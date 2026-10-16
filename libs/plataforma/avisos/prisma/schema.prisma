@@ -1,0 +1,133 @@
+// Módulo `avisos` (contenedor plataforma). Schema PostgreSQL: avisos.
+// Avisa a las personas de un hecho del sistema por dos canales con la misma regla: la campanita de la aplicación y el correo.
+// Quién recibe qué sale de la base de datos: una regla liga un evento y un rol con una plantilla (asunto, cuerpo del correo y
+// texto de la campanita), así el mensaje se ajusta al cargo sin tocar código.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie más
+// lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["avisos", "identidad"]
+}
+
+enum TonoAviso {
+  info
+  warning
+  error
+
+  @@map("tono_aviso")
+  @@schema("avisos")
+}
+
+enum EstadoCorreo {
+  enviado
+  fallido
+
+  @@map("estado_correo")
+  @@schema("avisos")
+}
+
+/// Texto de un aviso. Los valores entre llaves dobles se reemplazan con los datos del evento: `{{pedido}}`, `{{cliente}}`...
+/// y con los de la persona que lo recibe: `{{nombre}}`, `{{cargo}}`.
+model Plantilla {
+  id          String  @id @db.Uuid
+  codigo      String  @unique
+  descripcion String?
+
+  // correo
+  asunto      String
+  cuerpoHtml  String  @map("cuerpo_html")
+  cuerpoTexto String  @map("cuerpo_texto")
+
+  // campanita
+  tituloAviso  String    @map("titulo_aviso")
+  detalleAviso String    @map("detalle_aviso")
+  /// Ruta de la aplicación a la que lleva el aviso (puede traer `{{variables}}`).
+  enlaceAviso  String?   @map("enlace_aviso")
+  tono         TonoAviso @default(info)
+
+  activa Boolean @default(true)
+
+  reglas ReglaAviso[]
+
+  @@map("plantilla")
+  @@schema("avisos")
+}
+
+/// Cuando ocurre `evento_tipo`, las personas activas con el rol `rol_codigo` reciben el aviso con esta plantilla.
+model ReglaAviso {
+  id         String    @id @db.Uuid
+  eventoTipo String    @map("evento_tipo")
+  rolCodigo  String    @map("rol_codigo")
+  plantillaId String   @map("plantilla_id") @db.Uuid
+  plantilla  Plantilla @relation(fields: [plantillaId], references: [id])
+  activa     Boolean   @default(true)
+
+  correos CorreoAviso[]
+
+  @@unique([eventoTipo, rolCodigo])
+  @@map("regla_aviso")
+  @@schema("avisos")
+}
+
+/// Aviso de la campanita: uno por persona y hecho.
+model Aviso {
+  id        String    @id @db.Uuid
+  /// Cuenta de identidad (FK; el nombre sale del JOIN).
+  usuarioId String    @map("usuario_id") @db.Uuid
+  usuario   IdUsuario @relation(fields: [usuarioId], references: [id])
+  eventoId  String    @map("evento_id") @db.Uuid
+  titulo    String
+  detalle   String?
+  enlace    String?
+  tono      TonoAviso @default(info)
+  leidoAt   DateTime? @map("leido_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([eventoId, usuarioId])
+  @@index([usuarioId, leidoAt])
+  @@map("aviso")
+  @@schema("avisos")
+}
+
+/// Bitácora de correos: quién lo habría recibido, a dónde llegó de verdad y cómo salió.
+model CorreoAviso {
+  id                   String       @id @db.Uuid
+  eventoId             String       @map("evento_id") @db.Uuid
+  reglaId              String       @map("regla_id") @db.Uuid
+  regla                ReglaAviso   @relation(fields: [reglaId], references: [id])
+  /// Cuenta que habría recibido el correo (FK; su nombre y correo salen del JOIN); vacía si no había nadie con el rol.
+  usuarioId            String?      @map("usuario_id") @db.Uuid
+  usuario              IdUsuario?   @relation(fields: [usuarioId], references: [id])
+  /// Dirección a la que se envió DE VERDAD (en pruebas, siempre la de redirección).
+  enviadoA             String       @map("enviado_a")
+  asunto               String
+  estado               EstadoCorreo
+  error                String?
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([eventoId])
+  @@index([usuarioId])
+  @@map("correo_aviso")
+  @@schema("avisos")
+}
+
+/// Espejo de SOLO LECTURA de `identidad.usuario` (nombre y correo de quien recibe el aviso). Lo administra el módulo identidad.
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+
+  avisos  Aviso[]
+  correos CorreoAviso[]
+
+  @@map("usuario")
+  @@schema("identidad")
+}

@@ -1,0 +1,674 @@
+// Módulo `pumping` (contenedor operaciones). Schema PostgreSQL: pumping.
+// El ticket de Pumping nace cuando Ventas abre un pedido de la línea Pumping (evento `comercial.pedido.abierto`) y lo lleva
+// el Jefe de Base, el Supervisor y el Operador por los pasos del servicio. Diseño: documentacion/pumping/PLAN-MIGRACION-OPERACIONES-PUMPING.md.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie
+// más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["pumping", "catalogos", "identidad"]
+}
+
+enum MacroEstado {
+  pendiente
+  en_proceso
+  esperando_aprobacion
+  aprobado
+  rechazado
+
+  @@map("macro_estado")
+  @@schema("pumping")
+}
+
+enum OrigenCambio {
+  manual
+  sistema
+
+  @@map("origen_cambio")
+  @@schema("pumping")
+}
+
+enum EstadoRequisito {
+  pendiente
+  cumplido
+
+  @@map("estado_requisito")
+  @@schema("pumping")
+}
+
+enum OrigenCumplimiento {
+  sistema
+  evento
+  manual_temporal
+
+  @@map("origen_cumplimiento")
+  @@schema("pumping")
+}
+
+enum AmbitoRequisito {
+  ticket
+  unidad
+  operador
+
+  @@map("ambito_requisito")
+  @@schema("pumping")
+}
+
+/// Módulo que es dueño del dato que cumple un requisito.
+enum ModuloDueno {
+  pumping
+  qhse
+  flota
+
+  @@map("modulo_dueno")
+  @@schema("pumping")
+}
+
+enum GasIngreso {
+  h2s
+  lel
+  o2
+  co
+
+  @@map("gas_ingreso")
+  @@schema("pumping")
+}
+
+enum SeccionInspeccion {
+  chasis
+  motor
+  equipo
+  instrumentacion
+
+  @@map("seccion_inspeccion")
+  @@schema("pumping")
+}
+
+enum ResultadoInspeccion {
+  conforme
+  no_conforme
+
+  @@map("resultado_inspeccion")
+  @@schema("pumping")
+}
+
+enum PosicionLlanta {
+  delantera_izquierda
+  delantera_derecha
+  trasera_izquierda
+  trasera_derecha
+
+  @@map("posicion_llanta")
+  @@schema("pumping")
+}
+
+enum PuntoHubodometro {
+  origen
+  destino
+
+  @@map("punto_hubodometro")
+  @@schema("pumping")
+}
+
+/// Rol con el que una persona queda asignada a un ticket (no es el rol de su cuenta: un supervisor_pumping se asigna como supervisor).
+enum RolAsignado {
+  supervisor
+  operador
+
+  @@map("rol_asignado")
+  @@schema("pumping")
+}
+
+/// Pasos del servicio de Pumping (catálogo): revisión inicial, asignación, traslados, ejecución, cierre...
+model Paso {
+  codigo   String      @id
+  nombre   String
+  macro    MacroEstado
+  orden    Int
+  terminal Boolean     @default(false)
+  activo   Boolean     @default(true)
+
+  roles     PasoRol[]
+  requisitos PasoRequisito[]
+  salidas   Transicion[] @relation("origen")
+  entradas  Transicion[] @relation("destino")
+  tickets   Ticket[]
+
+  @@map("paso")
+  @@schema("pumping")
+}
+
+/// Roles que pueden actuar en cada paso (código de rol de identidad).
+model PasoRol {
+  pasoCodigo String @map("paso_codigo")
+  paso       Paso   @relation(fields: [pasoCodigo], references: [codigo])
+  rolCodigo  String @map("rol_codigo")
+
+  @@id([pasoCodigo, rolCodigo])
+  @@map("paso_rol")
+  @@schema("pumping")
+}
+
+/// Pasos válidos entre dos pasos. Solo existen los que el módulo ya sabe validar (cada fase agrega los suyos).
+model Transicion {
+  id             String  @id @db.Uuid
+  origenCodigo   String  @map("origen_codigo")
+  origen         Paso    @relation("origen", fields: [origenCodigo], references: [codigo])
+  destinoCodigo  String  @map("destino_codigo")
+  destino        Paso    @relation("destino", fields: [destinoCodigo], references: [codigo])
+  requiereMotivo Boolean @default(false) @map("requiere_motivo")
+  activa         Boolean @default(true)
+
+  @@unique([origenCodigo, destinoCodigo])
+  @@map("transicion")
+  @@schema("pumping")
+}
+
+/// Ticket de servicio de Pumping: uno por pedido. Guarda una copia de los datos del pedido tal como se abrió. NO tiene numeración propia:
+/// el "ticket" de Dynadrill es la prefactura, así que lleva el número que `comercial` le reservó al pedido del secuencial de la prefactura
+/// (la prefactura, cuando exista, tendrá ese mismo número).
+model Ticket {
+  id           String   @id @db.Uuid
+  pedidoId     String   @unique @map("pedido_id") @db.Uuid
+  pedidoCodigo String   @map("pedido_codigo")
+  /// Número de ticket = el de la prefactura que vendrá. Nulo solo en pedidos abiertos antes de que existiera esta regla.
+  ticketNumero Int?     @unique @map("ticket_numero")
+  pasoCodigo   String   @map("paso_codigo")
+  paso         Paso     @relation(fields: [pasoCodigo], references: [codigo])
+  version      Int      @default(1)
+  tipoOt       String?  @map("tipo_ot")
+
+  // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
+  clienteId      String?     @map("cliente_id") @db.Uuid
+  cliente        CatCliente? @relation(fields: [clienteId], references: [id])
+  campoId        String?     @map("campo_id") @db.Uuid
+  campo          CatCampo?   @relation(fields: [campoId], references: [id])
+  bloqueId       String?     @map("bloque_id") @db.Uuid
+  bloque         CatBloque?  @relation(fields: [bloqueId], references: [id])
+  pozoId         String?     @map("pozo_id") @db.Uuid
+  pozo           CatPozo?    @relation(fields: [pozoId], references: [id])
+  taladroId      String?     @map("taladro_id") @db.Uuid
+  taladro        CatTaladro? @relation(fields: [taladroId], references: [id])
+  rigless        Boolean @default(false)
+  numeroContrato String? @map("numero_contrato")
+  as2Numero      String? @map("as2_numero")
+  fechaInicioServicio DateTime? @map("fecha_inicio_servicio") @db.Date
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tiposServicio TicketTipoServicio[]
+  historial     TicketHistorial[]
+  personas      TicketPersona[]
+  unidades      TicketUnidad[]
+  requisitos    TicketRequisito[]
+  aceptaciones  AceptacionTerminos[]
+  ingreso       TicketIngreso?
+  reportesUnidad ReporteUnidad[]
+
+  @@index([pasoCodigo])
+  @@map("ticket")
+  @@schema("pumping")
+}
+
+/// Tipos de servicio del pedido (código del catálogo de `comercial`: control_fluidos, nitrogeno...).
+model TicketTipoServicio {
+  ticketId   String @map("ticket_id") @db.Uuid
+  ticket     Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipoCodigo String @map("tipo_codigo")
+
+  @@id([ticketId, tipoCodigo])
+  @@map("ticket_tipo_servicio")
+  @@schema("pumping")
+}
+
+/// Seguimiento: cada cambio de paso con quién lo hizo.
+model TicketHistorial {
+  id            String       @id @db.Uuid
+  ticketId      String       @map("ticket_id") @db.Uuid
+  ticket        Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  pasoAnterior  String?      @map("paso_anterior")
+  pasoNuevo     String       @map("paso_nuevo")
+  motivo        String?
+  actorId       String?      @map("actor_id") @db.Uuid
+  actor         IdUsuario?   @relation("historialActor", fields: [actorId], references: [id])
+  actorRol      String?      @map("actor_rol")
+  origen        OrigenCambio @default(manual)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_historial")
+  @@schema("pumping")
+}
+
+/// Personas que el Jefe de Base asignó al ticket: un supervisor y uno o más operadores (id de la cuenta + nombre; sin FK entre schemas).
+model TicketPersona {
+  ticketId      String      @map("ticket_id") @db.Uuid
+  ticket        Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  usuarioId     String      @map("usuario_id") @db.Uuid
+  usuario       IdUsuario   @relation("personaAsignada", fields: [usuarioId], references: [id])
+  rol           RolAsignado
+  /// Unidad que lleva este operador (solo operadores; FK compuesta a `ticket_unidad` en la base de datos).
+  vehiculoId    String?     @map("vehiculo_id") @db.Uuid
+  vehiculo      CatVehiculo? @relation("operadorUnidad", fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor   String?     @map("asignado_por") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, usuarioId])
+  @@index([usuarioId])
+  @@map("ticket_persona")
+  @@schema("pumping")
+}
+
+/// Unidades (vehículos del catálogo) asignadas al ticket: FK al catálogo de vehículos (la placa y la descripción salen del JOIN).
+model TicketUnidad {
+  ticketId    String   @map("ticket_id") @db.Uuid
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId  String      @map("vehiculo_id") @db.Uuid
+  vehiculo    CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor String?     @map("asignado_por") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, vehiculoId])
+  @@map("ticket_unidad")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Requisitos por paso (ver documentacion/pumping/PLAN-TRASLADO-SALIDA.md)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Condiciones que el proceso exige (catálogo): de qué ámbito son y qué módulo es dueño del dato que las cumple.
+model Requisito {
+  codigo      String          @id
+  nombre      String
+  descripcion String?
+  ambito      AmbitoRequisito
+  modulo      ModuloDueno
+  activo      Boolean         @default(true)
+
+  pasos   PasoRequisito[]
+  tickets TicketRequisito[]
+
+  @@map("requisito")
+  @@schema("pumping")
+}
+
+/// Requisitos que deben estar cumplidos para SALIR de un paso.
+model PasoRequisito {
+  pasoCodigo      String    @map("paso_codigo")
+  paso            Paso      @relation(fields: [pasoCodigo], references: [codigo])
+  requisitoCodigo String    @map("requisito_codigo")
+  requisito       Requisito @relation(fields: [requisitoCodigo], references: [codigo])
+
+  @@id([pasoCodigo, requisitoCodigo])
+  @@map("paso_requisito")
+  @@schema("pumping")
+}
+
+/// Un requisito de un ticket, de una de sus unidades o de uno de sus operadores. Un índice único (en la base de datos) impide
+/// duplicados. Se cumple desde Pumping (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con
+/// el puente temporal (`manual_temporal`, con motivo).
+model TicketRequisito {
+  id              String              @id @db.Uuid
+  ticketId        String              @map("ticket_id") @db.Uuid
+  ticket          Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requisitoCodigo String              @map("requisito_codigo")
+  requisito       Requisito           @relation(fields: [requisitoCodigo], references: [codigo])
+  vehiculoId      String?             @map("vehiculo_id") @db.Uuid
+  vehiculo        CatVehiculo?        @relation(fields: [vehiculoId], references: [id])
+  usuarioId       String?             @map("usuario_id") @db.Uuid
+  usuario         IdUsuario?          @relation("requisitoOperador", fields: [usuarioId], references: [id])
+  estado          EstadoRequisito     @default(pendiente)
+  cumplidoAt      DateTime?           @map("cumplido_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  cumplidoPor     String?             @map("cumplido_por") @db.Uuid
+  origen          OrigenCumplimiento?
+  motivo          String?
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ticketId, estado])
+  @@map("ticket_requisito")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Términos y condiciones de uso de equipos
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Texto versionado (la huella SHA-256 prueba qué se leyó). Una sola versión vigente a la vez (índice parcial).
+model TerminosVersion {
+  codigo      String   @id
+  titulo      String
+  texto       String
+  textoHash   String   @map("texto_hash")
+  vigente     Boolean  @default(false)
+  publicadoAt DateTime @default(now()) @map("publicado_at") @db.Timestamptz(6)
+
+  aceptaciones AceptacionTerminos[]
+
+  @@map("terminos_version")
+  @@schema("pumping")
+}
+
+/// Constancia inmutable: la cuenta de cada operador asignado acepta, con hora del servidor, la versión vigente (solo se crea y se lee).
+model AceptacionTerminos {
+  id            String          @id @db.Uuid
+  ticketId      String          @map("ticket_id") @db.Uuid
+  ticket        Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  usuarioId     String          @map("usuario_id") @db.Uuid
+  usuario       IdUsuario       @relation("aceptacionTerminos", fields: [usuarioId], references: [id])
+  versionCodigo String          @map("version_codigo")
+  version       TerminosVersion @relation(fields: [versionCodigo], references: [codigo])
+  aceptadoAt    DateTime        @default(now()) @map("aceptado_at") @db.Timestamptz(6)
+
+  @@unique([ticketId, usuarioId, versionCodigo])
+  @@index([usuarioId])
+  @@map("aceptacion_terminos")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Checklist de ingreso a locación + verificaciones de seguridad
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Límites de cada gas medido (catálogo). Sin mínimo: seguro si la lectura es menor al máximo; con mínimo: entre ambos, inclusive.
+model GasLimite {
+  gas     GasIngreso @id
+  nombre  String
+  unidad  String
+  minimo  Decimal?   @db.Decimal(8, 2)
+  maximo  Decimal    @db.Decimal(8, 2)
+
+  lecturas TicketIngresoGas[]
+
+  @@map("gas_limite")
+  @@schema("pumping")
+}
+
+/// Pasos de bloqueo y etiquetado (LOTO) que se verifican al ingresar (catálogo).
+model LotoItem {
+  id       String  @id @db.Uuid
+  orden    Int     @unique
+  etiqueta String  @unique
+  activo   Boolean @default(true)
+
+  marcas TicketIngresoLoto[]
+
+  @@map("loto_item")
+  @@schema("pumping")
+}
+
+/// Un registro por ticket. Está completo cuando están las cinco confirmaciones, la última lectura de cada gas es segura y todos los
+/// ítems LOTO están marcados (se calcula; `confirmado_*` guarda quién lo completó).
+model TicketIngreso {
+  ticketId                      String   @id @map("ticket_id") @db.Uuid
+  ticket                        Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  toolboxTalkRealizado          Boolean  @default(false) @map("toolbox_talk_realizado")
+  walkaroundCompletado          Boolean  @default(false) @map("walkaround_completado")
+  lineaBaseAmbientalDocumentada Boolean  @default(false) @map("linea_base_ambiental_documentada")
+  rutasEmergenciaVerificadas    Boolean  @default(false) @map("rutas_emergencia_verificadas")
+  simopsConfirmado              Boolean  @default(false) @map("simops_confirmado")
+  lotoNotificadoClienteAt       DateTime? @map("loto_notificado_cliente_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  confirmadoPor                 String?  @map("confirmado_por") @db.Uuid
+  confirmadoAt                  DateTime? @map("confirmado_at") @db.Timestamptz(6)
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  gases TicketIngresoGas[]
+  loto  TicketIngresoLoto[]
+
+  @@map("ticket_ingreso")
+  @@schema("pumping")
+}
+
+/// Lectura de un gas (se guarda si resultó segura al medirla, porque los límites pueden cambiar).
+model TicketIngresoGas {
+  id        String        @id @db.Uuid
+  ticketId  String        @map("ticket_id") @db.Uuid
+  ingreso   TicketIngreso @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  gas       GasIngreso
+  limite    GasLimite     @relation(fields: [gas], references: [gas])
+  lectura   Decimal       @db.Decimal(8, 2)
+  seguro    Boolean
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  medidoPor String        @map("medido_por") @db.Uuid
+  medidoAt  DateTime      @default(now()) @map("medido_at") @db.Timestamptz(6)
+
+  @@index([ticketId, gas, medidoAt])
+  @@map("ticket_ingreso_gas")
+  @@schema("pumping")
+}
+
+model TicketIngresoLoto {
+  ticketId   String        @map("ticket_id") @db.Uuid
+  ingreso    TicketIngreso @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  lotoItemId String        @map("loto_item_id") @db.Uuid
+  item       LotoItem      @relation(fields: [lotoItemId], references: [id])
+  marcado    Boolean       @default(false)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  marcadoPor String?       @map("marcado_por") @db.Uuid
+  marcadoAt  DateTime?     @map("marcado_at") @db.Timestamptz(6)
+
+  @@id([ticketId, lotoItemId])
+  @@map("ticket_ingreso_loto")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Reporte de unidad (DYN-MNT-RE-012)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Ítems fijos del formulario, por sección (catálogo).
+model InspeccionItem {
+  id       String            @id @db.Uuid
+  seccion  SeccionInspeccion
+  orden    Int
+  etiqueta String
+  activo   Boolean           @default(true)
+
+  respuestas ReporteUnidadInspeccion[]
+
+  @@unique([seccion, orden])
+  @@unique([seccion, etiqueta])
+  @@map("inspeccion_item")
+  @@schema("pumping")
+}
+
+/// Una por ticket y unidad. La salida se llena en Traslado de salida (firmada por el operador de la unidad); la llegada, en Traslado de
+/// llegada. El encabezado (cliente, pozo, campo, bloque, taladro) no se guarda: sale del ticket.
+model ReporteUnidad {
+  id                       String      @id @db.Uuid
+  ticketId                 String      @map("ticket_id") @db.Uuid
+  ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId               String      @map("vehiculo_id") @db.Uuid
+  vehiculo                 CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  origen                   String?
+  destino                  String?
+  salidaFecha              DateTime?   @map("salida_fecha") @db.Date
+  salidaCombustible        Decimal?    @map("salida_combustible") @db.Decimal(8, 2)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  salidaFirmadaPor         String?     @map("salida_firmada_por") @db.Uuid
+  salidaFirmadaAt          DateTime?   @map("salida_firmada_at") @db.Timestamptz(6)
+  llegadaFecha             DateTime?   @map("llegada_fecha") @db.Date
+  llegadaCombustible       Decimal?    @map("llegada_combustible") @db.Decimal(8, 2)
+  novedadesMecanica        String?     @map("novedades_mecanica")
+  novedadesInstrumentacion String?     @map("novedades_instrumentacion")
+  novedadesOperaciones     String?     @map("novedades_operaciones")
+  unidadLista              Boolean?    @map("unidad_lista")
+  operacionInterrumpida    Boolean?    @map("operacion_interrumpida")
+  detalleInterrupcion      String?     @map("detalle_interrupcion")
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  llegadaFirmadaPor        String?     @map("llegada_firmada_por") @db.Uuid
+  llegadaFirmadaAt         DateTime?   @map("llegada_firmada_at") @db.Timestamptz(6)
+  createdAt                DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  hubodometros ReporteUnidadHubodometro[]
+  llantas      ReporteUnidadLlanta[]
+  inspecciones ReporteUnidadInspeccion[]
+
+  @@unique([ticketId, vehiculoId])
+  @@map("reporte_unidad")
+  @@schema("pumping")
+}
+
+/// Lectura del hubodómetro por eje (A, B, C...), en el punto de origen o de destino, a la salida y a la llegada.
+model ReporteUnidadHubodometro {
+  reporteId String           @map("reporte_id") @db.Uuid
+  reporte   ReporteUnidad    @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  eje       String
+  punto     PuntoHubodometro
+  salida    Decimal?         @db.Decimal(12, 2)
+  llegada   Decimal?         @db.Decimal(12, 2)
+
+  @@id([reporteId, eje, punto])
+  @@map("reporte_unidad_hubodometro")
+  @@schema("pumping")
+}
+
+model ReporteUnidadLlanta {
+  reporteId String         @map("reporte_id") @db.Uuid
+  reporte   ReporteUnidad  @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  posicion  PosicionLlanta
+  salida    String?
+  llegada   String?
+
+  @@id([reporteId, posicion])
+  @@map("reporte_unidad_llanta")
+  @@schema("pumping")
+}
+
+model ReporteUnidadInspeccion {
+  reporteId String               @map("reporte_id") @db.Uuid
+  reporte   ReporteUnidad        @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  itemId    String               @map("item_id") @db.Uuid
+  item      InspeccionItem       @relation(fields: [itemId], references: [id])
+  salida    ResultadoInspeccion?
+  llegada   ResultadoInspeccion?
+
+  @@id([reporteId, itemId])
+  @@map("reporte_unidad_inspeccion")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir
+// de las FK. Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id,
+// nombre, email, activo y rol). Las administra el módulo dueño de cada tabla.
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatCliente {
+  id              String  @id @db.Uuid
+  identificacion  String
+  nombreComercial String  @map("nombre_comercial")
+  nombreFiscal    String? @map("nombre_fiscal")
+
+  tickets Ticket[]
+
+  @@map("cliente")
+  @@schema("catalogos")
+}
+
+model CatCampo {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+model CatBloque {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("bloque")
+  @@schema("catalogos")
+}
+
+model CatPozo {
+  id             String   @id @db.Uuid
+  codigo         String
+  nombreCompleto String   @map("nombre_completo")
+  tickets        Ticket[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+model CatTaladro {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("taladro")
+  @@schema("catalogos")
+}
+
+model CatTipoVehiculo {
+  id        String        @id @db.Uuid
+  nombre    String
+  vehiculos CatVehiculo[]
+
+  @@map("tipo_vehiculo")
+  @@schema("catalogos")
+}
+
+model CatVehiculo {
+  id             String           @id @db.Uuid
+  placa          String
+  marca          String?
+  modelo         String?
+  tipoVehiculoId String?          @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo   CatTipoVehiculo? @relation(fields: [tipoVehiculoId], references: [id])
+  habilitado     Boolean          @default(true)
+  unidades       TicketUnidad[]
+  operadores     TicketPersona[]  @relation("operadorUnidad")
+  requisitos     TicketRequisito[]
+  reportes       ReporteUnidad[]
+
+  @@map("vehiculo")
+  @@schema("catalogos")
+}
+
+/// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String
+  nombre   String
+  usuarios IdUsuario[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  asignaciones TicketPersona[]   @relation("personaAsignada")
+  historial    TicketHistorial[] @relation("historialActor")
+  requisitos   TicketRequisito[] @relation("requisitoOperador")
+  aceptaciones AceptacionTerminos[] @relation("aceptacionTerminos")
+
+  @@map("usuario")
+  @@schema("identidad")
+}

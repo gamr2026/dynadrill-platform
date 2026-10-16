@@ -1,0 +1,311 @@
+// Módulo `identidad` (contenedor plataforma). Schema PostgreSQL: identidad.
+// Modelo según "Propuesta de Base de Datos v1.0" (cap. 5.1). Las IDs son UUIDv7 generados por la
+// aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie más lo importa.
+// Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["identidad"]
+}
+
+/// Los 17 roles del sistema (RoleCode). La matriz de permisos por módulo vive en código (@dyn/authz).
+model Rol {
+  id          String  @id @db.Uuid
+  codigo      String  @unique
+  nombre      String
+  descripcion String?
+
+  /// TRANSICIÓN: id numérico que este rol tenía en el backend demo. Los módulos aún no migrados
+  /// siguen usando ese id; se elimina cuando el último módulo viejo pase al backend nuevo.
+  legacyId Int? @unique @map("legacy_id")
+
+  usuarios  Usuario[]
+  permisos  RolPermiso[]
+  historial RolPermisoHistorial[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// Cuenta de acceso de una persona.
+model Usuario {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  email    String  @unique
+  username String  @unique
+  nombre   String
+  telefono String?
+
+  /// Nulo si la identidad pasa a Entra ID (entonces se usa `entraObjectId`).
+  /// Argon2id; los hashes bcrypt heredados de la demo se aceptan y se reemplazan en el primer login.
+  passwordHash  String? @map("password_hash")
+  entraObjectId String? @unique @map("entra_object_id") @db.Uuid
+
+  /// TRANSICIÓN: id numérico del usuario en el backend demo (ver Rol.legacyId).
+  legacyId Int? @unique @map("legacy_id")
+
+  rolId String @map("rol_id") @db.Uuid
+  rol   Rol    @relation(fields: [rolId], references: [id])
+
+  /// Vínculo de la persona con Dynadrill: 'empleado' | 'contratista' | 'externo' (CHECK en la migración).
+  /// Distinto de `usuario_perfil.tipo_contrato`, que es la modalidad de contrato de un empleado.
+  tipoVinculo TipoVinculo @default(empleado) @map("tipo_vinculo")
+
+  activo         Boolean   @default(true)
+  /// 'Mecánico' | 'Instrumental' — solo Operador de Mantenimiento (CHECK en la migración).
+  especialidad   String?
+  ultimoAccesoAt DateTime? @map("ultimo_acceso_at") @db.Timestamptz(6)
+
+  /// La persona debe elegir su propia clave antes de usar el sistema (cuentas creadas con una clave provisional
+  /// o restablecidas por un administrador). Mientras sea true, el token lleva `mustChangePassword` y solo se
+  /// puede llamar a /auth/change-password, /auth/me y /auth/logout.
+  debeCambiarClave Boolean @default(false) @map("debe_cambiar_clave")
+
+  /// Bloqueo temporal por intentos fallidos (documento de arquitectura, cap. 10.1).
+  intentosFallidos Int       @default(0) @map("intentos_fallidos")
+  bloqueadoHasta   DateTime? @map("bloqueado_hasta") @db.Timestamptz(6)
+
+  perfil   UsuarioPerfil?
+  sesiones Sesion[]
+
+  permisosAsignados RolPermiso[]          @relation("asignadoPor")
+  cambiosDePermisos RolPermisoHistorial[] @relation("realizadoPor")
+
+  @@index([rolId])
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// Perfil del usuario (1:1, opcional): datos de RRHH y personales. Contiene datos protegidos por la LOPDP.
+/// Origen de los campos: campos_empleado.xlsx. No todo usuario tiene perfil; `usuario.tipo_vinculo` indica
+/// de qué clase de persona se trata y el perfil guarda los datos que se necesiten de ella.
+model UsuarioPerfil {
+  id        String  @id @db.Uuid
+  usuarioId String  @unique @map("usuario_id") @db.Uuid
+  usuario   Usuario @relation(fields: [usuarioId], references: [id])
+
+  cedula             String?
+  tipoIdentificacion String?   @map("tipo_identificacion")
+  nacionalidad       String?
+  apellidos          String?
+  nombres            String?
+  cargo              String?
+  departamento       String?
+  area               String?
+  fechaIngreso       DateTime? @map("fecha_ingreso") @db.Date
+  fechaSalida        DateTime? @map("fecha_salida") @db.Date
+  causaSalida        String?   @map("causa_salida")
+  tipoContrato       String?   @map("tipo_contrato")
+  sucursal           String?
+  tipoDiscapacidad   String?   @map("tipo_discapacidad")
+  cargasActivas      Int?      @map("cargas_activas")
+  categoria          String?
+  centroCosto        String?   @map("centro_costo")
+  empleadoActivo     Boolean?  @map("empleado_activo")
+
+  /// Empleado de AS2 al que corresponde este perfil (copia local en `empleado_as2`). Nulo para quien no esté en AS2.
+  empleadoAs2Id String?      @map("empleado_as2_id") @db.Uuid
+  empleadoAs2   EmpleadoAs2? @relation(fields: [empleadoAs2Id], references: [id])
+
+  @@index([empleadoAs2Id])
+  @@map("usuario_perfil")
+  @@schema("identidad")
+}
+
+/// Copia local y de solo lectura de los empleados de AS2 (el ERP). La alimenta la sincronización; nadie la edita
+/// desde el portal. Guarda solo lo necesario para operar: nada de sueldo, discapacidad ni cargas familiares.
+/// Un empleado de AS2 puede existir aquí sin tener cuenta; si la tiene, `usuario_perfil.empleado_as2_id` lo enlaza.
+model EmpleadoAs2 {
+  id String @id @db.Uuid
+
+  /// `idEmpleado` en AS2: clave de cruce estable (la cédula puede repetirse si alguien reingresa).
+  as2EmpleadoId Int       @unique @map("as2_empleado_id")
+  cedula        String
+  nombres       String
+  apellidos     String
+  genero        String?
+  cargo         String?
+  departamento  String?
+  sucursal      String?
+  tipoContrato  String?   @map("tipo_contrato")
+  fechaIngreso  DateTime? @map("fecha_ingreso") @db.Date
+  /// Nula mientras el empleado esté activo. Es la única señal de baja: que falte en la respuesta no la implica.
+  fechaSalida   DateTime? @map("fecha_salida") @db.Date
+  activo        Boolean
+
+  /// Correo del usuario de AS2 con la misma cédula, si existe. Informativo: el correo de la cuenta del portal es otro dato.
+  correoAs2 String? @map("correo_as2")
+
+  sincronizadoAt DateTime @map("sincronizado_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  perfiles  UsuarioPerfil[]
+  historial EmpleadoAs2Historial[]
+
+  @@index([cedula])
+  @@index([activo])
+  @@map("empleado_as2")
+  @@schema("identidad")
+}
+
+/// Bitácora inmutable de cambios de un empleado de AS2: una fila por campo que cambió (alta incluida, con
+/// `valor_anterior` nulo). Permite saber qué cargo, departamento o contrato tenía alguien en una fecha dada.
+model EmpleadoAs2Historial {
+  id         String      @id @db.Uuid
+  empleadoId String      @map("empleado_id") @db.Uuid
+  empleado   EmpleadoAs2 @relation(fields: [empleadoId], references: [id])
+
+  campo         String
+  valorAnterior String?  @map("valor_anterior")
+  valorNuevo    String?  @map("valor_nuevo")
+  detectadoAt   DateTime @default(now()) @map("detectado_at") @db.Timestamptz(6)
+
+  ejecucionId String?            @map("ejecucion_id") @db.Uuid
+  ejecucion   SincronizacionAs2? @relation(fields: [ejecucionId], references: [id])
+
+  @@index([empleadoId, detectadoAt(sort: Desc)])
+  @@map("empleado_as2_historial")
+  @@schema("identidad")
+}
+
+/// Una corrida de la sincronización con AS2: cuántos registros leyó y qué cambió, o por qué falló.
+model SincronizacionAs2 {
+  id           String    @id @db.Uuid
+  iniciadaAt   DateTime  @default(now()) @map("iniciada_at") @db.Timestamptz(6)
+  finalizadaAt DateTime? @map("finalizada_at") @db.Timestamptz(6)
+  /// 'en_curso' | 'ok' | 'error' (CHECK en la migración).
+  estado       EstadoSincronizacion
+  /// 'manual' | 'programada'.
+  origen       OrigenSincronizacion
+  disparadaPor String?   @map("disparada_por") @db.Uuid
+
+  leidos             Int     @default(0)
+  nuevos             Int     @default(0)
+  modificados        Int     @default(0)
+  bajas              Int     @default(0)
+  cuentasInactivadas Int     @default(0) @map("cuentas_inactivadas")
+  error              String?
+
+  historial EmpleadoAs2Historial[]
+
+  @@index([iniciadaAt(sort: Desc)])
+  @@map("sincronizacion_as2")
+  @@schema("identidad")
+}
+
+/// Refresh tokens rotativos. Solo se guarda el SHA-256 del token, nunca el token.
+model Sesion {
+  id        String  @id @db.Uuid
+  usuarioId String  @map("usuario_id") @db.Uuid
+  usuario   Usuario @relation(fields: [usuarioId], references: [id])
+
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  emitidoAt  DateTime  @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  expiraAt   DateTime  @map("expira_at") @db.Timestamptz(6)
+  revocadoAt DateTime? @map("revocado_at") @db.Timestamptz(6)
+  ip         String?   @db.Inet
+  userAgent  String?   @map("user_agent")
+
+  @@index([usuarioId])
+  @@map("sesion")
+  @@schema("identidad")
+}
+
+/// Catálogo de permisos (RBAC). Lo define el código: cada endpoint exige uno. Formato del código:
+/// `<modulo>.<recurso>.<accion>`. La UI de administración NO crea permisos, solo los asigna a roles.
+model Permiso {
+  id          String   @id @db.Uuid
+  codigo      String   @unique
+  modulo      String
+  recurso     String
+  accion      String
+  descripcion String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roles RolPermiso[]
+
+  @@index([modulo])
+  @@map("permiso")
+  @@schema("identidad")
+}
+
+/// Qué puede hacer cada rol (M:N rol↔permiso). Un administrador lo edita desde la app.
+model RolPermiso {
+  rolId       String   @map("rol_id") @db.Uuid
+  rol         Rol      @relation(fields: [rolId], references: [id])
+  permisoId   String   @map("permiso_id") @db.Uuid
+  permiso     Permiso  @relation(fields: [permisoId], references: [id])
+  asignadoAt  DateTime @default(now()) @map("asignado_at") @db.Timestamptz(6)
+  /// Nulo si lo asignó la siembra inicial.
+  asignadoPor String?  @map("asignado_por") @db.Uuid
+  asignador   Usuario? @relation("asignadoPor", fields: [asignadoPor], references: [id])
+
+  @@id([rolId, permisoId])
+  @@index([permisoId])
+  @@map("rol_permiso")
+  @@schema("identidad")
+}
+
+/// Bitácora inmutable de cambios de permisos (solo inserciones: la aplicación no puede modificarla
+/// ni borrarla). Guarda el código del permiso como texto porque el catálogo puede cambiar con el tiempo.
+model RolPermisoHistorial {
+  id            String   @id @db.Uuid
+  rolId         String   @map("rol_id") @db.Uuid
+  rol           Rol      @relation(fields: [rolId], references: [id])
+  permisoCodigo String   @map("permiso_codigo")
+  /// 'otorgado' | 'revocado' (CHECK en la migración).
+  accion        AccionPermiso
+  realizadoPor  String?  @map("realizado_por") @db.Uuid
+  realizador    Usuario? @relation("realizadoPor", fields: [realizadoPor], references: [id])
+  realizadoAt   DateTime @default(now()) @map("realizado_at") @db.Timestamptz(6)
+
+  @@index([rolId, realizadoAt(sort: Desc)])
+  @@map("rol_permiso_historial")
+  @@schema("identidad")
+}
+
+enum TipoVinculo {
+  empleado
+  contratista
+  externo
+
+  @@map("tipo_vinculo")
+  @@schema("identidad")
+}
+
+enum AccionPermiso {
+  otorgado
+  revocado
+
+  @@map("accion_permiso")
+  @@schema("identidad")
+}
+
+enum EstadoSincronizacion {
+  en_curso
+  ok
+  error
+
+  @@map("estado_sincronizacion")
+  @@schema("identidad")
+}
+
+enum OrigenSincronizacion {
+  manual
+  programada
+
+  @@map("origen_sincronizacion")
+  @@schema("identidad")
+}

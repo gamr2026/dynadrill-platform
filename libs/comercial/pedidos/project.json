@@ -1,0 +1,26 @@
+{
+  "name": "pedidos",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/comercial/pedidos/src",
+  "projectType": "library",
+  "tags": ["scope:comercial", "type:module"],
+  "// targets": "to see all targets run: nx show project pedidos --web",
+  "targets": {
+    "prisma-generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/prisma/schema.prisma"],
+      "outputs": ["{projectRoot}/src/generated"],
+      "options": {
+        "command": "prisma generate",
+        "cwd": "libs/comercial/pedidos"
+      }
+    },
+    "test": {
+      "dependsOn": ["prisma-generate"]
+    },
+    "lint": {
+      "dependsOn": ["prisma-generate"]
+    }
+  }
+}

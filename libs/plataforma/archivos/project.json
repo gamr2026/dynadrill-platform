@@ -1,0 +1,26 @@
+{
+  "name": "archivos",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plataforma/archivos/src",
+  "projectType": "library",
+  "tags": ["scope:plataforma", "type:module"],
+  "// targets": "to see all targets run: nx show project archivos --web",
+  "targets": {
+    "prisma-generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/prisma/schema.prisma"],
+      "outputs": ["{projectRoot}/src/generated"],
+      "options": {
+        "command": "prisma generate",
+        "cwd": "libs/plataforma/archivos"
+      }
+    },
+    "test": {
+      "dependsOn": ["prisma-generate"]
+    },
+    "lint": {
+      "dependsOn": ["prisma-generate"]
+    }
+  }
+}

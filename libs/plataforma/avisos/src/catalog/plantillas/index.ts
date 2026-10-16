@@ -1,0 +1,17 @@
+import type { PlantillaDef } from './tipos';
+import { PLANTILLAS_PUMPING } from './pumping';
+
+export type { PlantillaDef } from './tipos';
+
+/**
+ * Plantillas iniciales de todos los módulos. **Cada módulo tiene su propio archivo** (`plantillas/<modulo>.ts`) y agrega aquí UNA
+ * línea; así varias sesiones pueden sembrar avisos a la vez sin pisarse (ver documentacion/modulos/01-REGLAS-DE-COORDINACION.md).
+ */
+export const PLANTILLAS: PlantillaDef[] = [
+  ...PLANTILLAS_PUMPING,
+  // ...PLANTILLAS_QHSE,
+  // ...PLANTILLAS_FLOTA,
+  // ...PLANTILLAS_MANTENIMIENTO,
+  // ...PLANTILLAS_INVENTARIO,
+  // ...PLANTILLAS_FCR,
+];

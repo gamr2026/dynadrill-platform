@@ -1,0 +1,26 @@
+{
+  "name": "identidad",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plataforma/identidad/src",
+  "projectType": "library",
+  "tags": ["scope:plataforma", "type:module"],
+  "// targets": "to see all targets run: nx show project identidad --web",
+  "targets": {
+    "prisma-generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/prisma/schema.prisma"],
+      "outputs": ["{projectRoot}/src/generated"],
+      "options": {
+        "command": "prisma generate",
+        "cwd": "libs/plataforma/identidad"
+      }
+    },
+    "test": {
+      "dependsOn": ["prisma-generate"]
+    },
+    "lint": {
+      "dependsOn": ["prisma-generate"]
+    }
+  }
+}

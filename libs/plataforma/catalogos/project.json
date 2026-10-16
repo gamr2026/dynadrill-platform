@@ -1,0 +1,26 @@
+{
+  "name": "catalogos",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plataforma/catalogos/src",
+  "projectType": "library",
+  "tags": ["scope:plataforma", "type:module"],
+  "// targets": "to see all targets run: nx show project catalogos --web",
+  "targets": {
+    "prisma-generate": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/prisma/schema.prisma"],
+      "outputs": ["{projectRoot}/src/generated"],
+      "options": {
+        "command": "prisma generate",
+        "cwd": "libs/plataforma/catalogos"
+      }
+    },
+    "test": {
+      "dependsOn": ["prisma-generate"]
+    },
+    "lint": {
+      "dependsOn": ["prisma-generate"]
+    }
+  }
+}

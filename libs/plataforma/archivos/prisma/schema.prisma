@@ -1,0 +1,72 @@
+// Módulo `archivos` (contenedor plataforma). Schema PostgreSQL: archivos.
+// Guarda el REGISTRO de cada archivo (quién lo subió, de qué módulo, tamaño, huella SHA-256, dónde está); el contenido va
+// al almacenamiento de objetos (Azure Blob; Azurite en local) detrás de un puerto. Los demás módulos no guardan archivos:
+// guardan el `archivo_id` en sus propias tablas (p. ej. `comercial.pedido_documento`). Qué permiso exige subir o ver los
+// archivos de cada módulo, y qué tipos y tamaño admite, se gobierna desde la tabla `modulo_archivo`.
+// Los IDs son UUIDv7 generados por la aplicación. Migraciones: dyn_migrator, directo a PostgreSQL.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["archivos"]
+}
+
+/// Qué admite cada módulo que guarda archivos: permisos para subir y ver, tipos de contenido y tamaño máximo.
+model ModuloArchivo {
+  id           String   @id @db.Uuid
+  /// Clave que envía el módulo al subir (p. ej. `pedido_documento`).
+  codigo       String   @unique
+  nombre       String
+  /// Permiso (código de `identidad.permiso`) que exige SUBIR un archivo de este módulo.
+  permisoSubir String   @map("permiso_subir")
+  /// Permiso que exige VER o DESCARGAR un archivo de este módulo.
+  permisoVer   String   @map("permiso_ver")
+  /// Tipos de contenido admitidos (MIME).
+  tiposMime    String[] @map("tipos_mime")
+  tamanoMaxMb  Int      @default(25) @map("tamano_max_mb")
+  activo       Boolean  @default(true)
+
+  archivos Archivo[]
+
+  @@map("modulo_archivo")
+  @@schema("archivos")
+}
+
+/// Resultado del análisis antimalware al subir. Un archivo infectado NO se guarda.
+enum Escaneo {
+  limpio
+  omitido
+
+  @@map("escaneo")
+  @@schema("archivos")
+}
+
+/// Un archivo guardado. Inmutable salvo su baja lógica (`eliminado_*`).
+model Archivo {
+  id             String        @id @db.Uuid
+  moduloId       String        @map("modulo_id") @db.Uuid
+  modulo         ModuloArchivo @relation(fields: [moduloId], references: [id])
+  nombreOriginal String        @map("nombre_original")
+  mimeType       String        @map("mime_type")
+  tamanoBytes    BigInt        @map("tamano_bytes")
+  /// Huella SHA-256 del contenido (hex): detecta alteraciones y duplicados.
+  sha256         String
+  /// Ubicación del contenido en el almacenamiento de objetos.
+  blobKey        String        @unique @map("blob_key")
+  escaneo        Escaneo
+  subidoPor      String        @map("subido_por") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  eliminadoAt    DateTime?     @map("eliminado_at") @db.Timestamptz(6)
+  eliminadoPor   String?       @map("eliminado_por") @db.Uuid
+
+  @@index([moduloId, createdAt(sort: Desc)])
+  @@index([sha256])
+  @@map("archivo")
+  @@schema("archivos")
+}

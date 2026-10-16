@@ -1,0 +1,301 @@
+// Módulo `catalogos` (contenedor plataforma). Schema PostgreSQL: catalogos.
+// Datos maestros compartidos: clientes, personas de contacto y ubicaciones operativas.
+// Modelo según "Propuesta de Base de Datos v1.0" (cap. 5.1). IDs UUIDv7 generados por la aplicación.
+// Borrado: nunca se eliminan filas (la aplicación no tiene DELETE); se inactivan.
+// Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["catalogos"]
+}
+
+/// Clientes (operadoras) con su identificación fiscal.
+model Cliente {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico del cliente en el backend demo (los módulos viejos lo referencian).
+  legacyId Int? @unique @map("legacy_id")
+
+  tipoIdentificacion String  @map("tipo_identificacion")
+  identificacion     String  @unique
+  nombreComercial    String  @map("nombre_comercial")
+  nombreFiscal       String? @map("nombre_fiscal")
+  activo             Boolean @default(true)
+
+  @@map("cliente")
+  @@schema("catalogos")
+}
+
+/// Personas de contacto de un Pedido: Company Man / Representante de campo, Representante Quito,
+/// Analista de Facturación y Agente Comercial. Gestionado por Ventas.
+model PersonaContacto {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico en el backend demo.
+  legacyId Int? @unique @map("legacy_id")
+
+  /// 'representante_campo' | 'representante_quito' | 'analista_facturacion' | 'agente_comercial' (CHECK).
+  tipo   TipoPersona
+  nombre String
+  /// Cédula del Company Man (a pedido del cliente, para buscarlo por cédula además de por nombre).
+  cedula String?
+  activo Boolean @default(true)
+
+  @@unique([tipo, nombre])
+  @@index([tipo])
+  @@map("persona_contacto")
+  @@schema("catalogos")
+}
+
+/// Bloques petroleros.
+model Bloque {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico en el backend demo.
+  legacyId Int? @unique @map("legacy_id")
+
+  nombre     String  @unique
+  habilitado Boolean @default(true)
+
+  pozos Pozo[]
+
+  @@map("bloque")
+  @@schema("catalogos")
+}
+
+/// Zonas comerciales (ZONA OESTE, ZONA ESTE...). Cada campo pertenece a una.
+model Zona {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  nombre     String  @unique
+  habilitado Boolean @default(true)
+
+  campos Campo[]
+
+  @@map("zona")
+  @@schema("catalogos")
+}
+
+/// Campos petroleros.
+model Campo {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico en el backend demo.
+  legacyId Int? @unique @map("legacy_id")
+
+  nombre String @unique
+  /// Región comercial (ZONA OESTE/ESTE/NORTE/LITORAL/MACHALA...): catálogo propio. Va en el Campo, no en el Bloque.
+  zonaId            String?          @map("zona_id") @db.Uuid
+  zona              Zona?            @relation(fields: [zonaId], references: [id])
+  habilitado        Boolean          @default(true)
+
+  pozos Pozo[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+/// Pozos; cada uno pertenece a un campo y a un bloque.
+model Pozo {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico en el backend demo.
+  legacyId Int? @unique @map("legacy_id")
+
+  codigo         String  @unique
+  nombreCompleto String  @map("nombre_completo")
+  campoId        String  @map("campo_id") @db.Uuid
+  campo          Campo   @relation(fields: [campoId], references: [id])
+  bloqueId       String  @map("bloque_id") @db.Uuid
+  bloque         Bloque  @relation(fields: [bloqueId], references: [id])
+  habilitado     Boolean @default(true)
+
+  @@index([campoId])
+  @@index([bloqueId])
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+/// Taladros / rigs.
+model Taladro {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// TRANSICIÓN: id numérico en el backend demo.
+  legacyId Int? @unique @map("legacy_id")
+
+  nombre String @unique
+  /// "RIG CONTRACTUAL": solo lo traen los taladros de contratista.
+  rigContractual String? @map("rig_contractual")
+  habilitado     Boolean @default(true)
+
+  @@map("taladro")
+  @@schema("catalogos")
+}
+
+/// Bodegas (catálogo compartido). `as2_id` es el id de la bodega en AS2, para enlazar los pedidos que vienen de allá.
+model Bodega {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  as2Id      Int?    @unique @map("as2_id")
+  nombre     String  @unique
+  habilitado Boolean @default(true)
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// Condiciones de pago (30 días, 90 días...). `as2_id` es el id de la condición en AS2.
+model CondicionPago {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  as2Id      Int?    @unique @map("as2_id")
+  nombre     String  @unique
+  habilitado Boolean @default(true)
+
+  @@map("condicion_pago")
+  @@schema("catalogos")
+}
+
+enum TipoPersona {
+  representante_campo
+  representante_quito
+  analista_facturacion
+  agente_comercial
+
+  @@map("tipo_persona")
+  @@schema("catalogos")
+}
+
+enum TipoIdentificacion {
+  ruc
+  cedula
+  pasaporte
+
+  @@map("tipo_identificacion")
+  @@schema("catalogos")
+}
+
+/// Transportistas (quien traslada lo que dice la guía de remisión). En AS2 es un catálogo propio, distinto del chofer.
+model Transportista {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// Código del transportista en AS2 (p. ej. `GRAL`), si lo tiene.
+  codigo             String?            @unique
+  nombreFiscal       String             @map("nombre_fiscal")
+  tipoIdentificacion TipoIdentificacion @map("tipo_identificacion")
+  identificacion     String             @unique
+  habilitado         Boolean            @default(true)
+
+  vehiculos Vehiculo[]
+  choferes  Chofer[]
+
+  @@map("transportista")
+  @@schema("catalogos")
+}
+
+/// Tipos de vehículo (camión, camioneta...).
+model TipoVehiculo {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  nombre     String  @unique
+  habilitado Boolean @default(true)
+
+  vehiculos Vehiculo[]
+
+  @@map("tipo_vehiculo")
+  @@schema("catalogos")
+}
+
+model Vehiculo {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  /// Placa en mayúsculas y sin espacios ni guiones (`GSI6538`).
+  placa           String        @unique
+  marca           String?
+  modelo          String?
+  anio            Int?
+  tipoVehiculoId  String?       @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo    TipoVehiculo? @relation(fields: [tipoVehiculoId], references: [id])
+  /// A quién pertenece (el "responsable" de AS2).
+  transportistaId String?       @map("transportista_id") @db.Uuid
+  transportista   Transportista? @relation(fields: [transportistaId], references: [id])
+  habilitado      Boolean       @default(true)
+
+  @@index([transportistaId])
+  @@map("vehiculo")
+  @@schema("catalogos")
+}
+
+/// Chofer: pertenece a un transportista (como en AS2).
+model Chofer {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  transportistaId String        @map("transportista_id") @db.Uuid
+  transportista   Transportista @relation(fields: [transportistaId], references: [id])
+  licencia        String
+  nombre          String
+  habilitado      Boolean       @default(true)
+
+  @@unique([transportistaId, licencia])
+  @@map("chofer")
+  @@schema("catalogos")
+}

@@ -1,0 +1,1281 @@
+// Módulo `pedidos` (contenedor comercial). Schema PostgreSQL: comercial.
+// Diseño: documentacion/database/PLAN-PEDIDO-VENTAS-Y-SECUENCIALES.md (§5) y PLAN-MIGRACION-PEDIDOS.md.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo
+// y nadie más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["comercial", "catalogos", "identidad", "archivos"]
+}
+
+/// Qué documentos existen en el ciclo comercial y cómo se numeran (pedido, prefactura, guía, AOT...).
+model Documento {
+  id          String  @id @db.Uuid
+  /// Código interno estable: `pedido`, `pedido_cliente_as2`, `prefactura`... (minúsculas y guion bajo).
+  codigo      String  @unique
+  nombre      String
+  /// Nombre del documento en AS2 (p. ej. `PEDIDOS CLIENTES`) para conciliar secuencias.
+  nombreAs2   String? @map("nombre_as2")
+  /// true: el portal emite el número. false: lo asigna AS2 y el portal solo lo refleja (como `PEC-`).
+  emitePortal Boolean @default(true) @map("emite_portal")
+  activo      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  secuencias Secuencia[]
+
+  @@map("documento")
+  @@schema("comercial")
+}
+
+/// Contador de un documento. Un documento puede tener varias (por año, por vigencia...), pero solo una activa por
+/// documento y año (índice parcial en la migración). Emitir un número es un `UPDATE ... RETURNING` atómico.
+model Secuencia {
+  id          String    @id @db.Uuid
+  documentoId String    @map("documento_id") @db.Uuid
+  documento   Documento @relation(fields: [documentoId], references: [id])
+
+  prefijo      String?
+  sufijo       String?
+  /// Largo total del código incluyendo prefijo y sufijo (como AS2: `PEC-` + 6 dígitos = 10). 0 = sin relleno de ceros.
+  longitud     Int     @default(0)
+  rangoDesde   Int     @default(1) @map("rango_desde")
+  rangoHasta   Int     @default(999999) @map("rango_hasta")
+  /// Último número emitido. El siguiente es `numero_actual + 1`.
+  numeroActual Int     @default(0) @map("numero_actual")
+
+  /// Informativas: AS2 emite pedidos con vigencia vencida desde 2020, así que no se hace cumplir salvo que se active.
+  vigenciaDesde        DateTime? @map("vigencia_desde") @db.Date
+  vigenciaHasta        DateTime? @map("vigencia_hasta") @db.Date
+  /// Número de autorización del SRI del bloque de documentos (la guía lo imprime junto a su vigencia).
+  autorizacionNumero   String?   @map("autorizacion_numero")
+  hacerCumplirVigencia Boolean   @default(false) @map("hacer_cumplir_vigencia")
+
+  /// 'nunca' o 'anual' (con `anio`).
+  reinicio ReinicioSecuencia @default(nunca)
+  anio     Int?
+
+  /// 'portal' (emite el portal) o 'as2' (espejo de la secuencia de AS2).
+  origen            OrigenRegistro @default(portal)
+  /// Último valor leído de AS2 para esta secuencia (solo origen 'as2').
+  as2NumeroActual   Int?      @map("as2_numero_actual")
+  as2SincronizadoAt DateTime? @map("as2_sincronizado_at") @db.Timestamptz(6)
+
+  activa  Boolean @default(true)
+  version Int     @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  emisiones SecuenciaEmision[]
+
+  @@index([documentoId])
+  @@map("secuencia")
+  @@schema("comercial")
+}
+
+/// Bitácora inmutable de cada número emitido (solo inserción). La restricción única `(secuencia_id, numero)` es la
+/// garantía contra duplicados; el estado permite ver anulaciones y números sin documento.
+model SecuenciaEmision {
+  id          String    @id @db.Uuid
+  secuenciaId String    @map("secuencia_id") @db.Uuid
+  secuencia   Secuencia @relation(fields: [secuenciaId], references: [id])
+
+  numero           Int
+  codigoFormateado String   @map("codigo_formateado")
+  /// Id del documento (pedido, prefactura...) que recibió el número; nulo si aún no se asignó.
+  documentoRefId   String?  @map("documento_ref_id") @db.Uuid
+  /// 'emitido' | 'anulado' | 'huerfano' (CHECK en la migración).
+  estado           EstadoEmision @default(emitido)
+  emitidoPor       String?  @map("emitido_por") @db.Uuid
+  emitidoAt        DateTime @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  motivo           String?
+
+  @@unique([secuenciaId, numero])
+  @@index([documentoRefId])
+  @@map("secuencia_emision")
+  @@schema("comercial")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Estados por proceso (catálogo + transiciones + seguimiento). Un mismo motor sirve a todos los procesos del
+// contenedor (pedido, prefactura, AOT...). Las precondiciones de negocio siguen en código y se referencian por nombre
+// (`regla`); aquí vive lo que cambia sin desplegar: qué estados hay, cómo se llaman, quién responde y qué pasos son válidos.
+// ---------------------------------------------------------------------------------------------------------------
+
+model ProcesoEstado {
+  id             String  @id @db.Uuid
+  proceso        String
+  codigo         String
+  nombre         String
+  /// 'borrador' | 'pendiente' | 'en_proceso' | 'esperando_aprobacion' | 'aprobado' | 'rechazado' (CHECK en la migración).
+  macroEstado    MacroEstado @map("macro_estado")
+  orden          Int     @default(0)
+  /// Rol del portal que responde en este estado, o 'cliente' (espera externa); nulo = sin responsable.
+  rolResponsable String? @map("rol_responsable")
+  terminal       Boolean @default(false)
+  activo         Boolean @default(true)
+
+  origenes ProcesoTransicion[] @relation("origen")
+  destinos ProcesoTransicion[] @relation("destino")
+  pedidos  Pedido[]
+
+  @@unique([proceso, codigo])
+  @@map("proceso_estado")
+  @@schema("comercial")
+}
+
+model ProcesoTransicion {
+  id            String        @id @db.Uuid
+  proceso       String
+  estadoOrigen  String        @map("estado_origen")
+  estadoDestino String        @map("estado_destino")
+  origen        ProcesoEstado @relation("origen", fields: [proceso, estadoOrigen], references: [proceso, codigo])
+  destino       ProcesoEstado @relation("destino", fields: [proceso, estadoDestino], references: [proceso, codigo])
+
+  /// Permiso que debe tener quien dispara el paso a mano; nulo = no hay paso manual (solo el sistema o un forzado).
+  permiso          String?
+  requiereMotivo   Boolean @default(false) @map("requiere_motivo")
+  /// true: lo dispara un hecho (evento o sincronización). El paso manual solo existe si tiene `permiso`.
+  automatica       Boolean @default(false)
+  eventoDisparador String? @map("evento_disparador")
+  /// Nombre de una precondición de negocio implementada en código (p. ej. `avance_documental_completo`).
+  regla            String?
+  activa           Boolean @default(true)
+
+  @@unique([proceso, estadoOrigen, estadoDestino])
+  @@map("proceso_transicion")
+  @@schema("comercial")
+}
+
+/// Seguimiento inmutable de cada cambio de estado de cualquier proceso (solo inserción).
+model ProcesoHistorial {
+  id             String   @id @db.Uuid
+  proceso        String
+  entidadId      String   @map("entidad_id") @db.Uuid
+  estadoAnterior String?  @map("estado_anterior")
+  estadoNuevo    String   @map("estado_nuevo")
+  macroEstado    MacroEstado? @map("macro_estado")
+  motivo         String?
+  actorId        String?  @map("actor_id") @db.Uuid
+  actor          IdUsuario? @relation("historialActor", fields: [actorId], references: [id])
+  actorRol       String?  @map("actor_rol")
+  /// 'manual' | 'automatico' | 'sincronizacion' | 'forzado' | 'sistema' (CHECK en la migración).
+  origen         OrigenCambioEstado @default(manual)
+  eventoId       String?  @map("evento_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([proceso, entidadId, createdAt])
+  @@map("proceso_historial")
+  @@schema("comercial")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pedido: entidad ancla del ciclo comercial. Los datos de catálogo y de personas son FK reales a `catalogos` e `identidad`
+// (el nombre sale del JOIN: no se copia). Los documentos emitidos (guía, orden de trabajo, prefactura firmada) sí conservan
+// lo que decían al emitirse.
+// ---------------------------------------------------------------------------------------------------------------
+
+model Pedido {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  /// Control optimista de concurrencia: cada edición exige la versión que vio quien edita.
+  version   Int      @default(1)
+
+  /// Código propio del portal (secuencia `pedido`). Nulo mientras es borrador; se emite al abrir.
+  codigo String? @unique
+
+  /// 'portal' (creado por Ventas) | 'as2' (cargado desde AS2).
+  origen             OrigenRegistro
+  as2IdPedidoCliente Int?      @unique @map("as2_id_pedido_cliente")
+  /// `PEC-00xxxx`, el número que AS2 asignó.
+  as2Numero          String?   @map("as2_numero")
+  as2Estado          String?   @map("as2_estado")
+  as2Fecha           DateTime? @map("as2_fecha") @db.Date
+  /// Montos de cabecera de AS2: `total` es el subtotal bruto; el final es `total - descuento + impuesto`.
+  as2Total           Decimal?  @map("as2_total") @db.Decimal(14, 2)
+  as2Descuento       Decimal?  @map("as2_descuento") @db.Decimal(14, 2)
+  as2Impuesto        Decimal?  @map("as2_impuesto") @db.Decimal(14, 2)
+  as2Descripcion     String?   @map("as2_descripcion")
+  /// 'no_aplica' | 'pendiente_de_crear_en_as2' | 'vinculado' | 'error' (CHECK en la migración).
+  as2SyncEstado      EstadoSyncAs2 @default(no_aplica) @map("as2_sync_estado")
+  /// 'referencia_en_descripcion' | 'manual' | 'api' (cómo se vinculó un pedido del portal con el de AS2).
+  as2VinculoMetodo   MetodoVinculoAs2? @map("as2_vinculo_metodo")
+  as2SincronizadoAt  DateTime? @map("as2_sincronizado_at") @db.Timestamptz(6)
+
+  // --- cliente y servicio
+  clienteId     String?     @map("cliente_id") @db.Uuid
+  cliente       CatCliente? @relation(fields: [clienteId], references: [id])
+  subcliente    String?
+  /// 'fcr' | 'pumping'
+  lineaId       String?        @map("linea_id") @db.Uuid
+  linea         ServicioLinea? @relation(fields: [lineaId], references: [id])
+  /// Tipo de OT (catálogo `tipo_ot`: venta | servicio)
+  tipoOtId      String?  @map("tipo_ot_id") @db.Uuid
+  tipoOt        TipoOt?  @relation(fields: [tipoOtId], references: [id])
+
+  // --- ubicación (FK a los catálogos; la zona es la del campo); `rigless` = trabajo sin taladro
+  campoId        String?     @map("campo_id") @db.Uuid
+  campo          CatCampo?   @relation(fields: [campoId], references: [id])
+  bloqueId       String?     @map("bloque_id") @db.Uuid
+  bloque         CatBloque?  @relation(fields: [bloqueId], references: [id])
+  pozoId         String?     @map("pozo_id") @db.Uuid
+  pozo           CatPozo?    @relation(fields: [pozoId], references: [id])
+  taladroId      String?     @map("taladro_id") @db.Uuid
+  taladro        CatTaladro? @relation(fields: [taladroId], references: [id])
+  rigless        Boolean @default(false)
+  numeroContrato String? @map("numero_contrato")
+
+  // --- estado (catálogo `proceso_estado`)
+  proceso         String        @default("pedido")
+  estado          String        @default("borrador")
+  estadoRef       ProcesoEstado @relation(fields: [proceso, estado], references: [proceso, codigo])
+  motivoAnulacion String?       @map("motivo_anulacion")
+  anuladoAt       DateTime?     @map("anulado_at") @db.Timestamptz(6)
+
+  // --- responsables (FK a `identidad.usuario`; los representantes, a `catalogos.persona_contacto`). El analista de
+  // facturación NO se asigna al crear.
+  agenteComercialId         String?   @map("agente_comercial_id") @db.Uuid
+  agenteComercial           IdUsuario? @relation("pedidoAgente", fields: [agenteComercialId], references: [id])
+  representanteCampoId      String?   @map("representante_campo_id") @db.Uuid
+  representanteCampo        CatPersona? @relation("pedidoRepCampo", fields: [representanteCampoId], references: [id])
+  representanteQuitoId      String?   @map("representante_quito_id") @db.Uuid
+  representanteQuito        CatPersona? @relation("pedidoRepQuito", fields: [representanteQuitoId], references: [id])
+  tecnicoHseId              String?   @map("tecnico_hse_id") @db.Uuid
+  tecnicoHse                IdUsuario? @relation("pedidoHse", fields: [tecnicoHseId], references: [id])
+  analistaFacturacionId     String?   @map("analista_facturacion_id") @db.Uuid
+  analistaFacturacion       IdUsuario? @relation("pedidoAnalista", fields: [analistaFacturacionId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  analistaAsignadoPor       String?   @map("analista_asignado_por") @db.Uuid
+  analistaAsignadoAt        DateTime? @map("analista_asignado_at") @db.Timestamptz(6)
+
+  // --- sección administrativa
+  /// Condición de pago y bodega: FK a los catálogos. La zona no se guarda: es la del campo.
+  condicionPagoId     String?        @map("condicion_pago_id") @db.Uuid
+  condicionPago       CatCondicionPago? @relation(fields: [condicionPagoId], references: [id])
+  bodegaId            String?        @map("bodega_id") @db.Uuid
+  bodega              CatBodega?     @relation(fields: [bodegaId], references: [id])
+  /// Lo que AS2 trae del pedido cuando no tiene su registro en nuestro catálogo (se conserva como dato de AS2 hasta conciliarlo).
+  as2EmpresaNombre         String? @map("as2_empresa_nombre")
+  as2EmpresaIdentificacion String? @map("as2_empresa_identificacion")
+  as2Bodega                String? @map("as2_bodega")
+  as2CondicionPago         String? @map("as2_condicion_pago")
+  as2Zona                  String? @map("as2_zona")
+  /// 'verbal' | 'escrita'
+  solicitudMedio      SolicitudMedio? @map("solicitud_medio")
+  fechaInicioServicio DateTime? @map("fecha_inicio_servicio") @db.Date
+  fechaFinServicio    DateTime? @map("fecha_fin_servicio") @db.Date
+
+  tiposServicio    PedidoTipoServicio[]
+  items            PedidoItem[]
+  documentos       PedidoDocumento[]
+  documentosOperativos DocumentoOperativo[]
+  /// Despacho a Bodega: solo dos momentos (solicitado por Facturación, realizado por Bodega), sin documento.
+  /// Número de ticket: el MISMO que tendrá la prefactura (el "ticket" de Dynadrill es la prefactura). Se toma del secuencial de la
+  /// prefactura al abrir el pedido por primera vez; la prefactura, cuando exista, lleva este mismo número.
+  ticketNumero     Int?    @unique @map("ticket_numero")
+  ticketEmisionId  String? @map("ticket_emision_id") @db.Uuid
+  /// Factura de AS2 con la que se cerró el pedido.
+  facturaNumero String?   @map("factura_numero")
+  facturadoAt   DateTime? @map("facturado_at") @db.Timestamptz(6)
+  facturadoPor  String?   @map("facturado_por") @db.Uuid
+  despachoSolicitadoAt     DateTime? @map("despacho_solicitado_at") @db.Timestamptz(6)
+  despachoSolicitadoPor    String?   @map("despacho_solicitado_por") @db.Uuid
+  despachoSolicitante      IdUsuario? @relation("pedidoDespachoSolicitado", fields: [despachoSolicitadoPor], references: [id])
+  despachoRealizadoAt      DateTime? @map("despacho_realizado_at") @db.Timestamptz(6)
+  despachoRealizadoPor     String?   @map("despacho_realizado_por") @db.Uuid
+  despachoEjecutor         IdUsuario? @relation("pedidoDespachoRealizado", fields: [despachoRealizadoPor], references: [id])
+  prefacturas      Prefactura[]
+  guias            GuiaRemision[]
+  ordenTrabajo     OrdenTrabajo?
+
+  @@index([estado])
+  @@index([clienteId])
+  @@index([lineaId, estado])
+  @@index([analistaFacturacionId])
+  @@map("pedido")
+  @@schema("comercial")
+}
+
+/// Catálogo de líneas de servicio (FCR, Pumping...). Cada tabla tiene `id` UUID; las claves foráneas van por `id`.
+model ServicioLinea {
+  id     String  @id @db.Uuid
+  codigo String  @unique
+  nombre String
+  orden  Int     @default(0)
+  activo Boolean @default(true)
+
+  tipos   ServicioTipo[]
+  pedidos Pedido[]
+
+  @@map("servicio_linea")
+  @@schema("comercial")
+}
+
+/// Catálogo de tipos de servicio: cada uno pertenece a una línea.
+model ServicioTipo {
+  id      String        @id @db.Uuid
+  lineaId String        @map("linea_id") @db.Uuid
+  linea   ServicioLinea @relation(fields: [lineaId], references: [id])
+  codigo  String        @unique
+  nombre  String
+  orden   Int           @default(0)
+  activo  Boolean       @default(true)
+
+  subtipos    ServicioSubtipo[]
+  pedidoTipos PedidoTipoServicio[]
+
+  @@index([lineaId])
+  @@map("servicio_tipo")
+  @@schema("comercial")
+}
+
+/// Catálogo de subtipos: cada subtipo pertenece a UN tipo (1:n). El mismo nombre puede existir bajo tipos distintos.
+model ServicioSubtipo {
+  id     String       @id @db.Uuid
+  tipoId String       @map("tipo_id") @db.Uuid
+  tipo   ServicioTipo @relation(fields: [tipoId], references: [id])
+  nombre String
+  orden  Int          @default(0)
+  activo Boolean      @default(true)
+
+  pedidoSubtipos PedidoSubtipoServicio[]
+
+  @@unique([tipoId, nombre])
+  @@unique([tipoId, id])
+  @@map("servicio_subtipo")
+  @@schema("comercial")
+}
+
+/// Tipo de servicio elegido en un pedido.
+model PedidoTipoServicio {
+  id       String       @id @db.Uuid
+  pedidoId String       @map("pedido_id") @db.Uuid
+  pedido   Pedido       @relation(fields: [pedidoId], references: [id])
+  tipoId   String       @map("tipo_id") @db.Uuid
+  tipo     ServicioTipo @relation(fields: [tipoId], references: [id])
+
+  subtipos PedidoSubtipoServicio[]
+
+  @@unique([pedidoId, tipoId])
+  @@map("pedido_tipo_servicio")
+  @@schema("comercial")
+}
+
+/// Subtipo elegido en un pedido. Cuelga de un tipo que el MISMO pedido tiene elegido (FK compuesta) y de un subtipo que
+/// pertenece a ESE tipo (FK compuesta al catálogo). Sin FK directa a pedido: queda garantizado a través del tipo.
+model PedidoSubtipoServicio {
+  id         String             @id @db.Uuid
+  pedidoId   String             @map("pedido_id") @db.Uuid
+  tipoId     String             @map("tipo_id") @db.Uuid
+  subtipoId  String             @map("subtipo_id") @db.Uuid
+  pedidoTipo PedidoTipoServicio @relation(fields: [pedidoId, tipoId], references: [pedidoId, tipoId])
+  catalogo   ServicioSubtipo    @relation(fields: [tipoId, subtipoId], references: [tipoId, id])
+
+  @@unique([pedidoId, subtipoId])
+  @@map("pedido_subtipo_servicio")
+  @@schema("comercial")
+}
+
+/// Ítem estimado. Los de un pedido nuevo salen SIEMPRE de la lista de precios del cliente (`lista_precios_item_id`).
+model PedidoItem {
+  id                 String            @id @db.Uuid
+  pedidoId           String            @map("pedido_id") @db.Uuid
+  pedido             Pedido            @relation(fields: [pedidoId], references: [id])
+  orden              Int               @db.SmallInt
+  codigo             String
+  descripcion        String
+  unidad             String
+  cantidad           Decimal           @db.Decimal(12, 3)
+  valorUnitario      Decimal           @map("valor_unitario") @db.Decimal(14, 2)
+  descuentoPct       Decimal?          @map("descuento_pct") @db.Decimal(5, 2)
+  /// 'lista' (de la lista de precios) | 'plantilla' (Excel de AS2) | 'as2' (líneas importadas de AS2) | 'manual' (precio autorizado a mano)
+  origenItem         OrigenItem @default(lista) @map("origen_item")
+  listaPreciosItemId String?           @map("lista_precios_item_id") @db.Uuid
+  listaPreciosItem   ListaPreciosItem? @relation(fields: [listaPreciosItemId], references: [id])
+
+  @@unique([pedidoId, orden])
+  @@map("pedido_item")
+  @@schema("comercial")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Listas de precios (por cliente y contrato). De aquí salen los ítems de un pedido.
+// ---------------------------------------------------------------------------------------------------------------
+
+model ListaPrecios {
+  id             String   @id @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?  @map("created_by") @db.Uuid
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  clienteId      String?  @map("cliente_id") @db.Uuid
+  cliente        CatCliente? @relation(fields: [clienteId], references: [id])
+  numeroContrato String   @map("numero_contrato")
+  vigenteDesde   DateTime @map("vigente_desde") @db.Date
+  activa         Boolean  @default(true)
+  /// El cliente de este contrato exige la orden de trabajo (OT) después de la prefactura firmada.
+  requiereOrdenTrabajo Boolean @default(false) @map("requiere_orden_trabajo")
+  /// Párrafo del contrato que la OT imprime (fijo por contrato).
+  textoContrato        String? @map("texto_contrato")
+  /// id numérico de la demo, solo para trazar la migración inicial de listas.
+  legacyId       Int?     @unique @map("legacy_id")
+
+  items ListaPreciosItem[]
+
+  @@index([clienteId, activa])
+  @@map("lista_precios")
+  @@schema("comercial")
+}
+
+model ListaPreciosItem {
+  id             String       @id @db.Uuid
+  listaPreciosId String       @map("lista_precios_id") @db.Uuid
+  listaPrecios   ListaPrecios @relation(fields: [listaPreciosId], references: [id])
+  codigo         String
+  descripcion    String
+  unidad         String
+  precio         Decimal      @db.Decimal(14, 2)
+  /// 'Material' | 'Servicio'
+  tipo           TipoItemLista
+
+  pedidoItems PedidoItem[]
+
+  @@unique([listaPreciosId, codigo])
+  @@map("lista_precios_item")
+  @@schema("comercial")
+}
+
+/// Tipo de OT: clasifica el pedido como venta o servicio (reporte de Facturación).
+model TipoOt {
+  id     String  @id @db.Uuid
+  codigo String  @unique
+  nombre String
+  orden  Int     @default(0)
+  activo Boolean @default(true)
+
+  pedidos Pedido[]
+
+  @@map("tipo_ot")
+  @@schema("comercial")
+}
+
+/// Medio por el que el cliente solicitó el servicio (valores fijos: enum en la base de datos).
+enum SolicitudMedio {
+  verbal
+  escrita
+
+  @@map("solicitud_medio")
+  @@schema("comercial")
+}
+
+/// Documento adjunto del pedido (p. ej. el documento referencial). El archivo vive en el módulo `archivos` de plataforma:
+/// aquí solo su `archivo_id` (sin FK entre schemas) y una copia de nombre, tipo y tamaño.
+model PedidoDocumento {
+  id          String   @id @db.Uuid
+  pedidoId    String   @map("pedido_id") @db.Uuid
+  pedido      Pedido   @relation(fields: [pedidoId], references: [id])
+  archivoId   String     @map("archivo_id") @db.Uuid
+  /// El nombre, el tipo, el tamaño y quién lo subió salen del archivo (FK a `archivos.archivo`).
+  archivo     CatArchivo @relation(fields: [archivoId], references: [id])
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([pedidoId, archivoId])
+  @@index([pedidoId])
+  @@map("pedido_documento")
+  @@schema("comercial")
+}
+
+enum OrigenRegistro {
+  portal
+  as2
+
+  @@map("origen_registro")
+  @@schema("comercial")
+}
+
+enum EstadoSyncAs2 {
+  no_aplica
+  pendiente_de_crear_en_as2
+  vinculado
+  error
+
+  @@map("estado_sync_as2")
+  @@schema("comercial")
+}
+
+enum MetodoVinculoAs2 {
+  referencia_en_descripcion
+  manual
+  api
+
+  @@map("metodo_vinculo_as2")
+  @@schema("comercial")
+}
+
+enum OrigenItem {
+  lista
+  plantilla
+  as2
+  manual
+
+  @@map("origen_item")
+  @@schema("comercial")
+}
+
+enum MacroEstado {
+  borrador
+  pendiente
+  en_proceso
+  esperando_aprobacion
+  aprobado
+  rechazado
+
+  @@map("macro_estado")
+  @@schema("comercial")
+}
+
+enum OrigenCambioEstado {
+  manual
+  automatico
+  sincronizacion
+  forzado
+  sistema
+
+  @@map("origen_cambio_estado")
+  @@schema("comercial")
+}
+
+enum ReinicioSecuencia {
+  nunca
+  anual
+
+  @@map("reinicio_secuencia")
+  @@schema("comercial")
+}
+
+enum EstadoEmision {
+  emitido
+  anulado
+  huerfano
+
+  @@map("estado_emision")
+  @@schema("comercial")
+}
+
+enum TipoItemLista {
+  Material
+  Servicio
+
+  @@map("tipo_item_lista")
+  @@schema("comercial")
+}
+
+/// Tipo de documento operativo que llega de Operaciones durante el servicio.
+enum TipoDocumentoOperativo {
+  reporte_job
+  reporte_herramientas
+
+  @@map("tipo_documento_operativo")
+  @@schema("comercial")
+}
+
+/// Línea operativa que originó el documento.
+enum OrigenOperativo {
+  fcr
+  pumping
+
+  @@map("origen_operativo")
+  @@schema("comercial")
+}
+
+/// Estado de una herramienta un día: operación, stand by, cargo diario o venta.
+enum EstadoUsoHerramienta {
+  operacion
+  stand_by
+  daily_charge
+  venta
+
+  @@map("estado_uso_herramienta")
+  @@schema("comercial")
+}
+
+/// Documento operativo del pedido: un Reporte Job por día o un Reporte de Herramientas por servicio. Lo empuja Operaciones
+/// (FCR al aprobar el supervisor; Pumping al guardar el reporte diario). Recibir otro con la misma clave
+/// (pedido, tipo, origen, fecha) lo REEMPLAZA. `ticket_ref` es la referencia al ticket en Operaciones (aún sin migrar).
+model DocumentoOperativo {
+  id               String                 @id @db.Uuid
+  pedidoId         String                 @map("pedido_id") @db.Uuid
+  pedido           Pedido                 @relation(fields: [pedidoId], references: [id])
+  tipo             TipoDocumentoOperativo
+  origen           OrigenOperativo
+  ticketRef        String?                @map("ticket_ref")
+  /// Día del reporte (Reporte Job); nulo en el Reporte de Herramientas, que es uno por servicio.
+  fecha            DateTime?              @db.Date
+  /// Quién lo firmó en campo (nombre) y cuándo; supervisor y operador son cuentas de identidad (FK).
+  firmadoPor       String?                @map("firmado_por")
+  firmadoAt        DateTime?              @map("firmado_at") @db.Timestamptz(6)
+  supervisorId     String?                @map("supervisor_id") @db.Uuid
+  supervisor       IdUsuario?             @relation("docopSupervisor", fields: [supervisorId], references: [id])
+  operadorId       String?                @map("operador_id") @db.Uuid
+  operador         IdUsuario?             @relation("docopOperador", fields: [operadorId], references: [id])
+  recibidoAt       DateTime               @default(now()) @map("recibido_at") @db.Timestamptz(6)
+  recibidoPor      String                 @map("recibido_por") @db.Uuid
+
+  actividades  DocumentoOperativoActividad[]
+  herramientas DocumentoOperativoHerramienta[]
+
+  @@index([pedidoId, tipo])
+  @@map("documento_operativo")
+  @@schema("comercial")
+}
+
+/// Actividad de la bitácora de un Reporte Job (DYN-SGI-RE-047).
+model DocumentoOperativoActividad {
+  id            String             @id @db.Uuid
+  documentoId   String             @map("documento_id") @db.Uuid
+  documento     DocumentoOperativo @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  orden         Int
+  fecha         DateTime           @db.Date
+  /// 'HH:mm'
+  horaInicio    String             @map("hora_inicio")
+  horaFin       String             @map("hora_fin")
+  duracionHoras Decimal            @map("duracion_horas") @db.Decimal(5, 2)
+  detalle       String
+  autor         String?
+
+  @@unique([documentoId, orden])
+  @@map("documento_operativo_actividad")
+  @@schema("comercial")
+}
+
+/// Herramienta de un Reporte de Herramientas (DYN-FCR-RE-008). `codigo` es el de la lista de precios (con él se factura).
+model DocumentoOperativoHerramienta {
+  id          String             @id @db.Uuid
+  documentoId String             @map("documento_id") @db.Uuid
+  documento   DocumentoOperativo @relation(fields: [documentoId], references: [id], onDelete: Cascade)
+  orden       Int
+  nombre      String
+  serie       String?
+  codigo      String?
+
+  usos DocumentoOperativoUso[]
+
+  @@unique([documentoId, orden])
+  @@map("documento_operativo_herramienta")
+  @@schema("comercial")
+}
+
+/// Estado de una herramienta en un día.
+model DocumentoOperativoUso {
+  id            String                        @id @db.Uuid
+  herramientaId String                        @map("herramienta_id") @db.Uuid
+  herramienta   DocumentoOperativoHerramienta @relation(fields: [herramientaId], references: [id], onDelete: Cascade)
+  fecha         DateTime                      @db.Date
+  estado        EstadoUsoHerramienta
+
+  @@unique([herramientaId, fecha])
+  @@map("documento_operativo_uso")
+  @@schema("comercial")
+}
+
+/// Estado de una prefactura. Una prefactura rechazada o anulada se conserva (no se borra); la que está vigente es la
+/// generada, enviada o firmada (solo una por pedido).
+enum EstadoPrefactura {
+  generada
+  enviada_para_firmas
+  firmada
+  rechazada
+  anulada
+
+  @@map("estado_prefactura")
+  @@schema("comercial")
+}
+
+enum MedioEnvioPrefactura {
+  email
+  portal
+
+  @@map("medio_envio_prefactura")
+  @@schema("comercial")
+}
+
+/// De dónde sale una línea de la prefactura.
+enum FuenteItemPrefactura {
+  herramienta
+  material
+  personal
+  personal_manual
+
+  @@map("fuente_item_prefactura")
+  @@schema("comercial")
+}
+
+enum TipoFirmante {
+  company_man
+  cliente
+  dynadrill
+
+  @@map("tipo_firmante")
+  @@schema("comercial")
+}
+
+/// Resultado de la lectura automática de la firma (ayuda para revisar; nunca certifica la firma).
+enum VerificacionFirma {
+  no_verificada
+  firma_detectada
+  firma_no_detectada
+  no_concluyente
+
+  @@map("verificacion_firma")
+  @@schema("comercial")
+}
+
+/// A quién se devuelve el pedido cuando el cliente rechaza la prefactura.
+enum AreaDevolucion {
+  ventas
+  operaciones
+  facturacion
+
+  @@map("area_devolucion")
+  @@schema("comercial")
+}
+
+enum TipoTasa {
+  iva
+  retencion_ir
+  retencion_iva
+
+  @@map("tipo_tasa")
+  @@schema("comercial")
+}
+
+/// Tasas de impuestos y retenciones con su vigencia (en la prefactura se guarda la que se aplicó).
+model TasaImpuesto {
+  id           String   @id @db.Uuid
+  tipo         TipoTasa
+  porcentaje   Decimal  @db.Decimal(5, 2)
+  vigenteDesde DateTime @map("vigente_desde") @db.Date
+
+  @@unique([tipo, vigenteDesde])
+  @@map("tasa_impuesto")
+  @@schema("comercial")
+}
+
+/// Prefactura del pedido. Se calcula con la lista de precios, los reportes operativos y los ítems del pedido. Cada
+/// regeneración tras un rechazo es una VERSIÓN nueva; las anteriores se conservan. `ticket_numero` es el número que AS2
+/// asigna a la prefactura (PRC-) y que Dynadrill usa como número de ticket; se registra cuando AS2 lo entrega.
+model Prefactura {
+  id                   String           @id @db.Uuid
+  pedidoId             String           @map("pedido_id") @db.Uuid
+  pedido               Pedido           @relation(fields: [pedidoId], references: [id])
+  version              Int              @default(1)
+  estado               EstadoPrefactura @default(generada)
+  ticketNumero         Int?             @map("ticket_numero")
+  listaPreciosId       String?          @map("lista_precios_id") @db.Uuid
+  subtotalServicios    Decimal          @map("subtotal_servicios") @db.Decimal(14, 2)
+  subtotalMateriales   Decimal          @map("subtotal_materiales") @db.Decimal(14, 2)
+  subtotal             Decimal          @db.Decimal(14, 2)
+  iva                  Decimal          @db.Decimal(14, 2)
+  retencionIr          Decimal          @map("retencion_ir") @db.Decimal(14, 2)
+  retencionIva         Decimal          @map("retencion_iva") @db.Decimal(14, 2)
+  netoCobrar           Decimal          @map("neto_cobrar") @db.Decimal(14, 2)
+  ivaPct               Decimal          @map("iva_pct") @db.Decimal(5, 2)
+  retencionIrPct       Decimal          @map("retencion_ir_pct") @db.Decimal(5, 2)
+  retencionIvaPct      Decimal          @map("retencion_iva_pct") @db.Decimal(5, 2)
+  generadaAt           DateTime         @default(now()) @map("generada_at") @db.Timestamptz(6)
+  generadaPor          String           @map("generada_por") @db.Uuid
+  enviadaAt            DateTime?        @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor           String?          @map("enviada_por") @db.Uuid
+  medioEnvio           MedioEnvioPrefactura? @map("medio_envio")
+  /// Por qué se tardó en firmar (cuando aplica).
+  razonRetraso         String?          @map("razon_retraso")
+  firmadaAt            DateTime?        @map("firmada_at") @db.Timestamptz(6)
+  rechazadaAt          DateTime?        @map("rechazada_at") @db.Timestamptz(6)
+  rechazadaPor         String?          @map("rechazada_por") @db.Uuid
+  rechazoMotivo        String?          @map("rechazo_motivo")
+  rechazoDevueltoA     AreaDevolucion?  @map("rechazo_devuelto_a")
+  anuladaAt            DateTime?        @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor           String?          @map("anulada_por") @db.Uuid
+  anulacionMotivo      String?          @map("anulacion_motivo")
+
+  items        PrefacturaItem[]
+  advertencias PrefacturaAdvertencia[]
+  firmas       PrefacturaFirma[]
+
+  @@unique([pedidoId, version])
+  @@index([pedidoId])
+  @@map("prefactura")
+  @@schema("comercial")
+}
+
+model PrefacturaItem {
+  id             String               @id @db.Uuid
+  prefacturaId   String               @map("prefactura_id") @db.Uuid
+  prefactura     Prefactura           @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
+  orden          Int
+  codigo         String
+  descripcion    String
+  unidad         String?
+  serie          String?
+  cantidad       Decimal              @db.Decimal(14, 3)
+  precioUnitario Decimal              @map("precio_unitario") @db.Decimal(14, 2)
+  descuentoPct   Decimal              @default(0) @map("descuento_pct") @db.Decimal(5, 2)
+  precioTotal    Decimal              @map("precio_total") @db.Decimal(14, 2)
+  tipo           TipoItemLista
+  fuente         FuenteItemPrefactura
+
+  @@unique([prefacturaId, orden])
+  @@map("prefactura_item")
+  @@schema("comercial")
+}
+
+/// Aviso al calcular (p. ej. una herramienta sin código o sin coincidencia en la lista) para que Facturación lo revise.
+model PrefacturaAdvertencia {
+  id           String     @id @db.Uuid
+  prefacturaId String     @map("prefactura_id") @db.Uuid
+  prefactura   Prefactura @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
+  orden        Int
+  mensaje      String
+
+  @@unique([prefacturaId, orden])
+  @@map("prefactura_advertencia")
+  @@schema("comercial")
+}
+
+/// Firma de la prefactura: quién firmó (company man del pedido, cliente o Dynadrill), con el archivo firmado.
+model PrefacturaFirma {
+  id            String            @id @db.Uuid
+  prefacturaId  String            @map("prefactura_id") @db.Uuid
+  prefactura    Prefactura        @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
+  firmanteTipo  TipoFirmante      @map("firmante_tipo")
+  /// Persona del catálogo (representante de campo o de Quito), si es una; sin FK entre schemas.
+  personaId     String?           @map("persona_id") @db.Uuid
+  nombre        String
+  cargo         String?
+  firmadoAt     DateTime          @map("firmado_at") @db.Date
+  archivoId     String            @map("archivo_id") @db.Uuid
+  archivo       CatArchivo        @relation(fields: [archivoId], references: [id])
+  verificacion  VerificacionFirma @default(no_verificada)
+  /// Confianza de la lectura (0 a 1; no es una probabilidad calibrada) y cuándo se intentó. Con `verificacion_at` y
+  /// resultado `no_verificada`, el intento no pudo completarse (servicio no disponible).
+  verificacionConfianza Decimal? @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt        DateTime? @map("verificacion_at") @db.Timestamptz(6)
+  /// `null` si no se comparó el nombre; si no, si apareció junto a la firma.
+  nombreCoincide        Boolean?  @map("nombre_coincide")
+  registradoPor String            @map("registrado_por") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([prefacturaId, archivoId])
+  @@index([prefacturaId])
+  @@map("prefactura_firma")
+  @@schema("comercial")
+}
+
+enum EstadoGuia {
+  emitida
+  anulada
+
+  @@map("estado_guia")
+  @@schema("comercial")
+}
+
+enum OrigenItemGuia {
+  herramienta
+  material
+  manual
+
+  @@map("origen_item_guia")
+  @@schema("comercial")
+}
+
+/// Lugares desde donde se despacha (p. ej. la base de Dynadrill).
+model LugarDespacho {
+  id     String  @id @db.Uuid
+  nombre String  @unique
+  activo Boolean @default(true)
+
+  guias GuiaRemision[]
+
+  @@map("lugar_despacho")
+  @@schema("comercial")
+}
+
+/// Guía de remisión del pedido: lo que sale físicamente de bodega (herramientas con su serie y materiales). El portal la
+/// numera con su secuencial (`003-001-0011036`; el número se puede reasignar con motivo), genera el PDF y Facturación lo
+/// firma electrónicamente; el archivo firmado se adjunta desde `archivos`. No es la guía electrónica del SRI.
+model GuiaRemision {
+  id            String     @id @db.Uuid
+  pedidoId      String     @map("pedido_id") @db.Uuid
+  pedido        Pedido     @relation(fields: [pedidoId], references: [id])
+  numero        Int
+  /// Código formateado (`003-001-0011036`); no se repite.
+  codigo        String     @unique
+  /// Emisión vigente del número en la bitácora de secuenciales.
+  emisionId     String     @map("emision_id") @db.Uuid
+  estado        EstadoGuia @default(emitida)
+  fecha         DateTime   @db.Date
+  clienteNombre String?    @map("cliente_nombre")
+  clienteRuc    String?    @map("cliente_ruc")
+  lugarOrigenId String     @map("lugar_origen_id") @db.Uuid
+  lugarOrigen   LugarDespacho @relation(fields: [lugarOrigenId], references: [id])
+  /// Quién solicita y quién despacha, tal como se imprimió en la guía (documento emitido: texto, no un vínculo).
+  solicitadoPorNombre String? @map("solicitado_por_nombre")
+  despachadoPorNombre String? @map("despachado_por_nombre")
+  /// 'HH:mm'
+  horaSalida    String?    @map("hora_salida")
+  horaLlegada   String?    @map("hora_llegada")
+  /// Transporte: el id es FK al catálogo (solo en la base de datos); el nombre y la identificación se conservan tal como se emitió.
+  transportistaId             String  @map("transportista_id") @db.Uuid
+  transportistaNombre         String  @map("transportista_nombre")
+  transportistaIdentificacion String  @map("transportista_identificacion")
+  vehiculoId     String? @map("vehiculo_id") @db.Uuid
+  placa          String?
+  /// Tipo, marca y modelo del vehículo al emitir (p. ej. "CAMION JAC HFC1040K2"): copia, el catálogo puede cambiar.
+  vehiculoDescripcion String? @map("vehiculo_descripcion")
+  choferId       String? @map("chofer_id") @db.Uuid
+  choferNombre   String? @map("chofer_nombre")
+  observaciones  String?
+  /// Si reemplaza a otra guía de este pedido (p. ej. por un error).
+  reemplazaAId   String?       @map("reemplaza_a_id") @db.Uuid
+  reemplazaA     GuiaRemision? @relation("reemplazo", fields: [reemplazaAId], references: [id])
+  reemplazadaPor GuiaRemision[] @relation("reemplazo")
+  emitidaAt      DateTime   @default(now()) @map("emitida_at") @db.Timestamptz(6)
+  emitidaPor     String     @map("emitida_por") @db.Uuid
+  anuladaAt      DateTime?  @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor     String?    @map("anulada_por") @db.Uuid
+  anulacionMotivo String?   @map("anulacion_motivo")
+  /// Guía firmada electrónicamente (archivo en el módulo `archivos`).
+  archivoFirmadoId     String?     @map("archivo_firmado_id") @db.Uuid
+  archivoFirmado       CatArchivo? @relation("guiaArchivo", fields: [archivoFirmadoId], references: [id])
+  firmadaAt            DateTime? @map("firmada_at") @db.Timestamptz(6)
+  /// Validación criptográfica de las firmas digitales del PDF firmado (servicio firmas-ocr). Ayuda para revisar: sin
+  /// revocación y con las raíces cargadas, un firmante puede salir "no verificado". Nunca bloquea el registro.
+  /// Lectura de la firma manuscrita (OpenCV + Tesseract), como en la prefactura: ayuda para revisar, nunca certifica.
+  firmaManuscrita          VerificacionFirma @default(no_verificada) @map("firma_manuscrita")
+  firmaManuscritaConfianza Decimal?          @map("firma_manuscrita_confianza") @db.Decimal(4, 3)
+  firmaManuscritaAt        DateTime?         @map("firma_manuscrita_at") @db.Timestamptz(6)
+  firmaElectronicaEstado  EstadoFirmaElectronica? @map("firma_electronica_estado")
+  firmaElectronicaResumen String?                 @map("firma_electronica_resumen")
+  firmaElectronicaAt      DateTime?               @map("firma_electronica_at") @db.Timestamptz(6)
+
+  items          GuiaRemisionItem[]
+  firmasDigitales GuiaFirmaDigital[]
+
+  @@index([pedidoId])
+  @@map("guia_remision")
+  @@schema("comercial")
+}
+
+model GuiaRemisionItem {
+  id          String         @id @db.Uuid
+  guiaId      String         @map("guia_id") @db.Uuid
+  guia        GuiaRemision   @relation(fields: [guiaId], references: [id], onDelete: Cascade)
+  orden       Int
+  codigo      String?
+  descripcion String
+  cantidad    Decimal        @db.Decimal(14, 3)
+  unidad      String
+  serie       String?
+  origen      OrigenItemGuia
+
+  @@unique([guiaId, orden])
+  @@map("guia_remision_item")
+  @@schema("comercial")
+}
+
+enum EstadoFirmaElectronica {
+  sin_firmas_digitales
+  verificado
+  verificado_con_advertencias
+  firmantes_no_verificados
+  alterado
+
+  @@map("estado_firma_electronica")
+  @@schema("comercial")
+}
+
+enum IntegridadFirmaDigital {
+  intacto
+  intacto_con_revisiones_posteriores
+  modificado_despues_de_firmar
+  firma_invalida
+
+  @@map("integridad_firma_digital")
+  @@schema("comercial")
+}
+
+enum OrigenFechaFirma {
+  sello_de_tiempo
+  declarada_por_el_firmante
+  desconocida
+
+  @@map("origen_fecha_firma")
+  @@schema("comercial")
+}
+
+/// Una firma digital encontrada en el PDF firmado de la guía.
+model GuiaFirmaDigital {
+  id                     String                 @id @db.Uuid
+  guiaId                 String                 @map("guia_id") @db.Uuid
+  guia                   GuiaRemision           @relation(fields: [guiaId], references: [id], onDelete: Cascade)
+  orden                  Int
+  firmanteNombre         String?                @map("firmante_nombre")
+  firmanteIdentificacion String?                @map("firmante_identificacion")
+  emisor                 String?
+  integridad             IntegridadFirmaDigital
+  firmaValida            Boolean                @map("firma_valida")
+  firmanteVerificado     Boolean                @map("firmante_verificado")
+  vigenteAlFirmar        Boolean?               @map("vigente_al_firmar")
+  fechaFirma             DateTime?              @map("fecha_firma") @db.Timestamptz(6)
+  origenFecha            OrigenFechaFirma       @map("origen_fecha")
+  conclusion             String
+
+  @@unique([guiaId, orden])
+  @@map("guia_firma_digital")
+  @@schema("comercial")
+}
+
+enum EstadoOrdenTrabajo {
+  generada
+  firmada
+
+  @@map("estado_orden_trabajo")
+  @@schema("comercial")
+}
+
+/// Ciudades que lleva el número de la OT (`948-OPR-POZO-UIO-2026`).
+model CiudadOt {
+  id     String  @id @db.Uuid
+  codigo String  @unique
+  nombre String
+  activo Boolean @default(true)
+
+  ordenes OrdenTrabajo[]
+
+  @@map("ciudad_ot")
+  @@schema("comercial")
+}
+
+/// Quién firma la OT por Dynadrill (representante de la contratista).
+model FirmanteContratista {
+  id             String  @id @db.Uuid
+  nombre         String
+  cargo          String
+  predeterminado Boolean @default(false)
+  activo         Boolean @default(true)
+
+  @@map("firmante_contratista")
+  @@schema("comercial")
+}
+
+/// Orden de trabajo / resumen de costos: se genera de la prefactura firmada, solo para los clientes que la requieren
+/// (una por pedido). Su número propio no se reinicia: `{n}-OPR-{pozo}-{ciudad}-{año de la OT}`. La firma es física: el
+/// portal solo anota quién la marcó como firmada (y el archivo, si se sube).
+model OrdenTrabajo {
+  id            String       @id @db.Uuid
+  pedidoId      String       @unique @map("pedido_id") @db.Uuid
+  pedido        Pedido       @relation(fields: [pedidoId], references: [id])
+  prefacturaId  String       @map("prefactura_id") @db.Uuid
+  numero        Int
+  /// `948-OPR-ESTACION NORTE 2-UIO-2026`; no se repite.
+  codigo        String       @unique
+  emisionId     String       @map("emision_id") @db.Uuid
+  ciudadId      String       @map("ciudad_id") @db.Uuid
+  ciudad        CiudadOt     @relation(fields: [ciudadId], references: [id])
+  anio          Int          @db.SmallInt
+  /// Fecha de la OT: un día antes del inicio del servicio.
+  fecha         DateTime     @db.Date
+  numeroContrato String?     @map("numero_contrato")
+  textoContrato String?      @map("texto_contrato")
+  descripcionRequerimiento String @map("descripcion_requerimiento")
+  /// `descripción /pozo/taladro`
+  servicio      String
+  fechaInicio   DateTime?    @map("fecha_inicio") @db.Date
+  fechaTerminacion DateTime? @map("fecha_terminacion") @db.Date
+  valorOt       Decimal      @map("valor_ot") @db.Decimal(14, 2)
+  contratistaNombre String   @map("contratista_nombre")
+  contratistaCargo  String   @map("contratista_cargo")
+  clienteNombre String       @map("cliente_nombre")
+  clienteCargo  String       @map("cliente_cargo")
+  estado        EstadoOrdenTrabajo @default(generada)
+  generadaAt    DateTime     @default(now()) @map("generada_at") @db.Timestamptz(6)
+  generadaPor   String       @map("generada_por") @db.Uuid
+  firmadaAt     DateTime?    @map("firmada_at") @db.Timestamptz(6)
+  firmadaPor    String?      @map("firmada_por") @db.Uuid
+  archivoFirmadoId     String?     @map("archivo_firmado_id") @db.Uuid
+  archivoFirmado       CatArchivo? @relation("ordenArchivo", fields: [archivoFirmadoId], references: [id])
+
+  items OrdenTrabajoItem[]
+
+  @@map("orden_trabajo")
+  @@schema("comercial")
+}
+
+model OrdenTrabajoItem {
+  id          String       @id @db.Uuid
+  ordenId     String       @map("orden_id") @db.Uuid
+  orden       OrdenTrabajo @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  orden_      Int          @map("orden")
+  codigo      String?
+  descripcion String
+  unidad      String?
+  tarifa      Decimal      @db.Decimal(14, 2)
+  cantidad    Decimal      @db.Decimal(14, 3)
+  total       Decimal      @db.Decimal(14, 2)
+
+  @@unique([ordenId, orden_])
+  @@map("orden_trabajo_item")
+  @@schema("comercial")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`). Sirven para obtener el nombre con JOIN a
+// partir de las FK. Este módulo nunca escribe en ellas (`app_comercial` solo tiene SELECT, y de `identidad.usuario` solo
+// id, nombre, email y activo). Las administra el módulo dueño de cada tabla.
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatCliente {
+  id              String  @id @db.Uuid
+  identificacion  String
+  nombreComercial String  @map("nombre_comercial")
+  nombreFiscal    String? @map("nombre_fiscal")
+
+  pedidos       Pedido[]
+  listasPrecios ListaPrecios[]
+
+  @@map("cliente")
+  @@schema("catalogos")
+}
+
+model CatZona {
+  id     String     @id @db.Uuid
+  nombre String
+  campos CatCampo[]
+
+  @@map("zona")
+  @@schema("catalogos")
+}
+
+model CatCampo {
+  id     String   @id @db.Uuid
+  nombre String
+  zonaId String?  @map("zona_id") @db.Uuid
+  zona   CatZona? @relation(fields: [zonaId], references: [id])
+
+  pedidos Pedido[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+model CatBloque {
+  id     String @id @db.Uuid
+  nombre String
+
+  pedidos Pedido[]
+
+  @@map("bloque")
+  @@schema("catalogos")
+}
+
+model CatPozo {
+  id             String @id @db.Uuid
+  codigo         String
+  nombreCompleto String @map("nombre_completo")
+
+  pedidos Pedido[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+model CatTaladro {
+  id     String @id @db.Uuid
+  nombre String
+
+  pedidos Pedido[]
+
+  @@map("taladro")
+  @@schema("catalogos")
+}
+
+model CatBodega {
+  id     String @id @db.Uuid
+  nombre String
+
+  pedidos Pedido[]
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
+model CatCondicionPago {
+  id     String @id @db.Uuid
+  nombre String
+
+  pedidos Pedido[]
+
+  @@map("condicion_pago")
+  @@schema("catalogos")
+}
+
+/// `catalogos.persona_contacto`: representantes de campo y de Quito.
+model CatPersona {
+  id     String @id @db.Uuid
+  nombre String
+
+  comoRepresentanteCampo Pedido[] @relation("pedidoRepCampo")
+  comoRepresentanteQuito Pedido[] @relation("pedidoRepQuito")
+
+  @@map("persona_contacto")
+  @@schema("catalogos")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+
+  historial          ProcesoHistorial[]   @relation("historialActor")
+  comoAgente         Pedido[]             @relation("pedidoAgente")
+  comoTecnicoHse     Pedido[]             @relation("pedidoHse")
+  comoAnalista       Pedido[]             @relation("pedidoAnalista")
+  comoDespachoSolic  Pedido[]             @relation("pedidoDespachoSolicitado")
+  comoDespachoReal   Pedido[]             @relation("pedidoDespachoRealizado")
+  comoSupervisorDoc  DocumentoOperativo[] @relation("docopSupervisor")
+  comoOperadorDoc    DocumentoOperativo[] @relation("docopOperador")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// `archivos.archivo`: espejo de SOLO LECTURA (nombre, tipo, tamaño y quién lo subió; nunca la clave del blob ni el hash).
+model CatArchivo {
+  id             String @id @db.Uuid
+  nombreOriginal String @map("nombre_original")
+  mimeType       String @map("mime_type")
+  tamanoBytes    BigInt @map("tamano_bytes")
+  subidoPor      String @map("subido_por") @db.Uuid
+
+  documentosPedido PedidoDocumento[]
+  firmasPrefactura PrefacturaFirma[]
+  guias            GuiaRemision[]    @relation("guiaArchivo")
+  ordenes          OrdenTrabajo[]    @relation("ordenArchivo")
+
+  @@map("archivo")
+  @@schema("archivos")
+}

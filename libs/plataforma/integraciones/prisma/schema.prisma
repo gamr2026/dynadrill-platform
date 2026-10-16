@@ -1,0 +1,214 @@
+// Módulo `integraciones` (contenedor plataforma). Schema PostgreSQL: integraciones.
+// Registro de las APIs de terceros (AS2 y las que vengan) gobernado desde la base de datos: URL, autenticación,
+// llamadas, plantillas, mapeo de campos y bitácora. Un cambio del tercero (otra ruta, otro campo, otra versión)
+// se resuelve editando datos, no código. Las IDs son UUIDv7 generados por la aplicación.
+// Los SECRETOS no se guardan aquí: solo el nombre con el que el resolvedor los encuentra (variable de entorno
+// hoy, Key Vault mañana). Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["integraciones"]
+}
+
+/// Un tercero con el que nos integramos (p. ej. `as2`).
+model Proveedor {
+  id     String @id @db.Uuid
+  codigo String @unique
+  nombre String
+
+  /// Sin barra final. Las rutas de cada operación se concatenan a esta base.
+  baseUrl    String  @map("base_url")
+  /// 'produccion' | 'pruebas' (CHECK en la migración).
+  ambiente   AmbienteProveedor
+  /// Formato de intercambio. Hoy el motor solo implementa 'json'; otro valor se rechaza con un error claro.
+  formato    String  @default("json")
+  timeoutMs  Int     @default(30000) @map("timeout_ms")
+  /// Reintentos ante fallo de red o 5xx (no ante 4xx).
+  reintentos Int     @default(1)
+  /// Valores no secretos que las plantillas leen como `{{var.nombre}}` (p. ej. el id de la organización).
+  variables  Json    @default("{}")
+  activo     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  autenticacion Autenticacion?
+  operaciones   Operacion[]
+
+  @@map("proveedor")
+  @@schema("integraciones")
+}
+
+/// Cómo se autentica el motor ante un proveedor (1:1).
+///  - 'ninguna'
+///  - 'bearer_login': llama a la operación `config.operacion`, lee `config.campoToken` de la respuesta y lo
+///    manda como `Authorization: Bearer`. `config.vidaSegundos` es cuánto se reutiliza antes de renovarlo.
+///  - 'api_key': manda `secretos.clave` en la cabecera `config.cabecera`.
+/// `secretos` = { nombreLógico: nombreDelSecreto }; las plantillas los usan como `{{secreto.nombreLógico}}`.
+model Autenticacion {
+  id          String    @id @db.Uuid
+  proveedorId String    @unique @map("proveedor_id") @db.Uuid
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+
+  tipo     TipoAutenticacion
+  config   Json   @default("{}")
+  secretos Json   @default("{}")
+
+  @@map("autenticacion")
+  @@schema("integraciones")
+}
+
+/// Una llamada al tercero, versionada. Solo una versión por (proveedor, código) está activa (índice parcial en
+/// la migración): se crea la versión nueva, se prueba y se activa; volver atrás es activar la anterior.
+///
+/// Plantillas (en `ruta`, `cabeceras` y `cuerpo`): `{{param.x}}` parámetro de la llamada, `{{var.x}}` variable del
+/// proveedor, `{{secreto.x}}` secreto, `{{pagina.desde}}` y `{{pagina.tamano}}` datos de la paginación. Un valor que
+/// es exactamente un marcador conserva su tipo (número, booleano); dentro de un texto se vuelve texto.
+model Operacion {
+  id          String    @id @db.Uuid
+  proveedorId String    @map("proveedor_id") @db.Uuid
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+
+  codigo      String
+  version     Int     @default(1)
+  activa      Boolean @default(false)
+  descripcion String?
+
+  metodo         MetodoHttp @default(POST)
+  ruta           String
+  cabeceras      Json?
+  cuerpo         Json?
+  /// Nula si la respuesta no se pagina. Ej.: { "tipo": "offset", "tamano": 1000, "inicio": 0,
+  /// "campoDesde": "primerResultado", "campoTamano": "resultadoMaximo" } (esos dos campos van al cuerpo).
+  paginacion     Json?
+  /// Ruta (con puntos) hacia el arreglo de resultados; vacía si la respuesta ya es el arreglo.
+  rutaResultados String  @default("") @map("ruta_resultados")
+  /// false en las llamadas de autenticación (login).
+  requiereAuth   Boolean @default(true) @map("requiere_auth")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  mapeos      MapeoCampo[]
+  ejecuciones Ejecucion[]
+
+  @@unique([proveedorId, codigo, version])
+  @@map("operacion")
+  @@schema("integraciones")
+}
+
+/// Cómo se traduce cada fila de la respuesta a nuestro modelo: `origen` (ruta con puntos en la respuesta)
+/// → `destino` (nombre del campo en nuestro modelo), con una transformación opcional.
+/// Transformaciones: 'texto' (recorta; vacío → null), 'entero', 'numero', 'booleano', 'fecha_ms_ec'
+/// (milisegundos de la medianoche de Ecuador → día de calendario), 'fecha_iso'.
+model MapeoCampo {
+  id          String    @id @db.Uuid
+  operacionId String    @map("operacion_id") @db.Uuid
+  operacion   Operacion @relation(fields: [operacionId], references: [id])
+
+  destino        String
+  origen         String
+  transformacion TransformacionCampo?
+  /// Si falta en una fila, la fila se omite (y se cuenta como omitida).
+  obligatorio    Boolean @default(false)
+  orden          Int     @default(0)
+
+  @@unique([operacionId, destino])
+  @@map("mapeo_campo")
+  @@schema("integraciones")
+}
+
+/// Bitácora inmutable de cada llamada (solo inserción). No guarda cuerpos ni datos personales: solo estado,
+/// tiempos y conteos, para saber qué falló y cuándo.
+model Ejecucion {
+  id          String    @id @db.Uuid
+  operacionId String    @map("operacion_id") @db.Uuid
+  operacion   Operacion @relation(fields: [operacionId], references: [id])
+
+  iniciadaAt    DateTime @default(now()) @map("iniciada_at") @db.Timestamptz(6)
+  duracionMs    Int      @map("duracion_ms")
+  /// 'ok' | 'error' (CHECK en la migración).
+  estado        EstadoEjecucion
+  httpStatus    Int?     @map("http_status")
+  registros     Int      @default(0)
+  omitidos      Int      @default(0)
+  error         String?
+  /// Quién la pidió: 'sistema' o el id de un usuario.
+  solicitadoPor String?  @map("solicitado_por")
+
+  @@index([operacionId, iniciadaAt(sort: Desc)])
+  @@index([iniciadaAt(sort: Desc)])
+  @@map("ejecucion")
+  @@schema("integraciones")
+}
+
+/// Bitácora inmutable de los cambios de configuración (quién cambió qué y cuándo). Solo inserción.
+model Cambio {
+  id           String   @id @db.Uuid
+  entidad      String
+  entidadId    String   @map("entidad_id") @db.Uuid
+  accion       String
+  antes        Json?
+  despues      Json?
+  realizadoPor String?  @map("realizado_por") @db.Uuid
+  realizadoAt  DateTime @default(now()) @map("realizado_at") @db.Timestamptz(6)
+
+  @@index([entidad, entidadId, realizadoAt(sort: Desc)])
+  @@map("cambio")
+  @@schema("integraciones")
+}
+
+enum TipoAutenticacion {
+  ninguna
+  bearer_login
+  api_key
+
+  @@map("tipo_autenticacion")
+  @@schema("integraciones")
+}
+
+enum EstadoEjecucion {
+  ok
+  error
+
+  @@map("estado_ejecucion")
+  @@schema("integraciones")
+}
+
+enum TransformacionCampo {
+  texto
+  entero
+  numero
+  booleano
+  fecha_ms_ec
+  fecha_iso
+
+  @@map("transformacion_campo")
+  @@schema("integraciones")
+}
+
+enum MetodoHttp {
+  GET
+  POST
+  PUT
+  PATCH
+
+  @@map("metodo_http")
+  @@schema("integraciones")
+}
+
+enum AmbienteProveedor {
+  produccion
+  pruebas
+
+  @@map("ambiente_proveedor")
+  @@schema("integraciones")
+}
