@@ -48,3 +48,13 @@ Thumbs.db
 .nx/polygraph
 .nx/self-healing
 .nx/migrate-runs
+# entorno local de infraestructura
+infra/.env
+
+# secretos y entorno local
+.env
+apps/*/.env
+infra/keys
+
+# cliente Prisma generado (se produce en build/test con `nx run <lib>:prisma-generate`)
+**/src/generated

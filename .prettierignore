@@ -1,6 +1,8 @@
-# Add files here to ignore them from prettier formatting
-/dist
-/coverage
-/.nx/cache
-/.nx/workspace-data
-.nx/self-healing
+dist
+tmp
+out-tsc
+node_modules
+.nx
+package-lock.json
+**/prisma/generated
+**/prisma/migrations
