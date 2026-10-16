@@ -228,6 +228,21 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Eliminar un documento operativo del pedido (Facturación)',
   ),
   def(
+    'prefacturaTicket',
+    'comercial.prefacturas.vista_ticket',
+    'Ver desde el ticket la prefactura vigente o una preliminar con lo generado hasta el momento',
+  ),
+  def(
+    'prefacturaTicket',
+    'comercial.prefacturas.firma_company_man',
+    'Subir desde el ticket el documento firmado por el Company Man (genera o recalcula la prefactura y la deja firmada)',
+  ),
+  def(
+    'facturacion',
+    'comercial.documentos_operativos.corregir',
+    'Corregir un día del Reporte Job de un pedido antes de que salga al cliente para firmas (Facturación)',
+  ),
+  def(
     'pedidos',
     'catalogos.transporte.crear',
     'Crear transportistas, vehículos y choferes (para la guía de remisión)',
@@ -338,6 +353,33 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'flota.viajes.aprobar',
     'Autorizar o rechazar un Gerenciamiento de Viaje',
   ),
+  // flota — unidades y lecturas (tramo F1). Lectura: la de la demo para Operaciones más Bodega (patrimonio); escritura: Bodega y Jefe de Mantenimiento.
+  nuevo('flota.unidades.ver', 'Consultar las unidades, sus lecturas y alertas preventivas', [
+    ...ModuleRoles.maintenanceReadOps,
+    RoleCode.BODEGUERO,
+  ]),
+  nuevo('flota.unidades.crear', 'Dar de alta una unidad', ModuleRoles.inventario),
+  nuevo(
+    'flota.unidades.editar',
+    'Editar los datos de una unidad (incluye el patrimonio)',
+    ModuleRoles.inventario,
+  ),
+  nuevo('flota.unidades.inactivar', 'Dar de baja o reactivar una unidad', ModuleRoles.inventario),
+  nuevo(
+    'flota.lecturas.registrar',
+    'Registrar a mano el horómetro o el kilometraje de una unidad',
+    ModuleRoles.maintenance,
+  ),
+  nuevo(
+    'flota.preventivos.registrar',
+    'Registrar un mantenimiento preventivo de una unidad',
+    ModuleRoles.maintenance,
+  ),
+  nuevo(
+    'flota.proveedores.gestionar',
+    'Administrar los proveedores externos de mantenimiento',
+    ModuleRoles.maintenance,
+  ),
   // mantenimiento
   def(
     'maintenance',
@@ -368,6 +410,23 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'reportarQhse',
     'qhse.eventos.reportar',
     'Reportar un evento de seguridad (cualquier trabajador)',
+  ),
+  // ---- qhse (contenedor nuevo): entrega de EPI (tramo Q1). Los demás subdominios agregan aquí su bloque.
+  nuevo(
+    'qhse.epi.ver',
+    'Ver las entregas de EPI y ropa de trabajo (DYN-SGI-RE-032)',
+    ModuleRoles.qhse,
+  ),
+  nuevo('qhse.epi.crear', 'Registrar a mano una entrega de EPI y sus renglones', ModuleRoles.qhse),
+  nuevo(
+    'qhse.epi.aprobar',
+    'Aprobar o rechazar (con motivo) una solicitud de EPI',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.epi.despachar',
+    'Despachar la entrega de EPI, revertirla y registrar la firma de Talento Humano',
+    ModuleRoles.qhse,
   ),
 ];
 
@@ -410,6 +469,9 @@ export const Permission = {
   DOCUMENTOS_OPERATIVOS_VER: 'comercial.documentos_operativos.ver',
   DOCUMENTOS_OPERATIVOS_ENVIAR: 'comercial.documentos_operativos.enviar',
   DOCUMENTOS_OPERATIVOS_ELIMINAR: 'comercial.documentos_operativos.eliminar',
+  DOCUMENTOS_OPERATIVOS_CORREGIR: 'comercial.documentos_operativos.corregir',
+  PREFACTURAS_VISTA_TICKET: 'comercial.prefacturas.vista_ticket',
+  PREFACTURAS_FIRMA_COMPANY_MAN: 'comercial.prefacturas.firma_company_man',
   TRANSPORTE_CREAR: 'catalogos.transporte.crear',
   TRANSPORTE_EDITAR: 'catalogos.transporte.editar',
   TRANSPORTE_INACTIVAR: 'catalogos.transporte.inactivar',
@@ -441,6 +503,13 @@ export const Permission = {
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
+  UNIDADES_VER: 'flota.unidades.ver',
+  UNIDADES_CREAR: 'flota.unidades.crear',
+  UNIDADES_EDITAR: 'flota.unidades.editar',
+  UNIDADES_INACTIVAR: 'flota.unidades.inactivar',
+  LECTURAS_REGISTRAR: 'flota.lecturas.registrar',
+  PREVENTIVOS_REGISTRAR: 'flota.preventivos.registrar',
+  PROVEEDORES_MANTENIMIENTO_GESTIONAR: 'flota.proveedores.gestionar',
   MANTENIMIENTO_GESTIONAR: 'mantenimiento.ordenes.gestionar',
   MANTENIMIENTO_VER: 'mantenimiento.ordenes.ver',
   MANTENIMIENTO_TAREAS: 'mantenimiento.tareas.ejecutar',
@@ -450,6 +519,10 @@ export const Permission = {
   QHSE_GESTIONAR: 'qhse.general.gestionar',
   IPERC_APROBAR: 'qhse.iperc.aprobar',
   QHSE_REPORTAR: 'qhse.eventos.reportar',
+  EPI_VER: 'qhse.epi.ver',
+  EPI_CREAR: 'qhse.epi.crear',
+  EPI_APROBAR: 'qhse.epi.aprobar',
+  EPI_DESPACHAR: 'qhse.epi.despachar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

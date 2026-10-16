@@ -47,6 +47,14 @@ export class ItemPedidoDto {
   @IsOptional()
   @IsIn(['lista', 'plantilla'])
   origen?: 'lista' | 'plantilla';
+
+  /**
+   * Tipo de línea. Si no se envía se deduce del ítem de la lista (Material, Servicio) y de su descripción
+   * («moviliz» = movilización). `herramienta` hay que indicarla (la lista de precios no la distingue).
+   */
+  @IsOptional()
+  @IsIn(['servicio', 'material', 'herramienta', 'movilizacion'])
+  tipoLinea?: 'servicio' | 'material' | 'herramienta' | 'movilizacion';
 }
 
 class DatosPedidoDto {

@@ -70,6 +70,7 @@ export function toItem(i: PedidoConHijos['items'][number]) {
     valorUnitario: num(i.valorUnitario),
     descuentoPct: num(i.descuentoPct),
     origenItem: i.origenItem,
+    tipoLinea: i.tipoLinea,
     listaPreciosItemId: i.listaPreciosItemId,
     ...importesItem(i),
   };

@@ -860,14 +860,26 @@ run('guía de remisión y despacho (base de datos real)', () => {
     expect(await estadoDe(id)).toBe('prefactura_generada');
     // permisos: Bodega no solicita y Facturación no realiza
     await http().post(`${base}/solicitar`).set(bodega()).expect(403);
-    await http().post(`${base}/realizar`).set(fact()).expect(403);
-    await http().post(`${base}/realizar`).set(bodega()).expect(409);
+    const adjuntos = { archivoRespaldoId: ARCHIVO_OK.id, archivoMsdsId: ARCHIVO_IMG.id };
+    await http().post(`${base}/realizar`).set(fact()).send(adjuntos).expect(403);
+    await http().post(`${base}/realizar`).set(bodega()).send(adjuntos).expect(409);
     const s = await http().post(`${base}/solicitar`).set(fact()).expect(201);
     expect(s.body).toMatchObject({ solicitado: { por: 'Fabiola Facturación' }, realizado: null });
     expect(await estadoDe(id)).toBe('por_despachar_bodega');
     await http().post(`${base}/solicitar`).set(fact()).expect(409);
-    const r = await http().post(`${base}/realizar`).set(bodega()).expect(201);
-    expect(r.body.realizado).toMatchObject({ por: 'Fabiola Facturación' });
+    // el documento de respaldo es obligatorio y los archivos deben existir
+    await http().post(`${base}/realizar`).set(bodega()).send({}).expect(400);
+    await http()
+      .post(`${base}/realizar`)
+      .set(bodega())
+      .send({ archivoRespaldoId: uuidv7() })
+      .expect(400);
+    const r = await http().post(`${base}/realizar`).set(bodega()).send(adjuntos).expect(201);
+    expect(r.body.realizado).toMatchObject({
+      por: 'Fabiola Facturación',
+      respaldo: { id: ARCHIVO_OK.id, nombre: 'guia firmada.pdf' },
+      msds: { id: ARCHIVO_IMG.id, nombre: 'guia escaneada.png' },
+    });
     expect(await estadoDe(id)).toBe('prefactura_generada');
     expect((await http().get(base).set(soloVer()).expect(200)).body.realizado).not.toBeNull();
   });

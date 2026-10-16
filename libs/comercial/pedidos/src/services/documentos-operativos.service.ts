@@ -10,6 +10,7 @@ import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import {
   ActividadOperativaDto,
+  CorregirDiaOperativoDto,
   HerramientaOperativaDto,
   RecibirDocumentoOperativoDto,
 } from '../dto/documentos-operativos.dto';
@@ -24,6 +25,17 @@ const RECIBEN_DOCUMENTOS = new Set([
   'documentos_completos',
   'en_revision_prefacturacion',
   'en_correccion',
+]);
+
+/**
+ * Estados en los que Facturación todavía puede corregir un día del Reporte Job: hasta que el pedido sale al cliente para
+ * firmas. Un pedido rechazado por el cliente sí admite corrección.
+ */
+const ADMITEN_CORRECCION = new Set([
+  ...RECIBEN_DOCUMENTOS,
+  'prefactura_generada',
+  'por_despachar_bodega',
+  'rechazado_por_cliente',
 ]);
 
 const dia = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);
@@ -77,6 +89,16 @@ export class DocumentosOperativosService {
       }
 
       const fecha = dto.tipo === 'reporte_job' ? dia(dto.fecha as string) : null;
+      // Un día que Facturación ya corrigió no se vuelve a pisar con lo que reenvíe el ticket.
+      const corregido = await tx.documentoOperativo.findFirst({
+        where: { pedidoId, tipo: dto.tipo, origen: dto.origen, fecha, corregidoAt: { not: null } },
+        select: { id: true },
+      });
+      if (corregido) {
+        throw new ConflictException(
+          'Facturación corrigió este día: el ticket ya no puede reenviarlo',
+        );
+      }
       // Reemplazo idempotente: el documento con la misma clave se sustituye (sus hijos caen en cascada).
       await tx.documentoOperativo.deleteMany({
         where: { pedidoId, tipo: dto.tipo, origen: dto.origen, fecha },
@@ -98,9 +120,7 @@ export class DocumentosOperativosService {
         },
       });
       if (dto.tipo === 'reporte_job') {
-        await tx.documentoOperativoActividad.createMany({
-          data: (dto.actividades ?? []).map((a, i) => this.actividad(id, a, i)),
-        });
+        await this.guardarActividades(tx, id, dto.actividades ?? []);
       } else {
         for (const [i, h] of (dto.herramientas ?? []).entries()) {
           await this.herramienta(tx, id, h, i);
@@ -170,7 +190,18 @@ export class DocumentosOperativosService {
         ...(tipo ? { tipo: tipo as 'reporte_job' | 'reporte_herramientas' } : {}),
       },
       include: {
-        actividades: { orderBy: { orden: 'asc' } },
+        actividades: {
+          orderBy: { orden: 'asc' },
+          include: {
+            tablas: {
+              orderBy: { orden: 'asc' },
+              include: {
+                columnas: { orderBy: { orden: 'asc' } },
+                filas: { orderBy: { orden: 'asc' }, include: { celdas: true } },
+              },
+            },
+          },
+        },
         herramientas: {
           orderBy: { orden: 'asc' },
           include: { usos: { orderBy: { fecha: 'asc' } } },
@@ -191,6 +222,8 @@ export class DocumentosOperativosService {
       supervisor: d.supervisor ? { id: d.supervisor.id, nombre: d.supervisor.nombre } : null,
       operador: d.operador ? { id: d.operador.id, nombre: d.operador.nombre } : null,
       recibidoAt: d.recibidoAt,
+      corregidoAt: d.corregidoAt,
+      corregidoPor: d.corregidoPor,
       actividades: d.actividades.map((a) => ({
         orden: a.orden,
         fecha: aDia(a.fecha),
@@ -199,6 +232,13 @@ export class DocumentosOperativosService {
         duracionHoras: Number(a.duracionHoras),
         detalle: a.detalle,
         autor: a.autor,
+        tablas: a.tablas.map((t) => ({
+          titulo: t.titulo,
+          columnas: t.columnas.map((c) => c.encabezado),
+          filas: t.filas.map((f) =>
+            t.columnas.map((c) => f.celdas.find((x) => x.columnaId === c.id)?.valor ?? ''),
+          ),
+        })),
       })),
       herramientas: d.herramientas.map((h) => ({
         orden: h.orden,
@@ -208,6 +248,69 @@ export class DocumentosOperativosService {
         usos: h.usos.map((u) => ({ fecha: aDia(u.fecha), estado: u.estado })),
       })),
     }));
+  }
+
+  /**
+   * Facturación corrige un día del Reporte Job (actividades y tablas). Solo antes de que el pedido salga al cliente
+   * para firmas. Una lista vacía quita el día. Desde la corrección, el ticket ya no puede reenviar ese día.
+   */
+  async corregirDia(pedidoId: string, dto: CorregirDiaOperativoDto, actor: AuthUser) {
+    const fecha = dia(dto.fecha);
+    const raros = dto.actividades.filter((a) => a.fecha.slice(0, 10) !== dto.fecha.slice(0, 10));
+    if (raros.length)
+      throw new BadRequestException('Todas las actividades deben ser del día corregido');
+    return this.prisma.$transaction(async (tx) => {
+      const pedido = await tx.pedido.findUnique({
+        where: { id: pedidoId },
+        select: { id: true, estado: true },
+      });
+      if (!pedido) throw new NotFoundException('El pedido no existe');
+      if (!ADMITEN_CORRECCION.has(pedido.estado)) {
+        throw new ConflictException(
+          'El pedido ya salió al cliente para firmas: sus documentos operativos no se corrigen',
+        );
+      }
+      const previo = await tx.documentoOperativo.findFirst({
+        where: { pedidoId, tipo: 'reporte_job', origen: dto.origen, fecha },
+      });
+      await tx.documentoOperativo.deleteMany({
+        where: { pedidoId, tipo: 'reporte_job', origen: dto.origen, fecha },
+      });
+      let documentoId: string | null = null;
+      if (dto.actividades.length || previo) {
+        // Con la lista vacía se deja un documento corregido sin actividades: así el ticket no reenvía el día quitado.
+        documentoId = uuidv7();
+        await tx.documentoOperativo.create({
+          data: {
+            id: documentoId,
+            pedidoId,
+            tipo: 'reporte_job',
+            origen: dto.origen,
+            ticketRef: previo?.ticketRef ?? null,
+            fecha,
+            firmadoPor: previo?.firmadoPor ?? null,
+            firmadoAt: previo?.firmadoAt ?? null,
+            supervisorId: previo?.supervisorId ?? null,
+            operadorId: previo?.operadorId ?? null,
+            recibidoPor: previo?.recibidoPor ?? actor.id,
+            corregidoAt: new Date(),
+            corregidoPor: actor.id,
+          },
+        });
+        await this.guardarActividades(tx, documentoId, dto.actividades);
+      }
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'comercial.documento_operativo.corregido',
+          subject: { type: 'pedido', id: pedidoId },
+          data: { pedidoId, documentoId, origen: dto.origen, fecha: aDia(fecha) },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
+      );
+      return { documentoId, avance: await this.avanceEn(tx, pedidoId) };
+    });
   }
 
   async avance(pedidoId: string): Promise<Avance> {
@@ -245,7 +348,12 @@ export class DocumentosOperativosService {
       },
     });
     const dias = await db.documentoOperativo.findMany({
-      where: { pedidoId, tipo: 'reporte_job' },
+      // Un día quitado por Facturación queda como documento corregido sin actividades: no cuenta como reportado.
+      where: {
+        pedidoId,
+        tipo: 'reporte_job',
+        NOT: { corregidoAt: { not: null }, actividades: { none: {} } },
+      },
       select: { fecha: true },
     });
     const conReporte = new Set(dias.map((d) => aDia(d.fecha)));
@@ -314,22 +422,56 @@ export class DocumentosOperativosService {
     }
   }
 
-  private actividad(
+  /** Guarda las actividades de un Reporte Job con sus tablas (encabezados, filas y celdas). */
+  private async guardarActividades(
+    tx: Prisma.TransactionClient,
     documentoId: string,
-    a: ActividadOperativaDto,
-    orden: number,
-  ): Prisma.DocumentoOperativoActividadCreateManyInput {
-    return {
-      id: uuidv7(),
-      documentoId,
-      orden,
-      fecha: dia(a.fecha),
-      horaInicio: a.horaInicio,
-      horaFin: a.horaFin,
-      duracionHoras: a.duracionHoras,
-      detalle: a.detalle,
-      autor: a.autor ?? null,
-    };
+    actividades: ActividadOperativaDto[],
+  ) {
+    for (const [orden, a] of actividades.entries()) {
+      const actividadId = uuidv7();
+      await tx.documentoOperativoActividad.create({
+        data: {
+          id: actividadId,
+          documentoId,
+          orden,
+          fecha: dia(a.fecha),
+          horaInicio: a.horaInicio,
+          horaFin: a.horaFin,
+          duracionHoras: a.duracionHoras,
+          detalle: a.detalle,
+          autor: a.autor ?? null,
+        },
+      });
+      for (const [ordenTabla, t] of (a.tablas ?? []).entries()) {
+        const tablaId = uuidv7();
+        await tx.documentoOperativoActividadTabla.create({
+          data: { id: tablaId, actividadId, orden: ordenTabla, titulo: t.titulo ?? null },
+        });
+        const columnas = t.columnas.map((encabezado, i) => ({
+          id: uuidv7(),
+          orden: i,
+          encabezado,
+        }));
+        await tx.documentoOperativoTablaColumna.createMany({
+          data: columnas.map((c) => ({ ...c, tablaId })),
+        });
+        for (const [ordenFila, valores] of t.filas.entries()) {
+          if (valores.length !== columnas.length) {
+            throw new BadRequestException(
+              'Cada fila de una tabla debe tener una celda por encabezado',
+            );
+          }
+          const filaId = uuidv7();
+          await tx.documentoOperativoTablaFila.create({
+            data: { id: filaId, tablaId, orden: ordenFila },
+          });
+          await tx.documentoOperativoTablaCelda.createMany({
+            data: columnas.map((c, i) => ({ filaId, columnaId: c.id, valor: String(valores[i]) })),
+          });
+        }
+      }
+    }
   }
 
   private async herramienta(

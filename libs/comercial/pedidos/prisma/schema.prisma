@@ -296,6 +296,9 @@ model Pedido {
   despachoRealizadoAt      DateTime? @map("despacho_realizado_at") @db.Timestamptz(6)
   despachoRealizadoPor     String?   @map("despacho_realizado_por") @db.Uuid
   despachoEjecutor         IdUsuario? @relation("pedidoDespachoRealizado", fields: [despachoRealizadoPor], references: [id])
+  /// Bodega adjunta el documento de respaldo (obligatorio al realizar el despacho) y, si despacha químicos, la hoja MSDS.
+  despachoArchivoRespaldoId String?  @map("despacho_archivo_respaldo_id") @db.Uuid
+  despachoArchivoMsdsId     String?  @map("despacho_archivo_msds_id") @db.Uuid
   prefacturas      Prefactura[]
   guias            GuiaRemision[]
   ordenTrabajo     OrdenTrabajo?
@@ -404,6 +407,8 @@ model PedidoItem {
   origenItem         OrigenItem @default(lista) @map("origen_item")
   listaPreciosItemId String?           @map("lista_precios_item_id") @db.Uuid
   listaPreciosItem   ListaPreciosItem? @relation(fields: [listaPreciosItemId], references: [id])
+  /// Cómo se trata la línea: `material` (incluye químicos de Inventario), `servicio`, `herramienta` (FCR) o `movilizacion`.
+  tipoLinea          TipoLinea         @default(servicio) @map("tipo_linea")
 
   @@unique([pedidoId, orden])
   @@map("pedido_item")
@@ -574,6 +579,16 @@ enum EstadoEmision {
   @@schema("comercial")
 }
 
+enum TipoLinea {
+  servicio
+  material
+  herramienta
+  movilizacion
+
+  @@map("tipo_linea")
+  @@schema("comercial")
+}
+
 enum TipoItemLista {
   Material
   Servicio
@@ -632,6 +647,9 @@ model DocumentoOperativo {
   operador         IdUsuario?             @relation("docopOperador", fields: [operadorId], references: [id])
   recibidoAt       DateTime               @default(now()) @map("recibido_at") @db.Timestamptz(6)
   recibidoPor      String                 @map("recibido_por") @db.Uuid
+  /// Facturación corrigió este día: desde entonces el ticket ya no puede reenviarlo (contrato 4.4).
+  corregidoAt      DateTime?              @map("corregido_at") @db.Timestamptz(6)
+  corregidoPor     String?                @map("corregido_por") @db.Uuid
 
   actividades  DocumentoOperativoActividad[]
   herramientas DocumentoOperativoHerramienta[]
@@ -655,8 +673,63 @@ model DocumentoOperativoActividad {
   detalle       String
   autor         String?
 
+  tablas DocumentoOperativoActividadTabla[]
+
   @@unique([documentoId, orden])
   @@map("documento_operativo_actividad")
+  @@schema("comercial")
+}
+
+/// Tabla dentro de una actividad del Reporte Job (por ejemplo, de monitoreo): encabezados, filas y celdas, sin JSON.
+model DocumentoOperativoActividadTabla {
+  id          String                      @id @db.Uuid
+  actividadId String                      @map("actividad_id") @db.Uuid
+  actividad   DocumentoOperativoActividad @relation(fields: [actividadId], references: [id], onDelete: Cascade)
+  orden       Int
+  titulo      String?
+
+  columnas DocumentoOperativoTablaColumna[]
+  filas    DocumentoOperativoTablaFila[]
+
+  @@unique([actividadId, orden])
+  @@map("documento_operativo_actividad_tabla")
+  @@schema("comercial")
+}
+
+model DocumentoOperativoTablaColumna {
+  id         String                           @id @db.Uuid
+  tablaId    String                           @map("tabla_id") @db.Uuid
+  tabla      DocumentoOperativoActividadTabla @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden      Int
+  encabezado String
+  celdas     DocumentoOperativoTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("documento_operativo_tabla_columna")
+  @@schema("comercial")
+}
+
+model DocumentoOperativoTablaFila {
+  id      String                           @id @db.Uuid
+  tablaId String                           @map("tabla_id") @db.Uuid
+  tabla   DocumentoOperativoActividadTabla @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden   Int
+  celdas  DocumentoOperativoTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("documento_operativo_tabla_fila")
+  @@schema("comercial")
+}
+
+model DocumentoOperativoTablaCelda {
+  filaId    String                         @map("fila_id") @db.Uuid
+  fila      DocumentoOperativoTablaFila    @relation(fields: [filaId], references: [id], onDelete: Cascade)
+  columnaId String                         @map("columna_id") @db.Uuid
+  columna   DocumentoOperativoTablaColumna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  valor     String
+
+  @@id([filaId, columnaId])
+  @@map("documento_operativo_tabla_celda")
   @@schema("comercial")
 }
 

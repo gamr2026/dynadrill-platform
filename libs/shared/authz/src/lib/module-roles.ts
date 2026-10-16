@@ -107,6 +107,8 @@ export const ModuleRoles = {
     RoleCode.SUPERVISOR_PUMPING,
     RoleCode.OPERADOR,
   ),
+  /** Prefactura desde el ticket (demo `prefacturaTicket`): ver la vigente o la preliminar y subir la firma del Company Man. */
+  prefacturaTicket: withAdmins(RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING),
 
   /**
    * Operaciones · FCR — acceso al módulo (el paso a paso lo restringe el

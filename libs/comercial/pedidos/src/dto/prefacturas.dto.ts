@@ -36,6 +36,17 @@ export class AgregarFirmaDto {
   @IsUUID() archivoId!: string;
 }
 
+/** Firma del Company Man subida desde el ticket (siempre firmante `company_man`). */
+export class FirmaCompanyManDto {
+  @IsOptional() @IsUUID() personaId?: string;
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(200) nombre?: string;
+  @IsOptional() @IsString() @MaxLength(200) cargo?: string;
+  @IsDateString() firmadoAt!: string;
+  /** Archivo subido a `archivos` con módulo `prefactura_company_man`. */
+  @IsUUID() archivoId!: string;
+  @IsOptional() @IsString() @MaxLength(500) razonRetraso?: string;
+}
+
 export class FirmarPrefacturaDto {
   /** Por qué se tardó en firmar, si aplica. */
   @IsOptional() @IsString() @MaxLength(500) razonRetraso?: string;

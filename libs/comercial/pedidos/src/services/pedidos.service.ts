@@ -65,6 +65,12 @@ const INCLUDE = {
 } as const;
 
 const fechaDia = (iso: string): Date => new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);
+/** Tipo de línea que se deduce de la lista de precios: Material, Servicio y, por su descripción, la movilización. */
+const tipoLineaDeLista = (
+  tipo: 'Material' | 'Servicio',
+  descripcion: string,
+): 'servicio' | 'material' | 'movilizacion' =>
+  /moviliz/i.test(descripcion) ? 'movilizacion' : tipo === 'Material' ? 'material' : 'servicio';
 const flujo = (a: AuthUser): ActorFlujo => ({
   id: a.id,
   nombre: a.name,
@@ -764,7 +770,16 @@ export class PedidosService {
         rigless: p.rigless,
         numeroContrato: p.numeroContrato,
         fechaInicioServicio: p.fechaInicioServicio?.toISOString().slice(0, 10) ?? null,
+        fechaFinServicio: p.fechaFinServicio?.toISOString().slice(0, 10) ?? null,
         as2Numero: p.as2Numero,
+        // las líneas cotizadas, para que Operaciones arme su precarga (FCR: herramientas; Pumping: químicos)
+        lineas: p.items.map((it) => ({
+          codigo: it.codigo,
+          descripcion: it.descripcion,
+          unidad: it.unidad,
+          cantidad: Number(it.cantidad),
+          tipoLinea: it.tipoLinea,
+        })),
       });
     } else {
       await this.publicar(tx, 'comercial.pedido.estado_cambiado', id, ctx, {
@@ -1111,6 +1126,7 @@ export class PedidosService {
         descuentoPct: i.descuentoPct ?? null,
         origenItem: origenForzado ?? i.origen ?? 'lista',
         listaPreciosItemId: li.id,
+        tipoLinea: i.tipoLinea ?? tipoLineaDeLista(li.tipo, li.descripcion),
       };
     });
   }

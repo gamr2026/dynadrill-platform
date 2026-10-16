@@ -13,6 +13,7 @@ import { DirectorioPort } from '../directorio/directorio.port';
 import {
   AgregarFirmaDto,
   EnviarPrefacturaDto,
+  FirmaCompanyManDto,
   FirmarPrefacturaDto,
   RechazarPrefacturaDto,
 } from '../dto/prefacturas.dto';
@@ -229,6 +230,126 @@ export class PrefacturasService {
     return this.detalle(id);
   }
 
+  /**
+   * «Ver prefactura» desde el ticket: la vigente o, si no existe o fue rechazada, una preliminar calculada al vuelo con
+   * lo cotizado y los documentos generados hasta el momento. No guarda nada ni cambia el estado del pedido.
+   */
+  async vista(pedidoId: string) {
+    await this.pedido(pedidoId);
+    const vigente = await this.prisma.prefactura.findFirst({
+      where: { pedidoId, estado: { in: [...VIGENTES] } },
+      include: INCLUDE,
+    });
+    const avance = await this.documentos.avance(pedidoId);
+    if (vigente) return { preliminar: false, prefactura: aDto(vigente), avance };
+    const calculo = await this.prisma.$transaction(async (tx) => {
+      const pedido = await tx.pedido.findUniqueOrThrow({
+        where: { id: pedidoId },
+        include: { items: true, linea: true },
+      });
+      return this.calcular(tx, pedido);
+    });
+    return {
+      preliminar: true,
+      prefactura: {
+        totales: calculo.totales,
+        tasas: calculo.tasas,
+        items: calculo.items,
+        advertencias: calculo.advertencias,
+      },
+      avance,
+    };
+  }
+
+  /**
+   * El Supervisor sube, desde el ticket y antes de finalizar, el documento firmado por el Company Man. Solo con la
+   * documentación completa. Si no hay prefactura se genera en ese momento; si ya estaba generada se recalcula con los datos
+   * actuales. La prefactura queda firmada y el pedido pasa a «ticket firmado» (ya se puede generar la orden de trabajo).
+   */
+  async firmarDesdeTicket(pedidoId: string, dto: FirmaCompanyManDto, ctx: ContextoPrefactura) {
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id: pedidoId },
+      select: { estado: true },
+    });
+    if (!pedido) throw new NotFoundException('El pedido no existe');
+    const avance = await this.documentos.avance(pedidoId);
+    if (!avance.completo) {
+      throw new UnprocessableEntityException({
+        message: `La documentación de respaldo está incompleta. Falta: ${avance.pendientes.join(', ')}`,
+        code: 'DOCUMENTACION_INCOMPLETA',
+      });
+    }
+    let vigente = await this.prisma.prefactura.findFirst({
+      where: { pedidoId, estado: { in: [...VIGENTES] } },
+      select: { id: true, estado: true },
+    });
+    if (vigente?.estado === 'firmada') {
+      throw new ConflictException('La prefactura de este pedido ya está firmada');
+    }
+    if (!vigente) {
+      const nueva = await this.generar(pedidoId, ctx);
+      vigente = { id: nueva.id, estado: 'generada' };
+    } else if (vigente.estado === 'generada') {
+      await this.recalcular(vigente.id, ctx);
+    }
+    await this.agregarFirma(
+      vigente.id,
+      {
+        firmanteTipo: 'company_man',
+        personaId: dto.personaId,
+        nombre: dto.nombre,
+        cargo: dto.cargo,
+        firmadoAt: dto.firmadoAt,
+        archivoId: dto.archivoId,
+      },
+      ctx,
+    );
+    if (vigente.estado === 'enviada_para_firmas') {
+      return this.firmar(vigente.id, { razonRetraso: dto.razonRetraso }, ctx);
+    }
+    const id = vigente.id;
+    await this.prisma.$transaction(async (tx) => {
+      const p = await tx.pedido.findUniqueOrThrow({
+        where: { id: pedidoId },
+        select: { estado: true },
+      });
+      const ahora = new Date();
+      await tx.prefactura.update({
+        where: { id },
+        data: {
+          // la firma se tomó en campo: queda como entregada para firmas y firmada en el mismo acto
+          estado: 'firmada',
+          enviadaAt: ahora,
+          enviadaPor: ctx.actor.id,
+          medioEnvio: 'portal',
+          firmadaAt: ahora,
+          razonRetraso: dto.razonRetraso?.trim() || null,
+        },
+      });
+      await this.estados.pasar(
+        tx,
+        pedidoId,
+        p.estado,
+        'enviado_para_firmas',
+        ctx.actor,
+        'firma del Company Man desde el ticket',
+      );
+      await this.estados.pasar(
+        tx,
+        pedidoId,
+        'enviado_para_firmas',
+        'ticket_firmado',
+        ctx.actor,
+        'firma del Company Man desde el ticket',
+      );
+      await this.publicar(tx, 'comercial.prefactura.firmada', pedidoId, id, ctx.actor, {
+        firmas: 1,
+        origen: 'ticket',
+      });
+    });
+    return this.detalle(id);
+  }
+
   /** Vuelve a calcular una prefactura "generada" (p. ej. cambió el pedido o llegaron más reportes). */
   async recalcular(id: string, ctx: ContextoPrefactura) {
     const p = await this.cargar(id);
@@ -332,7 +453,7 @@ export class PrefacturasService {
     }
     const archivo = await this.directorio.archivo(dto.archivoId, ctx.token);
     if (!archivo) throw new BadRequestException('El archivo indicado no existe');
-    if (archivo.modulo !== 'prefactura_documento') {
+    if (archivo.modulo !== 'prefactura_documento' && archivo.modulo !== 'prefactura_company_man') {
       throw new BadRequestException('El archivo no se subió como documento de prefactura');
     }
     if (archivo.subidoPor !== ctx.actor.id) {

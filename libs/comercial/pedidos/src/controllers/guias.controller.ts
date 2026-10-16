@@ -6,6 +6,7 @@ import {
   CrearLugarDespachoDto,
   EmitirGuiaDto,
   ReasignarNumeroGuiaDto,
+  RealizarDespachoDto,
   RegistrarGuiaFirmadaDto,
 } from '../dto/guias.dto';
 import { ContextoGuia, GuiasService } from '../services/guias.service';
@@ -121,7 +122,11 @@ export class GuiasController {
 
   @RequirePermission(P.DESPACHOS_GESTIONAR)
   @Post('pedidos/:pedidoId/despacho/realizar')
-  realizar(@Param('pedidoId', ParseUUIDPipe) pedidoId: string, @CurrentUser() actor: AuthUser) {
-    return this.guias.realizarDespacho(pedidoId, actor);
+  realizar(
+    @Param('pedidoId', ParseUUIDPipe) pedidoId: string,
+    @Body() dto: RealizarDespachoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.guias.realizarDespacho(pedidoId, dto, actor);
   }
 }

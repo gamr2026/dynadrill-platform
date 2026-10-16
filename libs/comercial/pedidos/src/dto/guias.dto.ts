@@ -69,6 +69,13 @@ export class RegistrarGuiaFirmadaDto {
   @IsUUID() archivoId!: string;
 }
 
+/** Bodega confirma el despacho con su documento de respaldo (obligatorio) y, si despachó químicos, la hoja MSDS. */
+export class RealizarDespachoDto {
+  /** Archivo subido a `archivos` con módulo `despacho_documento`. */
+  @IsUUID() archivoRespaldoId!: string;
+  @IsOptional() @IsUUID() archivoMsdsId?: string;
+}
+
 export class CrearLugarDespachoDto {
   @IsString() @MinLength(2) @MaxLength(120) nombre!: string;
 }

@@ -402,4 +402,143 @@ run('documentos operativos (base de datos real)', () => {
         .body,
     ).toEqual([]);
   });
+
+  describe('tablas dentro de las actividades y corrección por Facturación', () => {
+    const corrige = () => bearer([P.DOCUMENTOS_OPERATIVOS_VER, P.DOCUMENTOS_OPERATIVOS_CORREGIR]);
+    const conTabla = (dia: number) => {
+      const d = job(dia);
+      d.actividades[0] = {
+        ...d.actividades[0],
+        tablas: [
+          {
+            titulo: 'Monitoreo',
+            columnas: ['Hora', 'Presión'],
+            filas: [
+              ['06:00', '120'],
+              ['07:00', '135'],
+            ],
+          },
+        ],
+      } as (typeof d.actividades)[0];
+      return d;
+    };
+    const lista = async (id: string) =>
+      (await http().get(`/api/comercial/pedidos/${id}/documentos-operativos`).set(ve()).expect(200))
+        .body;
+
+    it('guarda y devuelve las tablas de una actividad (encabezados, filas y celdas)', async () => {
+      const id = await pedido('pumping');
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...conTabla(1), origen: 'pumping' })
+        .expect(201);
+      const [doc] = await lista(id);
+      expect(doc.actividades[0].tablas).toEqual([
+        {
+          titulo: 'Monitoreo',
+          columnas: ['Hora', 'Presión'],
+          filas: [
+            ['06:00', '120'],
+            ['07:00', '135'],
+          ],
+        },
+      ]);
+    });
+
+    it('rechaza una fila con distinto número de celdas que de encabezados', async () => {
+      const id = await pedido('pumping');
+      const malo = conTabla(1);
+      malo.actividades[0] = {
+        ...malo.actividades[0],
+        tablas: [{ titulo: 'Monitoreo', columnas: ['Hora', 'Presión'], filas: [['06:00']] }],
+      } as (typeof malo.actividades)[0];
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...malo, origen: 'pumping' })
+        .expect(400);
+    });
+
+    it('Facturación corrige un día; el ticket ya no puede reenviarlo y sin permiso no se puede corregir', async () => {
+      const id = await pedido('pumping');
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...job(1), origen: 'pumping' })
+        .expect(201);
+      const cuerpo = {
+        origen: 'pumping',
+        fecha: '2026-11-01',
+        actividades: [{ ...job(1).actividades[0], detalle: 'Corregido por Facturación' }],
+      };
+      await http()
+        .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
+        .set(envia())
+        .send(cuerpo)
+        .expect(403);
+      await http()
+        .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
+        .set(corrige())
+        .send(cuerpo)
+        .expect(200);
+      const [doc] = await lista(id);
+      expect(doc.actividades[0].detalle).toBe('Corregido por Facturación');
+      expect(doc.corregidoAt).not.toBeNull();
+      expect(doc.corregidoPor).toBe(ACTOR);
+      // el ticket reenvía lo suyo: no pisa la corrección
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...job(1), origen: 'pumping' })
+        .expect(409);
+      expect((await lista(id))[0].actividades[0].detalle).toBe('Corregido por Facturación');
+      // otro día no corregido sí se reenvía
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...job(2), origen: 'pumping' })
+        .expect(201);
+    });
+
+    it('una lista vacía quita el día: deja de contar como reportado y el ticket no lo reenvía', async () => {
+      const id = await pedido('pumping');
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...job(1), origen: 'pumping' })
+        .expect(201);
+      const r = await http()
+        .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
+        .set(corrige())
+        .send({ origen: 'pumping', fecha: '2026-11-01', actividades: [] })
+        .expect(200);
+      expect(r.body.avance.diasConReporteJob).toBe(0);
+      await http()
+        .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
+        .set(envia())
+        .send({ ...job(1), origen: 'pumping' })
+        .expect(409);
+    });
+
+    it('no se corrige un pedido que ya salió al cliente para firmas, pero sí uno rechazado por el cliente', async () => {
+      const cuerpo = {
+        origen: 'pumping',
+        fecha: '2026-11-01',
+        actividades: [{ ...job(1).actividades[0], detalle: 'Ajuste' }],
+      };
+      const enviado = await pedido('pumping', 'enviado_para_firmas');
+      await http()
+        .put(`/api/comercial/pedidos/${enviado}/documentos-operativos/dia`)
+        .set(corrige())
+        .send(cuerpo)
+        .expect(409);
+      const rechazado = await pedido('pumping', 'rechazado_por_cliente');
+      await http()
+        .put(`/api/comercial/pedidos/${rechazado}/documentos-operativos/dia`)
+        .set(corrige())
+        .send(cuerpo)
+        .expect(200);
+    });
+  });
 });

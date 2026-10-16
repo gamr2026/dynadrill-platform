@@ -863,6 +863,37 @@ run('pedidos (base de datos real)', () => {
         .expect(400);
     });
 
+    it('cada línea lleva su tipo: se deduce de la lista (Material, Servicio, movilización) y se puede indicar', async () => {
+      const b = (await crear(completo())).body;
+      const r = await http()
+        .put(`/api/comercial/pedidos/${b.id}`)
+        .set(ventas())
+        .send({
+          version: b.version,
+          items: [
+            { listaPreciosItemId: li['IT-SCR5001'], cantidad: 1 },
+            { listaPreciosItemId: li['IT-MOV01'], cantidad: 1 },
+            { listaPreciosItemId: li['IT-QUIM01'], cantidad: 1 },
+            { listaPreciosItemId: li['IT-QUIM01'], cantidad: 1, tipoLinea: 'herramienta' },
+          ],
+        })
+        .expect(200);
+      expect(r.body.items.map((i: { tipoLinea: string }) => i.tipoLinea)).toEqual([
+        'servicio',
+        'movilizacion',
+        'material',
+        'herramienta',
+      ]);
+      await http()
+        .put(`/api/comercial/pedidos/${b.id}`)
+        .set(ventas())
+        .send({
+          version: r.body.version,
+          items: [{ listaPreciosItemId: li['IT-QUIM01'], cantidad: 1, tipoLinea: 'otro' }],
+        })
+        .expect(400);
+    });
+
     it('un pedido anulado ya no se edita', async () => {
       const b = (await crear(completo({ abrir: true }))).body;
       const an = await http()

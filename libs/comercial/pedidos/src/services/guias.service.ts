@@ -8,7 +8,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { DirectorioPort } from '../directorio/directorio.port';
-import { EmitirGuiaDto, GuiaItemDto } from '../dto/guias.dto';
+import { EmitirGuiaDto, GuiaItemDto, RealizarDespachoDto } from '../dto/guias.dto';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PedidoEstadoService } from './pedido-estado.service';
@@ -511,6 +511,8 @@ export class GuiasService {
           despachoSolicitadoPor: actor.id,
           despachoRealizadoAt: null,
           despachoRealizadoPor: null,
+          despachoArchivoRespaldoId: null,
+          despachoArchivoMsdsId: null,
         },
       });
       await this.estados.pasar(
@@ -521,23 +523,31 @@ export class GuiasService {
         actor,
         'despacho solicitado',
       );
+      await this.publicarDespacho(tx, 'comercial.despacho.solicitado', pedidoId, actor, {});
     });
     return this.estadoDespacho(pedidoId);
   }
 
   /** Bodega confirma que despachó. El pedido vuelve a la etapa de prefactura. */
-  async realizarDespacho(pedidoId: string, actor: AuthUser) {
+  async realizarDespacho(pedidoId: string, dto: RealizarDespachoDto, actor: AuthUser) {
     await this.prisma.$transaction(async (tx) => {
       const p = await tx.pedido.findUnique({ where: { id: pedidoId }, select: { estado: true } });
       if (!p) throw new NotFoundException('El pedido no existe');
       if (p.estado !== 'por_despachar_bodega') {
         throw new ConflictException('El pedido no tiene un despacho pendiente');
       }
+      const ids = [dto.archivoRespaldoId, ...(dto.archivoMsdsId ? [dto.archivoMsdsId] : [])];
+      const existen = await tx.catArchivo.count({ where: { id: { in: ids } } });
+      if (existen !== new Set(ids).size) {
+        throw new BadRequestException('El documento de respaldo o la hoja MSDS no existen');
+      }
       await tx.pedido.update({
         where: { id: pedidoId },
         data: {
           despachoRealizadoAt: new Date(),
           despachoRealizadoPor: actor.id,
+          despachoArchivoRespaldoId: dto.archivoRespaldoId,
+          despachoArchivoMsdsId: dto.archivoMsdsId ?? null,
         },
       });
       await this.estados.pasar(
@@ -548,6 +558,10 @@ export class GuiasService {
         actor,
         'despacho realizado',
       );
+      await this.publicarDespacho(tx, 'comercial.despacho.resuelto', pedidoId, actor, {
+        archivoRespaldoId: dto.archivoRespaldoId,
+        archivoMsdsId: dto.archivoMsdsId ?? null,
+      });
     });
     return this.estadoDespacho(pedidoId);
   }
@@ -560,17 +574,56 @@ export class GuiasService {
         despachoSolicitante: { select: { nombre: true } },
         despachoRealizadoAt: true,
         despachoEjecutor: { select: { nombre: true } },
+        despachoArchivoRespaldoId: true,
+        despachoArchivoMsdsId: true,
       },
     });
     if (!p) throw new NotFoundException('El pedido no existe');
+    const ids = [p.despachoArchivoRespaldoId, p.despachoArchivoMsdsId].filter(
+      (x): x is string => !!x,
+    );
+    const archivos = ids.length
+      ? await this.prisma.catArchivo.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, nombreOriginal: true },
+        })
+      : [];
+    const archivo = (id: string | null) => {
+      const a = archivos.find((x) => x.id === id);
+      return a ? { id: a.id, nombre: a.nombreOriginal } : null;
+    };
     return {
       solicitado: p.despachoSolicitadoAt
         ? { at: p.despachoSolicitadoAt, por: p.despachoSolicitante?.nombre ?? null }
         : null,
       realizado: p.despachoRealizadoAt
-        ? { at: p.despachoRealizadoAt, por: p.despachoEjecutor?.nombre ?? null }
+        ? {
+            at: p.despachoRealizadoAt,
+            por: p.despachoEjecutor?.nombre ?? null,
+            respaldo: archivo(p.despachoArchivoRespaldoId),
+            msds: archivo(p.despachoArchivoMsdsId),
+          }
         : null,
     };
+  }
+
+  private async publicarDespacho(
+    tx: Prisma.TransactionClient,
+    type: string,
+    pedidoId: string,
+    actor: AuthUser,
+    data: Record<string, unknown>,
+  ) {
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type,
+        subject: { type: 'pedido', id: pedidoId },
+        data: { pedidoId, ...data },
+        actor: { userId: actor.id, role: actor.roleCode },
+        traceparent: currentTraceparent(),
+      }),
+    );
   }
 
   // =============================================================================================================

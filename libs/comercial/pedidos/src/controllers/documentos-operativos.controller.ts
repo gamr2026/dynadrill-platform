@@ -7,11 +7,13 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import {
+  CorregirDiaOperativoDto,
   DocumentosOperativosQueryDto,
   RecibirDocumentoOperativoDto,
 } from '../dto/documentos-operativos.dto';
@@ -31,6 +33,17 @@ export class DocumentosOperativosController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.documentos.recibir(pedidoId, dto, actor);
+  }
+
+  /** Facturación corrige un día del Reporte Job (lista vacía = quitar el día) hasta que el pedido sale para firmas. */
+  @RequirePermission(Permission.DOCUMENTOS_OPERATIVOS_CORREGIR)
+  @Put('dia')
+  corregirDia(
+    @Param('pedidoId', ParseUUIDPipe) pedidoId: string,
+    @Body() dto: CorregirDiaOperativoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.documentos.corregirDia(pedidoId, dto, actor);
   }
 
   @RequirePermission(Permission.DOCUMENTOS_OPERATIVOS_VER)

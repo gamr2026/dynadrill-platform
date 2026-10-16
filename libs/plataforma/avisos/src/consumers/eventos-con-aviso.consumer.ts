@@ -17,6 +17,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.pumping.salida_reportada',
     ],
   },
+  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas'] },
 ];
 
 /** Recibe los eventos y los entrega al servicio de avisos; el inbox evita avisar dos veces por el mismo evento. */

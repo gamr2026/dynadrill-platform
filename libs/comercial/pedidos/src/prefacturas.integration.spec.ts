@@ -143,11 +143,21 @@ run('prefactura (base de datos real)', () => {
     tamanoBytes: 10,
     subidoPor: ACTOR,
   };
+  /** Documento firmado por el Company Man que el Supervisor sube desde el ticket. */
+  const ARCHIVO_CM = {
+    id: uuidv7(),
+    modulo: 'prefactura_company_man',
+    nombre: 'company man.pdf',
+    mimeType: 'application/pdf',
+    tamanoBytes: 3000,
+    subidoPor: ACTOR,
+  };
   // los archivos que se guardan de verdad (los otros se rechazan antes de guardarse)
-  MAESTROS.archivos = [ARCHIVO_OK, ARCHIVO_2];
+  MAESTROS.archivos = [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_CM];
   const directorioFalso = {
     archivo: async (i: string) =>
-      [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_AJENO, ARCHIVO_OTRO].find((a) => a.id === i) ?? null,
+      [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_AJENO, ARCHIVO_OTRO, ARCHIVO_CM].find((a) => a.id === i) ??
+      null,
     persona: async (i: string) =>
       i === COMPANY_MAN ? { id: COMPANY_MAN, nombre: `Carlos Company Man ${n}` } : null,
     eliminarArchivo: async () => undefined,
@@ -751,5 +761,97 @@ run('prefactura (base de datos real)', () => {
       .send({ medio: 'email' })
       .expect(201);
     await http().post(`/api/comercial/prefacturas/${p.id}/recalcular`).set(fact()).expect(409);
+  });
+
+  describe('desde el ticket (Supervisor)', () => {
+    const sup = () => bearer([P.PREFACTURAS_VISTA_TICKET, P.PREFACTURAS_FIRMA_COMPANY_MAN]);
+    const firma = {
+      personaId: COMPANY_MAN,
+      firmadoAt: '2026-11-03',
+      archivoId: ARCHIVO_CM.id,
+    };
+
+    it('«ver prefactura»: una preliminar al vuelo (sin guardar ni mover el pedido) o la vigente', async () => {
+      const id = await pedidoListo();
+      await http().get(`/api/comercial/pedidos/${id}/prefactura-vista`).set(soloVer()).expect(403);
+      const pre = (
+        await http().get(`/api/comercial/pedidos/${id}/prefactura-vista`).set(sup()).expect(200)
+      ).body;
+      expect(pre.preliminar).toBe(true);
+      expect(pre.prefactura.totales.subtotal).toBe(1254.46);
+      expect(pre.avance.completo).toBe(true);
+      // no guardó nada ni cambió el estado
+      expect(await prisma.prefactura.count({ where: { pedidoId: id } })).toBe(0);
+      expect(await estadoDe(id)).toBe('documentos_completos');
+      // con una prefactura generada, devuelve esa
+      await generar(id).expect(201);
+      const vig = (
+        await http().get(`/api/comercial/pedidos/${id}/prefactura-vista`).set(sup()).expect(200)
+      ).body;
+      expect(vig).toMatchObject({ preliminar: false, prefactura: { estado: 'generada' } });
+    });
+
+    it('la firma del Company Man genera la prefactura si no existe y deja el pedido en «ticket firmado»', async () => {
+      const id = await pedidoListo();
+      const r = await http()
+        .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
+        .set(sup())
+        .send(firma)
+        .expect(201);
+      expect(r.body).toMatchObject({ estado: 'firmada', version: 1 });
+      expect(r.body.firmas).toHaveLength(1);
+      expect(r.body.firmas[0]).toMatchObject({
+        firmanteTipo: 'company_man',
+        archivoId: ARCHIVO_CM.id,
+      });
+      expect(await estadoDe(id)).toBe('ticket_firmado');
+      // no se firma dos veces
+      await http()
+        .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
+        .set(sup())
+        .send(firma)
+        .expect(409);
+    });
+
+    it('si la prefactura ya estaba generada se recalcula con los datos actuales antes de firmarla', async () => {
+      const id = await pedidoListo();
+      const p = (await generar(id).expect(201)).body;
+      await prisma.pedidoItem.updateMany({
+        where: { pedidoId: id, codigo: `MOV-${n}` },
+        data: { cantidad: 2 },
+      });
+      const r = await http()
+        .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
+        .set(sup())
+        .send(firma)
+        .expect(201);
+      expect(r.body.id).toBe(p.id);
+      expect(r.body.estado).toBe('firmada');
+      expect(r.body.items.find((i: { codigo: string }) => i.codigo === `MOV-${n}`).cantidad).toBe(
+        2,
+      );
+      expect(await estadoDe(id)).toBe('ticket_firmado');
+    });
+
+    it('sin la documentación completa no se firma, ni con un archivo que no es de este módulo', async () => {
+      const incompleto = await pedido();
+      const r = await http()
+        .post(`/api/comercial/pedidos/${incompleto}/prefactura/firma-company-man`)
+        .set(sup())
+        .send(firma)
+        .expect(422);
+      expect(r.body.message).toContain('Falta:');
+      const id = await pedidoListo();
+      await http()
+        .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
+        .set(sup())
+        .send({ ...firma, archivoId: ARCHIVO_OTRO.id })
+        .expect(400);
+      await http()
+        .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
+        .set(soloVer())
+        .send(firma)
+        .expect(403);
+    });
   });
 });

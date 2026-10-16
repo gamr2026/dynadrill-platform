@@ -4,6 +4,7 @@ import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import {
   AgregarFirmaDto,
   EnviarPrefacturaDto,
+  FirmaCompanyManDto,
   FirmarPrefacturaDto,
   RechazarPrefacturaDto,
   RegistrarTicketDto,
@@ -36,6 +37,25 @@ export class PrefacturasController {
     @Headers('authorization') auth?: string,
   ) {
     return this.prefacturas.generar(pedidoId, this.ctx(actor, auth));
+  }
+
+  /** «Ver prefactura» desde el ticket: la vigente o una preliminar calculada al vuelo (no guarda nada). */
+  @RequirePermission(P.PREFACTURAS_VISTA_TICKET)
+  @Get('pedidos/:pedidoId/prefactura-vista')
+  vista(@Param('pedidoId', ParseUUIDPipe) pedidoId: string) {
+    return this.prefacturas.vista(pedidoId);
+  }
+
+  /** El Supervisor sube el documento firmado por el Company Man: genera o recalcula la prefactura y la deja firmada. */
+  @RequirePermission(P.PREFACTURAS_FIRMA_COMPANY_MAN)
+  @Post('pedidos/:pedidoId/prefactura/firma-company-man')
+  firmaCompanyMan(
+    @Param('pedidoId', ParseUUIDPipe) pedidoId: string,
+    @Body() dto: FirmaCompanyManDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.prefacturas.firmarDesdeTicket(pedidoId, dto, this.ctx(actor, auth));
   }
 
   @RequirePermission(P.PREFACTURAS_VER)

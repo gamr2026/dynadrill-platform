@@ -1,5 +1,6 @@
 import type { PlantillaDef } from './tipos';
 import { PLANTILLAS_PUMPING } from './pumping';
+import { PLANTILLAS_QHSE } from './qhse';
 
 export type { PlantillaDef } from './tipos';
 
@@ -9,7 +10,7 @@ export type { PlantillaDef } from './tipos';
  */
 export const PLANTILLAS: PlantillaDef[] = [
   ...PLANTILLAS_PUMPING,
-  // ...PLANTILLAS_QHSE,
+  ...PLANTILLAS_QHSE,
   // ...PLANTILLAS_FLOTA,
   // ...PLANTILLAS_MANTENIMIENTO,
   // ...PLANTILLAS_INVENTARIO,

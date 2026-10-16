@@ -20,7 +20,7 @@ import {
   jwtVerifyEnvSchema,
   rabbitEnvSchema,
 } from '@dyn/config';
-import type { PermissionDef } from '@dyn/authz';
+import { ALL_PERMISSION_CODES, type PermissionDef } from '@dyn/authz';
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -671,7 +671,8 @@ run('identidad (base de datos real)', () => {
 
     it('GET /permissions devuelve el catálogo completo, ordenado por módulo', async () => {
       const lista = (await http().get('/api/permissions').set(bearer(adminToken)).expect(200)).body;
-      expect(lista).toHaveLength(77);
+      // El tamaño sale del catálogo: varios módulos agregan permisos a la vez y un número fijo se rompería a cada alta.
+      expect(lista).toHaveLength(ALL_PERMISSION_CODES.length);
       expect(lista[0]).toEqual({
         id: expect.any(String),
         codigo: expect.stringMatching(/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/),

@@ -45,6 +45,22 @@ export const MODULOS_ARCHIVO = [
     tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'prefactura_company_man',
+    nombre: 'Prefactura firmada por el Company Man (subida desde el ticket)',
+    permisoSubir: 'comercial.prefacturas.firma_company_man',
+    permisoVer: 'comercial.prefacturas.vista_ticket',
+    tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'despacho_documento',
+    nombre: 'Documento de respaldo y hoja MSDS del despacho a Bodega',
+    permisoSubir: 'inventario.despachos.gestionar',
+    permisoVer: 'comercial.pedidos.ver',
+    tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */

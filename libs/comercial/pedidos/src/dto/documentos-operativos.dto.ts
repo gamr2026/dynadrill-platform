@@ -22,6 +22,20 @@ export const ESTADOS_USO_HERRAMIENTA = ['operacion', 'stand_by', 'daily_charge',
 
 const HORA = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 
+/** Tabla dentro de una actividad: encabezados y filas (cada fila con una celda por encabezado). */
+export class TablaOperativaDto {
+  @IsOptional() @IsString() @MaxLength(200) titulo?: string;
+  @IsArray()
+  @ArrayMaxSize(30)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  columnas!: string[];
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsArray({ each: true })
+  filas!: string[][];
+}
+
 export class ActividadOperativaDto {
   @IsDateString() fecha!: string;
   @Matches(HORA, { message: 'La hora de inicio debe ser HH:mm' }) horaInicio!: string;
@@ -29,6 +43,23 @@ export class ActividadOperativaDto {
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(24) duracionHoras!: number;
   @IsString() @MaxLength(4000) detalle!: string;
   @IsOptional() @IsString() @MaxLength(200) autor?: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => TablaOperativaDto)
+  tablas?: TablaOperativaDto[];
+}
+
+/** Corrección de Facturación de un día del Reporte Job. Una lista vacía de actividades quita el día. */
+export class CorregirDiaOperativoDto {
+  @IsIn(ORIGENES_OPERATIVOS) origen!: (typeof ORIGENES_OPERATIVOS)[number];
+  @IsDateString() fecha!: string;
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => ActividadOperativaDto)
+  actividades!: ActividadOperativaDto[];
 }
 
 export class UsoHerramientaDto {
