@@ -27,7 +27,8 @@ describe('resolveTarget', () => {
     ['/api/operaciones/pumping/tickets', 'operaciones'],
     ['/api/operations/pumping/tickets', 'legacy'],
     ['/api/unidades', 'legacy'],
-    ['/api/qhse/ptw', 'qhse'],
+    ['/api/v2/qhse/epi', 'qhse'], // QHSE nuevo (UUID); /api/qhse sigue en la demo
+    ['/api/qhse/ptw', 'legacy'],
   ])('%s → %s', (path, expected) => {
     expect(resolveTarget(path, all).name).toBe(expected);
   });

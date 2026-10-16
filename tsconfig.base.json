@@ -30,6 +30,7 @@
       "@dyn/integraciones": ["./libs/plataforma/integraciones/src/index.ts"],
       "@dyn/pedidos": ["./libs/comercial/pedidos/src/index.ts"],
       "@dyn/pumping": ["./libs/operaciones/pumping/src/index.ts"],
+      "@dyn/qhse": ["./libs/qhse/seguridad/src/index.ts"],
       "@dyn/avisos": ["./libs/plataforma/avisos/src/index.ts"]
     }
   },

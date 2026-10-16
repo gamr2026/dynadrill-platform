@@ -27,6 +27,8 @@
     "db:migrate-demo:comercial": "tsx --tsconfig tsconfig.base.json libs/comercial/pedidos/prisma/migrate-from-demo.ts",
     "db:migrate:comercial": "cd libs/comercial/pedidos && prisma migrate deploy",
     "db:migrate:pumping": "cd libs/operaciones/pumping && prisma migrate deploy",
+    "db:migrate:qhse": "cd libs/qhse/seguridad && prisma migrate deploy",
+    "db:seed:qhse": "tsx --tsconfig tsconfig.base.json libs/qhse/seguridad/prisma/seed.ts",
     "db:migrate:avisos": "cd libs/plataforma/avisos && prisma migrate deploy",
     "db:seed:avisos": "tsx --tsconfig tsconfig.base.json libs/plataforma/avisos/prisma/seed.ts",
     "db:seed:pumping": "tsx --tsconfig tsconfig.base.json libs/operaciones/pumping/prisma/seed.ts",

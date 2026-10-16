@@ -1,0 +1,186 @@
+// Módulo `qhse` (contenedor qhse). Schema PostgreSQL: qhse. Calidad, salud, seguridad y ambiente; se construye por tramos
+// (plan: documentacion/modulos/plan-qhse.md). Q1: entrega de EPI (DYN-SGI-RE-032) y la referencia de los tickets que la originan.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie
+// más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["qhse", "identidad"]
+}
+
+enum EstadoEpi {
+  solicitado
+  aprobado
+  despachado
+  rechazado
+
+  @@map("estado_epi")
+  @@schema("qhse")
+}
+
+/// Ticket (de otro contenedor) que origina casos de QHSE. Se llena por evento; no hay FK al schema ajeno (decisión D1).
+model TicketRef {
+  ticketId     String   @id @map("ticket_id") @db.Uuid
+  ticketNumero Int?     @map("ticket_numero")
+  pedidoId     String   @map("pedido_id") @db.Uuid
+  pedidoCodigo String   @map("pedido_codigo")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  entregasEpi EpiEntrega[]
+
+  @@index([pedidoId])
+  @@map("ticket_ref")
+  @@schema("qhse")
+}
+
+/// Catálogo de elementos de protección individual y ropa de trabajo.
+model EpiElemento {
+  id            String  @id @db.Uuid
+  nombre        String
+  requiereTalla Boolean @default(false) @map("requiere_talla")
+  orden         Int
+  activo        Boolean @default(true)
+
+  items EpiEntregaItem[]
+
+  @@map("epi_elemento")
+  @@schema("qhse")
+}
+
+/// Entrega de EPI (DYN-SGI-RE-032): una por trabajador (y por ticket, si la origina un servicio).
+model EpiEntrega {
+  id                 String    @id @db.Uuid
+  numero             Int       @unique @default(autoincrement())
+  trabajadorId       String    @map("trabajador_id") @db.Uuid
+  trabajador         IdUsuario @relation("epiTrabajador", fields: [trabajadorId], references: [id])
+  ticketId           String?   @map("ticket_id") @db.Uuid
+  ticket             TicketRef? @relation(fields: [ticketId], references: [ticketId])
+  lugar              String?
+  estado             EstadoEpi @default(solicitado)
+  firmaTrabajadorPor String?   @map("firma_trabajador_por") @db.Uuid
+  firmaTrabajador    IdUsuario? @relation("epiFirmaTrabajador", fields: [firmaTrabajadorPor], references: [id])
+  firmaTrabajadorAt  DateTime? @map("firma_trabajador_at") @db.Timestamptz(6)
+  firmaThPor         String?   @map("firma_th_por") @db.Uuid
+  firmaTh            IdUsuario? @relation("epiFirmaTh", fields: [firmaThPor], references: [id])
+  firmaThAt          DateTime? @map("firma_th_at") @db.Timestamptz(6)
+  aprobadoPor        String?   @map("aprobado_por") @db.Uuid
+  aprobador          IdUsuario? @relation("epiAprobador", fields: [aprobadoPor], references: [id])
+  aprobadoAt         DateTime? @map("aprobado_at") @db.Timestamptz(6)
+  rechazadoPor       String?   @map("rechazado_por") @db.Uuid
+  rechazador         IdUsuario? @relation("epiRechazador", fields: [rechazadoPor], references: [id])
+  rechazadoAt        DateTime? @map("rechazado_at") @db.Timestamptz(6)
+  motivoRechazo      String?   @map("motivo_rechazo")
+  despachadoPor      String?   @map("despachado_por") @db.Uuid
+  despachador        IdUsuario? @relation("epiDespachador", fields: [despachadoPor], references: [id])
+  despachadoAt       DateTime? @map("despachado_at") @db.Timestamptz(6)
+  createdBy          String?   @map("created_by") @db.Uuid
+  creador            IdUsuario? @relation("epiCreador", fields: [createdBy], references: [id])
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedBy          String?   @map("updated_by") @db.Uuid
+  editor             IdUsuario? @relation("epiEditor", fields: [updatedBy], references: [id])
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items     EpiEntregaItem[]
+  historial EpiEntregaHistorial[]
+
+  @@index([trabajadorId])
+  @@index([estado])
+  @@map("epi_entrega")
+  @@schema("qhse")
+}
+
+model EpiEntregaItem {
+  id                  String      @id @db.Uuid
+  entregaId           String      @map("entrega_id") @db.Uuid
+  entrega             EpiEntrega  @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+  elementoId          String      @map("elemento_id") @db.Uuid
+  elemento            EpiElemento @relation(fields: [elementoId], references: [id])
+  cantidad            Int
+  talla               String?
+  /// Código del artículo entregado (la cédula del trabajador sale de su perfil, no se captura aquí).
+  codigo              String?
+  recibioCapacitacion Boolean     @default(false) @map("recibio_capacitacion")
+  observaciones       String?
+  entregadoEl         DateTime    @default(now()) @map("entregado_el") @db.Date
+
+  @@index([entregaId])
+  @@map("epi_entrega_item")
+  @@schema("qhse")
+}
+
+/// Rastro de cada cambio de estado de una entrega (solo se agrega).
+model EpiEntregaHistorial {
+  id             String     @id @db.Uuid
+  entregaId      String     @map("entrega_id") @db.Uuid
+  entrega        EpiEntrega @relation(fields: [entregaId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoEpi? @map("estado_anterior")
+  estadoNuevo    EstadoEpi  @map("estado_nuevo")
+  motivo         String?
+  actorId        String?    @map("actor_id") @db.Uuid
+  actor          IdUsuario? @relation("epiHistorialActor", fields: [actorId], references: [id])
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entregaId, createdAt])
+  @@map("epi_entrega_historial")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de `identidad`, para obtener el nombre con JOIN a partir de las FK. Este módulo nunca
+// escribe en ellas (`app_qhse` solo tiene SELECT sobre estas columnas). Las administra el módulo de identidad.
+// ---------------------------------------------------------------------------------------------------------------
+
+/// `identidad.rol`.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String
+  nombre   String
+  usuarios IdUsuario[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  perfil IdUsuarioPerfil?
+
+  entregasComoTrabajador EpiEntrega[]          @relation("epiTrabajador")
+  firmasComoTrabajador   EpiEntrega[]          @relation("epiFirmaTrabajador")
+  firmasTh               EpiEntrega[]          @relation("epiFirmaTh")
+  aprobaciones           EpiEntrega[]          @relation("epiAprobador")
+  rechazos               EpiEntrega[]          @relation("epiRechazador")
+  despachos              EpiEntrega[]          @relation("epiDespachador")
+  entregasCreadas        EpiEntrega[]          @relation("epiCreador")
+  entregasEditadas       EpiEntrega[]          @relation("epiEditor")
+  historialEpi           EpiEntregaHistorial[] @relation("epiHistorialActor")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario_perfil` (datos del empleado, de AS2): la cédula y el cargo del trabajador se obtienen de aquí.
+model IdUsuarioPerfil {
+  usuarioId String    @id @map("usuario_id") @db.Uuid
+  usuario   IdUsuario @relation(fields: [usuarioId], references: [id])
+  cedula    String?
+  cargo     String?
+
+  @@map("usuario_perfil")
+  @@schema("identidad")
+}

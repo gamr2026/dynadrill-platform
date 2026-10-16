@@ -38,11 +38,16 @@ export const ROUTE_RULES: RouteRule[] = [
   // `/api/maintenance-orders`, `/api/articulos`...) se suman aquí a medida que cada módulo se migra; hasta entonces
   // siguen en demo-legacy.
   { target: 'operaciones', prefixes: ['/api/operaciones'] },
-  { target: 'qhse', prefixes: ['/api/qhse'] },
+  // QHSE nuevo (ids UUID) bajo `/api/v2/qhse`, reescrito a `/api/qhse` (ver PATH_REWRITE). `/api/qhse` sigue siendo el QHSE de la demo
+  // (ids numéricos) y cae en demo-legacy hasta el corte de cada subdominio.
+  { target: 'qhse', prefixes: ['/api/v2/qhse'] },
 ];
 
 /** Prefijos que el gateway reescribe al reenviar al contenedor. */
-export const PATH_REWRITE: Record<string, string> = { '^/api/v2/catalogos': '/api/catalogos' };
+export const PATH_REWRITE: Record<string, string> = {
+  '^/api/v2/catalogos': '/api/catalogos',
+  '^/api/v2/qhse': '/api/qhse',
+};
 
 /** Rutas que no exigen token en el gateway aunque vayan a un contenedor nuevo. */
 export const PUBLIC_PATHS: readonly string[] = [
