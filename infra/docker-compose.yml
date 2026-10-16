@@ -1,0 +1,147 @@
+# Equivalentes locales de los servicios de Azure del documento de arquitectura v1.0.
+#   PostgreSQL Flexible + PgBouncer -> postgres + pgbouncer
+#   Service Bus                     -> rabbitmq
+#   Blob Storage                    -> azurite
+#   Defender for Storage            -> clamav (perfil "files")
+#   Communication Services          -> mailpit
+#   Application Insights            -> jaeger (recibe OTLP directo)
+# Uso: cp infra/.env.example infra/.env && npm run infra:up
+
+name: dynadrill
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: UTC
+      PGTZ: UTC
+      DYN_MIGRATOR_PASSWORD: ${DYN_MIGRATOR_PASSWORD}
+      DYN_LECTURA_PASSWORD: ${DYN_LECTURA_PASSWORD}
+      APP_PLATAFORMA_PASSWORD: ${APP_PLATAFORMA_PASSWORD}
+      APP_COMERCIAL_PASSWORD: ${APP_COMERCIAL_PASSWORD}
+      APP_OPERACIONES_PASSWORD: ${APP_OPERACIONES_PASSWORD}
+      APP_QHSE_PASSWORD: ${APP_QHSE_PASSWORD}
+      APP_WORKER_PASSWORD: ${APP_WORKER_PASSWORD}
+      PGBOUNCER_AUTH_PASSWORD: ${PGBOUNCER_AUTH_PASSWORD}
+    ports:
+      - '${POSTGRES_PORT}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_SUPERUSER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Pool de conexiones: un cliente Prisma por módulo abre pocas conexiones cada uno.
+  # Las migraciones (dyn_migrator) se ejecutan directo contra postgres, no por aquí.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: pgbouncer
+      DB_PASSWORD: ${PGBOUNCER_AUTH_PASSWORD}
+      AUTH_TYPE: scram-sha-256
+      AUTH_USER: pgbouncer
+      AUTH_QUERY: SELECT usename, passwd FROM pgbouncer.get_auth($$1)
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: '5'
+      MAX_CLIENT_CONN: '200'
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+    ports:
+      - '${PGBOUNCER_PORT}:5432'
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - '${RABBITMQ_PORT}:5672'
+      - '${RABBITMQ_UI_PORT}:15672'
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    restart: unless-stopped
+    command: azurite-blob --blobHost 0.0.0.0 --location /data --skipApiVersionCheck
+    ports:
+      - '${AZURITE_BLOB_PORT}:10000'
+    volumes:
+      - azurite-data:/data
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - '${MAILPIT_SMTP_PORT}:1025'
+      - '${MAILPIT_UI_PORT}:8025'
+
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    restart: unless-stopped
+    ports:
+      - '${JAEGER_UI_PORT}:16686'
+      - '${OTLP_GRPC_PORT}:4317'
+      - '${OTLP_HTTP_PORT}:4318'
+
+  # Se activa con: docker compose --profile files up -d (módulo de archivos, F1 etapa 2).
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ['files']
+    restart: unless-stopped
+    ports:
+      - '${CLAMAV_PORT}:3310'
+    volumes:
+      - clamav-data:/var/lib/clamav
+
+  # Validación de firmas con OCR (Facturación). Se activa con:
+  #   docker compose -f infra/docker-compose.yml --profile ocr up -d --build firmas-ocr
+  # Todo corre dentro del contenedor: sin llamadas a internet y sin guardar documentos
+  # (sistema de archivos de solo lectura; /tmp es memoria). Solo escucha en localhost.
+  # La llave interna sale de FIRMAS_OCR_API_KEY (por defecto, la de desarrollo).
+  firmas-ocr:
+    build:
+      context: ../apps/firmas-ocr
+      target: runtime
+    image: dynadrill/firmas-ocr:local
+    profiles: ['ocr']
+    restart: unless-stopped
+    environment:
+      FIRMAS_OCR_API_KEY: ${FIRMAS_OCR_API_KEY:-dev_firmas_ocr}
+      FIRMAS_OCR_MAX_BYTES: ${FIRMAS_OCR_MAX_BYTES:-10485760}
+      FIRMAS_OCR_MAX_PAGINAS: ${FIRMAS_OCR_MAX_PAGINAS:-10}
+      FIRMAS_OCR_TIMEOUT_S: ${FIRMAS_OCR_TIMEOUT_S:-60}
+    ports:
+      - '127.0.0.1:${FIRMAS_OCR_PORT:-8090}:8090'
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 1g
+    pids_limit: 128
+
+volumes:
+  postgres-data:
+  rabbitmq-data:
+  azurite-data:
+  clamav-data:
