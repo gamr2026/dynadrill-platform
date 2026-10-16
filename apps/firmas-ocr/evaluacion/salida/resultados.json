@@ -1,0 +1,1026 @@
+[
+  {
+    "id": "3836 CTU/3836_425-OPR-EDYL-013I-UIO-2026.pdf",
+    "categoria": "real_manuscrita",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.95,
+    "segundos": 8.28,
+    "observaciones": []
+  },
+  {
+    "id": "3836 CTU/3836_EDYL-013_GRÁFICOS MONITOREO-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 4.04,
+    "observaciones": []
+  },
+  {
+    "id": "3836 CTU/3836_EDYL-013_GUIA-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.875,
+    "segundos": 2.22,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3836 CTU/3836_EDYL-013_JOB_LOG-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.907,
+    "segundos": 18.6,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3836 CTU/3836_EDYL-013_Repoorte herram-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.902,
+    "segundos": 8.68,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3836 CTU/3836_EDYL-013_TKT-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.876,
+    "segundos": 4.21,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3836 CTU/3836_GEOPORTAL Taller Dynadrill a EDHL-013-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.6,
+    "segundos": 1.31,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_520-OPR-SCH-044-UIO-2026.pdf",
+    "categoria": "real_manuscrita",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.976,
+    "segundos": 4.64,
+    "observaciones": []
+  },
+  {
+    "id": "3937 COMPLET/3937_Geoportal Taller Dynadrill - SCH-044.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.6,
+    "segundos": 1.15,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_SCH-044_BHA_COMPLETACIÓN.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.872,
+    "segundos": 3.94,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_SCH-044_GUIA.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.685,
+    "segundos": 4.09,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_SCH-044_JOB_LOG.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.836,
+    "segundos": 21.09,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_SCH-044_REP_HERR.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.952,
+    "segundos": 3.89,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3937 COMPLET/3937_SCH-044_TKT.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.96,
+    "segundos": 4.67,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_BHA#01.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.824,
+    "segundos": 2.05,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_BHA#02 (2).pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.857,
+    "segundos": 1.6,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_GEO.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 2.89,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma.",
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_GR.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.783,
+    "segundos": 4.31,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_REP_HERR.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.949,
+    "segundos": 6.34,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_REP_JOB.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.896,
+    "segundos": 13.92,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_GNTD-043_TKT.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.904,
+    "segundos": 4.48,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3976 FISHING/3976_SOP.pdf",
+    "categoria": "real_manuscrita",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.994,
+    "segundos": 6.12,
+    "observaciones": []
+  },
+  {
+    "id": "3986 PUMPING/3986_565-OPR-ESTACION SACHA NORTE 2-UIO-2026.pdf",
+    "categoria": "real_manuscrita",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 3.62,
+    "observaciones": []
+  },
+  {
+    "id": "3986 PUMPING/3986_ESTACION_SACHA_NORTE_2_GUIA-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.877,
+    "segundos": 2.19,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3986 PUMPING/3986_ESTACION_SACHA_NORTE_2_JOB_LOG-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.799,
+    "segundos": 17.54,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3986 PUMPING/3986_ESTACION_SACHA_NORTE_2_REP_HERRAMIENTAS-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.896,
+    "segundos": 3.54,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "3986 PUMPING/3986_ESTACION_SACHA_NORTE_2_TICKET-signed-signed.pdf",
+    "categoria": "real_firma_electronica",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.871,
+    "segundos": 4.5,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "sint_formulario_0",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.31,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_1",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.28,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_2",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.74,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_3",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 2.35,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_4",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 2.57,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_5",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.537,
+    "segundos": 2.54,
+    "observaciones": ["Hay trazos dudosos que no alcanzan para afirmar una firma."]
+  },
+  {
+    "id": "sint_formulario_6",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.961,
+    "segundos": 6.87,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_7",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 3.64,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_8",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.934,
+    "segundos": 1.85,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_9",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 2.19,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_10",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 2.15,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_11",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.42,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_12",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.998,
+    "segundos": 1.88,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_13",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.6,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_14",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.39,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_15",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.99,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_16",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.68,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_17",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.763,
+    "segundos": 1.3,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_18",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.51,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_19",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 2.14,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_20",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.54,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_21",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.77,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_22",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 1.69,
+    "observaciones": []
+  },
+  {
+    "id": "sint_formulario_23",
+    "categoria": "sintetica_positiva_formulario",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.892,
+    "segundos": 1.45,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_0_3836_EDYL-013_GUIA-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.922,
+    "segundos": 1.6,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_1_3836_EDYL-013_Repoorte herram-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.797,
+    "segundos": 5.93,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_2_3836_EDYL-013_TKT-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.895,
+    "segundos": 5.16,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_3_3836_GEOPORTAL Taller Dynadrill a EDHL-013-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.904,
+    "segundos": 1.45,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_4_3937_Geoportal Taller Dynadrill - SCH-044.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.876,
+    "segundos": 1.54,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_5_3937_SCH-044_BHA_COMPLETACIÓN.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.934,
+    "segundos": 3.91,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_6_3937_SCH-044_GUIA.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.862,
+    "segundos": 4.1,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_7_3937_SCH-044_REP_HERR.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.929,
+    "segundos": 2.94,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_8_3937_SCH-044_TKT.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.88,
+    "segundos": 4.3,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_9_3976_GNTD-043_BHA#01.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.895,
+    "segundos": 1.58,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_10_3976_GNTD-043_BHA#02 (2).pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.873,
+    "segundos": 1.67,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_11_3976_GNTD-043_GEO.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 1.25,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma."
+    ]
+  },
+  {
+    "id": "sint_sobre_real_12_3976_GNTD-043_GR.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.909,
+    "segundos": 12.14,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_13_3976_GNTD-043_REP_HERR.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.809,
+    "segundos": 5.0,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_14_3976_GNTD-043_TKT.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.921,
+    "segundos": 5.44,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_15_3986_ESTACION_SACHA_NORTE_2_GUIA-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.905,
+    "segundos": 1.98,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_16_3986_ESTACION_SACHA_NORTE_2_REP_HERRAMIENTAS-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.885,
+    "segundos": 2.82,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_17_3986_ESTACION_SACHA_NORTE_2_TICKET-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.877,
+    "segundos": 3.64,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_18_3836_EDYL-013_GUIA-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.947,
+    "segundos": 1.79,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_19_3836_EDYL-013_Repoorte herram-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 1.9,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma."
+    ]
+  },
+  {
+    "id": "sint_sobre_real_20_3836_EDYL-013_TKT-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.819,
+    "segundos": 13.25,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_21_3836_GEOPORTAL Taller Dynadrill a EDHL-013-signed-signed.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.882,
+    "segundos": 1.5,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_22_3937_Geoportal Taller Dynadrill - SCH-044.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.899,
+    "segundos": 2.18,
+    "observaciones": []
+  },
+  {
+    "id": "sint_sobre_real_23_3937_SCH-044_BHA_COMPLETACIÓN.pdf",
+    "categoria": "sintetica_positiva_sobre_pdf_real",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.828,
+    "segundos": 3.48,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_tipeado_0",
+    "categoria": "sintetica_negativa_tipeado",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 2.28,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_nombre_cursivo_1",
+    "categoria": "sintetica_negativa_nombre_cursivo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.734,
+    "segundos": 1.92,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_sello_redondo_2",
+    "categoria": "sintetica_negativa_sello_redondo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.722,
+    "segundos": 1.63,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_codigo_qr_3",
+    "categoria": "sintetica_negativa_codigo_qr",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.869,
+    "segundos": 1.8,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "sint_neg_texto_denso_4",
+    "categoria": "sintetica_negativa_texto_denso",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 3.1,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_grafico_5",
+    "categoria": "sintetica_negativa_grafico",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 1.23,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma."
+    ]
+  },
+  {
+    "id": "sint_neg_foto_6",
+    "categoria": "sintetica_negativa_foto",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.043,
+    "segundos": 4.5,
+    "observaciones": ["Página 1: calidad insuficiente (imagen borrosa)."]
+  },
+  {
+    "id": "sint_neg_en_blanco_7",
+    "categoria": "sintetica_negativa_en_blanco",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 6.59,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_neg_tipeado_8",
+    "categoria": "sintetica_negativa_tipeado",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 5.52,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_nombre_cursivo_9",
+    "categoria": "sintetica_negativa_nombre_cursivo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.735,
+    "segundos": 2.43,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_sello_redondo_10",
+    "categoria": "sintetica_negativa_sello_redondo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.716,
+    "segundos": 1.29,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_codigo_qr_11",
+    "categoria": "sintetica_negativa_codigo_qr",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.858,
+    "segundos": 1.82,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "sint_neg_texto_denso_12",
+    "categoria": "sintetica_negativa_texto_denso",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 3.64,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_grafico_13",
+    "categoria": "sintetica_negativa_grafico",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 0.93,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma."
+    ]
+  },
+  {
+    "id": "sint_neg_foto_14",
+    "categoria": "sintetica_negativa_foto",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.045,
+    "segundos": 5.45,
+    "observaciones": ["Página 1: calidad insuficiente (imagen borrosa)."]
+  },
+  {
+    "id": "sint_neg_en_blanco_15",
+    "categoria": "sintetica_negativa_en_blanco",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 7.51,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_neg_tipeado_16",
+    "categoria": "sintetica_negativa_tipeado",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 5.66,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_nombre_cursivo_17",
+    "categoria": "sintetica_negativa_nombre_cursivo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.734,
+    "segundos": 4.24,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_sello_redondo_18",
+    "categoria": "sintetica_negativa_sello_redondo",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.726,
+    "segundos": 2.77,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_codigo_qr_19",
+    "categoria": "sintetica_negativa_codigo_qr",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 0.856,
+    "segundos": 1.58,
+    "observaciones": [
+      "El documento trae firma electrónica; este servicio solo evalúa firma manuscrita."
+    ]
+  },
+  {
+    "id": "sint_neg_texto_denso_20",
+    "categoria": "sintetica_negativa_texto_denso",
+    "esperado": "no_detectada",
+    "resultado": "no_detectada",
+    "confianza": 1.0,
+    "segundos": 3.24,
+    "observaciones": []
+  },
+  {
+    "id": "sint_neg_grafico_21",
+    "categoria": "sintetica_negativa_grafico",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 1.56,
+    "observaciones": [
+      "Página 1: demasiados trazos candidatos (gráficos, planos o fotos); no se puede aislar una firma."
+    ]
+  },
+  {
+    "id": "sint_neg_foto_22",
+    "categoria": "sintetica_negativa_foto",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.045,
+    "segundos": 4.97,
+    "observaciones": ["Página 1: calidad insuficiente (imagen borrosa)."]
+  },
+  {
+    "id": "sint_neg_en_blanco_23",
+    "categoria": "sintetica_negativa_en_blanco",
+    "esperado": "no_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 7.78,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_degradada_baja_resolucion_0",
+    "categoria": "degradada_baja_resolucion",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.938,
+    "segundos": 1.67,
+    "observaciones": ["Página 1: calidad insuficiente (resolución muy baja)."]
+  },
+  {
+    "id": "sint_degradada_borrosa_1",
+    "categoria": "degradada_borrosa",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 2.82,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_degradada_baja_resolucion_2",
+    "categoria": "degradada_baja_resolucion",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.96,
+    "segundos": 0.76,
+    "observaciones": ["Página 1: calidad insuficiente (resolución muy baja)."]
+  },
+  {
+    "id": "sint_degradada_borrosa_3",
+    "categoria": "degradada_borrosa",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 2.14,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_degradada_baja_resolucion_4",
+    "categoria": "degradada_baja_resolucion",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 1.0,
+    "segundos": 0.71,
+    "observaciones": ["Página 1: calidad insuficiente (resolución muy baja)."]
+  },
+  {
+    "id": "sint_degradada_borrosa_5",
+    "categoria": "degradada_borrosa",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 2.35,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  },
+  {
+    "id": "sint_degradada_baja_resolucion_6",
+    "categoria": "degradada_baja_resolucion",
+    "esperado": "firma_detectada",
+    "resultado": "firma_detectada",
+    "confianza": 0.978,
+    "segundos": 0.46,
+    "observaciones": ["Página 1: calidad insuficiente (resolución muy baja)."]
+  },
+  {
+    "id": "sint_degradada_borrosa_7",
+    "categoria": "degradada_borrosa",
+    "esperado": "firma_detectada",
+    "resultado": "no_concluyente",
+    "confianza": 0.0,
+    "segundos": 1.64,
+    "observaciones": ["Página 1: calidad insuficiente (página casi en blanco)."]
+  }
+]

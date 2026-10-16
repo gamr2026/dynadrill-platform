@@ -1,0 +1,9 @@
+{
+  "descripcion": "Verdad de los documentos reales de SOPORTES EJEMPLO. Los 4 escaneos de las Órdenes de Trabajo (OPR) llevan firmas manuscritas de la contratista y de EP Petroecuador; el resto son PDF generados con campos de firma electrónica (FirmaEC) y sin trazos manuscritos en las zonas de firma que se revisaron a simple vista.",
+  "firma_manuscrita": [
+    "3836_425-OPR-EDYL-013I-UIO-2026.pdf",
+    "3937_520-OPR-SCH-044-UIO-2026.pdf",
+    "3976_SOP.pdf",
+    "3986_565-OPR-ESTACION SACHA NORTE 2-UIO-2026.pdf"
+  ]
+}
