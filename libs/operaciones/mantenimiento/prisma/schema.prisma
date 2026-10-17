@@ -1,0 +1,322 @@
+// Módulo `mantenimiento` (contenedor operaciones). Schema PostgreSQL: mantenimiento.
+// Recibe los reportes de unidad (Pumping, FCR, inspección de vehículos y QHSE), que el Jefe de Mantenimiento clasifica: los
+// descarta (con motivo) o genera una orden con sub-órdenes mecánica, instrumental u operativa. Diseño: documentacion/modulos/plan-mantenimiento.md.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie
+// más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["mantenimiento", "flota", "pumping", "identidad", "inventario"]
+}
+
+enum OrigenReporte {
+  pumping
+  fcr
+  vehiculos
+  qhse
+
+  @@map("origen_reporte")
+  @@schema("mantenimiento")
+}
+
+enum EstadoFinalUnidad {
+  disponible
+  con_restricciones
+
+  @@map("estado_final_unidad")
+  @@schema("mantenimiento")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Catálogos del módulo
+// ---------------------------------------------------------------------------------------------------------------
+
+model TipoSuborden {
+  id        String  @id @db.Uuid
+  codigo    String  @unique
+  nombre    String
+  sufijo    String  @unique @db.Char(1)
+  asignable Boolean
+  orden     Int
+  activo    Boolean @default(true)
+
+  subordenes    Suborden[]
+  transiciones  TransicionSuborden[]
+
+  @@map("tipo_suborden")
+  @@schema("mantenimiento")
+}
+
+model EstadoSuborden {
+  id       String  @id @db.Uuid
+  codigo   String  @unique
+  nombre   String
+  orden    Int
+  resuelta Boolean @default(false)
+  activo   Boolean @default(true)
+
+  subordenes Suborden[]
+  desde      TransicionSuborden[] @relation("transicionOrigen")
+  hacia      TransicionSuborden[] @relation("transicionDestino")
+
+  @@map("estado_suborden")
+  @@schema("mantenimiento")
+}
+
+model TransicionSuborden {
+  id            String         @id @db.Uuid
+  origenId      String         @map("origen_id") @db.Uuid
+  origen        EstadoSuborden @relation("transicionOrigen", fields: [origenId], references: [id])
+  destinoId     String         @map("destino_id") @db.Uuid
+  destino       EstadoSuborden @relation("transicionDestino", fields: [destinoId], references: [id])
+  tipoId        String?        @map("tipo_id") @db.Uuid
+  tipo          TipoSuborden?  @relation(fields: [tipoId], references: [id])
+  requiereNota  Boolean        @default(false) @map("requiere_nota")
+  activa        Boolean        @default(true)
+
+  @@unique([origenId, destinoId, tipoId])
+  @@map("transicion_suborden")
+  @@schema("mantenimiento")
+}
+
+model Contador {
+  clave String @id
+  valor Int
+
+  @@map("contador")
+  @@schema("mantenimiento")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Reporte recibido, orden y sub-orden
+// ---------------------------------------------------------------------------------------------------------------
+
+model ReporteRecibido {
+  id                     String        @id @db.Uuid
+  codigo                 String        @unique
+  origen                 OrigenReporte
+  unidadId               String        @map("unidad_id") @db.Uuid
+  unidad                 FlotaUnidad   @relation(fields: [unidadId], references: [id])
+  pumpingReporteUnidadId String?       @unique @map("pumping_reporte_unidad_id") @db.Uuid
+  pumpingReporteUnidad   PumpingReporteUnidad? @relation(fields: [pumpingReporteUnidadId], references: [id])
+  /// Caso de QHSE (otro contenedor, D1): sin FK.
+  qhseReferenciaId       String?       @unique @map("qhse_referencia_id") @db.Uuid
+  novedadQhse            String?       @map("novedad_qhse")
+  recibidoAt             DateTime      @default(now()) @map("recibido_at") @db.Timestamptz(6)
+  recibidoPor            String?       @map("recibido_por") @db.Uuid
+  descartadoAt           DateTime?     @map("descartado_at") @db.Timestamptz(6)
+  descartadoPor          String?       @map("descartado_por") @db.Uuid
+  descartador            IdUsuario?    @relation("reporteDescartadoPor", fields: [descartadoPor], references: [id])
+  motivoDescarte         String?       @map("motivo_descarte")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  createdBy              String?       @map("created_by") @db.Uuid
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  updatedBy              String?       @map("updated_by") @db.Uuid
+
+  orden Orden?
+
+  @@index([unidadId, recibidoAt(sort: Desc)])
+  @@map("reporte_recibido")
+  @@schema("mantenimiento")
+}
+
+model Orden {
+  id                   String             @id @db.Uuid
+  reporteId            String             @unique @map("reporte_id") @db.Uuid
+  reporte              ReporteRecibido    @relation(fields: [reporteId], references: [id])
+  retornadaAt          DateTime?          @map("retornada_at") @db.Timestamptz(6)
+  retornadaPor         String?            @map("retornada_por") @db.Uuid
+  estadoFinal          EstadoFinalUnidad? @map("estado_final")
+  observacionesFinales String?            @map("observaciones_finales")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  createdBy            String?            @map("created_by") @db.Uuid
+  updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  updatedBy            String?            @map("updated_by") @db.Uuid
+
+  subordenes Suborden[]
+
+  @@map("orden")
+  @@schema("mantenimiento")
+}
+
+model Suborden {
+  id                    String         @id @db.Uuid
+  ordenId               String         @map("orden_id") @db.Uuid
+  orden                 Orden          @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tipoId                String         @map("tipo_id") @db.Uuid
+  tipo                  TipoSuborden   @relation(fields: [tipoId], references: [id])
+  estadoId              String         @map("estado_id") @db.Uuid
+  estado                EstadoSuborden @relation(fields: [estadoId], references: [id])
+  asignadaA             String?        @map("asignada_a") @db.Uuid
+  asignada              IdUsuario?     @relation("subordenAsignada", fields: [asignadaA], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadaPor           String?        @map("asignada_por") @db.Uuid
+  notaDerivacion        String?        @map("nota_derivacion")
+  diagnostico           String?
+  actividadesCorrectivas String?       @map("actividades_correctivas")
+  horasTrabajo          Decimal?       @map("horas_trabajo") @db.Decimal(8, 2)
+  trabajosAdicionales   String?        @map("trabajos_adicionales")
+  notaCorreccion        String?        @map("nota_correccion")
+  ejecucionIniciadaAt   DateTime?      @map("ejecucion_iniciada_at") @db.Timestamptz(6)
+  ejecucionTerminadaAt  DateTime?      @map("ejecucion_terminada_at") @db.Timestamptz(6)
+  cierreAprobadoAt      DateTime?      @map("cierre_aprobado_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  cierreAprobadoPor     String?        @map("cierre_aprobado_por") @db.Uuid
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  createdBy             String?        @map("created_by") @db.Uuid
+  updatedAt             DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  updatedBy             String?        @map("updated_by") @db.Uuid
+
+  repuestos SubordenRepuesto[]
+
+  @@unique([ordenId, tipoId])
+  @@index([asignadaA, estadoId])
+  @@index([estadoId])
+  @@map("suborden")
+  @@schema("mantenimiento")
+}
+
+model SubordenRepuesto {
+  id          String         @id @db.Uuid
+  subordenId  String         @map("suborden_id") @db.Uuid
+  suborden    Suborden       @relation(fields: [subordenId], references: [id], onDelete: Cascade)
+  numeroParte String         @map("numero_parte")
+  cantidad    Decimal        @db.Decimal(10, 2)
+  descripcion String?
+  articuloId  String?        @map("articulo_id") @db.Uuid
+  articulo    InvArticulo?   @relation(fields: [articuloId], references: [id])
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  createdBy   String?        @map("created_by") @db.Uuid
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  updatedBy   String?        @map("updated_by") @db.Uuid
+
+  @@unique([subordenId, numeroParte])
+  @@map("suborden_repuesto")
+  @@schema("mantenimiento")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`flota`, `pumping`, `identidad`), para obtener los datos con JOIN a partir
+// de las FK. Este módulo nunca escribe en ellas. Los administra el módulo dueño de cada tabla; aquí solo van las columnas usadas.
+// ---------------------------------------------------------------------------------------------------------------
+
+enum FlotaTipoUnidad {
+  servicio
+  auxiliar
+  transporte
+
+  @@map("tipo_unidad")
+  @@schema("flota")
+}
+
+enum FlotaCategoriaPeso {
+  pesado
+  liviano
+
+  @@map("categoria_peso")
+  @@schema("flota")
+}
+
+/// `flota.unidad`: dueño Flota.
+model FlotaUnidad {
+  id            String              @id @db.Uuid
+  codigo        String
+  nombre        String
+  tipo          FlotaTipoUnidad
+  categoriaPeso FlotaCategoriaPeso? @map("categoria_peso")
+  vehiculoId    String?             @map("vehiculo_id") @db.Uuid
+  activa        Boolean
+
+  reportes ReporteRecibido[]
+
+  @@map("unidad")
+  @@schema("flota")
+}
+
+/// `pumping.ticket`: solo para mostrar el número del ticket de un reporte de Pumping.
+model PumpingTicket {
+  id           String @id @db.Uuid
+  ticketNumero Int?   @map("ticket_numero")
+
+  reportes PumpingReporteUnidad[]
+
+  @@map("ticket")
+  @@schema("pumping")
+}
+
+/// `pumping.reporte_unidad`: dueño Pumping. De aquí salen las novedades de un reporte de llegada.
+model PumpingReporteUnidad {
+  id                       String        @id @db.Uuid
+  ticketId                 String        @map("ticket_id") @db.Uuid
+  ticket                   PumpingTicket @relation(fields: [ticketId], references: [id])
+  vehiculoId               String        @map("vehiculo_id") @db.Uuid
+  origen                   String?
+  destino                  String?
+  llegadaFecha             DateTime?     @map("llegada_fecha") @db.Date
+  novedadesMecanica        String?       @map("novedades_mecanica")
+  novedadesInstrumentacion String?       @map("novedades_instrumentacion")
+  novedadesOperaciones     String?       @map("novedades_operaciones")
+  unidadLista              Boolean?      @map("unidad_lista")
+  operacionInterrumpida    Boolean?      @map("operacion_interrumpida")
+  detalleInterrupcion      String?       @map("detalle_interrupcion")
+  llegadaFirmadaAt         DateTime?     @map("llegada_firmada_at") @db.Timestamptz(6)
+
+  recibido ReporteRecibido?
+
+  @@map("reporte_unidad")
+  @@schema("pumping")
+}
+
+/// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String
+  nombre   String
+  usuarios IdUsuario[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo id, nombre, email, activo y rol (lo único que `app_operaciones` puede leer).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  reportesDescartados ReporteRecibido[] @relation("reporteDescartadoPor")
+  subordenesAsignadas Suborden[]        @relation("subordenAsignada")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// `inventario.articulo`: dueño Inventario. Solo para enlazar un repuesto con su artículo.
+model InvArticulo {
+  id     String @id @db.Uuid
+  codigo String
+  nombre String
+
+  repuestos SubordenRepuesto[]
+
+  @@map("articulo")
+  @@schema("inventario")
+}
