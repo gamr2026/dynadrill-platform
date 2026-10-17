@@ -258,7 +258,9 @@ export class TicketsService {
       if (salida.requiereMotivo && !motivo?.trim())
         throw new BadRequestException('El motivo es obligatorio');
       // para salir del paso deben estar cumplidos todos sus requisitos (la lista de lo que falta va en la respuesta)
-      await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
+      if (salida.exigeRequisitos) {
+        await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
+      }
       const r = await tx.ticket.updateMany({
         where: { id, pasoCodigo: t.pasoCodigo },
         data: { pasoCodigo: hacia, version: { increment: 1 } },
@@ -287,6 +289,19 @@ export class TicketsService {
           traceparent: currentTraceparent(),
         }),
       );
+      // el cierre del servicio: Comercial genera la prefactura con lo que el ticket dejó (contrato 4.10)
+      if (hacia === 'cierre') {
+        await this.bus.publish(
+          tx,
+          this.bus.create({
+            type: 'operaciones.pumping.cerrado',
+            subject: { type: 'pumping_ticket', id },
+            data: { ticketId: id, ticketNumero: t.ticketNumero, pedidoId: t.pedidoId },
+            actor: { userId: actor.id, role: actor.roleCode },
+            traceparent: currentTraceparent(),
+          }),
+        );
+      }
       // al terminar el traslado de salida se avisa al supervisor asignado (los reportes de salida le esperan para revisión)
       if (hacia === 'revision_reportes_salida') {
         const supervisor = t.personas.find((p) => p.rol === 'supervisor');

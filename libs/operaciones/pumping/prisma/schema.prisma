@@ -164,6 +164,8 @@ model Transicion {
   destinoCodigo  String  @map("destino_codigo")
   destino        Paso    @relation("destino", fields: [destinoCodigo], references: [codigo])
   requiereMotivo Boolean @default(false) @map("requiere_motivo")
+  /// Falso en los rechazos (vuelven a un paso anterior): no se exige que el paso de origen esté completo.
+  exigeRequisitos Boolean @default(true) @map("exige_requisitos")
   activa         Boolean @default(true)
 
   @@unique([origenCodigo, destinoCodigo])

@@ -5,7 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { AuthUser } from '@dyn/common';
+import { currentTraceparent, type AuthUser } from '@dyn/common';
+import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import type {
@@ -18,6 +19,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from './requisitos.service';
 
 const PASO = 'traslado_salida';
+const PASO_LLEGADA = 'traslado_llegada';
+
+export interface LlegadaEntrada {
+  /** Día de la llegada (`AAAA-MM-DD`). */
+  fecha: string;
+  combustible: number;
+  hubodometros: Array<{ eje: string; punto: PuntoHubodometro; llegada: number | null }>;
+  llantas: Array<{ posicion: PosicionLlanta; llegada: string | null }>;
+  inspecciones: Array<{ itemId: string; resultado: ResultadoInspeccion }>;
+  novedadesMecanica?: string;
+  novedadesInstrumentacion?: string;
+  novedadesOperaciones?: string;
+  unidadLista: boolean;
+  operacionInterrumpida: boolean;
+  detalleInterrupcion?: string;
+}
 
 export interface SalidaEntrada {
   /** Día de la salida (`AAAA-MM-DD`). */
@@ -42,6 +59,7 @@ export class ReporteUnidadService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requisitos: RequisitosService,
+    private readonly bus: EventBus,
   ) {}
 
   /** Las unidades del ticket con su operador y si el reporte de salida ya está firmado. */
@@ -119,6 +137,17 @@ export class ReporteUnidadService {
         combustible: num(reporte?.salidaCombustible ?? null),
         firmadaPor: firmadoPor,
         firmadaAt: reporte?.salidaFirmadaAt ?? null,
+      },
+      llegada: {
+        fecha: reporte?.llegadaFecha ? reporte.llegadaFecha.toISOString().slice(0, 10) : null,
+        combustible: num(reporte?.llegadaCombustible ?? null),
+        novedadesMecanica: reporte?.novedadesMecanica ?? null,
+        novedadesInstrumentacion: reporte?.novedadesInstrumentacion ?? null,
+        novedadesOperaciones: reporte?.novedadesOperaciones ?? null,
+        unidadLista: reporte?.unidadLista ?? null,
+        operacionInterrumpida: reporte?.operacionInterrumpida ?? null,
+        detalleInterrupcion: reporte?.detalleInterrupcion ?? null,
+        firmadaAt: reporte?.llegadaFirmadaAt ?? null,
       },
       hubodometros: (reporte?.hubodometros ?? []).map((h) => ({
         eje: h.eje,
@@ -251,6 +280,133 @@ export class ReporteUnidadService {
         { ticketId, codigo: REQ.reporteSalida, vehiculoId },
         'sistema',
         actor.id,
+      );
+    });
+    return this.obtener(ticketId, vehiculoId);
+  }
+
+  /**
+   * Firma de la LLEGADA de la unidad (Reporte de Unidad, DYN-MNT-RE-012): la firma el operador asignado a esa unidad en el paso
+   * de Traslado de llegada, sobre el reporte de salida ya firmado. Al guardarla cumple el requisito `reporte_unidad_llegada` y
+   * publica `operaciones.pumping.reporte_unidad_llegada` (contrato 4.2) en la misma transacción, para que Mantenimiento reciba
+   * el reporte si hay novedades.
+   */
+  async guardarLlegada(ticketId: string, vehiculoId: string, e: LlegadaEntrada, actor: AuthUser) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.fecha) || Number.isNaN(Date.parse(`${e.fecha}T00:00:00Z`))) {
+      throw new BadRequestException('La fecha de llegada no es válida');
+    }
+    if (!Number.isFinite(e.combustible) || e.combustible < 0)
+      throw new BadRequestException('El combustible debe ser un número mayor o igual a cero');
+    const detalle = e.detalleInterrupcion?.trim() || null;
+    if (e.operacionInterrumpida && !detalle)
+      throw new BadRequestException('Indique el detalle de la interrupción de la operación');
+
+    await this.prisma.$transaction(async (tx) => {
+      const t = await tx.ticket.findUnique({ where: { id: ticketId } });
+      if (!t) throw new NotFoundException('El ticket no existe');
+      if (t.pasoCodigo !== PASO_LLEGADA)
+        throw new ConflictException(
+          'El reporte de llegada se registra en el paso de Traslado de llegada',
+        );
+      if (
+        !(await tx.ticketUnidad.findUnique({
+          where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
+        }))
+      )
+        throw new NotFoundException('Esa unidad no está asignada al ticket');
+      if (actor.roleCode !== 'superadmin') {
+        const op = await tx.ticketPersona.findFirst({
+          where: { ticketId, vehiculoId, usuarioId: actor.id, rol: 'operador' },
+        });
+        if (!op)
+          throw new ForbiddenException(
+            'Solo el operador asignado a esta unidad puede firmar su reporte de llegada',
+          );
+      }
+      const previo = await tx.reporteUnidad.findUnique({
+        where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
+      });
+      if (!previo?.salidaFirmadaAt)
+        throw new ConflictException('La unidad no tiene un reporte de salida firmado');
+
+      const items = await tx.inspeccionItem.findMany({
+        where: { activo: true },
+        select: { id: true },
+      });
+      const validos = new Set(items.map((i) => i.id));
+      if (e.inspecciones.some((i) => !validos.has(i.itemId)))
+        throw new BadRequestException('Alguno de los ítems de inspección no existe');
+      if (new Set(e.inspecciones.map((i) => i.itemId)).size !== e.inspecciones.length)
+        throw new BadRequestException('Hay un ítem de inspección repetido');
+      if (new Set(e.llantas.map((l) => l.posicion)).size !== e.llantas.length)
+        throw new BadRequestException('Hay una llanta repetida');
+      if (new Set(e.hubodometros.map((h) => `${h.eje}|${h.punto}`)).size !== e.hubodometros.length)
+        throw new BadRequestException('Hay una lectura de hubodómetro repetida');
+
+      const reporte = await tx.reporteUnidad.update({
+        where: { id: previo.id },
+        data: {
+          llegadaFecha: new Date(`${e.fecha}T00:00:00.000Z`),
+          llegadaCombustible: e.combustible,
+          novedadesMecanica: e.novedadesMecanica?.trim() || null,
+          novedadesInstrumentacion: e.novedadesInstrumentacion?.trim() || null,
+          novedadesOperaciones: e.novedadesOperaciones?.trim() || null,
+          unidadLista: e.unidadLista,
+          operacionInterrumpida: e.operacionInterrumpida,
+          detalleInterrupcion: e.operacionInterrumpida ? detalle : null,
+          llegadaFirmadaPor: actor.id,
+          llegadaFirmadaAt: new Date(),
+        },
+      });
+      for (const h of e.hubodometros) {
+        await tx.reporteUnidadHubodometro.upsert({
+          where: { reporteId_eje_punto: { reporteId: reporte.id, eje: h.eje, punto: h.punto } },
+          create: { reporteId: reporte.id, eje: h.eje, punto: h.punto, llegada: h.llegada },
+          update: { llegada: h.llegada },
+        });
+      }
+      for (const l of e.llantas) {
+        await tx.reporteUnidadLlanta.upsert({
+          where: { reporteId_posicion: { reporteId: reporte.id, posicion: l.posicion } },
+          create: {
+            reporteId: reporte.id,
+            posicion: l.posicion,
+            llegada: l.llegada?.trim() || null,
+          },
+          update: { llegada: l.llegada?.trim() || null },
+        });
+      }
+      for (const i of e.inspecciones) {
+        await tx.reporteUnidadInspeccion.upsert({
+          where: { reporteId_itemId: { reporteId: reporte.id, itemId: i.itemId } },
+          create: { reporteId: reporte.id, itemId: i.itemId, llegada: i.resultado },
+          update: { llegada: i.resultado },
+        });
+      }
+      await this.requisitos.marcar(
+        tx,
+        { ticketId, codigo: REQ.reporteLlegada, vehiculoId },
+        'sistema',
+        actor.id,
+      );
+      const hayNovedades =
+        !!(
+          reporte.novedadesMecanica ||
+          reporte.novedadesInstrumentacion ||
+          reporte.novedadesOperaciones
+        ) ||
+        !e.unidadLista ||
+        e.operacionInterrumpida ||
+        e.inspecciones.some((i) => i.resultado === 'no_conforme');
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'operaciones.pumping.reporte_unidad_llegada',
+          subject: { type: 'pumping_ticket', id: ticketId },
+          data: { ticketId, vehiculoId, reporteUnidadId: reporte.id, hayNovedades },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
       );
     });
     return this.obtener(ticketId, vehiculoId);

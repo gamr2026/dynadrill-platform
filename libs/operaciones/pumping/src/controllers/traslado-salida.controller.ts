@@ -18,6 +18,7 @@ import {
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { EjecucionService } from '../services/ejecucion.service';
 import { IngresoService } from '../services/ingreso.service';
 import { RequisitosService } from '../services/requisitos.service';
 import { ReporteUnidadService } from '../services/reporte-unidad.service';
@@ -85,6 +86,44 @@ export class GuardarSalidaDto {
   inspecciones!: InspeccionDto[];
 }
 
+class HubodometroLlegadaDto {
+  @Matches(/^[A-Z]$/) eje!: string;
+  @IsIn(PUNTOS) punto!: (typeof PUNTOS)[number];
+  @ValidateIf((o: HubodometroLlegadaDto) => o.llegada !== null) @IsNumber() @Min(0) llegada!:
+    number | null;
+}
+class LlantaLlegadaDto {
+  @IsIn(POSICIONES) posicion!: (typeof POSICIONES)[number];
+  @ValidateIf((o: LlantaLlegadaDto) => o.llegada !== null) @IsString() @MaxLength(100) llegada!:
+    string | null;
+}
+
+export class GuardarLlegadaDto {
+  @Matches(/^\d{4}-\d{2}-\d{2}$/) fecha!: string;
+  @IsNumber() @Min(0) @Max(100000) combustible!: number;
+  @IsArray()
+  @ArrayMaxSize(60)
+  @ValidateNested({ each: true })
+  @Type(() => HubodometroLlegadaDto)
+  hubodometros!: HubodometroLlegadaDto[];
+  @IsArray()
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => LlantaLlegadaDto)
+  llantas!: LlantaLlegadaDto[];
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => InspeccionDto)
+  inspecciones!: InspeccionDto[];
+  @IsOptional() @IsString() @MaxLength(4000) novedadesMecanica?: string;
+  @IsOptional() @IsString() @MaxLength(4000) novedadesInstrumentacion?: string;
+  @IsOptional() @IsString() @MaxLength(4000) novedadesOperaciones?: string;
+  @IsBoolean() unidadLista!: boolean;
+  @IsBoolean() operacionInterrumpida!: boolean;
+  @IsOptional() @IsString() @MaxLength(2000) detalleInterrupcion?: string;
+}
+
 export class CumplirManualDto {
   @IsString() @MaxLength(500) motivo!: string;
 }
@@ -101,6 +140,7 @@ export class TrasladoSalidaController {
     private readonly ingreso: IngresoService,
     private readonly reportes: ReporteUnidadService,
     private readonly requisitos: RequisitosService,
+    private readonly ejecucion: EjecucionService,
   ) {}
 
   // ---- términos y condiciones
@@ -174,6 +214,24 @@ export class TrasladoSalidaController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.reportes.guardarSalida(id, vehiculoId, dto, actor);
+  }
+
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Put('tickets/:id/reportes-unidad/:vehiculoId/llegada')
+  guardarLlegada(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @Body() dto: GuardarLlegadaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reportes.guardarLlegada(id, vehiculoId, dto, actor);
+  }
+
+  // ---- formalización de la ejecución (Supervisor)
+  @RequirePermission(P.PUMPING_EJECUCION_FORMALIZAR)
+  @Post('tickets/:id/ejecucion/formalizar')
+  formalizarEjecucion(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.ejecucion.formalizar(id, actor);
   }
 
   // ---- puente temporal para requisitos de módulos que aún no existen

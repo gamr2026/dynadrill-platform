@@ -21,9 +21,11 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
+import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
+import { sinSuscripciones } from './testing/sin-suscripciones';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 
@@ -85,6 +87,8 @@ run('prefactura (base de datos real)', () => {
     ]);
   const soloVer = () => bearer([P.PREFACTURAS_VER]);
   const pedidos: string[] = [];
+  let cerrado: TicketCerradoConsumer;
+  const eventosCierre: string[] = [];
   let listaId = '';
   /** Valor real del espejo de PRC- antes de la prueba: se restaura al final (la prueba registra números de ejemplo). */
   let espejoOriginal: { id: string; actual: number } | null = null;
@@ -304,8 +308,10 @@ run('prefactura (base de datos real)', () => {
       .compile();
     app = mod.createNestApplication();
     configureApp(app, { corsOrigins: ['http://localhost:4200'] });
+    sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    cerrado = app.get(TicketCerradoConsumer);
 
     const esp = await admin.query(
       `SELECT s.id, s.numero_actual FROM comercial.secuencia s JOIN comercial.documento d ON d.id = s.documento_id WHERE d.codigo = 'prefactura'`,
@@ -356,6 +362,11 @@ run('prefactura (base de datos real)', () => {
   });
 
   afterAll(async () => {
+    if (eventosCierre.length) {
+      await admin.query('DELETE FROM msg_comercial.inbox WHERE id = ANY($1::uuid[])', [
+        eventosCierre,
+      ]);
+    }
     if (pedidos.length) {
       await admin.query(
         'DELETE FROM comercial.secuencia_emision WHERE documento_ref_id IN (SELECT id FROM comercial.prefactura WHERE pedido_id = ANY($1::uuid[]))',
@@ -852,6 +863,41 @@ run('prefactura (base de datos real)', () => {
         .set(soloVer())
         .send(firma)
         .expect(403);
+    });
+  });
+
+  describe('al cerrar el ticket', () => {
+    const cierre = (pedidoId: string, type = 'operaciones.pumping.cerrado') => {
+      const id = uuidv7();
+      eventosCierre.push(id);
+      return {
+        id,
+        type,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'supervisor' },
+        data: { ticketId: uuidv7(), pedidoId },
+      } as Parameters<TicketCerradoConsumer['consumir']>[0];
+    };
+
+    it('genera la prefactura sola si la documentación está completa; un evento repetido no la duplica', async () => {
+      const id = await pedidoListo();
+      const e = cierre(id);
+      await cerrado.consumir(e);
+      expect(await estadoDe(id)).toBe('prefactura_generada');
+      expect(await prisma.prefactura.count({ where: { pedidoId: id } })).toBe(1);
+      await cerrado.consumir(e); // repetido: lo ignora el inbox
+      await cerrado.consumir(cierre(id, 'operaciones.fcr.cerrado')); // otro evento: ya hay una vigente, se omite
+      expect(await prisma.prefactura.count({ where: { pedidoId: id } })).toBe(1);
+    });
+
+    it('con la documentación incompleta se omite sin fallar y el pedido no cambia', async () => {
+      const id = await pedido();
+      await cerrado.consumir(cierre(id));
+      expect(await prisma.prefactura.count({ where: { pedidoId: id } })).toBe(0);
+      expect(await estadoDe(id)).toBe('abierto');
     });
   });
 });

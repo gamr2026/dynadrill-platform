@@ -74,10 +74,28 @@ export const PASOS: PasoDef[] = [
  * Pasos que el módulo ya sabe validar. Se agregan por fases, cada uno con sus condiciones (asignación completa, checklist
  * de QHSE, entrega de EPI, reportes...): por eso hoy solo existe el de la revisión inicial.
  */
-export const TRANSICIONES: Array<{ de: string; a: string; motivo?: boolean }> = [
+export const TRANSICIONES: Array<{
+  de: string;
+  a: string;
+  motivo?: boolean;
+  /** Falso en los rechazos: salir hacia atrás no exige los requisitos del paso. */
+  exigeRequisitos?: boolean;
+}> = [
   { de: 'revision_inicial', a: 'asignacion' },
   // Salir de Traslado de salida exige los requisitos del paso (ver `paso_requisito`)
   { de: 'traslado_salida', a: 'revision_reportes_salida' },
+  // Revisión de salida: gerenciamiento de viaje de salida y inspección aprobada (ver `paso_requisito`)
+  { de: 'revision_reportes_salida', a: 'ejecucion_operativa' },
+  // Ejecución: checklist de ingreso y formalización de la ejecución
+  { de: 'ejecucion_operativa', a: 'control_retorno' },
+  // Control de retorno: gerenciamiento de viaje de retorno aprobado
+  { de: 'control_retorno', a: 'traslado_llegada' },
+  // Traslado de llegada: reporte de unidad de llegada firmado por cada operador
+  { de: 'traslado_llegada', a: 'revision_reportes_llegada' },
+  { de: 'revision_reportes_llegada', a: 'revision_final' },
+  // Revisión final: el Acta de Entrega de Locación; el rechazo vuelve a la revisión de llegada, con motivo
+  { de: 'revision_final', a: 'cierre' },
+  { de: 'revision_final', a: 'revision_reportes_llegada', motivo: true, exigeRequisitos: false },
 ];
 
 /** Idempotente: lo que ya existe no se toca. */
@@ -112,6 +130,7 @@ export async function sembrarPasos(db: Cliente): Promise<{ pasos: number; transi
           origenCodigo: t.de,
           destinoCodigo: t.a,
           requiereMotivo: t.motivo ?? false,
+          exigeRequisitos: t.exigeRequisitos ?? true,
         },
       });
       transiciones++;

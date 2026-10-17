@@ -30,6 +30,17 @@ export const REGLAS_EXTERNAS: Record<string, Regla> = {
   // QHSE
   'qhse.epi.despachada': { codigo: REQ.epiDespachado, accion: 'cumplir', por: 'usuarioId' },
   'qhse.epi.revertida': { codigo: REQ.epiDespachado, accion: 'reabrir', por: 'usuarioId' },
+  // QHSE: Acta de Entrega de Locación (contrato 4.11); se exige para cerrar el servicio
+  'qhse.acta_entrega.cargada': {
+    codigo: REQ.actaEntregaLocacion,
+    accion: 'cumplir',
+    por: 'ticket',
+  },
+  'qhse.acta_entrega.anulada': {
+    codigo: REQ.actaEntregaLocacion,
+    accion: 'reabrir',
+    por: 'ticket',
+  },
   // Flota (dueña de la inspección de vehículos)
   'flota.inspeccion_vehiculo.realizada': {
     codigo: REQ.inspeccionRealizada,
@@ -65,7 +76,15 @@ export const REGLAS_EXTERNAS: Record<string, Regla> = {
 };
 
 const FUENTES = [
-  { source: 'qhse', patterns: ['qhse.epi.despachada', 'qhse.epi.revertida'] },
+  {
+    source: 'qhse',
+    patterns: [
+      'qhse.epi.despachada',
+      'qhse.epi.revertida',
+      'qhse.acta_entrega.cargada',
+      'qhse.acta_entrega.anulada',
+    ],
+  },
   {
     source: 'flota',
     patterns: [

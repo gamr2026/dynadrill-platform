@@ -23,6 +23,9 @@ export const REQ = {
   reporteSalida: 'reporte_unidad_salida',
   gerenciamientoSalida: 'gerenciamiento_viaje_salida_aprobado',
   gerenciamientoRetorno: 'gerenciamiento_viaje_retorno_aprobado',
+  ejecucionFormalizada: 'ejecucion_formalizada',
+  reporteLlegada: 'reporte_unidad_llegada',
+  actaEntregaLocacion: 'acta_entrega_locacion',
 } as const;
 
 interface RequisitoDef {
@@ -103,6 +106,32 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'flota',
     paso: 'control_retorno',
+  },
+  {
+    codigo: REQ.ejecucionFormalizada,
+    nombre: 'Formalización de la ejecución',
+    descripcion:
+      'El Supervisor confirmó que el Company Man aprobó el inicio de la ejecución (se hace junto con el checklist de ingreso a locación).',
+    ambito: 'ticket',
+    modulo: 'pumping',
+    paso: 'ejecucion_operativa',
+  },
+  {
+    codigo: REQ.reporteLlegada,
+    nombre: 'Reporte de unidad de llegada',
+    descripcion: 'El operador firmó el Reporte de Unidad (DYN-MNT-RE-012) de llegada de su unidad.',
+    ambito: 'unidad',
+    modulo: 'pumping',
+    paso: 'traslado_llegada',
+  },
+  {
+    codigo: REQ.actaEntregaLocacion,
+    nombre: 'Acta de Entrega de Locación cargada',
+    descripcion:
+      'QHSE cargó el Acta de Entrega de Locación (DYN-PMP-RE-027). Se exige para dar el servicio por cerrado.',
+    ambito: 'ticket',
+    modulo: 'qhse',
+    paso: 'revision_final',
   },
 ];
 

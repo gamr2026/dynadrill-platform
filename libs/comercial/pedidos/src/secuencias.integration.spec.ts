@@ -25,6 +25,7 @@ import { uuidv7 } from '@dyn/utils';
 import { PedidosModule, SecuenciasService } from './index';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
+import { sinSuscripciones } from './testing/sin-suscripciones';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 
@@ -127,6 +128,7 @@ run('secuenciales (base de datos real)', () => {
     const mod = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
     app = mod.createNestApplication();
     configureApp(app, { corsOrigins: ['http://localhost:4200'] });
+    sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
     secuencias = app.get(SecuenciasService);

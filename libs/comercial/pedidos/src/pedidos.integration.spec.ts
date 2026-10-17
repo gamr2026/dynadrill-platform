@@ -35,6 +35,7 @@ import {
 } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
+import { sinSuscripciones } from './testing/sin-suscripciones';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 
@@ -372,6 +373,7 @@ run('pedidos (base de datos real)', () => {
       .compile();
     app = mod.createNestApplication();
     configureApp(app, { corsOrigins: ['http://localhost:4200'] });
+    sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
 

@@ -6,6 +6,7 @@ import { RequisitosExternosConsumer } from './consumers/requisitos-externos.cons
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { IngresoService } from './services/ingreso.service';
+import { EjecucionService } from './services/ejecucion.service';
 import { ReporteUnidadService } from './services/reporte-unidad.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TerminosService } from './services/terminos.service';
@@ -28,6 +29,7 @@ import { TicketsService } from './services/tickets.service';
     TerminosService,
     IngresoService,
     ReporteUnidadService,
+    EjecucionService,
     PedidosAbiertosConsumer,
     RequisitosExternosConsumer,
   ],

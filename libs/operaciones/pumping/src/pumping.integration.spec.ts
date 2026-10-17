@@ -519,9 +519,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa).sort()).toEqual(
       [VEHICULO.placa, VEHICULO_2.placa].sort(),
     );
-    // lo que el proceso exige: del ticket 3 (checklist de ingreso, gerenciamiento de viaje de salida y de retorno), 3 por unidad, 2 por operador
+    // lo que el proceso exige: del ticket 5 (checklist de ingreso, formalización de la ejecución, gerenciamiento de viaje de salida y de retorno, acta de entrega), 4 por unidad (con el reporte de llegada), 2 por operador
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(3 + 3 * 2 + 2 * 2);
+    expect(req).toHaveLength(5 + 4 * 2 + 2 * 2);
     expect(req.every((x) => x.estado === 'pendiente')).toBe(true);
     expect(
       req
@@ -1003,5 +1003,209 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(evento.rows[0].d.asignados).toEqual([
       { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
     ]);
+  });
+
+  it('recorre todo el servicio: revisión de salida, ejecución, retorno, llegada, revisión final y cierre, con lo que exige cada paso', async () => {
+    const t = await ticketEnTraslado();
+    await cumplirTodoMenosReporte(t.id);
+    for (const [v, o] of [
+      [VEHICULO, op1()],
+      [VEHICULO_2, op2()],
+    ] as const) {
+      const cuerpoSalida = await salidaValida(t.id, v.id);
+      await http()
+        .put(`${t.url}/reportes-unidad/${v.id}/salida`)
+        .set(o)
+        .send(cuerpoSalida)
+        .expect(200);
+    }
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'revision_reportes_salida' })
+      .expect(201);
+
+    // revisión de salida: inspección aprobada de cada unidad y gerenciamiento de viaje de salida aprobado
+    const faltaRevision = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'ejecucion_operativa' })
+      .expect(409);
+    expect(faltaRevision.body.detail).toContain('Inspección de vehículos aprobada');
+    expect(faltaRevision.body.detail).toContain('Gerenciamiento de viaje de salida aprobado');
+    for (const v of [VEHICULO, VEHICULO_2]) {
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.aprobada',
+          { ticketId: t.id, vehiculoId: v.id },
+          'flota',
+        ),
+      );
+    }
+    await externos.consumir(
+      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'salida' }, 'flota'),
+    );
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'ejecucion_operativa' })
+      .expect(201);
+
+    // ejecución: checklist de ingreso (su prueba propia lo cubre; aquí se da por cumplido) y formalización del Supervisor
+    const faltaEjecucion = await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'control_retorno' })
+      .expect(409);
+    expect(faltaEjecucion.body.detail).toContain('Formalización de la ejecución');
+    const formalizar = `${t.url}/ejecucion/formalizar`;
+    await http().post(formalizar).set(op1()).expect(403); // sin el permiso
+    await http()
+      .post(formalizar)
+      .set(como('supervisor', OP1.id, OP1.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
+      .expect(403); // con el permiso, pero no es el supervisor asignado
+    await http()
+      .post(formalizar)
+      .set(como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
+      .expect(201);
+    await prisma.ticketRequisito.updateMany({
+      where: { ticketId: t.id, requisitoCodigo: 'checklist_ingreso_locacion' },
+      data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
+    });
+    await http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' }).expect(201);
+
+    // control de retorno: gerenciamiento de viaje de retorno aprobado
+    const faltaRetorno = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'traslado_llegada' })
+      .expect(409);
+    expect(faltaRetorno.body.detail).toContain('Gerenciamiento de viaje de retorno aprobado');
+    await externos.consumir(
+      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'retorno' }, 'flota'),
+    );
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'traslado_llegada' })
+      .expect(201);
+
+    // traslado de llegada: cada operador firma la llegada de su unidad (publica el evento para Mantenimiento)
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'revision_reportes_llegada' })
+      .expect(409);
+    const llegada = async (vehiculoId: string, extra: object = {}) => {
+      const r = (
+        await http().get(`${t.url}/reportes-unidad/${vehiculoId}`).set(supervisora()).expect(200)
+      ).body;
+      return {
+        fecha: '2026-11-09',
+        combustible: 20,
+        hubodometros: [{ eje: 'A', punto: 'destino', llegada: 1100 }],
+        llantas: [{ posicion: 'delantera_izquierda', llegada: '78 PSI' }],
+        inspecciones: r.inspecciones
+          .slice(0, 3)
+          .map((i: { itemId: string }) => ({ itemId: i.itemId, resultado: 'conforme' })),
+        unidadLista: true,
+        operacionInterrumpida: false,
+        ...extra,
+      };
+    };
+    const urlLlegada = (v: string) => `${t.url}/reportes-unidad/${v}/llegada`;
+    // la unidad de otro operador, y la interrupción exige su detalle
+    const cuerpoLlegada2 = await llegada(VEHICULO_2.id);
+    await http().put(urlLlegada(VEHICULO_2.id)).set(op1()).send(cuerpoLlegada2).expect(403);
+    const interrumpida = await llegada(VEHICULO.id, { operacionInterrumpida: true });
+    const conNovedad = await llegada(VEHICULO.id, { novedadesMecanica: 'Ruido en el eje trasero' });
+    await http().put(urlLlegada(VEHICULO.id)).set(op1()).send(interrumpida).expect(400);
+    const l1 = (await http().put(urlLlegada(VEHICULO.id)).set(op1()).send(conNovedad).expect(200))
+      .body;
+    expect(l1.llegada).toMatchObject({
+      fecha: '2026-11-09',
+      combustible: 20,
+      novedadesMecanica: 'Ruido en el eje trasero',
+      unidadLista: true,
+      operacionInterrumpida: false,
+    });
+    expect(l1.llegada.firmadaAt).not.toBeNull();
+    // se conserva lo de la salida y se agrega la llegada en las mismas filas
+    expect(l1.hubodometros).toContainEqual({
+      eje: 'A',
+      punto: 'destino',
+      salida: null,
+      llegada: 1100,
+    });
+    expect(l1.llantas).toEqual([
+      { posicion: 'delantera_izquierda', salida: '80 PSI', llegada: '78 PSI' },
+    ]);
+    const aunFaltaLlegada = await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'revision_reportes_llegada' })
+      .expect(409);
+    expect(aunFaltaLlegada.body.detail).toContain(
+      `Reporte de unidad de llegada (${VEHICULO_2.placa})`,
+    );
+    await http().put(urlLlegada(VEHICULO_2.id)).set(op2()).send(cuerpoLlegada2).expect(200);
+    const eventosLlegada = await admin.query(
+      "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_unidad_llegada' AND datos->'data'->>'ticketId' = $1",
+      [t.id],
+    );
+    expect(eventosLlegada.rows).toHaveLength(2);
+    expect(eventosLlegada.rows.map((x) => x.d.hayNovedades).sort()).toEqual([false, true]);
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'revision_reportes_llegada' })
+      .expect(201);
+
+    // revisión de llegada y revisión final: el cierre exige el Acta de Entrega de Locación; el rechazo vuelve con motivo
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_final' })
+      .expect(201);
+    const faltaActa = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'cierre' })
+      .expect(409);
+    expect(faltaActa.body.detail).toContain('Acta de Entrega de Locación');
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_reportes_llegada' })
+      .expect(400); // el rechazo exige motivo
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_reportes_llegada', motivo: 'Falta aclarar la novedad mecánica' })
+      .expect(201);
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_final' })
+      .expect(201);
+    await externos.consumir(externo('qhse.acta_entrega.cargada', { ticketId: t.id }));
+    const cerrado = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'cierre' })
+      .expect(201);
+    expect(cerrado.body.paso).toMatchObject({ codigo: 'cierre' });
+    const cierre = await admin.query(
+      "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.cerrado' AND datos->'data'->>'ticketId' = $1",
+      [t.id],
+    );
+    expect(cierre.rows).toHaveLength(1);
+    expect(cierre.rows[0].d).toMatchObject({ ticketId: t.id, pedidoId: t.pedidoId });
+    // un ticket cerrado ya no se mueve
+    await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_final' })
+      .expect(409);
   });
 });
