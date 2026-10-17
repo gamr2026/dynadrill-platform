@@ -337,6 +337,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Confirmar a mano un requisito de otro módulo que aún no existe (puente temporal del traslado de salida)',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
   ),
+  nuevo(
+    'pumping.ejecucion.formalizar',
+    'Formalizar la ejecución: confirmar que el Company Man aprobó el inicio del trabajo',
+    [RoleCode.SUPERADMIN, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
+  ),
   // flota
   def(
     'vehicleInspectionApprove',
@@ -378,6 +383,16 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   nuevo(
     'flota.proveedores.gestionar',
     'Administrar los proveedores externos de mantenimiento',
+    ModuleRoles.maintenance,
+  ),
+  nuevo(
+    'flota.lecturas.anular',
+    'Anular una lectura de horómetro o kilometraje mal tomada',
+    ModuleRoles.maintenance,
+  ),
+  nuevo(
+    'flota.preventivos.anular',
+    'Anular un mantenimiento preventivo mal registrado',
     ModuleRoles.maintenance,
   ),
   // mantenimiento
@@ -500,6 +515,7 @@ export const Permission = {
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
   PUMPING_REQUISITOS_PUENTE: 'pumping.requisitos.puente',
+  PUMPING_EJECUCION_FORMALIZAR: 'pumping.ejecucion.formalizar',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
@@ -510,6 +526,8 @@ export const Permission = {
   LECTURAS_REGISTRAR: 'flota.lecturas.registrar',
   PREVENTIVOS_REGISTRAR: 'flota.preventivos.registrar',
   PROVEEDORES_MANTENIMIENTO_GESTIONAR: 'flota.proveedores.gestionar',
+  LECTURAS_ANULAR: 'flota.lecturas.anular',
+  PREVENTIVOS_ANULAR: 'flota.preventivos.anular',
   MANTENIMIENTO_GESTIONAR: 'mantenimiento.ordenes.gestionar',
   MANTENIMIENTO_VER: 'mantenimiento.ordenes.ver',
   MANTENIMIENTO_TAREAS: 'mantenimiento.tareas.ejecutar',
