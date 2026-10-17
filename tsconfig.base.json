@@ -33,7 +33,7 @@
       "@dyn/qhse": ["./libs/qhse/seguridad/src/index.ts"],
       "@dyn/flota": ["./libs/operaciones/flota/src/index.ts"],
       "@dyn/mantenimiento": ["./libs/operaciones/mantenimiento/src/index.ts"],
-      "@dyn/inventario":["./libs/operaciones/inventario/src/index.ts"],
+      "@dyn/inventario": ["./libs/operaciones/inventario/src/index.ts"],
       "@dyn/avisos": ["./libs/plataforma/avisos/src/index.ts"]
     }
   },
