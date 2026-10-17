@@ -3,6 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfigModule } from '@dyn/config';
 import { CommonModule } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
+import { FlotaModule } from '@dyn/flota';
+import { InventarioModule } from '@dyn/inventario';
+import { MantenimientoModule } from '@dyn/mantenimiento';
 import { PumpingModule } from '@dyn/pumping';
 import { OperacionesEnv, operacionesEnvSchema } from './env';
 
@@ -30,6 +33,9 @@ const envFiles = ['apps/operaciones/.env', '.env'];
       }),
     }),
     PumpingModule,
+    FlotaModule,
+    InventarioModule,
+    MantenimientoModule,
   ],
 })
 export class AppModule {}

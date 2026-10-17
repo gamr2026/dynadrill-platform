@@ -30,6 +30,10 @@
       "@dyn/integraciones": ["./libs/plataforma/integraciones/src/index.ts"],
       "@dyn/pedidos": ["./libs/comercial/pedidos/src/index.ts"],
       "@dyn/pumping": ["./libs/operaciones/pumping/src/index.ts"],
+      "@dyn/qhse": ["./libs/qhse/seguridad/src/index.ts"],
+      "@dyn/flota": ["./libs/operaciones/flota/src/index.ts"],
+      "@dyn/mantenimiento": ["./libs/operaciones/mantenimiento/src/index.ts"],
+      "@dyn/inventario":["./libs/operaciones/inventario/src/index.ts"],
       "@dyn/avisos": ["./libs/plataforma/avisos/src/index.ts"]
     }
   },
