@@ -119,10 +119,10 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
        VALUES ($1, $2, $3, 'revision_inicial', $4)`,
       [ticketId, uuidv7(), `PED-MT${n}`, 700_000 + tickets.length + (n % 10_000) * 10],
     );
-    await admin.query('INSERT INTO pumping.ticket_unidad (ticket_id, vehiculo_id) VALUES ($1, $2)', [
-      ticketId,
-      vehiculoId,
-    ]);
+    await admin.query(
+      'INSERT INTO pumping.ticket_unidad (ticket_id, vehiculo_id) VALUES ($1, $2)',
+      [ticketId, vehiculoId],
+    );
     const firmado = opciones.firmado ?? true;
     await admin.query(
       `INSERT INTO pumping.reporte_unidad
@@ -162,7 +162,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
   const recibido = async () => {
     const { reporteId, ticketId } = await reportePumping();
     await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
-    return prisma.reporteRecibido.findUniqueOrThrow({ where: { pumpingReporteUnidadId: reporteId } });
+    return prisma.reporteRecibido.findUniqueOrThrow({
+      where: { pumpingReporteUnidadId: reporteId },
+    });
   };
 
   beforeAll(async () => {
@@ -216,7 +218,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       'DELETE FROM mantenimiento.orden WHERE reporte_id IN (SELECT id FROM mantenimiento.reporte_recibido WHERE unidad_id = $1)',
       [UNIDAD.id],
     );
-    await admin.query('DELETE FROM mantenimiento.reporte_recibido WHERE unidad_id = $1', [UNIDAD.id]);
+    await admin.query('DELETE FROM mantenimiento.reporte_recibido WHERE unidad_id = $1', [
+      UNIDAD.id,
+    ]);
     await admin.query('DELETE FROM pumping.ticket WHERE id = ANY($1::uuid[])', [tickets]);
     await admin.query('DELETE FROM flota.unidad WHERE id = $1', [UNIDAD.id]);
     if (eventos.length) {
@@ -251,7 +255,11 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         codigo: r.codigo,
         estado: 'por_clasificar',
         unidad: { id: UNIDAD.id, codigo: UNIDAD.codigo, tipo: 'transporte' },
-        novedades: { mecanica: 'Fuga de aceite en el motor', destino: 'Pozo X', unidadLista: false },
+        novedades: {
+          mecanica: 'Fuga de aceite en el motor',
+          destino: 'Pozo X',
+          unidadLista: false,
+        },
         descarte: null,
         ordenId: null,
       });
@@ -277,7 +285,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       const dice = await reportePumping();
       await consumer.consumir(evento(dice.reporteId, { hayNovedades: false }));
       for (const id of [sin.reporteId, sinFirma.reporteId, dice.reporteId]) {
-        expect(await prisma.reporteRecibido.count({ where: { pumpingReporteUnidadId: id } })).toBe(0);
+        expect(await prisma.reporteRecibido.count({ where: { pumpingReporteUnidadId: id } })).toBe(
+          0,
+        );
       }
     });
 
@@ -297,7 +307,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       const huerfano = await reportePumping({ vehiculoId: VEHICULO_SIN_UNIDAD.id });
       await expect(consumer.consumir(evento(huerfano.reporteId))).resolves.toBeUndefined();
       expect(
-        await prisma.reporteRecibido.count({ where: { pumpingReporteUnidadId: huerfano.reporteId } }),
+        await prisma.reporteRecibido.count({
+          where: { pumpingReporteUnidadId: huerfano.reporteId },
+        }),
       ).toBe(0);
     });
 
@@ -308,7 +320,11 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         [r.id],
       );
       expect(salida.rows).toHaveLength(1);
-      expect(salida.rows[0].d).toMatchObject({ reporteId: r.id, codigo: r.codigo, unidadId: UNIDAD.id });
+      expect(salida.rows[0].d).toMatchObject({
+        reporteId: r.id,
+        codigo: r.codigo,
+        unidadId: UNIDAD.id,
+      });
       expect(Object.keys(salida.rows[0].d).sort()).toEqual(
         ['codigo', 'origen', 'reporteId', 'ticketId', 'unidadId'].sort(),
       );
@@ -333,9 +349,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         .set(soloLectura())
         .send({ motivo: 'x' });
       expect(intento.status).toBe(403);
-      expect((await http().get('/api/operaciones/mantenimiento/reportes').set(sinPermiso())).status).toBe(
-        403,
-      );
+      expect(
+        (await http().get('/api/operaciones/mantenimiento/reportes').set(sinPermiso())).status,
+      ).toBe(403);
       expect((await http().get('/api/operaciones/mantenimiento/reportes')).status).toBe(401);
     });
 
@@ -365,7 +381,10 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect(ok.status).toBe(201);
       expect(ok.body).toMatchObject({
         estado: 'descartado',
-        descarte: { motivo: 'Es el desgaste normal del equipo', por: { id: JEFE.id, nombre: JEFE.nombre } },
+        descarte: {
+          motivo: 'Es el desgaste normal del equipo',
+          por: { id: JEFE.id, nombre: JEFE.nombre },
+        },
       });
       const otra = await http().post(`${url}/descartar`).set(jefe()).send({ motivo: 'otra vez' });
       expect(otra.status).toBe(409);
@@ -413,7 +432,8 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect(res.body.codigo).toBe(r.codigo);
       expect(res.body.estado).toBe('pendiente');
       expect(res.body.unidad).toMatchObject({ id: UNIDAD.id, codigo: UNIDAD.codigo });
-      const por = (t: string) => res.body.subordenes.find((s: { tipo: { codigo: string } }) => s.tipo.codigo === t);
+      const por = (t: string) =>
+        res.body.subordenes.find((s: { tipo: { codigo: string } }) => s.tipo.codigo === t);
       expect(por('mecanico')).toMatchObject({
         codigo: `${r.codigo}-M`,
         estado: { codigo: 'pendiente' },
@@ -430,9 +450,14 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         notaDerivacion: 'Revisar el empaque del tanque',
       });
 
-      const reporte = await http().get(`/api/operaciones/mantenimiento/reportes/${r.id}`).set(jefe());
+      const reporte = await http()
+        .get(`/api/operaciones/mantenimiento/reportes/${r.id}`)
+        .set(jefe());
       expect(reporte.body).toMatchObject({ estado: 'clasificado', ordenId: res.body.id });
-      const fila = await prisma.suborden.findMany({ where: { ordenId: res.body.id }, include: { tipo: true } });
+      const fila = await prisma.suborden.findMany({
+        where: { ordenId: res.body.id },
+        include: { tipo: true },
+      });
       expect(fila.find((s) => s.tipo.codigo === 'mecanico')?.asignadaPor).toBe(JEFE.id);
     });
 
@@ -457,7 +482,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
           .set(jefe())
           .send({ asignaciones });
       expect((await clasificar([])).status).toBe(400);
-      expect((await clasificar([{ tipo: 'mecanico' }, { tipo: 'mecanico' }])).body.code).toBe('TIPO_REPETIDO');
+      expect((await clasificar([{ tipo: 'mecanico' }, { tipo: 'mecanico' }])).body.code).toBe(
+        'TIPO_REPETIDO',
+      );
       expect((await clasificar([{ tipo: 'hidraulico' }])).body.code).toBe('TIPO_INVALIDO');
       expect((await clasificar([{ tipo: 'mecanico', usuarioId: OPERADOR.id }])).body.code).toBe(
         'OPERADOR_INVALIDO',
@@ -481,9 +508,15 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     it('un reporte se clasifica una sola vez; una orden no admite descartar su reporte', async () => {
       const r = await recibido();
       const url = `/api/operaciones/mantenimiento/reportes/${r.id}`;
-      const ok = await http().post(`${url}/clasificar`).set(jefe()).send({ asignaciones: [{ tipo: 'mecanico' }] });
+      const ok = await http()
+        .post(`${url}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico' }] });
       expect(ok.status).toBe(201);
-      const otra = await http().post(`${url}/clasificar`).set(jefe()).send({ asignaciones: [{ tipo: 'mecanico' }] });
+      const otra = await http()
+        .post(`${url}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico' }] });
       expect(otra.status).toBe(409);
       expect(otra.body.code).toBe('REPORTE_CON_ORDEN');
       const descartar = await http().post(`${url}/descartar`).set(jefe()).send({ motivo: 'ya no' });
@@ -496,7 +529,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       const res = await http()
         .post(`/api/operaciones/mantenimiento/reportes/${r.id}/clasificar`)
         .set(jefe())
-        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }, { tipo: 'operativo' }] });
+        .send({
+          asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }, { tipo: 'operativo' }],
+        });
       const eventosOrden = await admin.query(
         "SELECT tipo, datos->'data' AS d FROM msg_operaciones.outbox WHERE datos->'data'->>'ordenId' = $1 ORDER BY tipo",
         [res.body.id],
@@ -557,7 +592,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       const reasignada = await http()
         .put(`/api/operaciones/mantenimiento/ordenes/${base.body.id}/clasificacion`)
         .set(jefe())
-        .send({ asignaciones: [{ tipo: 'operativo' }, { tipo: 'instrumental', usuarioId: MECANICO.id }] });
+        .send({
+          asignaciones: [{ tipo: 'operativo' }, { tipo: 'instrumental', usuarioId: MECANICO.id }],
+        });
       expect(reasignada.status).toBe(200);
       const ins = reasignada.body.subordenes.find(
         (s: { tipo: { codigo: string } }) => s.tipo.codigo === 'instrumental',
@@ -582,7 +619,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         .send({ asignaciones: [{ tipo: 'instrumental' }] });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('ORDEN_CERRADA');
-      const orden = await http().get(`/api/operaciones/mantenimiento/ordenes/${base.body.id}`).set(jefe());
+      const orden = await http()
+        .get(`/api/operaciones/mantenimiento/ordenes/${base.body.id}`)
+        .set(jefe());
       expect(orden.body.estado).toBe('cerrada');
       expect(orden.body.retorno).toMatchObject({ estadoFinal: 'disponible' });
     });
@@ -625,9 +664,13 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
 
   describe('camino completo y reglas de la base', () => {
     it('camino completo: reporte de Pumping, evento, reporte recibido y orden, con la auditoría de quién lo hizo', async () => {
-      const { reporteId, ticketId } = await reportePumping({ instrumentacion: 'Monitor sin lectura' });
+      const { reporteId, ticketId } = await reportePumping({
+        instrumentacion: 'Monitor sin lectura',
+      });
       await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
-      const r = await prisma.reporteRecibido.findUniqueOrThrow({ where: { pumpingReporteUnidadId: reporteId } });
+      const r = await prisma.reporteRecibido.findUniqueOrThrow({
+        where: { pumpingReporteUnidadId: reporteId },
+      });
       expect(r).toMatchObject({ createdBy: OPERADOR.id, updatedBy: OPERADOR.id });
       const o = await http()
         .post(`/api/operaciones/mantenimiento/reportes/${r.id}/clasificar`)
@@ -643,15 +686,25 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
           WHERE o.id = $1`,
         [o.body.id],
       );
-      expect(fila.rows[0]).toMatchObject({ codigo: r.codigo, ticket_id: ticketId, unidad: UNIDAD.codigo, created_by: JEFE.id });
+      expect(fila.rows[0]).toMatchObject({
+        codigo: r.codigo,
+        ticket_id: ticketId,
+        unidad: UNIDAD.codigo,
+        created_by: JEFE.id,
+      });
       const auditado = await prisma.reporteRecibido.findUniqueOrThrow({ where: { id: r.id } });
       expect(auditado.updatedBy).toBe(OPERADOR.id);
     });
 
     it('descartar deja quién lo descartó como autor de la última edición', async () => {
       const r = await recibido();
-      await http().post(`/api/operaciones/mantenimiento/reportes/${r.id}/descartar`).set(jefe()).send({ motivo: 'Normal' });
-      expect((await prisma.reporteRecibido.findUniqueOrThrow({ where: { id: r.id } })).updatedBy).toBe(JEFE.id);
+      await http()
+        .post(`/api/operaciones/mantenimiento/reportes/${r.id}/descartar`)
+        .set(jefe())
+        .send({ motivo: 'Normal' });
+      expect(
+        (await prisma.reporteRecibido.findUniqueOrThrow({ where: { id: r.id } })).updatedBy,
+      ).toBe(JEFE.id);
     });
 
     it('la base rechaza: origen sin su referencia, un tipo repetido en la orden, repuestos inválidos o repetidos y una transición a sí misma', async () => {
@@ -706,15 +759,21 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         ),
       ).rejects.toThrow(/transicion_suborden_distinta_check/);
       // un tipo o un estado en uso no se puede borrar
-      await expect(admin.query("DELETE FROM mantenimiento.tipo_suborden WHERE codigo = 'mecanico'")).rejects.toThrow(/violates foreign key/);
+      await expect(
+        admin.query("DELETE FROM mantenimiento.tipo_suborden WHERE codigo = 'mecanico'"),
+      ).rejects.toThrow(/violates foreign key/);
     });
 
     it('el rol de la aplicación no puede borrar reportes ni órdenes (la historia no se reescribe)', async () => {
       const app = new Pool({ connectionString: APP_DB.replace('?pgbouncer=true', ''), max: 1 });
       try {
         const r = await recibido();
-        await expect(app.query('DELETE FROM mantenimiento.reporte_recibido WHERE id = $1', [r.id])).rejects.toThrow(/permission denied/);
-        await expect(app.query('DELETE FROM mantenimiento.orden')).rejects.toThrow(/permission denied/);
+        await expect(
+          app.query('DELETE FROM mantenimiento.reporte_recibido WHERE id = $1', [r.id]),
+        ).rejects.toThrow(/permission denied/);
+        await expect(app.query('DELETE FROM mantenimiento.orden')).rejects.toThrow(
+          /permission denied/,
+        );
       } finally {
         await app.end();
       }
@@ -727,7 +786,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         Array.from({ length: 25 }, async () => {
           const { reporteId } = await reportePumping();
           await consumer.consumir(evento(reporteId));
-          return prisma.reporteRecibido.findUniqueOrThrow({ where: { pumpingReporteUnidadId: reporteId } });
+          return prisma.reporteRecibido.findUniqueOrThrow({
+            where: { pumpingReporteUnidadId: reporteId },
+          });
         }),
       );
       const codigos = reportes.map((r) => r.codigo);

@@ -1,6 +1,9 @@
 import { estadoDeOrden, type SubordenParaEstado } from './estado-orden';
 
-const sub = (estadoCodigo: string, resuelta = false): SubordenParaEstado => ({ estadoCodigo, resuelta });
+const sub = (estadoCodigo: string, resuelta = false): SubordenParaEstado => ({
+  estadoCodigo,
+  resuelta,
+});
 
 describe('estado de la orden (se deriva de sus sub-órdenes)', () => {
   it('sin sub-órdenes está pendiente', () => {
@@ -19,7 +22,11 @@ describe('estado de la orden (se deriva de sus sub-órdenes)', () => {
 
   it('requiere cambios si alguna sub-orden tiene una corrección solicitada, aunque otras avancen', () => {
     expect(
-      estadoDeOrden(false, [sub('correccion_solicitada'), sub('en_ejecucion'), sub('cerrado', true)]),
+      estadoDeOrden(false, [
+        sub('correccion_solicitada'),
+        sub('en_ejecucion'),
+        sub('cerrado', true),
+      ]),
     ).toBe('requiere_cambios');
   });
 
@@ -30,7 +37,9 @@ describe('estado de la orden (se deriva de sus sub-órdenes)', () => {
   });
 
   it('una sub-orden sin resolver impide aceptarla', () => {
-    expect(estadoDeOrden(false, [sub('cerrado', true), sub('en_ejecucion')])).toBe('en_mantenimiento');
+    expect(estadoDeOrden(false, [sub('cerrado', true), sub('en_ejecucion')])).toBe(
+      'en_mantenimiento',
+    );
     expect(estadoDeOrden(false, [sub('cerrado', true), sub('pendiente')])).toBe('pendiente');
   });
 

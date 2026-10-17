@@ -39,7 +39,12 @@ const ESTADOS = [
   { codigo: ESTADO.enDiagnostico, nombre: 'En diagnóstico', orden: 2, resuelta: false },
   { codigo: ESTADO.enEjecucion, nombre: 'En ejecución', orden: 3, resuelta: false },
   { codigo: ESTADO.enRevisionCierre, nombre: 'En revisión de cierre', orden: 4, resuelta: false },
-  { codigo: ESTADO.correccionSolicitada, nombre: 'Corrección solicitada', orden: 5, resuelta: false },
+  {
+    codigo: ESTADO.correccionSolicitada,
+    nombre: 'Corrección solicitada',
+    orden: 5,
+    resuelta: false,
+  },
   { codigo: ESTADO.cerrado, nombre: 'Cerrado', orden: 6, resuelta: true },
   // Derivada a Pumping cuenta como resuelta para aceptar la orden (regla de la demo): ya no depende de Mantenimiento.
   { codigo: ESTADO.derivadoAPumping, nombre: 'Derivado a Pumping', orden: 7, resuelta: true },
@@ -66,7 +71,12 @@ const TRANSICIONES: TransicionDef[] = [
   { origen: ESTADO.enRevisionCierre, destino: ESTADO.correccionSolicitada, requiereNota: true },
   { origen: ESTADO.correccionSolicitada, destino: ESTADO.enEjecucion },
   { origen: ESTADO.correccionSolicitada, destino: ESTADO.enRevisionCierre },
-  { origen: ESTADO.pendiente, destino: ESTADO.derivadoAPumping, tipo: TIPO.operativo, requiereNota: true },
+  {
+    origen: ESTADO.pendiente,
+    destino: ESTADO.derivadoAPumping,
+    tipo: TIPO.operativo,
+    requiereNota: true,
+  },
   { origen: ESTADO.derivadoAPumping, destino: ESTADO.enEjecucion, tipo: TIPO.operativo },
   { origen: ESTADO.derivadoAPumping, destino: ESTADO.enRevisionCierre, tipo: TIPO.operativo },
 ];
@@ -104,7 +114,13 @@ export async function sembrarCatalogos(prisma: Cliente) {
     });
     if (!existe) {
       await prisma.transicionSuborden.create({
-        data: { id: uuidv7(), origenId, destinoId, tipoId: tId, requiereNota: t.requiereNota ?? false },
+        data: {
+          id: uuidv7(),
+          origenId,
+          destinoId,
+          tipoId: tId,
+          requiereNota: t.requiereNota ?? false,
+        },
       });
       transiciones++;
     }

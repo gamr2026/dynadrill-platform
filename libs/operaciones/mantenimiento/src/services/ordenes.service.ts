@@ -200,7 +200,10 @@ export class OrdenesService {
   // ── piezas internas ─────────────────────────────────────────────────────────────────────────────
 
   /** Tipos válidos y sin repetir; el operador asignado debe ser una cuenta activa con rol de operador de mantenimiento. */
-  private async validarAsignaciones(tx: Prisma.TransactionClient, asignaciones: AsignacionEntrada[]) {
+  private async validarAsignaciones(
+    tx: Prisma.TransactionClient,
+    asignaciones: AsignacionEntrada[],
+  ) {
     if (!asignaciones?.length) {
       throw new BadRequestException({
         message: 'Elija al menos un tipo de mantenimiento',
@@ -209,13 +212,21 @@ export class OrdenesService {
     }
     const codigos = asignaciones.map((a) => a.tipo);
     if (new Set(codigos).size !== codigos.length) {
-      throw new BadRequestException({ message: 'Hay un tipo de mantenimiento repetido', code: 'TIPO_REPETIDO' });
+      throw new BadRequestException({
+        message: 'Hay un tipo de mantenimiento repetido',
+        code: 'TIPO_REPETIDO',
+      });
     }
-    const tipos = await tx.tipoSuborden.findMany({ where: { codigo: { in: codigos }, activo: true } });
+    const tipos = await tx.tipoSuborden.findMany({
+      where: { codigo: { in: codigos }, activo: true },
+    });
     for (const a of asignaciones) {
       const tipo = tipos.find((t) => t.codigo === a.tipo);
       if (!tipo) {
-        throw new BadRequestException({ message: `El tipo «${a.tipo}» no existe`, code: 'TIPO_INVALIDO' });
+        throw new BadRequestException({
+          message: `El tipo «${a.tipo}» no existe`,
+          code: 'TIPO_INVALIDO',
+        });
       }
       if (!tipo.asignable && a.usuarioId) {
         throw new BadRequestException({
@@ -224,7 +235,10 @@ export class OrdenesService {
         });
       }
       if (a.usuarioId) {
-        const u = await tx.idUsuario.findUnique({ where: { id: a.usuarioId }, include: { rol: true } });
+        const u = await tx.idUsuario.findUnique({
+          where: { id: a.usuarioId },
+          include: { rol: true },
+        });
         if (!u || !u.activo || u.rol.codigo !== ROL_OPERADOR_MANTENIMIENTO) {
           throw new BadRequestException({
             message: 'Solo se asigna a un operador de mantenimiento con la cuenta activa',
@@ -242,7 +256,11 @@ export class OrdenesService {
   }
 
   /** Estado y datos con que nace la sub-orden: el operativo se deriva (o queda pendiente); los demás, con operador si lo hay. */
-  private async datosIniciales(tx: Prisma.TransactionClient, a: AsignacionEntrada, actor: AuthUser) {
+  private async datosIniciales(
+    tx: Prisma.TransactionClient,
+    a: AsignacionEntrada,
+    actor: AuthUser,
+  ) {
     const tipo = await tx.tipoSuborden.findUniqueOrThrow({ where: { codigo: a.tipo } });
     if (!tipo.asignable) {
       const derivar = a.derivar ?? true;
@@ -270,9 +288,22 @@ export class OrdenesService {
       tx.estadoSuborden.findUniqueOrThrow({ where: { codigo: estadoCodigo } }),
     ]);
     await tx.suborden.create({
-      data: { id, ordenId, tipoId: tipo.id, estadoId: estado.id, createdBy: actor.id, updatedBy: actor.id, ...datos },
+      data: {
+        id,
+        ordenId,
+        tipoId: tipo.id,
+        estadoId: estado.id,
+        createdBy: actor.id,
+        updatedBy: actor.id,
+        ...datos,
+      },
     });
-    return { id, tipo: a.tipo, estadoCodigo, asignadaA: 'asignadaA' in datos ? (datos.asignadaA ?? null) : null };
+    return {
+      id,
+      tipo: a.tipo,
+      estadoCodigo,
+      asignadaA: 'asignadaA' in datos ? (datos.asignadaA ?? null) : null,
+    };
   }
 
   /** Reclasificación de una sub-orden existente: solo cambia la asignación o la derivación (nunca el trabajo ya hecho). */
@@ -293,7 +324,9 @@ export class OrdenesService {
         where: { id },
         data: {
           estadoId: estado.id,
-          ...(derivar && a.notaDerivacion?.trim() ? { notaDerivacion: a.notaDerivacion.trim() } : {}),
+          ...(derivar && a.notaDerivacion?.trim()
+            ? { notaDerivacion: a.notaDerivacion.trim() }
+            : {}),
           updatedBy: actor.id,
         },
       });
@@ -308,7 +341,12 @@ export class OrdenesService {
   private async publicarCreada(
     tx: Prisma.TransactionClient,
     ordenId: string,
-    reporte: { id: string; codigo: string; unidadId: string; pumpingReporteUnidad: { ticketId: string } | null },
+    reporte: {
+      id: string;
+      codigo: string;
+      unidadId: string;
+      pumpingReporteUnidad: { ticketId: string } | null;
+    },
     creadas: Array<{ id: string; tipo: string; estadoCodigo: string; asignadaA: string | null }>,
     actor: AuthUser,
   ) {
@@ -352,7 +390,9 @@ export class OrdenesService {
           ordenId,
           unidadId,
           tipo: s.tipo,
-          ...(asignada ? { asignados: [{ usuarioId: s.asignadaA, rolCodigo: ROL_OPERADOR_MANTENIMIENTO }] } : {}),
+          ...(asignada
+            ? { asignados: [{ usuarioId: s.asignadaA, rolCodigo: ROL_OPERADOR_MANTENIMIENTO }] }
+            : {}),
         },
       }),
     );
@@ -370,7 +410,12 @@ export class OrdenesService {
         o.subordenes.map((s) => ({ estadoCodigo: s.estado.codigo, resuelta: s.estado.resuelta })),
       ),
       reporte: { id: r.id, codigo: r.codigo, origen: r.origen },
-      unidad: { id: r.unidad.id, codigo: r.unidad.codigo, nombre: r.unidad.nombre, tipo: r.unidad.tipo },
+      unidad: {
+        id: r.unidad.id,
+        codigo: r.unidad.codigo,
+        nombre: r.unidad.nombre,
+        tipo: r.unidad.tipo,
+      },
       ticket: p ? { id: p.ticket.id, numero: p.ticket.ticketNumero } : null,
       creadaAt: o.createdAt,
       retorno: o.retornadaAt

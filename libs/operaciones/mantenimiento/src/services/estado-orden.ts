@@ -3,11 +3,7 @@
  * se devolvió a Operaciones (retorno a operación).
  */
 export type EstadoOrden =
-  | 'pendiente'
-  | 'en_mantenimiento'
-  | 'requiere_cambios'
-  | 'aceptada'
-  | 'cerrada';
+  'pendiente' | 'en_mantenimiento' | 'requiere_cambios' | 'aceptada' | 'cerrada';
 
 export interface SubordenParaEstado {
   estadoCodigo: string;

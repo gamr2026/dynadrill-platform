@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -64,7 +70,9 @@ export class ReportesService {
       return null;
     }
     if (!origen.llegadaFirmadaAt) {
-      this.logger.warn(`Reporte de unidad ${reporteUnidadId}: la llegada aún no está firmada; se ignora`);
+      this.logger.warn(
+        `Reporte de unidad ${reporteUnidadId}: la llegada aún no está firmada; se ignora`,
+      );
       return null;
     }
     const hayNovedades =
@@ -73,7 +81,9 @@ export class ReportesService {
       hay(origen.novedadesOperaciones);
     if (!hayNovedades) return null;
 
-    const ya = await tx.reporteRecibido.findUnique({ where: { pumpingReporteUnidadId: reporteUnidadId } });
+    const ya = await tx.reporteRecibido.findUnique({
+      where: { pumpingReporteUnidadId: reporteUnidadId },
+    });
     if (ya) return ya.id;
 
     // La unidad de Flota que corresponde al vehículo del catálogo con que Pumping armó el reporte (D2)
@@ -163,7 +173,10 @@ export class ReportesService {
       const r = await tx.reporteRecibido.findUnique({ where: { id }, include: { orden: true } });
       if (!r) throw new NotFoundException('El reporte de unidad no existe');
       if (r.descartadoAt) {
-        throw new ConflictException({ message: 'El reporte ya fue descartado', code: 'REPORTE_YA_DESCARTADO' });
+        throw new ConflictException({
+          message: 'El reporte ya fue descartado',
+          code: 'REPORTE_YA_DESCARTADO',
+        });
       }
       if (r.orden) {
         throw new ConflictException({
@@ -173,7 +186,12 @@ export class ReportesService {
       }
       await tx.reporteRecibido.update({
         where: { id },
-        data: { descartadoAt: new Date(), descartadoPor: actor.id, motivoDescarte: texto, updatedBy: actor.id },
+        data: {
+          descartadoAt: new Date(),
+          descartadoPor: actor.id,
+          motivoDescarte: texto,
+          updatedBy: actor.id,
+        },
       });
       await this.bus.publish(
         tx,
