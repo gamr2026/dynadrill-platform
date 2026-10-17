@@ -1,0 +1,295 @@
+// Módulo `flota` (contenedor operaciones). Schema PostgreSQL: flota.
+// Dueño de las unidades de Dynadrill, sus lecturas (horómetro y odómetro), los conductores y sus permisos, la inspección de
+// vehículos y el gerenciamiento de viaje. Diseño: documentacion/modulos/plan-flota.md.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie
+// más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["flota", "catalogos", "identidad", "archivos"]
+}
+
+enum TipoUnidad {
+  servicio
+  auxiliar
+  transporte
+
+  @@map("tipo_unidad")
+  @@schema("flota")
+}
+
+enum CategoriaPeso {
+  pesado
+  liviano
+
+  @@map("categoria_peso")
+  @@schema("flota")
+}
+
+enum TipoLectura {
+  horometro
+  odometro
+
+  @@map("tipo_lectura")
+  @@schema("flota")
+}
+
+enum FuenteLectura {
+  carga_inicial
+  manual
+  inspeccion
+  reporte_unidad
+  mantenimiento
+
+  @@map("fuente_lectura")
+  @@schema("flota")
+}
+
+enum TipoServicioPreventivo {
+  a
+  b
+
+  @@map("tipo_servicio_preventivo")
+  @@schema("flota")
+}
+
+enum MetricaPreventiva {
+  horas
+  km
+  dias
+
+  @@map("metrica_preventiva")
+  @@schema("flota")
+}
+
+enum OrigenRegistro {
+  carga_inicial
+  aplicacion
+
+  @@map("origen_registro")
+  @@schema("flota")
+}
+
+enum EjecutadoPor {
+  interno
+  tercero
+
+  @@map("ejecutado_por")
+  @@schema("flota")
+}
+
+/// Proveedores externos de mantenimiento.
+model ProveedorMantenimiento {
+  id        String   @id @db.Uuid
+  nombre    String   @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  unidades    Unidad[]
+  preventivos UnidadPreventivo[]
+
+  @@map("proveedor_mantenimiento")
+  @@schema("flota")
+}
+
+/// Reglas del Plan de Mantenimiento 2026 (MAN-002): qué se controla, cada cuánto y con qué tolerancia.
+model ReglaPreventiva {
+  codigo       String                  @id
+  tipoUnidad   TipoUnidad              @map("tipo_unidad")
+  tipoServicio TipoServicioPreventivo? @map("tipo_servicio")
+  metrica      MetricaPreventiva
+  intervalo    Int
+  tolerancia   Int                     @default(0)
+  descripcion  String
+  activa       Boolean                 @default(true)
+
+  @@map("regla_preventiva")
+  @@schema("flota")
+}
+
+/// Unidad operativa de Dynadrill. Los datos de matrícula (placa, marca, modelo, año) salen de `catalogos.vehiculo`.
+model Unidad {
+  id                       String         @id @db.Uuid
+  codigo                   String         @unique
+  nombre                   String
+  tipo                     TipoUnidad
+  categoriaPeso            CategoriaPeso? @map("categoria_peso")
+  vehiculoId               String?        @unique @map("vehiculo_id") @db.Uuid
+  vehiculo                 CatVehiculo?   @relation(fields: [vehiculoId], references: [id])
+  proveedorMantenimientoId String?        @map("proveedor_mantenimiento_id") @db.Uuid
+  proveedorMantenimiento   ProveedorMantenimiento? @relation(fields: [proveedorMantenimientoId], references: [id])
+  fechaMatricula           DateTime?      @map("fecha_matricula") @db.Date
+  caducidadMatricula       DateTime?      @map("caducidad_matricula") @db.Date
+  caducidadPoliza          DateTime?      @map("caducidad_poliza") @db.Date
+  vigenciaOtroDocumento    DateTime?      @map("vigencia_otro_documento") @db.Date
+  responsablePatrimonialId String?        @map("responsable_patrimonial_id") @db.Uuid
+  responsablePatrimonial   IdUsuario?     @relation("unidadResponsable", fields: [responsablePatrimonialId], references: [id])
+  predeterminada           Boolean        @default(false)
+  nota                     String?
+  activa                   Boolean        @default(true)
+  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?        @map("created_by") @db.Uuid
+  updatedAt                DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?        @map("updated_by") @db.Uuid
+
+  lecturas    UnidadLectura[]
+  preventivos UnidadPreventivo[]
+
+  @@index([tipo])
+  @@map("unidad")
+  @@schema("flota")
+}
+
+/// Histórico de lecturas. La vigente es la más reciente por unidad y tipo.
+model UnidadLectura {
+  id            String        @id @db.Uuid
+  unidadId      String        @map("unidad_id") @db.Uuid
+  unidad        Unidad        @relation(fields: [unidadId], references: [id], onDelete: Cascade)
+  tipo          TipoLectura
+  valor         Decimal       @db.Decimal(12, 1)
+  leidaAt       DateTime      @map("leida_at") @db.Timestamptz(6)
+  fuente        FuenteLectura
+  registradaPor String?       @map("registrada_por") @db.Uuid
+  registrador   IdUsuario?    @relation("lecturaRegistrador", fields: [registradaPor], references: [id])
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  preventivos UnidadPreventivo[]
+  anulacion   UnidadLecturaAnulacion?
+
+  @@index([unidadId, tipo, leidaAt(sort: Desc)])
+  @@map("unidad_lectura")
+  @@schema("flota")
+}
+
+/// Mantenimiento preventivo ejecutado. El horómetro o kilometraje de ese momento es una lectura, no una columna.
+model UnidadPreventivo {
+  id                       String                  @id @db.Uuid
+  unidadId                 String                  @map("unidad_id") @db.Uuid
+  unidad                   Unidad                  @relation(fields: [unidadId], references: [id], onDelete: Cascade)
+  tipoServicio             TipoServicioPreventivo? @map("tipo_servicio")
+  fecha                    DateTime                @db.Date
+  lecturaId                String?                 @map("lectura_id") @db.Uuid
+  lectura                  UnidadLectura?          @relation(fields: [lecturaId], references: [id])
+  ejecutadoPor             EjecutadoPor            @map("ejecutado_por")
+  proveedorMantenimientoId String?                 @map("proveedor_mantenimiento_id") @db.Uuid
+  proveedorMantenimiento   ProveedorMantenimiento? @relation(fields: [proveedorMantenimientoId], references: [id])
+  responsableId            String?                 @map("responsable_id") @db.Uuid
+  responsable              IdUsuario?              @relation("preventivoResponsable", fields: [responsableId], references: [id])
+  observaciones            String?
+  checklistArchivoId       String?                 @map("checklist_archivo_id") @db.Uuid
+  checklistArchivo         ArchArchivo?            @relation(fields: [checklistArchivoId], references: [id])
+  origen                   OrigenRegistro          @default(aplicacion)
+  anulacion                UnidadPreventivoAnulacion?
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?                 @map("created_by") @db.Uuid
+
+  @@index([unidadId, fecha(sort: Desc)])
+  @@map("unidad_preventivo")
+  @@schema("flota")
+}
+
+/// Anulación de una lectura (la lectura no se edita ni se borra: se anula y se registra otra).
+model UnidadLecturaAnulacion {
+  lecturaId  String        @id @map("lectura_id") @db.Uuid
+  lectura    UnidadLectura @relation(fields: [lecturaId], references: [id], onDelete: Cascade)
+  anuladaAt  DateTime      @default(now()) @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor String        @map("anulada_por") @db.Uuid
+  motivo     String
+
+  @@map("unidad_lectura_anulacion")
+  @@schema("flota")
+}
+
+/// Anulación de un preventivo (misma regla: historia inmutable).
+model UnidadPreventivoAnulacion {
+  preventivoId String           @id @map("preventivo_id") @db.Uuid
+  preventivo   UnidadPreventivo @relation(fields: [preventivoId], references: [id], onDelete: Cascade)
+  anuladaAt    DateTime         @default(now()) @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor   String           @map("anulada_por") @db.Uuid
+  motivo       String
+
+  @@map("unidad_preventivo_anulacion")
+  @@schema("flota")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`, `archivos`), para obtener el nombre con JOIN
+// a partir de las FK. Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id,
+// nombre, email, activo y rol).
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatTipoVehiculo {
+  id        String        @id @db.Uuid
+  nombre    String
+  vehiculos CatVehiculo[]
+
+  @@map("tipo_vehiculo")
+  @@schema("catalogos")
+}
+
+model CatVehiculo {
+  id             String           @id @db.Uuid
+  placa          String
+  marca          String?
+  modelo         String?
+  anio           Int?
+  tipoVehiculoId String?          @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo   CatTipoVehiculo? @relation(fields: [tipoVehiculoId], references: [id])
+  habilitado     Boolean          @default(true)
+  unidad         Unidad?
+
+  @@map("vehiculo")
+  @@schema("catalogos")
+}
+
+/// `identidad.rol`: para comprobar el rol de las cuentas que se eligen.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String
+  nombre   String
+  usuarios IdUsuario[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  unidadesResponsable Unidad[]           @relation("unidadResponsable")
+  lecturas            UnidadLectura[]    @relation("lecturaRegistrador")
+  preventivos         UnidadPreventivo[] @relation("preventivoResponsable")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// `archivos.archivo`: solo los datos descriptivos (nunca la clave del blob).
+model ArchArchivo {
+  id             String  @id @db.Uuid
+  nombreOriginal String  @map("nombre_original")
+  mimeType       String  @map("mime_type")
+  tamanoBytes    BigInt  @map("tamano_bytes")
+  subidoPor      String  @map("subido_por") @db.Uuid
+
+  preventivos UnidadPreventivo[]
+
+  @@map("archivo")
+  @@schema("archivos")
+}
