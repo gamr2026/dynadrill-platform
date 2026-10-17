@@ -5,6 +5,7 @@
 import type { Pool } from 'pg';
 
 export interface MaestrosDePrueba {
+  bodegas?: Array<{ id: string; nombre: string }>;
   usuarios?: Array<{
     id: string;
     nombre: string;
@@ -22,6 +23,12 @@ export async function sembrarMaestros(admin: Pool, m: MaestrosDePrueba): Promise
       (r: { id: string; codigo: string }) => [r.codigo, r.id],
     ),
   );
+  for (const b of m.bodegas ?? []) {
+    await admin.query(
+      'INSERT INTO catalogos.bodega (id, nombre) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
+      [b.id, b.nombre],
+    );
+  }
   for (const u of m.usuarios ?? []) {
     const rolId = roles.get(u.rol);
     if (!rolId) throw new Error(`El rol ${u.rol} no existe en identidad.rol`);
@@ -42,6 +49,9 @@ export async function sembrarMaestros(admin: Pool, m: MaestrosDePrueba): Promise
 
 /** Quita lo sembrado. Lo que aún esté referenciado por otro dato se deja (no es un error de la prueba). */
 export async function quitarMaestros(admin: Pool, m: MaestrosDePrueba): Promise<void> {
+  for (const b of m.bodegas ?? []) {
+    await admin.query('DELETE FROM catalogos.bodega WHERE id = $1', [b.id]).catch(() => undefined);
+  }
   const ids = (m.usuarios ?? []).map((u) => u.id);
   if (!ids.length) return;
   await admin.query('DELETE FROM identidad.usuario_perfil WHERE usuario_id = ANY($1::uuid[])', [

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PumpingEventosConsumer } from './consumers/pumping-eventos.consumer';
+import { EpiConsultaService } from './epi/epi-consulta.service';
 import { EpiController } from './epi/epi.controller';
+import { EpiRenglonesService } from './epi/epi-renglones.service';
 import { EpiService } from './epi/epi.service';
 import { PrismaService } from './prisma/prisma.service';
 
@@ -13,7 +15,13 @@ import { PrismaService } from './prisma/prisma.service';
  */
 @Module({
   controllers: [EpiController],
-  providers: [PrismaService, EpiService, PumpingEventosConsumer],
+  providers: [
+    PrismaService,
+    EpiService,
+    EpiConsultaService,
+    EpiRenglonesService,
+    PumpingEventosConsumer,
+  ],
   exports: [EpiService],
 })
 export class QhseModule {}

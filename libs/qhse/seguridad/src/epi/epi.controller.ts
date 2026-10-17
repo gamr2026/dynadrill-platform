@@ -18,6 +18,7 @@ import {
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { EstadoEpi } from '../generated/client';
+import { EpiConsultaService } from './epi-consulta.service';
 import { EpiService } from './epi.service';
 
 const P = Permission;
@@ -33,8 +34,8 @@ export class ListarEntregasDto {
 export class RenglonDto {
   @IsUUID() elementoId!: string;
   @IsInt() @Min(1) @Max(1000) cantidad!: number;
-  @IsOptional() @IsString() @MaxLength(30) talla?: string;
-  @IsOptional() @IsString() @MaxLength(60) codigo?: string;
+  /** Talla del catálogo; obligatoria solo si el elemento lleva talla (del tipo que corresponde). */
+  @IsOptional() @IsUUID() tallaId?: string;
   @IsBoolean() recibioCapacitacion!: boolean;
   @IsOptional() @IsString() @MaxLength(500) observaciones?: string;
   @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) entregadoEl?: string;
@@ -45,7 +46,8 @@ export class CrearEntregaDto {
   @IsUUID() trabajadorId!: string;
   /** Ticket que origina la entrega (debe ser uno que QHSE ya conoce); sin ticket para entregas sueltas. */
   @IsOptional() @IsUUID() ticketId?: string;
-  @IsOptional() @IsString() @MaxLength(200) lugar?: string;
+  /** Base o bodega (catálogo) donde se entrega. */
+  @IsOptional() @IsUUID() lugarBodegaId?: string;
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(60)
@@ -55,7 +57,7 @@ export class CrearEntregaDto {
 }
 
 export class GuardarContenidoDto {
-  @IsOptional() @IsString() @MaxLength(200) lugar?: string;
+  @IsOptional() @IsUUID() lugarBodegaId?: string;
   @IsArray()
   @ArrayMaxSize(60)
   @ValidateNested({ each: true })
@@ -73,24 +75,39 @@ export class MotivoDto {
  */
 @Controller('qhse/epi')
 export class EpiController {
-  constructor(private readonly epi: EpiService) {}
+  constructor(
+    private readonly epi: EpiService,
+    private readonly consulta: EpiConsultaService,
+  ) {}
 
   @RequirePermission(P.EPI_VER)
   @Get('elementos')
   elementos() {
-    return this.epi.elementos();
+    return this.consulta.elementos();
+  }
+
+  @RequirePermission(P.EPI_VER)
+  @Get('tallas')
+  tallas() {
+    return this.consulta.tallas();
+  }
+
+  @RequirePermission(P.EPI_VER)
+  @Get('lugares')
+  lugares() {
+    return this.consulta.lugares();
   }
 
   @RequirePermission(P.EPI_VER)
   @Get()
   listar(@Query() q: ListarEntregasDto) {
-    return this.epi.listar(q);
+    return this.consulta.listar(q);
   }
 
   @RequirePermission(P.EPI_VER)
   @Get(':id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
-    return this.epi.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   @RequirePermission(P.EPI_CREAR)

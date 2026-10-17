@@ -57,7 +57,9 @@ const OP1 = {
 };
 const OP2 = { id: uuidv7(), nombre: 'Olga Operadora' };
 const OP_INACTIVO = { id: uuidv7(), nombre: 'Ismael Inactivo' };
+const BODEGA = { id: uuidv7(), nombre: `Base de prueba ${n}` };
 const MAESTROS: MaestrosDePrueba = {
+  bodegas: [BODEGA],
   usuarios: [
     { ...TECNICO, rol: 'tecnico_hse' },
     { ...GERENTE, rol: 'gerente_hse' },
@@ -146,16 +148,22 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
         [ticketId, tipo],
       )
     ).rows as Array<{ tipo: string; datos: { source: string; data: Record<string, unknown> } }>;
-  let elementos: Array<{ id: string; nombre: string; requiereTalla: boolean }> = [];
-  const renglon = (conTalla = false) => {
-    const el = elementos.find((e) => e.requiereTalla === conTalla) as (typeof elementos)[number];
-    return {
-      elementoId: el.id,
-      cantidad: 2,
-      ...(conTalla ? { talla: 'L' } : {}),
-      recibioCapacitacion: true,
-    };
-  };
+  type Elemento = { id: string; codigo: string; tipoTalla: string | null };
+  let elementos: Elemento[] = [];
+  let tallas: Array<{ id: string; tipo: string; codigo: string }> = [];
+  const elemento = (codigo: string) => elementos.find((e) => e.codigo === codigo) as Elemento;
+  const talla = (tipo: string, codigo: string) =>
+    tallas.find((t) => t.tipo === tipo && t.codigo === codigo) as (typeof tallas)[number];
+  /** Un renglón válido: con talla de guante si se pide, o un casco (que no lleva talla). */
+  const renglon = (conTalla = false) =>
+    conTalla
+      ? {
+          elementoId: elemento('guantes_nitrilo').id,
+          cantidad: 2,
+          tallaId: talla('guante', '9').id,
+          recibioCapacitacion: true,
+        }
+      : { elementoId: elemento('casco').id, cantidad: 2, recibioCapacitacion: true };
 
   beforeAll(async () => {
     await sembrarMaestros(admin, MAESTROS);
@@ -195,8 +203,9 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     consumer = app.get(PumpingEventosConsumer);
     elementos = await prisma.epiElemento.findMany({
       where: { activo: true },
-      select: { id: true, nombre: true, requiereTalla: true },
+      select: { id: true, codigo: true, tipoTalla: true },
     });
+    tallas = await prisma.epiTalla.findMany({ select: { id: true, tipo: true, codigo: true } });
   });
 
   afterAll(async () => {
@@ -375,12 +384,12 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       expect(sinRenglones.body.detail).toMatch(/al menos un elemento/);
 
       // un elemento que exige talla no se acepta sin ella
-      const el = elementos.find((x) => x.requiereTalla) as (typeof elementos)[number];
+      const el = elemento('guantes_nitrilo');
       await http()
         .put(`/api/qhse/epi/${entregaId}/contenido`)
         .set(tecnico())
         .send({
-          lugar: 'Base Shushufindi',
+          lugarBodegaId: BODEGA.id,
           renglones: [{ elementoId: el.id, cantidad: 1, recibioCapacitacion: true }],
         })
         .expect(400);
@@ -407,7 +416,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       await http()
         .put(`/api/qhse/epi/${entregaId}/contenido`)
         .set(tecnico())
-        .send({ lugar: 'Base Shushufindi', renglones: [renglon(false), renglon(true)] })
+        .send({ lugarBodegaId: BODEGA.id, renglones: [renglon(false), renglon(true)] })
         .expect(200);
       const sinFirma = await http()
         .post(`/api/qhse/epi/${entregaId}/despachar`)
@@ -540,11 +549,14 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
         .send({
           trabajadorId: OP2.id,
           ticketId,
-          lugar: 'Base Lago Agrio',
+          lugarBodegaId: BODEGA.id,
           renglones: [renglon(false)],
         })
         .expect(201);
-      expect(nueva.body).toMatchObject({ estado: 'solicitado', lugar: 'Base Lago Agrio' });
+      expect(nueva.body).toMatchObject({
+        estado: 'solicitado',
+        lugar: { id: BODEGA.id, nombre: BODEGA.nombre },
+      });
       expect(nueva.body.renglones).toHaveLength(1);
       expect((await entregasDe(ticketId)).length).toBe(2);
     });
@@ -555,7 +567,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       const sinTicket = await http()
         .post('/api/qhse/epi')
         .set(tecnico())
-        .send({ trabajadorId: OP1.id, lugar: 'Oficina Quito' })
+        .send({ trabajadorId: OP1.id, lugarBodegaId: BODEGA.id })
         .expect(201);
       expect(sinTicket.body.ticket).toBeNull();
       const pub = await salida(sinTicket.body.id);
@@ -599,14 +611,16 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('el catálogo de elementos trae los activos, con su regla de talla', async () => {
       const r = await http().get('/api/qhse/epi/elementos').set(soloVer()).expect(200);
       expect(r.body.length).toBeGreaterThanOrEqual(12);
-      expect(
-        r.body.find((x: { nombre: string }) => x.nombre === 'Casco de seguridad'),
-      ).toMatchObject({
-        requiereTalla: false,
+      expect(r.body.find((x: { codigo: string }) => x.codigo === 'casco')).toMatchObject({
+        tipoTalla: null,
       });
-      expect(r.body.find((x: { nombre: string }) => x.nombre === 'Overol')).toMatchObject({
-        requiereTalla: true,
+      expect(r.body.find((x: { codigo: string }) => x.codigo === 'overol')).toMatchObject({
+        tipoTalla: 'ropa',
       });
+      const t = await http().get('/api/qhse/epi/tallas').set(soloVer()).expect(200);
+      expect(t.body.filter((x: { tipo: string }) => x.tipo === 'calzado')).toHaveLength(12);
+      const l = await http().get('/api/qhse/epi/lugares').set(soloVer()).expect(200);
+      expect(l.body.some((x: { id: string }) => x.id === BODEGA.id)).toBe(true);
     });
   });
 
@@ -690,6 +704,140 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       await expect(
         prisma.epiEntrega.create({ data: { id: uuidv7(), trabajadorId: OP1.id, ticketId } }),
       ).rejects.toThrow();
+    });
+
+    /** Una entrega despachada por la API, para probar lo que la base impide aunque el servicio se equivoque. */
+    const despachada = async () => {
+      const ticketId = uuidv7();
+      await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      const [e] = await entregasDe(ticketId);
+      await http().post(`/api/qhse/epi/${e.id}/aprobar`).set(tecnico()).expect(201);
+      await http()
+        .put(`/api/qhse/epi/${e.id}/contenido`)
+        .set(tecnico())
+        .send({ lugarBodegaId: BODEGA.id, renglones: [renglon(false), renglon(true)] })
+        .expect(200);
+      await http().post(`/api/qhse/epi/${e.id}/firma-trabajador`).set(tecnico()).expect(201);
+      await http().post(`/api/qhse/epi/${e.id}/despachar`).set(tecnico()).expect(201);
+      return e.id;
+    };
+
+    it('tras el despacho la base no deja agregar, cambiar ni quitar renglones, ni tocar la entrega firmada', async () => {
+      const id = await despachada();
+      const [item] = await prisma.epiEntregaItem.findMany({ where: { entregaId: id } });
+      await expect(
+        prisma.epiEntregaItem.create({
+          data: {
+            id: uuidv7(),
+            entregaId: id,
+            elementoId: elemento('casco').id,
+            cantidad: 1,
+            recibioCapacitacion: true,
+          },
+        }),
+      ).rejects.toThrow(/no se pueden cambiar/);
+      await expect(
+        prisma.epiEntregaItem.update({ where: { id: item.id }, data: { cantidad: 99 } }),
+      ).rejects.toThrow(/no se pueden cambiar/);
+      await expect(prisma.epiEntregaItem.delete({ where: { id: item.id } })).rejects.toThrow(
+        /no se pueden cambiar/,
+      );
+      // la cabecera firmada tampoco se reescribe (ni el lugar ni el trabajador), pero Talento Humano sí puede completar su firma
+      await expect(
+        prisma.epiEntrega.update({ where: { id }, data: { lugarBodegaId: null } }),
+      ).rejects.toThrow(/no se puede modificar/);
+      await expect(
+        prisma.epiEntrega.update({ where: { id }, data: { trabajadorId: OP2.id } }),
+      ).rejects.toThrow(/no se puede modificar/);
+      await http().post(`/api/qhse/epi/${id}/firma-talento-humano`).set(tecnico()).expect(201);
+      // y una entrega rechazada tampoco admite renglones
+      const ticketId = uuidv7();
+      await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      const [r] = await entregasDe(ticketId);
+      await http()
+        .post(`/api/qhse/epi/${r.id}/rechazar`)
+        .set(tecnico())
+        .send({ motivo: 'No corresponde' })
+        .expect(201);
+      await expect(
+        prisma.epiEntregaItem.create({
+          data: {
+            id: uuidv7(),
+            entregaId: r.id,
+            elementoId: elemento('casco').id,
+            cantidad: 1,
+            recibioCapacitacion: false,
+          },
+        }),
+      ).rejects.toThrow(/no se pueden cambiar/);
+    });
+
+    it('la talla debe ser del tipo que lleva el elemento (la base lo exige aunque el servicio no lo revise)', async () => {
+      const ticketId = uuidv7();
+      await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      const [e] = await entregasDe(ticketId);
+      const base = { entregaId: e.id, cantidad: 1, recibioCapacitacion: false };
+      const nuevoItem = (elementoId: string, tallaId?: string) =>
+        prisma.epiEntregaItem.create({
+          data: { id: uuidv7(), elementoId, tallaId: tallaId ?? null, ...base },
+        });
+      // guantes con una talla de calzado, guantes sin talla y casco con talla
+      await expect(
+        nuevoItem(elemento('guantes_nitrilo').id, talla('calzado', '40').id),
+      ).rejects.toThrow(/no es del tipo/);
+      await expect(nuevoItem(elemento('guantes_nitrilo').id)).rejects.toThrow(/exige una talla/);
+      await expect(nuevoItem(elemento('casco').id, talla('ropa', 'M').id)).rejects.toThrow(
+        /no lleva talla/,
+      );
+      await expect(
+        nuevoItem(elemento('guantes_nitrilo').id, talla('guante', '8').id),
+      ).resolves.toBeDefined();
+      // y el servicio da el mismo rechazo con un mensaje claro
+      const r = await http()
+        .put(`/api/qhse/epi/${e.id}/contenido`)
+        .set(tecnico())
+        .send({
+          renglones: [
+            {
+              elementoId: elemento('overol').id,
+              cantidad: 1,
+              recibioCapacitacion: true,
+              tallaId: talla('calzado', '40').id,
+            },
+          ],
+        })
+        .expect(400);
+      expect(r.body.detail).toMatch(/talla indicada no corresponde/);
+    });
+
+    it('el lugar y la talla son catálogos con FK, y el historial no admite borrar', async () => {
+      const ticketId = uuidv7();
+      await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      const [e] = await entregasDe(ticketId);
+      await expect(
+        prisma.epiEntrega.update({ where: { id: e.id }, data: { lugarBodegaId: uuidv7() } }),
+      ).rejects.toThrow();
+      await http()
+        .put(`/api/qhse/epi/${e.id}/contenido`)
+        .set(tecnico())
+        .send({ lugarBodegaId: uuidv7(), renglones: [] })
+        .expect(400);
+      const [h] = await prisma.epiEntregaHistorial.findMany({ where: { entregaId: e.id } });
+      await expect(
+        prisma.$executeRawUnsafe(
+          'DELETE FROM qhse.epi_entrega_historial WHERE id = $1::uuid',
+          h.id,
+        ),
+      ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
+    it('cada renglón queda auditado con quién lo registró', async () => {
+      const id = await despachada();
+      const items = await prisma.epiEntregaItem.findMany({ where: { entregaId: id } });
+      expect(items.length).toBe(2);
+      expect(items.every((i) => i.createdBy === TECNICO.id && i.updatedBy === TECNICO.id)).toBe(
+        true,
+      );
     });
   });
 });

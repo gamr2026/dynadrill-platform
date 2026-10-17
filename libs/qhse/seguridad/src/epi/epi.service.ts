@@ -10,65 +10,21 @@ import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import { EstadoEpi } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
-
-/** Lo que se registra por cada elemento entregado. El elemento sale del catálogo `epi_elemento` (nunca texto suelto). */
-export interface RenglonEntrada {
-  elementoId: string;
-  cantidad: number;
-  talla?: string | null;
-  codigo?: string | null;
-  recibioCapacitacion: boolean;
-  observaciones?: string | null;
-  /** AAAA-MM-DD; si no viene, hoy. */
-  entregadoEl?: string | null;
-}
-
-export interface CrearEntregaEntrada {
-  trabajadorId: string;
-  ticketId?: string | null;
-  lugar?: string | null;
-  renglones?: RenglonEntrada[];
-}
-
-export interface FiltroEntregas {
-  estado?: EstadoEpi;
-  ticketId?: string;
-  trabajadorId?: string;
-  q?: string;
-}
-
-type Tx = Prisma.TransactionClient;
+import { EpiConsultaService } from './epi-consulta.service';
+import { EpiRenglonesService } from './epi-renglones.service';
+import { codigoDe, texto, type RenglonEntrada, type Tx } from './epi-tipos';
 
 /** Estados en los que aún se pueden editar los renglones. */
 const EDITABLES: EstadoEpi[] = [EstadoEpi.solicitado, EstadoEpi.aprobado];
 
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
-const codigoDe = (numero: number) => `EPI-${String(numero).padStart(6, '0')}`;
-const texto = (s: string | null | undefined) => {
-  const t = s?.trim();
-  return t ? t : null;
-};
 
-const INCLUDE_LISTA = {
-  trabajador: { include: { perfil: true } },
-  ticket: true,
-  _count: { select: { items: true } },
-} satisfies Prisma.EpiEntregaInclude;
-
-const INCLUDE_DETALLE = {
-  trabajador: { include: { perfil: true, rol: true } },
-  ticket: true,
-  items: { include: { elemento: true }, orderBy: { elemento: { orden: 'asc' } } },
-  firmaTrabajador: true,
-  firmaTh: true,
-  aprobador: true,
-  rechazador: true,
-  despachador: true,
-  historial: { include: { actor: true }, orderBy: { createdAt: 'asc' } },
-} satisfies Prisma.EpiEntregaInclude;
-
-type EntregaLista = Prisma.EpiEntregaGetPayload<{ include: typeof INCLUDE_LISTA }>;
-type EntregaDetalle = Prisma.EpiEntregaGetPayload<{ include: typeof INCLUDE_DETALLE }>;
+export interface CrearEntregaEntrada {
+  trabajadorId: string;
+  ticketId?: string | null;
+  lugarBodegaId?: string | null;
+  renglones?: RenglonEntrada[];
+}
 
 /**
  * Entrega de EPI y ropa de trabajo (DYN-SGI-RE-032). Ciclo: solicitado → aprobado → despachado (o rechazado). QHSE abre una solicitud
@@ -80,51 +36,9 @@ export class EpiService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly consulta: EpiConsultaService,
+    private readonly renglones: EpiRenglonesService,
   ) {}
-
-  // ---------------------------------------------------------------------------------------------------------- lectura
-
-  async elementos() {
-    return this.prisma.epiElemento.findMany({
-      where: { activo: true },
-      orderBy: { orden: 'asc' },
-      select: { id: true, nombre: true, requiereTalla: true },
-    });
-  }
-
-  async listar(f: FiltroEntregas) {
-    const q = f.q?.trim();
-    const filas = await this.prisma.epiEntrega.findMany({
-      where: {
-        ...(f.estado ? { estado: f.estado } : {}),
-        ...(f.ticketId ? { ticketId: f.ticketId } : {}),
-        ...(f.trabajadorId ? { trabajadorId: f.trabajadorId } : {}),
-        ...(q
-          ? {
-              OR: [
-                { trabajador: { nombre: { contains: q, mode: 'insensitive' as const } } },
-                { trabajador: { perfil: { cedula: { contains: q } } } },
-                { lugar: { contains: q, mode: 'insensitive' as const } },
-                { ticket: { pedidoCodigo: { contains: q, mode: 'insensitive' as const } } },
-                ...(/^\d+$/.test(q)
-                  ? [{ numero: Number(q) }, { ticket: { ticketNumero: Number(q) } }]
-                  : []),
-              ],
-            }
-          : {}),
-      },
-      include: INCLUDE_LISTA,
-      orderBy: { createdAt: 'desc' },
-      take: 500,
-    });
-    return filas.map((e) => this.resumen(e));
-  }
-
-  async detalle(id: string) {
-    const e = await this.prisma.epiEntrega.findUnique({ where: { id }, include: INCLUDE_DETALLE });
-    if (!e) throw new NotFoundException('La entrega de EPI no existe');
-    return this.completo(e);
-  }
 
   // ------------------------------------------------------------------------------------------------------ escritura
 
@@ -142,30 +56,31 @@ export class EpiService {
         await this.exigirSinVigente(tx, ticketId, entrada.trabajadorId);
       }
       const renglones = entrada.renglones ?? [];
-      await this.validarRenglones(tx, renglones);
+      await this.renglones.validar(tx, renglones);
+      await this.exigirLugar(tx, entrada.lugarBodegaId);
       const nuevoId = uuidv7();
       await tx.epiEntrega.create({
         data: {
           id: nuevoId,
           trabajadorId: entrada.trabajadorId,
           ticketId,
-          lugar: texto(entrada.lugar),
+          lugarBodegaId: entrada.lugarBodegaId ?? null,
           createdBy: actor.id,
           updatedBy: actor.id,
         },
       });
-      await this.guardarRenglones(tx, nuevoId, renglones);
+      await this.renglones.reemplazar(tx, nuevoId, renglones, actor.id);
       await this.registrarCambio(tx, nuevoId, null, EstadoEpi.solicitado, null, actor.id);
       await this.publicar(tx, 'qhse.epi.solicitada', nuevoId, enActor(actor));
       return nuevoId;
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   /** Reemplaza los renglones y el lugar mientras la entrega no se haya despachado. */
   async guardarContenido(
     id: string,
-    entrada: { lugar?: string | null; renglones: RenglonEntrada[] },
+    entrada: { lugarBodegaId?: string | null; renglones: RenglonEntrada[] },
     actor: AuthUser,
   ) {
     await this.prisma.$transaction(async (tx) => {
@@ -175,18 +90,19 @@ export class EpiService {
           `La entrega está ${e.estado}: ya no se pueden cambiar sus renglones`,
         );
       }
-      await this.validarRenglones(tx, entrada.renglones);
+      await this.renglones.validar(tx, entrada.renglones);
+      await this.exigirLugar(tx, entrada.lugarBodegaId);
       await tx.epiEntregaItem.deleteMany({ where: { entregaId: id } });
-      await this.guardarRenglones(tx, id, entrada.renglones);
+      await this.renglones.reemplazar(tx, id, entrada.renglones, actor.id);
       await tx.epiEntrega.update({
         where: { id },
         data: {
-          ...(entrada.lugar !== undefined ? { lugar: texto(entrada.lugar) } : {}),
+          ...(entrada.lugarBodegaId !== undefined ? { lugarBodegaId: entrada.lugarBodegaId } : {}),
           updatedBy: actor.id,
         },
       });
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   async aprobar(id: string, actor: AuthUser) {
@@ -196,7 +112,7 @@ export class EpiService {
       evento: 'qhse.epi.aprobada',
       datos: () => ({ aprobadoPor: actor.id, aprobadoAt: new Date() }),
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   async rechazar(id: string, motivo: string, actor: AuthUser) {
@@ -209,7 +125,7 @@ export class EpiService {
       motivo: m,
       datos: () => ({ rechazadoPor: actor.id, rechazadoAt: new Date(), motivoRechazo: m }),
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   /** Solo se despacha lo aprobado, con lugar, al menos un renglón y la declaración del trabajador. */
@@ -221,13 +137,17 @@ export class EpiService {
       validar: async (tx) => {
         const e = await tx.epiEntrega.findUniqueOrThrow({
           where: { id },
-          select: { lugar: true, firmaTrabajadorAt: true, _count: { select: { items: true } } },
+          select: {
+            lugarBodegaId: true,
+            firmaTrabajadorAt: true,
+            _count: { select: { items: true } },
+          },
         });
         if (e._count.items === 0)
           throw new BadRequestException(
             'Registre al menos un elemento entregado antes de despachar',
           );
-        if (!e.lugar)
+        if (!e.lugarBodegaId)
           throw new BadRequestException('Indique el lugar de la entrega antes de despachar');
         if (!e.firmaTrabajadorAt)
           throw new BadRequestException(
@@ -236,7 +156,7 @@ export class EpiService {
       },
       datos: () => ({ despachadoPor: actor.id, despachadoAt: new Date() }),
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   /** Corrige un despacho hecho por error: vuelve a `aprobado` y reabre el requisito del ticket (`qhse.epi.revertida`). */
@@ -250,19 +170,19 @@ export class EpiService {
       motivo: m,
       datos: () => ({ despachadoPor: null, despachadoAt: null }),
     });
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   /** Declaración del trabajador ("Firmo y acepto ser responsable..."): firma de una línea, con la hora del servidor. */
   async firmarTrabajador(id: string, actor: AuthUser) {
     await this.firmar(id, actor, 'trabajador');
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   /** "Recibe conforme Talento Humano": cierra el expediente. Solo tiene sentido después de despachar. */
   async firmarTalentoHumano(id: string, actor: AuthUser) {
     await this.firmar(id, actor, 'th');
-    return this.detalle(id);
+    return this.consulta.detalle(id);
   }
 
   // ----------------------------------------------------------------------------------------------- uso desde consumidores
@@ -362,6 +282,13 @@ export class EpiService {
       throw new BadRequestException('El trabajador indicado no existe o está inactivo');
   }
 
+  private async exigirLugar(tx: Tx, lugarBodegaId: string | null | undefined) {
+    if (!lugarBodegaId) return;
+    const b = await tx.catBodega.findUnique({ where: { id: lugarBodegaId } });
+    if (!b || !b.habilitado)
+      throw new BadRequestException('La base o bodega indicada no existe o está deshabilitada');
+  }
+
   private async exigirSinVigente(tx: Tx, ticketId: string, trabajadorId: string) {
     const vigente = await tx.epiEntrega.findFirst({
       where: { ticketId, trabajadorId, estado: { not: EstadoEpi.rechazado } },
@@ -371,36 +298,6 @@ export class EpiService {
       throw new ConflictException(
         `El trabajador ya tiene la entrega ${codigoDe(vigente.numero)} para este ticket`,
       );
-  }
-
-  private async validarRenglones(tx: Tx, renglones: RenglonEntrada[]) {
-    if (!renglones.length) return;
-    const ids = [...new Set(renglones.map((r) => r.elementoId))];
-    const elementos = await tx.epiElemento.findMany({ where: { id: { in: ids } } });
-    for (const r of renglones) {
-      const el = elementos.find((x) => x.id === r.elementoId);
-      if (!el || !el.activo)
-        throw new BadRequestException('Algún elemento indicado no existe en el catálogo de EPI');
-      if (el.requiereTalla && !texto(r.talla))
-        throw new BadRequestException(`Indique la talla de: ${el.nombre}`);
-    }
-  }
-
-  private async guardarRenglones(tx: Tx, entregaId: string, renglones: RenglonEntrada[]) {
-    if (!renglones.length) return;
-    await tx.epiEntregaItem.createMany({
-      data: renglones.map((r) => ({
-        id: uuidv7(),
-        entregaId,
-        elementoId: r.elementoId,
-        cantidad: r.cantidad,
-        talla: texto(r.talla),
-        codigo: texto(r.codigo),
-        recibioCapacitacion: r.recibioCapacitacion,
-        observaciones: texto(r.observaciones),
-        ...(r.entregadoEl ? { entregadoEl: new Date(`${r.entregadoEl}T00:00:00.000Z`) } : {}),
-      })),
-    });
   }
 
   private async registrarCambio(
@@ -461,87 +358,5 @@ export class EpiService {
         traceparent: currentTraceparent(),
       }),
     );
-  }
-
-  private resumen(e: EntregaLista) {
-    return {
-      id: e.id,
-      numero: e.numero,
-      codigo: codigoDe(e.numero),
-      estado: e.estado,
-      lugar: e.lugar,
-      trabajador: {
-        id: e.trabajador.id,
-        nombre: e.trabajador.nombre,
-        cedula: e.trabajador.perfil?.cedula ?? null,
-        cargo: e.trabajador.perfil?.cargo ?? null,
-      },
-      ticket: e.ticket
-        ? {
-            id: e.ticket.ticketId,
-            numero: e.ticket.ticketNumero,
-            pedidoId: e.ticket.pedidoId,
-            pedidoCodigo: e.ticket.pedidoCodigo,
-          }
-        : null,
-      renglones: e._count.items,
-      firmadaPorTrabajador: e.firmaTrabajadorAt !== null,
-      firmadaPorTalentoHumano: e.firmaThAt !== null,
-      createdAt: e.createdAt,
-    };
-  }
-
-  private completo(e: EntregaDetalle) {
-    const persona = (u: { id: string; nombre: string } | null, at: Date | null) =>
-      u && at ? { usuarioId: u.id, nombre: u.nombre, at } : null;
-    return {
-      id: e.id,
-      numero: e.numero,
-      codigo: codigoDe(e.numero),
-      estado: e.estado,
-      lugar: e.lugar,
-      trabajador: {
-        id: e.trabajador.id,
-        nombre: e.trabajador.nombre,
-        cedula: e.trabajador.perfil?.cedula ?? null,
-        cargo: e.trabajador.perfil?.cargo ?? e.trabajador.rol.nombre,
-      },
-      ticket: e.ticket
-        ? {
-            id: e.ticket.ticketId,
-            numero: e.ticket.ticketNumero,
-            pedidoId: e.ticket.pedidoId,
-            pedidoCodigo: e.ticket.pedidoCodigo,
-          }
-        : null,
-      renglones: e.items.map((i) => ({
-        id: i.id,
-        elementoId: i.elementoId,
-        elemento: i.elemento.nombre,
-        cantidad: i.cantidad,
-        talla: i.talla,
-        codigo: i.codigo,
-        recibioCapacitacion: i.recibioCapacitacion,
-        observaciones: i.observaciones,
-        entregadoEl: i.entregadoEl.toISOString().slice(0, 10),
-      })),
-      firmaTrabajador: persona(e.firmaTrabajador, e.firmaTrabajadorAt),
-      firmaTalentoHumano: persona(e.firmaTh, e.firmaThAt),
-      aprobado: persona(e.aprobador, e.aprobadoAt),
-      rechazado:
-        e.rechazador && e.rechazadoAt
-          ? { ...persona(e.rechazador, e.rechazadoAt), motivo: e.motivoRechazo }
-          : null,
-      despachado: persona(e.despachador, e.despachadoAt),
-      historial: e.historial.map((h) => ({
-        estadoAnterior: h.estadoAnterior,
-        estadoNuevo: h.estadoNuevo,
-        motivo: h.motivo,
-        actor: h.actor?.nombre ?? null,
-        at: h.createdAt,
-      })),
-      createdAt: e.createdAt,
-      updatedAt: e.updatedAt,
-    };
   }
 }

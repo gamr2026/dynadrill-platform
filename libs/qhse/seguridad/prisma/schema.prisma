@@ -12,7 +12,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["qhse", "identidad"]
+  schemas  = ["qhse", "identidad", "catalogos"]
 }
 
 enum EstadoEpi {
@@ -22,6 +22,15 @@ enum EstadoEpi {
   rechazado
 
   @@map("estado_epi")
+  @@schema("qhse")
+}
+
+enum TipoTalla {
+  ropa
+  calzado
+  guante
+
+  @@map("tipo_talla")
   @@schema("qhse")
 }
 
@@ -43,15 +52,42 @@ model TicketRef {
 
 /// Catálogo de elementos de protección individual y ropa de trabajo.
 model EpiElemento {
-  id            String  @id @db.Uuid
-  nombre        String
-  requiereTalla Boolean @default(false) @map("requiere_talla")
-  orden         Int
-  activo        Boolean @default(true)
+  id        String     @id @db.Uuid
+  /// Código estable (minúsculas y guion bajo): el comportamiento nunca se decide comparando nombres.
+  codigo    String     @unique
+  nombre    String
+  /// Tipo de talla que lleva el elemento; `null` = no lleva talla.
+  tipoTalla TipoTalla? @map("tipo_talla")
+  orden     Int
+  activo    Boolean    @default(true)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?    @map("created_by") @db.Uuid
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?    @map("updated_by") @db.Uuid
 
   items EpiEntregaItem[]
 
   @@map("epi_elemento")
+  @@schema("qhse")
+}
+
+/// Tallas por tipo (ropa, calzado, guante).
+model EpiTalla {
+  id        String   @id @db.Uuid
+  tipo      TipoTalla
+  codigo    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  items EpiEntregaItem[]
+
+  @@unique([tipo, codigo])
+  @@unique([tipo, orden])
+  @@map("epi_talla")
   @@schema("qhse")
 }
 
@@ -63,7 +99,9 @@ model EpiEntrega {
   trabajador         IdUsuario @relation("epiTrabajador", fields: [trabajadorId], references: [id])
   ticketId           String?   @map("ticket_id") @db.Uuid
   ticket             TicketRef? @relation(fields: [ticketId], references: [ticketId])
-  lugar              String?
+  /// Base o bodega donde se entrega (catalogos.bodega).
+  lugarBodegaId      String?   @map("lugar_bodega_id") @db.Uuid
+  lugar              CatBodega? @relation(fields: [lugarBodegaId], references: [id])
   estado             EstadoEpi @default(solicitado)
   firmaTrabajadorPor String?   @map("firma_trabajador_por") @db.Uuid
   firmaTrabajador    IdUsuario? @relation("epiFirmaTrabajador", fields: [firmaTrabajadorPor], references: [id])
@@ -92,6 +130,7 @@ model EpiEntrega {
   historial EpiEntregaHistorial[]
 
   @@index([trabajadorId])
+  @@index([lugarBodegaId])
   @@index([estado])
   @@map("epi_entrega")
   @@schema("qhse")
@@ -104,12 +143,15 @@ model EpiEntregaItem {
   elementoId          String      @map("elemento_id") @db.Uuid
   elemento            EpiElemento @relation(fields: [elementoId], references: [id])
   cantidad            Int
-  talla               String?
-  /// Código del artículo entregado (la cédula del trabajador sale de su perfil, no se captura aquí).
-  codigo              String?
+  tallaId             String?     @map("talla_id") @db.Uuid
+  talla               EpiTalla?   @relation(fields: [tallaId], references: [id])
   recibioCapacitacion Boolean     @default(false) @map("recibio_capacitacion")
   observaciones       String?
   entregadoEl         DateTime    @default(now()) @map("entregado_el") @db.Date
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy           String?     @map("created_by") @db.Uuid
+  updatedAt           DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy           String?     @map("updated_by") @db.Uuid
 
   @@index([entregaId])
   @@map("epi_entrega_item")
@@ -183,4 +225,15 @@ model IdUsuarioPerfil {
 
   @@map("usuario_perfil")
   @@schema("identidad")
+}
+
+/// `catalogos.bodega`: el lugar de la entrega (solo id, nombre y si está habilitada).
+model CatBodega {
+  id         String       @id @db.Uuid
+  nombre     String
+  habilitado Boolean
+  entregas   EpiEntrega[]
+
+  @@map("bodega")
+  @@schema("catalogos")
 }
