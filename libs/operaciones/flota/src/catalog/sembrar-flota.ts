@@ -162,7 +162,12 @@ export const UNIDADES_INICIALES: UnidadSemilla[] = [
     caducidadPoliza: '2027-03-01',
     predeterminada: true,
     preventivos: [
-      { tipoServicio: null, fecha: '2026-07-10', valor: 85000, proveedor: 'Lubricentro Norte S.A.' },
+      {
+        tipoServicio: null,
+        fecha: '2026-07-10',
+        valor: 85000,
+        proveedor: 'Lubricentro Norte S.A.',
+      },
     ],
   },
   {
@@ -195,10 +200,14 @@ export async function sembrarFlota(prisma: PrismaClient) {
   }
   let unidades = 0;
   for (const u of UNIDADES_INICIALES) {
-    if (await prisma.unidad.findUnique({ where: { codigo: u.codigo }, select: { id: true } })) continue;
+    if (await prisma.unidad.findUnique({ where: { codigo: u.codigo }, select: { id: true } }))
+      continue;
     // Se liga al vehículo del catálogo por la placa, solo si ya existe y no lo usa otra unidad.
     const vehiculo = u.placa
-      ? await prisma.catVehiculo.findFirst({ where: { placa: u.placa, unidad: null }, select: { id: true } })
+      ? await prisma.catVehiculo.findFirst({
+          where: { placa: u.placa, unidad: null },
+          select: { id: true },
+        })
       : null;
     const id = uuidv7();
     await prisma.$transaction(async (tx) => {
@@ -216,7 +225,8 @@ export async function sembrarFlota(prisma: PrismaClient) {
           predeterminada: u.predeterminada ?? false,
         },
       });
-      const tipoLectura = u.tipo === 'servicio' ? 'horometro' : u.tipo === 'transporte' ? 'odometro' : null;
+      const tipoLectura =
+        u.tipo === 'servicio' ? 'horometro' : u.tipo === 'transporte' ? 'odometro' : null;
       for (const p of u.preventivos) {
         let lecturaId: string | null = null;
         if (tipoLectura && p.valor !== null) {

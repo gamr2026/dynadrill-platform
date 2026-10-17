@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { currentTraceparent } from '@dyn/common';
 import { createEvent, EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -38,7 +43,11 @@ const fechaDia = (s: string | null | undefined) => (s ? new Date(`${s}T00:00:00.
 const dia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 type UnidadConRelaciones = Prisma.UnidadGetPayload<{
-  include: { vehiculo: { include: { tipoVehiculo: true } }; proveedorMantenimiento: true; responsablePatrimonial: true };
+  include: {
+    vehiculo: { include: { tipoVehiculo: true } };
+    proveedorMantenimiento: true;
+    responsablePatrimonial: true;
+  };
 }>;
 
 const INCLUIR = {
@@ -156,7 +165,8 @@ export class UnidadesService {
     if (c.proveedorMantenimientoId !== undefined)
       data.proveedorMantenimientoId = c.proveedorMantenimientoId;
     if (c.fechaMatricula !== undefined) data.fechaMatricula = fechaDia(c.fechaMatricula);
-    if (c.caducidadMatricula !== undefined) data.caducidadMatricula = fechaDia(c.caducidadMatricula);
+    if (c.caducidadMatricula !== undefined)
+      data.caducidadMatricula = fechaDia(c.caducidadMatricula);
     if (c.caducidadPoliza !== undefined) data.caducidadPoliza = fechaDia(c.caducidadPoliza);
     if (c.vigenciaOtroDocumento !== undefined)
       data.vigenciaOtroDocumento = fechaDia(c.vigenciaOtroDocumento);
@@ -179,7 +189,11 @@ export class UnidadesService {
     return this.obtener(id);
   }
 
-  private validar(tipo: TipoUnidad, categoria: CategoriaPeso | null, lecturaInicial: number | null) {
+  private validar(
+    tipo: TipoUnidad,
+    categoria: CategoriaPeso | null,
+    lecturaInicial: number | null,
+  ) {
     if (categoria && tipo !== 'transporte') {
       throw new BadRequestException({
         message: 'La categoría de peso (pesado o liviano) solo aplica a las unidades de transporte',
@@ -188,7 +202,8 @@ export class UnidadesService {
     }
     if (lecturaInicial !== null && !LECTURA_DE_TIPO[tipo]) {
       throw new BadRequestException({
-        message: 'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
+        message:
+          'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
         code: 'unidad_sin_lectura',
       });
     }
@@ -201,8 +216,15 @@ export class UnidadesService {
     propiaId?: string,
   ) {
     if (e.vehiculoId) {
-      const v = await db.catVehiculo.findUnique({ where: { id: e.vehiculoId }, include: { unidad: true } });
-      if (!v) throw new BadRequestException({ message: 'El vehículo del catálogo no existe', code: 'vehiculo_invalido' });
+      const v = await db.catVehiculo.findUnique({
+        where: { id: e.vehiculoId },
+        include: { unidad: true },
+      });
+      if (!v)
+        throw new BadRequestException({
+          message: 'El vehículo del catálogo no existe',
+          code: 'vehiculo_invalido',
+        });
       if (v.unidad && v.unidad.id !== propiaId) {
         throw new ConflictException({
           message: `Ese vehículo ya es la unidad ${v.unidad.codigo}`,
@@ -211,20 +233,31 @@ export class UnidadesService {
       }
     }
     if (e.proveedorMantenimientoId) {
-      const p = await db.proveedorMantenimiento.findUnique({ where: { id: e.proveedorMantenimientoId } });
+      const p = await db.proveedorMantenimiento.findUnique({
+        where: { id: e.proveedorMantenimientoId },
+      });
       if (!p?.activo)
-        throw new BadRequestException({ message: 'El proveedor de mantenimiento no existe o está inactivo', code: 'proveedor_invalido' });
+        throw new BadRequestException({
+          message: 'El proveedor de mantenimiento no existe o está inactivo',
+          code: 'proveedor_invalido',
+        });
     }
     if (e.responsablePatrimonialId) {
       const u = await db.idUsuario.findUnique({ where: { id: e.responsablePatrimonialId } });
       if (!u?.activo)
-        throw new BadRequestException({ message: 'El responsable patrimonial no es una cuenta activa', code: 'responsable_invalido' });
+        throw new BadRequestException({
+          message: 'El responsable patrimonial no es una cuenta activa',
+          code: 'responsable_invalido',
+        });
     }
   }
 
   private presentar(
     u: UnidadConRelaciones,
-    vigentes?: { horometro?: { valor: number; leidaAt: Date }; odometro?: { valor: number; leidaAt: Date } },
+    vigentes?: {
+      horometro?: { valor: number; leidaAt: Date };
+      odometro?: { valor: number; leidaAt: Date };
+    },
   ) {
     return {
       id: u.id,

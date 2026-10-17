@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { currentTraceparent } from '@dyn/common';
 import { createEvent, EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -70,7 +75,8 @@ export class LecturasService {
     const esperado = LECTURA_DE_TIPO[unidad.tipo];
     if (esperado === null) {
       throw new BadRequestException({
-        message: 'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
+        message:
+          'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
         code: 'unidad_sin_lectura',
       });
     }
@@ -161,14 +167,18 @@ export class LecturasService {
       });
       if (!l) throw new NotFoundException('La lectura no existe');
       if (l.anulacion) {
-        throw new ConflictException({ message: 'La lectura ya está anulada', code: 'lectura_ya_anulada' });
+        throw new ConflictException({
+          message: 'La lectura ya está anulada',
+          code: 'lectura_ya_anulada',
+        });
       }
       const usada = await tx.unidadPreventivo.count({
         where: { lecturaId, anulacion: { is: null } },
       });
       if (usada > 0) {
         throw new ConflictException({
-          message: 'La lectura respalda un mantenimiento preventivo vigente; anule primero ese mantenimiento',
+          message:
+            'La lectura respalda un mantenimiento preventivo vigente; anule primero ese mantenimiento',
           code: 'lectura_en_uso',
         });
       }
@@ -192,7 +202,10 @@ export class LecturasService {
 
   /** Historial de lecturas de una unidad, de la más reciente a la más antigua. */
   async listar(unidadId: string, tipo?: TipoLectura, limite = 50) {
-    const unidad = await this.prisma.unidad.findUnique({ where: { id: unidadId }, select: { id: true } });
+    const unidad = await this.prisma.unidad.findUnique({
+      where: { id: unidadId },
+      select: { id: true },
+    });
     if (!unidad) throw new NotFoundException('La unidad no existe');
     const filas = await this.prisma.unidadLectura.findMany({
       where: { unidadId, ...(tipo ? { tipo } : {}) },

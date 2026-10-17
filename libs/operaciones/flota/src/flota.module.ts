@@ -15,7 +15,13 @@ import { UnidadesService } from './services/unidades.service';
  */
 @Module({
   controllers: [UnidadesController],
-  providers: [PrismaService, UnidadesService, LecturasService, PreventivosService, ProveedoresService],
+  providers: [
+    PrismaService,
+    UnidadesService,
+    LecturasService,
+    PreventivosService,
+    ProveedoresService,
+  ],
   exports: [UnidadesService, LecturasService, PreventivosService],
 })
 export class FlotaModule {}

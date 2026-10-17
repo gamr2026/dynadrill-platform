@@ -1,12 +1,13 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { currentTraceparent } from '@dyn/common';
 import { createEvent, EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import {
-  calcularAlertas,
-  type ReglaAlerta,
-  type UltimoPreventivo,
-} from '../catalog/alertas';
+import { calcularAlertas, type ReglaAlerta, type UltimoPreventivo } from '../catalog/alertas';
 import type { EjecutadoPor, Prisma, TipoServicioPreventivo } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LECTURA_DE_TIPO, LecturasService, type ActorLectura } from './lecturas.service';
@@ -62,7 +63,10 @@ export class PreventivosService {
     const unidad = await tx.unidad.findUnique({ where: { id: unidadId } });
     if (!unidad) throw new NotFoundException('La unidad no existe');
     if (!unidad.activa) {
-      throw new BadRequestException({ message: 'La unidad está dada de baja', code: 'unidad_inactiva' });
+      throw new BadRequestException({
+        message: 'La unidad está dada de baja',
+        code: 'unidad_inactiva',
+      });
     }
 
     const tipoServicio = e.tipoServicio ?? null;
@@ -83,7 +87,9 @@ export class PreventivosService {
     // Una unidad que nunca tuvo lectura (p. ej. una cisterna sin horómetro) se controla solo por tiempo: no la exige.
     const tuvoLectura =
       tipoLectura !== null &&
-      (await tx.unidadLectura.count({ where: { unidadId, tipo: tipoLectura, anulacion: { is: null } } })) > 0;
+      (await tx.unidadLectura.count({
+        where: { unidadId, tipo: tipoLectura, anulacion: { is: null } },
+      })) > 0;
     if (tipoLectura && valor === null && tuvoLectura) {
       throw new BadRequestException({
         message:
@@ -95,7 +101,8 @@ export class PreventivosService {
     }
     if (!tipoLectura && valor !== null) {
       throw new BadRequestException({
-        message: 'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
+        message:
+          'Las unidades auxiliares se controlan por tiempo: no llevan horómetro ni kilometraje',
         code: 'unidad_sin_lectura',
       });
     }
@@ -199,7 +206,10 @@ export class PreventivosService {
       });
       if (!p) throw new NotFoundException('El mantenimiento no existe');
       if (p.anulacion) {
-        throw new ConflictException({ message: 'El mantenimiento ya está anulado', code: 'preventivo_ya_anulado' });
+        throw new ConflictException({
+          message: 'El mantenimiento ya está anulado',
+          code: 'preventivo_ya_anulado',
+        });
       }
       await tx.unidadPreventivoAnulacion.create({
         data: { preventivoId, anuladaPor: actor.id, motivo: motivo.trim() },
@@ -221,11 +231,20 @@ export class PreventivosService {
 
   /** Historial de preventivos de una unidad, del más reciente al más antiguo. */
   async listar(unidadId: string) {
-    const unidad = await this.prisma.unidad.findUnique({ where: { id: unidadId }, select: { id: true } });
+    const unidad = await this.prisma.unidad.findUnique({
+      where: { id: unidadId },
+      select: { id: true },
+    });
     if (!unidad) throw new NotFoundException('La unidad no existe');
     const filas = await this.prisma.unidadPreventivo.findMany({
       where: { unidadId },
-      include: { anulacion: true, lectura: true, proveedorMantenimiento: true, responsable: true, checklistArchivo: true },
+      include: {
+        anulacion: true,
+        lectura: true,
+        proveedorMantenimiento: true,
+        responsable: true,
+        checklistArchivo: true,
+      },
       orderBy: [{ fecha: 'desc' }, { createdAt: 'desc' }],
     });
     return filas.map((f) => ({

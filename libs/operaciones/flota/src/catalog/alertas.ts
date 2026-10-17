@@ -97,7 +97,11 @@ export function calcularAlertas(
     if (r.metrica === 'horas' && e.lecturaVigente !== null) {
       const base = r.tipoServicio === 'b' ? horasB : horasA;
       alertas.push(armar(r, e.lecturaVigente - base, e.lecturaVigente));
-    } else if (r.metrica === 'km' && e.lecturaVigente !== null && e.ultimoCualquiera?.valor != null) {
+    } else if (
+      r.metrica === 'km' &&
+      e.lecturaVigente !== null &&
+      e.ultimoCualquiera?.valor != null
+    ) {
       alertas.push(armar(r, e.lecturaVigente - e.ultimoCualquiera.valor, e.lecturaVigente));
     } else if (r.metrica === 'dias' && e.ultimoCualquiera) {
       // Las unidades de servicio se rigen por horas; los 6 meses solo cuentan si todavía no se alcanzan las horas del tipo A.

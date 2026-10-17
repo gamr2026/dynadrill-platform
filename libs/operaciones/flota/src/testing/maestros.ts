@@ -40,6 +40,12 @@ export async function quitarMaestros(admin: Pool, m: MaestrosDePrueba): Promise<
       await admin.query(`DELETE FROM ${tabla} WHERE id = $1`, [id]).catch(() => undefined);
     }
   };
-  await quitar('catalogos.vehiculo', m.vehiculos?.map((x) => x.id));
-  await quitar('identidad.usuario', m.usuarios?.map((x) => x.id));
+  await quitar(
+    'catalogos.vehiculo',
+    m.vehiculos?.map((x) => x.id),
+  );
+  await quitar(
+    'identidad.usuario',
+    m.usuarios?.map((x) => x.id),
+  );
 }

@@ -17,7 +17,9 @@ export class ProveedoresService {
 
   async crear(nombre: string, actorId: string) {
     const limpio = nombre.trim();
-    const existe = await this.prisma.proveedorMantenimiento.findUnique({ where: { nombre: limpio } });
+    const existe = await this.prisma.proveedorMantenimiento.findUnique({
+      where: { nombre: limpio },
+    });
     if (existe) {
       throw new ConflictException({
         message: 'Ya existe un proveedor con ese nombre',
