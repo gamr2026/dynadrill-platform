@@ -1,0 +1,345 @@
+// Módulo `inventario` (contenedor operaciones). Schema PostgreSQL: inventario.
+// Artículos de bodega (herramientas, químicos e insumos), sus partes y el kardex inmutable. El stock nunca se guarda: se calcula
+// del kardex. Diseño: documentacion/modulos/plan-inventario.md.
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie
+// más lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["inventario", "catalogos", "identidad", "pumping", "archivos"]
+}
+
+enum TipoMovimiento {
+  entrada
+  salida
+
+  @@map("tipo_movimiento")
+  @@schema("inventario")
+}
+
+enum OrigenMovimiento {
+  saldo_inicial
+  compra
+  ajuste
+  despacho_bodega
+  salida_ticket
+  devolucion_ticket
+
+  @@map("origen_movimiento")
+  @@schema("inventario")
+}
+
+enum EstadoDespacho {
+  solicitado
+  realizado
+
+  @@map("estado_despacho")
+  @@schema("inventario")
+}
+
+enum TipoCodigoArticulo {
+  alterno
+  comercial
+  barras
+
+  @@map("tipo_codigo_articulo")
+  @@schema("inventario")
+}
+
+model CategoriaArticulo {
+  id          String   @id @db.Uuid
+  nombre      String   @unique
+  /// La categoría agrupa químicos (Pumping los asigna al ticket; el despacho admite hoja MSDS).
+  esQuimica   Boolean  @default(false) @map("es_quimica")
+  /// Los artículos de la categoría son herramientas con lista de partes.
+  llevaPartes Boolean  @default(false) @map("lleva_partes")
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by") @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?  @map("updated_by") @db.Uuid
+
+  subcategorias SubcategoriaArticulo[]
+  articulos     Articulo[]
+
+  @@map("categoria_articulo")
+  @@schema("inventario")
+}
+
+model SubcategoriaArticulo {
+  id          String            @id @db.Uuid
+  categoriaId String            @map("categoria_id") @db.Uuid
+  categoria   CategoriaArticulo @relation(fields: [categoriaId], references: [id])
+  nombre      String
+  activo      Boolean           @default(true)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?           @map("created_by") @db.Uuid
+  updatedAt   DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?           @map("updated_by") @db.Uuid
+
+  articulos Articulo[]
+
+  @@unique([categoriaId, nombre])
+  @@map("subcategoria_articulo")
+  @@schema("inventario")
+}
+
+model UnidadStock {
+  id        String   @id @db.Uuid
+  nombre    String   @unique
+  simbolo   String
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  articulos Articulo[]
+
+  @@map("unidad_stock")
+  @@schema("inventario")
+}
+
+/// El motivo fija el tipo y el origen del movimiento; `manual` indica si la pantalla permite elegirlo.
+model MotivoMovimiento {
+  id        String           @id @db.Uuid
+  nombre    String           @unique
+  tipo      TipoMovimiento
+  origen    OrigenMovimiento
+  manual    Boolean          @default(false)
+  activo    Boolean          @default(true)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?          @map("created_by") @db.Uuid
+  updatedAt DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?          @map("updated_by") @db.Uuid
+
+  movimientos Movimiento[]
+
+  @@unique([id, tipo, origen])
+  @@map("motivo_movimiento")
+  @@schema("inventario")
+}
+
+model Articulo {
+  id                   String                @id @db.Uuid
+  codigo               String                @unique
+  nombre               String
+  nombreComercial      String?               @map("nombre_comercial")
+  categoriaId          String                @map("categoria_id") @db.Uuid
+  categoria            CategoriaArticulo     @relation(fields: [categoriaId], references: [id])
+  subcategoriaId       String?               @map("subcategoria_id") @db.Uuid
+  subcategoria         SubcategoriaArticulo? @relation(fields: [subcategoriaId], references: [id])
+  unidadStockId        String                @map("unidad_stock_id") @db.Uuid
+  unidadStock          UnidadStock           @relation(fields: [unidadStockId], references: [id])
+  nota                 String?
+  informacionAdicional String?               @map("informacion_adicional")
+  /// Costo interno de Dynadrill (no es precio de venta).
+  costoUnitario        Decimal?              @map("costo_unitario") @db.Decimal(14, 4)
+  /// % de descuento sugerido a nivel general (no por cliente).
+  descuentoSugerido    Decimal?              @map("descuento_sugerido") @db.Decimal(5, 2)
+  /// Id del producto en AS2, cuando AS2 lo exponga.
+  as2Id                Int?                  @unique @map("as2_id")
+  activo               Boolean               @default(true)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String?               @map("created_by") @db.Uuid
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?               @map("updated_by") @db.Uuid
+
+  codigos     ArticuloCodigo[]
+  partes      ArticuloParte[]
+  movimientos Movimiento[]
+  consumos    ConsumoTicket[]
+
+  @@index([categoriaId])
+  @@index([subcategoriaId])
+  @@map("articulo")
+  @@schema("inventario")
+}
+
+model ArticuloCodigo {
+  id         String             @id @db.Uuid
+  articuloId String             @map("articulo_id") @db.Uuid
+  articulo   Articulo           @relation(fields: [articuloId], references: [id], onDelete: Cascade)
+  tipo       TipoCodigoArticulo
+  codigo     String
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?            @map("created_by") @db.Uuid
+  updatedAt  DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?            @map("updated_by") @db.Uuid
+
+  @@unique([articuloId, tipo])
+  @@index([codigo])
+  @@map("articulo_codigo")
+  @@schema("inventario")
+}
+
+model ArticuloParte {
+  id               String   @id @db.Uuid
+  articuloId       String   @map("articulo_id") @db.Uuid
+  articulo         Articulo @relation(fields: [articuloId], references: [id], onDelete: Cascade)
+  /// Posición secuencial dentro de la herramienta: la asigna el servidor.
+  orden            Int
+  /// Etiqueta del ítem tal como aparece en el documento de origen ("1", "21*", "A").
+  item             String
+  codigo           String
+  descripcion      String
+  cantidadEsperada Int      @default(1) @map("cantidad_esperada")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String?  @map("created_by") @db.Uuid
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy        String?  @map("updated_by") @db.Uuid
+
+  @@unique([articuloId, orden])
+  @@map("articulo_parte")
+  @@schema("inventario")
+}
+
+/// Kardex INMUTABLE: la aplicación solo inserta (sin UPDATE ni DELETE). `saldoResultante` es el saldo del artículo en esa bodega.
+model Movimiento {
+  id              String           @id @db.Uuid
+  secuencia       BigInt           @unique @default(autoincrement())
+  articuloId      String           @map("articulo_id") @db.Uuid
+  articulo        Articulo         @relation(fields: [articuloId], references: [id])
+  bodegaId        String           @map("bodega_id") @db.Uuid
+  bodega          CatBodega        @relation(fields: [bodegaId], references: [id])
+  tipo            TipoMovimiento
+  origen          OrigenMovimiento
+  motivoId        String           @map("motivo_id") @db.Uuid
+  /// FK compuesta: el tipo y el origen del movimiento son los de su motivo.
+  motivo          MotivoMovimiento @relation(fields: [motivoId, tipo, origen], references: [id, tipo, origen])
+  cantidad        Decimal          @db.Decimal(14, 3)
+  saldoResultante Decimal          @map("saldo_resultante") @db.Decimal(14, 3)
+  fecha           DateTime         @db.Timestamptz(6)
+  observacion     String?
+  responsableId   String           @map("responsable_id") @db.Uuid
+  responsable     IdUsuario        @relation("movimientoResponsable", fields: [responsableId], references: [id])
+  /// Ticket de Pumping (salida o devolución). FCR agregará su propia columna.
+  ticketPumpingId String?          @map("ticket_pumping_id") @db.Uuid
+  ticketPumping   PumpTicket?      @relation(fields: [ticketPumpingId], references: [id])
+  /// Despacho a bodega que respalda la salida.
+  despachoId      String?          @map("despacho_id") @db.Uuid
+  despacho        Despacho?        @relation(fields: [despachoId], references: [id])
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([articuloId, bodegaId, secuencia])
+  @@index([ticketPumpingId])
+  @@index([despachoId])
+  @@index([fecha])
+  @@map("movimiento")
+  @@schema("inventario")
+}
+
+/// Solicitud de despacho a bodega de un pedido (la marca el ciclo comercial por evento).
+model Despacho {
+  id                String         @id @db.Uuid
+  /// Pedido de comercial (otro contenedor): uuid sin FK.
+  pedidoId          String         @unique @map("pedido_id") @db.Uuid
+  estado            EstadoDespacho
+  solicitadoAt      DateTime       @map("solicitado_at") @db.Timestamptz(6)
+  solicitadoPorId   String         @map("solicitado_por") @db.Uuid
+  solicitadoPor     IdUsuario      @relation("despachoSolicitante", fields: [solicitadoPorId], references: [id])
+  realizadoAt       DateTime?      @map("realizado_at") @db.Timestamptz(6)
+  realizadoPorId    String?        @map("realizado_por") @db.Uuid
+  realizadoPor      IdUsuario?     @relation("despachoEjecutor", fields: [realizadoPorId], references: [id])
+  archivoRespaldoId String?        @map("archivo_respaldo_id") @db.Uuid
+  archivoMsdsId     String?        @map("archivo_msds_id") @db.Uuid
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String         @map("created_by") @db.Uuid
+  updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String         @map("updated_by") @db.Uuid
+
+  movimientos Movimiento[]
+
+  @@index([estado])
+  @@map("despacho")
+  @@schema("inventario")
+}
+
+/// Consumo real de un artículo en un ticket de Pumping. INMUTABLE. No mueve stock.
+model ConsumoTicket {
+  id              String     @id @db.Uuid
+  ticketPumpingId String     @map("ticket_pumping_id") @db.Uuid
+  ticketPumping   PumpTicket @relation(fields: [ticketPumpingId], references: [id])
+  articuloId      String     @map("articulo_id") @db.Uuid
+  articulo        Articulo   @relation(fields: [articuloId], references: [id])
+  cantidad        Decimal    @db.Decimal(14, 3)
+  fecha           DateTime   @db.Timestamptz(6)
+  observacion     String?
+  responsableId   String     @map("responsable_id") @db.Uuid
+  responsable     IdUsuario  @relation("consumoResponsable", fields: [responsableId], references: [id])
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketPumpingId, articuloId])
+  @@map("consumo_ticket")
+  @@schema("inventario")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir
+// de las FK. Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id,
+// nombre, email, activo y rol).
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatBodega {
+  id          String       @id @db.Uuid
+  nombre      String
+  habilitado  Boolean
+  movimientos Movimiento[]
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// `pumping.ticket`: solo el id (la FK del kardex y del consumo). El resto es de Pumping.
+model PumpTicket {
+  id          String          @id @db.Uuid
+  movimientos Movimiento[]
+  consumos    ConsumoTicket[]
+
+  @@map("ticket")
+  @@schema("pumping")
+}
+
+/// `archivos.archivo`: solo el id, para comprobar que existe antes de guardar una referencia.
+model ArchivoRef {
+  id String @id @db.Uuid
+
+  @@map("archivo")
+  @@schema("archivos")
+}
+
+/// `identidad.rol`: para comprobar el rol de quien actúa.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String
+  nombre   String
+  usuarios IdUsuario[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  movimientos          Movimiento[]    @relation("movimientoResponsable")
+  consumos             ConsumoTicket[] @relation("consumoResponsable")
+  despachosSolicitados Despacho[]      @relation("despachoSolicitante")
+  despachosRealizados  Despacho[]      @relation("despachoEjecutor")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
