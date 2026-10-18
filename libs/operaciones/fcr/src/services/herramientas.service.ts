@@ -190,7 +190,7 @@ export class HerramientasService {
           updatedBy: actor.id,
         },
       });
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
     });
     return this.detalle(ticketId);
   }
@@ -208,8 +208,14 @@ export class HerramientasService {
           code: 'HERRAMIENTA_SOLICITADA',
         });
       }
+      if (await tx.inspeccionHerramienta.count({ where: { herramientaId } })) {
+        throw new ConflictException({
+          message: 'La herramienta ya tiene una inspección: no se puede quitar',
+          code: 'HERRAMIENTA_INSPECCIONADA',
+        });
+      }
       await tx.ticketHerramienta.delete({ where: { id: herramientaId } });
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
     });
     return this.detalle(ticketId);
   }
@@ -246,7 +252,7 @@ export class HerramientasService {
         'solicitada',
         actor.id,
       );
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
       const n = await tx.ticket.findUniqueOrThrow({
         where: { id: ticketId },
         include: { cliente: true, pozo: true },
@@ -308,7 +314,7 @@ export class HerramientasService {
         });
         await this.registrar(tx, [h.id], 'recibida', actor.id);
       }
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
     });
     return this.detalle(ticketId);
   }
@@ -329,7 +335,7 @@ export class HerramientasService {
         data: { recibidaAt: null, recibidaPor: null, recepcionNovedad: null, updatedBy: actor.id },
       });
       await this.registrar(tx, [h.id], 'recepcion_corregida', actor.id);
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
     });
     return this.detalle(ticketId);
   }
@@ -355,7 +361,7 @@ export class HerramientasService {
       this.exigirPaso(t);
       await this.exigirListadoAbierto(tx, ticketId);
       await this.precarga.armar(tx, ticketId, actor.id);
-      await this.requisitos.sincronizarHerramientasRecibidas(tx, ticketId, actor.id);
+      await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
     });
     return this.detalle(ticketId);
   }

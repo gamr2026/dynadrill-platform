@@ -15,7 +15,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["fcr", "catalogos", "identidad", "inventario"]
+  schemas  = ["fcr", "catalogos", "identidad", "inventario", "archivos"]
 }
 
 enum MacroEstado {
@@ -151,6 +151,8 @@ model Transicion {
   /// Falso en los rechazos (vuelven a un paso anterior): no se exige que el paso de origen esté completo.
   exigeRequisitos Boolean @default(true) @map("exige_requisitos")
   activa          Boolean @default(true)
+  /// Verdadero: el cambio de paso lo hace una acción propia (asignar, aprobar o rechazar la inspección); el avance genérico no la ofrece.
+  soloPorAccion   Boolean @default(false) @map("solo_por_accion")
 
   @@unique([origenCodigo, destinoCodigo])
   @@map("transicion")
@@ -314,6 +316,7 @@ model Ticket {
   lineas         TicketLinea[]
   herramientas   TicketHerramienta[]
   avisosPrecarga TicketAvisoPrecarga[]
+  documentos     TicketDocumento[]
 
   @@index([pasoCodigo])
   @@map("ticket")
@@ -573,7 +576,8 @@ model TicketHerramienta {
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy        String?           @map("updated_by") @db.Uuid
 
-  eventos TicketHerramientaEvento[]
+  eventos      TicketHerramientaEvento[]
+  inspecciones InspeccionHerramienta[]
 
   @@index([ticketId])
   @@map("ticket_herramienta")
@@ -611,6 +615,161 @@ model TicketAvisoPrecarga {
 
   @@index([ticketId])
   @@map("ticket_aviso_precarga")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Inspección y reparación de herramientas (entrada SERVICIOS) y documentos del ticket
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoInspeccion {
+  borrador
+  enviada
+  aprobada
+  rechazada
+
+  @@map("estado_inspeccion")
+  @@schema("fcr")
+}
+
+/// Quién inspeccionó o reparó: Dynadrill o un proveedor externo.
+enum ResponsableTrabajo {
+  dynadrill
+  proveedor_externo
+
+  @@map("responsable_trabajo")
+  @@schema("fcr")
+}
+
+enum ResultadoParte {
+  ok
+  defectuoso
+
+  @@map("resultado_parte")
+  @@schema("fcr")
+}
+
+enum RolFirmaInspeccion {
+  reparado_por
+  revisado_por
+  liberado_qhse
+
+  @@map("rol_firma_inspeccion")
+  @@schema("fcr")
+}
+
+enum CampoDocumentoFcr {
+  formulario_inspeccion_externo
+  formato_dimensionamiento_servicio
+  formato_dureza_servicio
+  documento_inspeccion
+  registro_dureza
+  registro_qaqc
+
+  @@map("campo_documento_fcr")
+  @@schema("fcr")
+}
+
+/// Roles de cuenta (`identidad.rol.codigo`) que pueden dejar cada firma; la base lo exige al firmar.
+model FirmaRolPermitido {
+  rolFirma  RolFirmaInspeccion @map("rol_firma")
+  rolCodigo String             @map("rol_codigo")
+  rol       IdRol              @relation(fields: [rolCodigo], references: [codigo])
+
+  @@id([rolFirma, rolCodigo])
+  @@map("firma_rol_permitido")
+  @@schema("fcr")
+}
+
+/// Checklist de inspección de una herramienta. La cabecera (cliente, pozo, descripción) sale del ticket y del artículo con JOIN.
+model InspeccionHerramienta {
+  id                String                  @id @db.Uuid
+  herramientaId     String                  @map("herramienta_id") @db.Uuid
+  herramienta       TicketHerramienta       @relation(fields: [herramientaId], references: [id])
+  version           Int                     @default(1)
+  estado            EstadoInspeccion        @default(borrador)
+  fechaInspeccion   DateTime?               @map("fecha_inspeccion") @db.Date
+  fechaReparacion   DateTime?               @map("fecha_reparacion") @db.Date
+  fechaEnvio        DateTime?               @map("fecha_envio") @db.Date
+  inspeccionadoPor  ResponsableTrabajo?     @map("inspeccionado_por")
+  reparadoPor       ResponsableTrabajo?     @map("reparado_por")
+  observaciones     String?
+  versionAnteriorId String?                 @map("version_anterior_id") @db.Uuid
+  versionAnterior   InspeccionHerramienta?  @relation("versiones", fields: [versionAnteriorId], references: [id])
+  siguientes        InspeccionHerramienta[] @relation("versiones")
+  enviadaAt         DateTime?               @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor        String?                 @map("enviada_por") @db.Uuid
+  enviador          IdUsuario?              @relation("inspeccionEnviador", fields: [enviadaPor], references: [id])
+  decididaAt        DateTime?               @map("decidida_at") @db.Timestamptz(6)
+  decididaPor       String?                 @map("decidida_por") @db.Uuid
+  decisor           IdUsuario?              @relation("inspeccionDecisor", fields: [decididaPor], references: [id])
+  motivoRechazo     String?                 @map("motivo_rechazo")
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String                  @map("created_by") @db.Uuid
+  updatedAt         DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String                  @map("updated_by") @db.Uuid
+
+  partes InspeccionParte[]
+  firmas InspeccionFirma[]
+
+  @@unique([herramientaId, version])
+  @@index([estado])
+  @@map("inspeccion_herramienta")
+  @@schema("fcr")
+}
+
+/// Parte de una inspección: copia fija de la parte del artículo al iniciar (o agregada a mano).
+model InspeccionParte {
+  id               String                @id @db.Uuid
+  inspeccionId     String                @map("inspeccion_id") @db.Uuid
+  inspeccion       InspeccionHerramienta @relation(fields: [inspeccionId], references: [id])
+  orden            Int
+  articuloParteId  String?               @map("articulo_parte_id") @db.Uuid
+  articuloParte    InvArticuloParte?     @relation(fields: [articuloParteId], references: [id], onDelete: SetNull)
+  manual           Boolean               @default(false)
+  item             String
+  codigo           String?
+  descripcion      String
+  cantidadEsperada Int                   @default(1) @map("cantidad_esperada")
+  visual           ResultadoParte?
+  endResultado     ResultadoParte?       @map("end_resultado")
+  cambioCantidad   Int?                  @map("cambio_cantidad")
+  accion           String?
+
+  @@unique([inspeccionId, orden])
+  @@map("inspeccion_parte")
+  @@schema("fcr")
+}
+
+/// Firma de la inspección (INMUTABLE): la cuenta y la hora del servidor.
+model InspeccionFirma {
+  inspeccionId String                @map("inspeccion_id") @db.Uuid
+  inspeccion   InspeccionHerramienta @relation(fields: [inspeccionId], references: [id])
+  rol          RolFirmaInspeccion
+  usuarioId    String                @map("usuario_id") @db.Uuid
+  usuario      IdUsuario             @relation("inspeccionFirmante", fields: [usuarioId], references: [id])
+  firmadaAt    DateTime              @default(now()) @map("firmada_at") @db.Timestamptz(6)
+
+  @@id([inspeccionId, rol])
+  @@map("inspeccion_firma")
+  @@schema("fcr")
+}
+
+/// Documento adjunto del ticket (INMUTABLE): el vigente de cada campo es el último.
+model TicketDocumento {
+  id        String            @id @db.Uuid
+  ticketId  String            @map("ticket_id") @db.Uuid
+  ticket    Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  campo     CampoDocumentoFcr
+  archivoId String            @map("archivo_id") @db.Uuid
+  archivo   ArchivoRef        @relation(fields: [archivoId], references: [id])
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String            @map("created_by") @db.Uuid
+  autor     IdUsuario         @relation("documentoAutor", fields: [createdBy], references: [id])
+
+  @@unique([ticketId, archivoId])
+  @@index([ticketId, campo, createdAt])
+  @@map("ticket_documento")
   @@schema("fcr")
 }
 
@@ -696,11 +855,12 @@ model CatVehiculo {
 
 /// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde y para ligar los pasos a sus roles.
 model IdRol {
-  id       String      @id @db.Uuid
-  codigo   String      @unique
+  id       String              @id @db.Uuid
+  codigo   String              @unique
   nombre   String
   usuarios IdUsuario[]
   pasos    PasoRol[]
+  firmas   FirmaRolPermitido[]
 
   @@map("rol")
   @@schema("identidad")
@@ -715,13 +875,17 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  asignaciones       TicketPersona[]           @relation("personaAsignada")
-  historial          TicketHistorial[]         @relation("historialActor")
-  requisitos         TicketRequisito[]         @relation("requisitoOperador")
-  inspecciones       Ticket[]                  @relation("ticketInspector")
-  creados            Ticket[]                  @relation("ticketCreador")
-  editados           Ticket[]                  @relation("ticketEditor")
-  herramientaEventos TicketHerramientaEvento[] @relation("herramientaEventoActor")
+  asignaciones          TicketPersona[]           @relation("personaAsignada")
+  historial             TicketHistorial[]         @relation("historialActor")
+  requisitos            TicketRequisito[]         @relation("requisitoOperador")
+  inspecciones          Ticket[]                  @relation("ticketInspector")
+  creados               Ticket[]                  @relation("ticketCreador")
+  editados              Ticket[]                  @relation("ticketEditor")
+  herramientaEventos    TicketHerramientaEvento[] @relation("herramientaEventoActor")
+  inspeccionesEnviadas  InspeccionHerramienta[]   @relation("inspeccionEnviador")
+  inspeccionesDecididas InspeccionHerramienta[]   @relation("inspeccionDecisor")
+  firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
+  documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
 
   @@map("usuario")
   @@schema("identidad")
@@ -753,4 +917,29 @@ model InvArticulo {
 
   @@map("articulo")
   @@schema("inventario")
+}
+
+/// `inventario.articulo_parte`: de aquí se copian las partes al iniciar la inspección de una herramienta.
+model InvArticuloParte {
+  id               String @id @db.Uuid
+  articuloId       String @map("articulo_id") @db.Uuid
+  orden            Int
+  item             String
+  codigo           String
+  descripcion      String
+  cantidadEsperada Int    @map("cantidad_esperada")
+
+  inspecciones InspeccionParte[]
+
+  @@map("articulo_parte")
+  @@schema("inventario")
+}
+
+/// `archivos.archivo`: el id y el módulo que lo subió, para comprobar el documento antes de enlazarlo.
+model ArchivoRef {
+  id         String            @id @db.Uuid
+  documentos TicketDocumento[]
+
+  @@map("archivo")
+  @@schema("archivos")
 }

@@ -2,13 +2,17 @@ import { Module } from '@nestjs/common';
 import { InventarioModule } from '@dyn/inventario';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { ConfiguracionCodigosController } from './controllers/configuracion-codigos.controller';
+import { DocumentosController } from './controllers/documentos.controller';
 import { HerramientasController } from './controllers/herramientas.controller';
+import { InspeccionesController } from './controllers/inspecciones.controller';
 import { TicketsController } from './controllers/tickets.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { CatalogosService } from './services/catalogos.service';
 import { ConfiguracionCodigosService } from './services/configuracion-codigos.service';
+import { DocumentosService } from './services/documentos.service';
 import { HerramientasService } from './services/herramientas.service';
+import { InspeccionesService } from './services/inspecciones.service';
 import { PrecargaService } from './services/precarga.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TicketsService } from './services/tickets.service';
@@ -25,7 +29,13 @@ import { TipoOperadorService } from './services/tipo-operador.service';
  */
 @Module({
   imports: [InventarioModule],
-  controllers: [TicketsController, ConfiguracionCodigosController, HerramientasController],
+  controllers: [
+    TicketsController,
+    ConfiguracionCodigosController,
+    HerramientasController,
+    InspeccionesController,
+    DocumentosController,
+  ],
   providers: [
     PrismaService,
     TicketsService,
@@ -35,6 +45,8 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     RequisitosService,
     PrecargaService,
     HerramientasService,
+    InspeccionesService,
+    DocumentosService,
     ConfiguracionCodigosService,
     PedidosAbiertosConsumer,
   ],

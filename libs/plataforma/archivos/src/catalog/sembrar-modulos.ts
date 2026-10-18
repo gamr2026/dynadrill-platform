@@ -77,6 +77,30 @@ export const MODULOS_ARCHIVO = [
     tiposMime: DOCUMENTOS,
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'ticket_fcr_documento',
+    nombre: 'Documento adjunto de un ticket de FCR (inspección, dimensionamiento, dureza y QAQC)',
+    permisoSubir: 'fcr.tickets.operar',
+    permisoVer: 'fcr.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_acta_entrega',
+    nombre: 'Acta de Entrega de Locación (DYN-PMP-RE-027) de un pedido',
+    permisoSubir: 'qhse.acta_entrega.cargar',
+    permisoVer: 'qhse.acta_entrega.ver',
+    tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_documento_pedido',
+    nombre: 'Documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
+    permisoSubir: 'qhse.documentos.gestionar',
+    permisoVer: 'qhse.documentos.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */

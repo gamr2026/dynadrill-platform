@@ -340,7 +340,14 @@ run(
         // los del tronco aplican a los dos; el del tipo de operador, solo a SERVICIOS
         const comunes = ['herramientas_recibidas', 'listado_herramientas_confirmado'];
         expect((await reqs(v.id)).sort()).toEqual(comunes);
-        expect((await reqs(s.id)).sort()).toEqual([...comunes, 'tipo_operador_definido']);
+        expect((await reqs(s.id)).sort()).toEqual(
+          [
+            ...comunes,
+            'formulario_inspeccion_externo',
+            'inspecciones_enviadas',
+            'tipo_operador_definido',
+          ].sort(),
+        );
       });
     });
 
@@ -554,7 +561,7 @@ run(
           .expect(409);
       });
 
-      it('recorre tipo de operador → inspección → aprobación y entra al mismo tronco; el rechazo vuelve a la inspección con motivo', async () => {
+      it('recorre tipo de operador → inspección; el Supervisor toma el ticket y solo el operador que inspecciona actúa; no sale sin inspeccionar (la inspección completa se prueba en fcr-inspecciones)', async () => {
         const t = await ticketServicios();
         const mecanico = await prisma.tipoOperador.findUniqueOrThrow({
           where: { codigo: 'mecanico' },
@@ -572,46 +579,18 @@ run(
         // en la inspección actúa el operador que inspecciona; ni el Supervisor ni otro operador FCR
         await avanzar(t.id, 'aprobacion_supervisor_operaciones', supervisor()).expect(403);
         await avanzar(t.id, 'aprobacion_supervisor_operaciones', otroOperador()).expect(403);
-        await avanzar(t.id, 'aprobacion_supervisor_operaciones', inspector()).expect(201);
-
-        // la aprobación la atiende el Supervisor de Operaciones FCR (cualquiera: no requiere equipo) y ve el ticket en su bandeja
-        const suya = await http()
-          .get('/api/operaciones/fcr/tickets?mios=true')
-          .set(supervisorOps())
-          .expect(200);
-        expect(suya.body.some((x: { id: string }) => x.id === t.id)).toBe(true);
-        await avanzar(t.id, 'preparacion_herramientas', supervisor()).expect(403);
-        // el rechazo exige motivo y vuelve a la inspección
-        await avanzar(t.id, 'inspeccion', supervisorOps()).expect(400);
-        const rechazo = await avanzar(
-          t.id,
-          'inspeccion',
-          supervisorOps(),
-          'Falta el torque de la sarta',
-        ).expect(201);
-        expect(rechazo.body.paso.codigo).toBe('inspeccion');
-        await avanzar(t.id, 'aprobacion_supervisor_operaciones', inspector()).expect(201);
-        const ok = await avanzar(t.id, 'preparacion_herramientas', supervisorOps()).expect(201);
-        expect(ok.body.paso.codigo).toBe('preparacion_herramientas');
-        // el motivo del rechazo y todo el recorrido quedan en el historial
-        expect(ok.body.historial.map((h: { pasoNuevo: string }) => h.pasoNuevo)).toEqual([
-          'tipo_operador',
-          'inspeccion',
-          'aprobacion_supervisor_operaciones',
-          'inspeccion',
-          'aprobacion_supervisor_operaciones',
-          'preparacion_herramientas',
-        ]);
-        expect(
-          ok.body.historial.find((h: { motivo: string | null }) => h.motivo?.includes('torque')),
-        ).toBeTruthy();
-        // el Supervisor de Operaciones no es del equipo: el ticket sigue siendo del Supervisor que lo tomó
-        await avanzar(t.id, 'asignacion', otroSupervisor()).expect(403);
-        await confirmarListado(t.id);
-        await avanzar(t.id, 'asignacion', supervisor()).expect(201);
+        const falta = await avanzar(t.id, 'aprobacion_supervisor_operaciones', inspector()).expect(
+          409,
+        );
+        expect(falta.body.code).toBe('REQUISITOS_PENDIENTES');
+        expect(falta.body.detail ?? falta.body.message).toMatch(
+          /Inspecciones de herramientas enviadas/,
+        );
+        expect(falta.body.detail ?? falta.body.message).toMatch(/Formulario de inspección externo/);
+        // la aprobación y su rechazo son acciones propias: el avance genérico no las ofrece
+        await avanzar(t.id, 'preparacion_herramientas', supervisorOps()).expect(403);
       });
     });
-
     describe('asignación del equipo', () => {
       const asignar = (id: string, cuerpo: Record<string, unknown>, auth = supervisor()) =>
         http().post(`/api/operaciones/fcr/tickets/${id}/asignar`).set(auth).send(cuerpo);
@@ -841,7 +820,7 @@ run(
         await rechaza(
           "UPDATE fcr.ticket SET paso_codigo = 'inventado' WHERE id = $1",
           [t.id],
-          /ticket_paso_fkey/,
+          /no puede pasar de|ticket_paso_fkey/,
         );
         await rechaza(
           "UPDATE fcr.ticket SET tipo_ot = 'otro' WHERE id = $1",

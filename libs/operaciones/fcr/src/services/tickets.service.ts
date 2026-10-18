@@ -63,7 +63,13 @@ const INCLUDE_LISTA = {
 const INCLUDE_DETALLE = {
   ...NOMBRES,
   paso: {
-    include: { roles: true, salidas: { where: { activa: true }, include: { destino: true } } },
+    include: {
+      roles: true,
+      salidas: {
+        where: { activa: true, soloPorAccion: false },
+        include: { destino: true },
+      },
+    },
   },
   tiposServicio: true,
   tipoOperador: true,
@@ -215,7 +221,7 @@ export class TicketsService {
     // las líneas del pedido y la precarga de herramientas desde su configuración por cliente y código
     await this.precarga.guardarLineas(tx, id, d.lineas ?? []);
     await this.precarga.armar(tx, id, creador);
-    await this.requisitos.sincronizarHerramientasRecibidas(tx, id, creador);
+    await this.requisitos.sincronizarDeHerramientas(tx, id, creador);
 
     // el evento lleva los nombres ya resueltos (los avisos los muestran tal cual), obtenidos de los catálogos por las FK
     const n = await tx.ticket.findUniqueOrThrow({ where: { id }, include: NOMBRES });
@@ -398,6 +404,31 @@ export class TicketsService {
         traceparent: currentTraceparent(),
       }),
     );
+    // la inspección de SERVICIOS llega al Supervisor de Operaciones FCR: se le avisa a todo su rol
+    if (hacia === 'aprobacion_supervisor_operaciones') {
+      const n = await tx.ticket.findUniqueOrThrow({
+        where: { id: t.id },
+        include: { cliente: true, pozo: true },
+      });
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'operaciones.fcr.aprobacion_solicitada',
+          subject: { type: 'fcr_ticket', id: t.id },
+          data: {
+            ticketId: t.id,
+            ticketNumero: n.ticketNumero,
+            pedidoId: n.pedidoId,
+            pedidoCodigo: n.pedidoCodigo,
+            cliente: nombreDe(n.cliente),
+            pozo: n.pozo?.nombreCompleto ?? null,
+            enviadoPor: actor.name,
+          },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
+      );
+    }
     // el cierre del servicio: Comercial genera la prefactura con lo que el ticket dejó (contrato 4.10)
     if (hacia === 'cerrado') {
       await this.bus.publish(

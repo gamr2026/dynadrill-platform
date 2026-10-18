@@ -121,4 +121,50 @@ export const PLANTILLAS_FCR: PlantillaDef[] = [
     evento: 'operaciones.fcr.herramientas_solicitadas',
     rol: 'bodeguero',
   },
+  {
+    codigo: 'fcr_aprobacion_solicitada_supervisor_operaciones',
+    descripcion:
+      'Las inspecciones de herramientas de un servicio están enviadas y esperan la aprobación del Supervisor de Operaciones FCR.',
+    asunto: 'Inspección de herramientas por aprobar: {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{enviadoPor}} envió las inspecciones de herramientas del siguiente servicio de FCR, que esperan su aprobación:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      '</table>' +
+      '<p>Revise las inspecciones y apruébelas o devuélvalas con el motivo.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{enviadoPor}} envió las inspecciones de herramientas del siguiente servicio de FCR, que esperan su aprobación:\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\n\n' +
+      'Revise las inspecciones y apruébelas o devuélvalas con el motivo.',
+    tituloAviso: 'Inspección por aprobar: {{pedidoCodigo}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}}',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'warning',
+    evento: 'operaciones.fcr.aprobacion_solicitada',
+    rol: 'supervisor_operaciones_fcr',
+  },
+  {
+    codigo: 'fcr_inspeccion_rechazada_operador',
+    descripcion:
+      'El Supervisor de Operaciones FCR devolvió las inspecciones (solo a la cuenta que inspecciona).',
+    asunto: 'Inspección devuelta: {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{rechazadoPor}} devolvió {{cantidad}} inspección(es) del servicio {{pedidoCodigo}} ({{cliente}}, pozo {{pozo}}).</p>' +
+      '<p><strong>Motivo:</strong> {{motivo}}</p>' +
+      '<p>Rehaga las inspecciones devueltas: conservan lo registrado y piden las firmas de nuevo.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{rechazadoPor}} devolvió {{cantidad}} inspección(es) del servicio {{pedidoCodigo}} ({{cliente}}, pozo {{pozo}}).\n\n' +
+      'Motivo: {{motivo}}\n\nRehaga las inspecciones devueltas: conservan lo registrado y piden las firmas de nuevo.',
+    tituloAviso: 'Inspección devuelta: {{pedidoCodigo}}',
+    detalleAviso: '{{motivo}}',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'error',
+    evento: 'operaciones.fcr.inspeccion_rechazada',
+    rol: 'operador',
+  },
 ];

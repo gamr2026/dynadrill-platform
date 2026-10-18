@@ -20,6 +20,7 @@ type Cliente = Pick<
   | 'tipoTrabajo'
   | 'tipoPicker'
   | 'unidadCotizacion'
+  | 'firmaRolPermitido'
 >;
 
 /** Códigos de los requisitos (los usa el código; el catálogo vive en la base de datos). */
@@ -27,6 +28,8 @@ export const REQ = {
   tipoOperadorDefinido: 'tipo_operador_definido',
   listadoConfirmado: 'listado_herramientas_confirmado',
   herramientasRecibidas: 'herramientas_recibidas',
+  inspeccionesEnviadas: 'inspecciones_enviadas',
+  formularioInspeccionExterno: 'formulario_inspeccion_externo',
 } as const;
 
 interface PasoDef {
@@ -129,20 +132,24 @@ export const TRANSICIONES: Array<{
   motivo?: boolean;
   /** Falso en los rechazos: salir hacia atrás no exige los requisitos del paso. */
   exigeRequisitos?: boolean;
+  /** Verdadero: la hace una acción propia (aprobar, rechazar, asignar), no el avance genérico. */
+  porAccion?: boolean;
 }> = [
   // Entrada VENTA: validación del programa
   { de: 'revision_inicial', a: 'preparacion_herramientas' },
   // Entrada SERVICIOS
   { de: 'tipo_operador', a: 'inspeccion' },
   { de: 'inspeccion', a: 'aprobacion_supervisor_operaciones' },
-  { de: 'aprobacion_supervisor_operaciones', a: 'preparacion_herramientas' },
+  { de: 'aprobacion_supervisor_operaciones', a: 'preparacion_herramientas', porAccion: true },
   {
     de: 'aprobacion_supervisor_operaciones',
     a: 'inspeccion',
     motivo: true,
     exigeRequisitos: false,
+    porAccion: true,
   },
-  // Tronco común. La asignación (`asignacion` → `reunion_operativa`) no es una transición libre: la hace el servicio de asignación.
+  // Tronco común. La asignación (`asignacion` → `reunion_operativa`) la hace el servicio de asignación (acción propia).
+  { de: 'asignacion', a: 'reunion_operativa', porAccion: true },
   { de: 'preparacion_herramientas', a: 'asignacion' },
   { de: 'reunion_operativa', a: 'ejecucion_operativa' },
   { de: 'ejecucion_operativa', a: 'revision_reportes' },
@@ -164,6 +171,25 @@ interface RequisitoDef {
 }
 
 export const REQUISITOS: RequisitoDef[] = [
+  {
+    codigo: REQ.inspeccionesEnviadas,
+    nombre: 'Inspecciones de herramientas enviadas',
+    descripcion:
+      'Cada herramienta del ticket tiene su inspección firmada y enviada (y al menos hay una herramienta).',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    tipoOt: 'servicio',
+    paso: 'inspeccion',
+  },
+  {
+    codigo: REQ.formularioInspeccionExterno,
+    nombre: 'Formulario de inspección externo adjunto',
+    descripcion: 'El operador adjuntó el formulario de inspección externo (consulta F-9).',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    tipoOt: 'servicio',
+    paso: 'inspeccion',
+  },
   {
     codigo: REQ.tipoOperadorDefinido,
     nombre: 'Tipo de operador definido',
@@ -193,6 +219,14 @@ export const REQUISITOS: RequisitoDef[] = [
     paso: 'preparacion_herramientas',
   },
 ];
+
+/** Quién puede dejar cada firma de la inspección (roles de cuenta). */
+const FIRMAS_PERMITIDAS = [
+  ['reparado_por', 'operador_fcr'],
+  ['revisado_por', 'supervisor'],
+  ['liberado_qhse', 'tecnico_hse'],
+  ['liberado_qhse', 'gerente_hse'],
+] as const;
 
 /** Unidades de cotización: las de tiempo piden un solo juego del kit. El código es el nombre sin tildes, en minúscula y en singular. */
 const UNIDADES_COTIZACION = [
@@ -278,6 +312,7 @@ export async function sembrarPasos(db: Cliente): Promise<{
           destinoCodigo: t.a,
           requiereMotivo: t.motivo ?? false,
           exigeRequisitos: t.exigeRequisitos ?? true,
+          soloPorAccion: t.porAccion ?? false,
         },
       });
       transiciones++;
@@ -311,6 +346,13 @@ export async function sembrarPasos(db: Cliente): Promise<{
       data: { id: uuidv7(), codigo, nombre, esTiempo, orden: (i + 1) * 10 },
     });
     catalogos++;
+  }
+  for (const [rolFirma, rolCodigo] of FIRMAS_PERMITIDAS) {
+    await db.firmaRolPermitido.upsert({
+      where: { rolFirma_rolCodigo: { rolFirma, rolCodigo } },
+      update: {},
+      create: { rolFirma, rolCodigo },
+    });
   }
   return { pasos, transiciones, requisitos, catalogos };
 }

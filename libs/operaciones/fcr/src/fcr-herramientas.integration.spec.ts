@@ -1064,13 +1064,18 @@ run(
       });
 
       it('un ticket cerrado solo se consulta', async () => {
-        const t = await crear({ lineas: [] });
-        await prisma.ticket.update({ where: { id: t.id }, data: { pasoCodigo: 'cerrado' } });
-        await http().post(url(t.id)).set(supervisor()).send({ articuloId: CANASTA.id }).expect(409);
-        expect((await herramientas(t.id)).herramientas).toEqual([]);
+        // un ticket cerrado se inserta ya cerrado (la base no deja saltar de paso con un UPDATE)
+        const id = uuidv7();
+        const pedidoId = uuidv7();
+        pedidos.push(pedidoId);
+        await admin.query(
+          "INSERT INTO fcr.ticket (id, pedido_id, pedido_codigo, paso_codigo, tipo_ot) VALUES ($1, $2, 'PED-CERRADO', 'cerrado', 'venta')",
+          [id, pedidoId],
+        );
+        await http().post(url(id)).set(supervisor()).send({ articuloId: CANASTA.id }).expect(409);
+        expect((await herramientas(id)).herramientas).toEqual([]);
       });
     });
-
     describe('reglas de la base de datos de las herramientas', () => {
       const rechaza = (sql: string, params: unknown[], patron: RegExp, pool = admin) =>
         expect(pool.query(sql, params)).rejects.toThrow(patron);

@@ -77,10 +77,10 @@ export class RequisitosService {
   }
 
   /**
-   * Mantiene `herramientas_recibidas`: cumplido cuando ninguna herramienta del ticket está sin recibir (sin herramientas también lo
+   * Mantiene los requisitos que dependen de las herramientas del ticket. `herramientas_recibidas`: cumplido cuando ninguna herramienta del ticket está sin recibir (sin herramientas también lo
    * está). Lo llama cada cambio de herramientas, dentro de su transacción.
    */
-  async sincronizarHerramientasRecibidas(
+  async sincronizarDeHerramientas(
     tx: Prisma.TransactionClient,
     ticketId: string,
     actorId: string | null,
@@ -88,6 +88,29 @@ export class RequisitosService {
     const sinRecibir = await tx.ticketHerramienta.count({ where: { ticketId, recibidaAt: null } });
     const clave = { ticketId, codigo: REQ.herramientasRecibidas };
     if (sinRecibir === 0) await this.marcar(tx, clave, 'sistema', actorId);
+    else await this.reabrir(tx, clave);
+    // agregar o quitar una herramienta también cambia lo que falta inspeccionar (solo existe en SERVICIOS)
+    await this.sincronizarInspecciones(tx, ticketId, actorId);
+  }
+
+  /**
+   * Mantiene `inspecciones_enviadas`: cumplido cuando hay al menos una herramienta y cada una tiene una inspección vigente enviada o
+   * aprobada. Lo llama cada cambio de inspecciones o de herramientas, dentro de su transacción.
+   */
+  async sincronizarInspecciones(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    actorId: string | null,
+  ): Promise<void> {
+    const total = await tx.ticketHerramienta.count({ where: { ticketId } });
+    const listas = await tx.ticketHerramienta.count({
+      where: {
+        ticketId,
+        inspecciones: { some: { estado: { in: ['enviada', 'aprobada'] } } },
+      },
+    });
+    const clave = { ticketId, codigo: REQ.inspeccionesEnviadas };
+    if (total > 0 && listas === total) await this.marcar(tx, clave, 'sistema', actorId);
     else await this.reabrir(tx, clave);
   }
 

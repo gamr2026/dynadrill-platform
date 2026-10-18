@@ -25,9 +25,11 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.fcr.ticket_creado',
       'operaciones.fcr.asignacion_realizada',
       'operaciones.fcr.herramientas_solicitadas',
+      'operaciones.fcr.aprobacion_solicitada',
+      'operaciones.fcr.inspeccion_rechazada',
     ],
   },
-  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas'] },
+  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas', 'qhse.ptw.cerrado'] },
 ];
 
 /** Recibe los eventos y los entrega al servicio de avisos; el inbox evita avisar dos veces por el mismo evento. */
