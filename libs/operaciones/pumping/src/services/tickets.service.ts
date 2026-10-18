@@ -236,6 +236,43 @@ export class TicketsService {
     return filas.map(resumen);
   }
 
+  /**
+   * Lectura mínima para el portal del Conductor (Flota, gerenciamiento de viaje): solo los tickets en los que la cuenta es operador
+   * asignado, aún sin cerrar, con lo necesario para autocompletar la solicitud. Los nombres salen de los catálogos (ids incluidos).
+   */
+  async misViajes(usuarioId: string) {
+    const filas = await this.prisma.ticket.findMany({
+      where: {
+        personas: { some: { usuarioId, rol: 'operador' } },
+        paso: { terminal: false },
+      },
+      include: {
+        ...NOMBRES,
+        tiposServicio: true,
+        personas: { where: { rol: 'supervisor' }, include: { usuario: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return filas.map((t) => ({
+      ticketId: t.id,
+      ticketNumero: t.ticketNumero,
+      pedidoCodigo: t.pedidoCodigo,
+      cliente: t.cliente ? { id: t.cliente.id, nombre: t.cliente.nombreComercial } : null,
+      destino: {
+        campo: t.campo ? { id: t.campo.id, nombre: t.campo.nombre } : null,
+        pozo: t.pozo ? { id: t.pozo.id, nombre: t.pozo.nombreCompleto } : null,
+      },
+      serviciosPrincipales: t.tiposServicio.map((s) => ({
+        codigo: s.tipoCodigo,
+        nombre: textoServicio(s.tipoCodigo),
+      })),
+      supervisor: t.personas[0]
+        ? { id: t.personas[0].usuarioId, nombre: t.personas[0].usuario.nombre }
+        : null,
+    }));
+  }
+
   async detalle(id: string, actor: AuthUser) {
     const t = await this.cargar(id);
     return { ...this.aDetalle(t, actor), requisitos: await this.requisitos.estado(id) };

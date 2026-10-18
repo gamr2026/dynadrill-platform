@@ -652,6 +652,45 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     });
   });
 
+  it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta es operador asignado, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
+    const t = await ticketEnTraslado();
+    const permiso = [P.PUMPING_CONTEXTO_CONDUCTOR];
+    const lista = async (h: Record<string, string>) =>
+      (await http().get(`${base}/tickets/mis-viajes`).set(h).expect(200)).body as {
+        ticketId: string;
+        ticketNumero: number;
+        supervisor: { id: string; nombre: string } | null;
+        destino: { pozo: { id: string } | null };
+        serviciosPrincipales: { codigo: string; nombre: string }[];
+      }[];
+    const mios = await lista(como('operador', OP1.id, OP1.nombre, permiso));
+    const v = mios.find((x) => x.ticketId === t.id)!;
+    expect(v).toBeDefined();
+    expect(v.supervisor).toEqual({ id: SUPERVISORA.id, nombre: SUPERVISORA.nombre });
+    expect(Object.keys(v).sort()).toEqual(
+      [
+        'cliente',
+        'destino',
+        'pedidoCodigo',
+        'serviciosPrincipales',
+        'supervisor',
+        'ticketId',
+        'ticketNumero',
+      ].sort(),
+    );
+    // otro operador (no asignado) no ve el ticket; el supervisor tampoco (no es operador del ticket)
+    expect(
+      (await lista(como('operador', uuidv7(), 'Otro', permiso))).map((x) => x.ticketId),
+    ).not.toContain(t.id);
+    expect(
+      (await lista(como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, permiso))).map(
+        (x) => x.ticketId,
+      ),
+    ).not.toContain(t.id);
+    // sin el permiso propio no se entra, aunque pueda operar tickets
+    await http().get(`${base}/tickets/mis-viajes`).set(op1()).expect(403);
+  });
+
   it('salir de Traslado de salida exige todos los requisitos del paso y dice exactamente cuáles faltan', async () => {
     const t = await ticketEnTraslado();
     const r = await http()

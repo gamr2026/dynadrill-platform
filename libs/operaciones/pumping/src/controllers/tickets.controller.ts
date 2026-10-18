@@ -104,6 +104,13 @@ export class TicketsController {
     });
   }
 
+  /** Tickets del operador que consulta, con los datos mínimos del viaje (los consume el portal del Conductor de Flota). */
+  @RequirePermission(P.PUMPING_CONTEXTO_CONDUCTOR)
+  @Get('tickets/mis-viajes')
+  misViajes(@CurrentUser() actor: AuthUser) {
+    return this.tickets.misViajes(actor.id);
+  }
+
   @RequirePermission(P.PUMPING_OPERAR)
   @Get('tickets/:id')
   detalle(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
