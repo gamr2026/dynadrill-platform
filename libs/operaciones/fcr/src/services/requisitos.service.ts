@@ -89,6 +89,13 @@ export class RequisitosService {
     const clave = { ticketId, codigo: REQ.herramientasRecibidas };
     if (sinRecibir === 0) await this.marcar(tx, clave, 'sistema', actorId);
     else await this.reabrir(tx, clave);
+    // el retorno: cumplido cuando cada herramienta está devuelta o con su faltante (sin herramientas, también)
+    const sinRetorno = await tx.ticketHerramienta.count({
+      where: { ticketId, devueltaAt: null, faltanteAt: null },
+    });
+    const retorno = { ticketId, codigo: REQ.herramientasDevueltas };
+    if (sinRetorno === 0) await this.marcar(tx, retorno, 'sistema', actorId);
+    else await this.reabrir(tx, retorno);
     // agregar o quitar una herramienta también cambia lo que falta inspeccionar (solo existe en SERVICIOS)
     await this.sincronizarInspecciones(tx, ticketId, actorId);
   }

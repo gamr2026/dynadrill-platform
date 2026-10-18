@@ -33,6 +33,9 @@ export const REQ = {
   actaReunionOperativa: 'acta_reunion_operativa',
   bitacoraEnviada: 'bitacora_enviada',
   listadoUsoConfirmado: 'listado_uso_confirmado',
+  herramientasDevueltas: 'herramientas_devueltas',
+  reporteUnidadLlegada: 'reporte_unidad_llegada',
+  actaEntregaLocacion: 'acta_entrega_locacion',
 } as const;
 
 interface PasoDef {
@@ -180,6 +183,32 @@ interface RequisitoDef {
 }
 
 export const REQUISITOS: RequisitoDef[] = [
+  {
+    codigo: REQ.herramientasDevueltas,
+    nombre: 'Herramientas devueltas o con su faltante registrado',
+    descripcion:
+      'Bodega registró el retorno de cada herramienta: devuelta, o faltante con su causa y detalle.',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'control_retorno',
+  },
+  {
+    codigo: REQ.reporteUnidadLlegada,
+    nombre: 'Reporte de unidad de llegada',
+    descripcion: 'El operador firmó el Reporte de Unidad (DYN-MNT-RE-012) de llegada de su unidad.',
+    ambito: 'unidad',
+    modulo: 'fcr',
+    paso: 'control_retorno',
+  },
+  {
+    codigo: REQ.actaEntregaLocacion,
+    nombre: 'Acta de Entrega de Locación cargada',
+    descripcion:
+      'QHSE cargó el Acta de Entrega de Locación (DYN-PMP-RE-027). Se exige para cerrar el servicio (contrato 4.11).',
+    ambito: 'ticket',
+    modulo: 'qhse',
+    paso: 'cierre',
+  },
   {
     codigo: REQ.actaReunionOperativa,
     nombre: 'Acta de la reunión operativa confirmada',

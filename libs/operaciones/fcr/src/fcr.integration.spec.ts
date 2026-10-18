@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { DespachosConsumer } from '@dyn/inventario';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -226,6 +227,9 @@ run(
       jest
         .spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
+      jest
+        .spyOn(ActaEntregaConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
       consumer = app.get(PedidosAbiertosConsumer);
@@ -339,8 +343,10 @@ run(
           );
         // los del tronco aplican a los dos; el del tipo de operador, solo a SERVICIOS
         const comunes = [
+          'acta_entrega_locacion',
           'acta_reunion_operativa',
           'bitacora_enviada',
+          'herramientas_devueltas',
           'herramientas_recibidas',
           'listado_herramientas_confirmado',
           'listado_uso_confirmado',
@@ -757,7 +763,11 @@ run(
 
       it('el puente temporal no confirma los requisitos que cumple FCR', async () => {
         const t = await crear({ tipoOt: 'servicio' });
-        const r = (await prisma.ticketRequisito.findFirstOrThrow({ where: { ticketId: t.id } })).id;
+        const r = (
+          await prisma.ticketRequisito.findFirstOrThrow({
+            where: { ticketId: t.id, requisitoCodigo: 'tipo_operador_definido' },
+          })
+        ).id;
         await http()
           .post(`/api/operaciones/fcr/requisitos/${r}/cumplir`)
           .set(jefe())

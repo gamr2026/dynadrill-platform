@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { InventarioModule } from '@dyn/inventario';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { ConfiguracionCodigosController } from './controllers/configuracion-codigos.controller';
+import { RetornoController } from './controllers/retorno.controller';
+import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
 import { EjecucionController } from './controllers/ejecucion.controller';
 import { DocumentosController } from './controllers/documentos.controller';
 import { HerramientasController } from './controllers/herramientas.controller';
@@ -11,6 +13,8 @@ import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { CatalogosService } from './services/catalogos.service';
 import { ConfiguracionCodigosService } from './services/configuracion-codigos.service';
+import { ReporteUnidadLlegadaService } from './services/reporte-unidad-llegada.service';
+import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
 import { EjecucionService } from './services/ejecucion.service';
 import { UsoHerramientasService } from './services/uso-herramientas.service';
@@ -40,6 +44,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     InspeccionesController,
     DocumentosController,
     EjecucionController,
+    RetornoController,
   ],
   providers: [
     PrismaService,
@@ -55,6 +60,9 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     BitacoraService,
     UsoHerramientasService,
     EjecucionService,
+    RetornoService,
+    ReporteUnidadLlegadaService,
+    ActaEntregaConsumer,
     ConfiguracionCodigosService,
     PedidosAbiertosConsumer,
   ],

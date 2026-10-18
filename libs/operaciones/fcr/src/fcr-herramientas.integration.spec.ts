@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { DespachosConsumer } from '@dyn/inventario';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -267,6 +268,9 @@ run(
         .mockResolvedValue(undefined);
       jest
         .spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ActaEntregaConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
@@ -1109,10 +1113,10 @@ run(
         await rechaza(
           'UPDATE fcr.ticket_herramienta SET faltante_at = now(), faltante_por = $2 WHERE id = $1',
           [h.id, SUPERVISOR.id],
-          /ticket_herramienta_faltante_check/,
+          /ticket_herramienta_faltante_(causa_)?check/,
         );
         await rechaza(
-          "UPDATE fcr.ticket_herramienta SET faltante_at = now(), faltante_por = $2, faltante_motivo = 'x' WHERE id = $1",
+          "UPDATE fcr.ticket_herramienta SET faltante_at = now(), faltante_por = $2, faltante_motivo = 'x', faltante_causa = 'perdida' WHERE id = $1",
           [h.id, SUPERVISOR.id],
           /ticket_herramienta_orden_check/,
         );

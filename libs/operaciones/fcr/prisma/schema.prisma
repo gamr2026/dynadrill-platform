@@ -316,6 +316,7 @@ model Ticket {
   personas       TicketPersona[]
   unidades       TicketUnidad[]
   requisitos     TicketRequisito[]
+  llegadas       ReporteUnidadLlegada[]
   lineas         TicketLinea[]
   herramientas   TicketHerramienta[]
   avisosPrecarga TicketAvisoPrecarga[]
@@ -576,6 +577,7 @@ model TicketHerramienta {
   faltanteAt       DateTime?         @map("faltante_at") @db.Timestamptz(6)
   faltantePor      String?           @map("faltante_por") @db.Uuid
   faltanteMotivo   String?           @map("faltante_motivo")
+  faltanteCausa    CausaFaltante?    @map("faltante_causa")
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy        String?           @map("created_by") @db.Uuid
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -872,6 +874,41 @@ model UsoHerramientaDia {
   @@schema("fcr")
 }
 
+/// Causa de que una herramienta falte al retorno.
+enum CausaFaltante {
+  venta_complementaria
+  perdida
+  dano
+  otro
+
+  @@map("causa_faltante")
+  @@schema("fcr")
+}
+
+/// Reporte de unidad de llegada de un ticket (INMUTABLE): lo firma el operador de la unidad.
+model ReporteUnidadLlegada {
+  id                       String      @id @db.Uuid
+  ticketId                 String      @map("ticket_id") @db.Uuid
+  ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId               String      @map("vehiculo_id") @db.Uuid
+  vehiculo                 CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  llegadaFecha             DateTime    @map("llegada_fecha") @db.Date
+  combustible              Decimal     @db.Decimal(8, 2)
+  novedadesMecanica        String?     @map("novedades_mecanica")
+  novedadesInstrumentacion String?     @map("novedades_instrumentacion")
+  novedadesOperaciones     String?     @map("novedades_operaciones")
+  unidadLista              Boolean     @map("unidad_lista")
+  operacionInterrumpida    Boolean     @map("operacion_interrumpida")
+  detalleInterrupcion      String?     @map("detalle_interrupcion")
+  firmadaPor               String      @map("firmada_por") @db.Uuid
+  firmante                 IdUsuario   @relation("llegadaFirmante", fields: [firmadaPor], references: [id])
+  firmadaAt                DateTime    @default(now()) @map("firmada_at") @db.Timestamptz(6)
+
+  @@unique([ticketId, vehiculoId])
+  @@map("reporte_unidad_llegada")
+  @@schema("fcr")
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
 // Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
@@ -937,16 +974,17 @@ model CatTipoVehiculo {
 }
 
 model CatVehiculo {
-  id             String            @id @db.Uuid
+  id             String                 @id @db.Uuid
   placa          String
   marca          String?
   modelo         String?
-  tipoVehiculoId String?           @map("tipo_vehiculo_id") @db.Uuid
-  tipoVehiculo   CatTipoVehiculo?  @relation(fields: [tipoVehiculoId], references: [id])
-  habilitado     Boolean           @default(true)
+  tipoVehiculoId String?                @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo   CatTipoVehiculo?       @relation(fields: [tipoVehiculoId], references: [id])
+  habilitado     Boolean                @default(true)
   unidades       TicketUnidad[]
-  operadores     TicketPersona[]   @relation("operadorUnidad")
+  operadores     TicketPersona[]        @relation("operadorUnidad")
   requisitos     TicketRequisito[]
+  llegadas       ReporteUnidadLlegada[]
 
   @@map("vehiculo")
   @@schema("catalogos")
@@ -986,6 +1024,7 @@ model IdUsuario {
   firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
   documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
   reuniones             ReunionOperativa[]        @relation("reunionFirmante")
+  llegadasFirmadas      ReporteUnidadLlegada[]    @relation("llegadaFirmante")
   bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
   actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
 
