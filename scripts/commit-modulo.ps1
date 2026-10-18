@@ -23,13 +23,15 @@ param(
   [Parameter(Mandatory = $true)][string]$Mensaje,
   [Parameter(Mandatory = $true)][string[]]$Rutas,
   [switch]$Subir,
+  # Solo para la sesión principal: confirma en la rama actual (`desarrollo`) en vez de `modulo/<modulo>`, y deja el índice real al día solo en esas rutas.
+  [switch]$EnRamaActual,
   # A dónde se sube: `origin` en el backend; en el frontend el repo de respaldo se llama `respaldo` (su `origin` es el de la demo: NUNCA).
   [string]$Remoto = 'origin'
 )
-$ErrorActionPreference = 'Stop'
+# 'Continue': en PowerShell 5.1 un aviso de git por la salida de error (p. ej. el de CRLF) no debe cortar el script; los pasos que importan revisan $LASTEXITCODE
 Set-Location (git rev-parse --show-toplevel)
 
-$rama = "modulo/$Modulo"
+$rama = if ($EnRamaActual) { git branch --show-current } else { "modulo/$Modulo" }
 $atribucion = 'Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>'
 $completo = "$Mensaje`n`n$atribucion"
 
@@ -54,15 +56,23 @@ try {
   $padre = git rev-parse --verify --quiet "refs/heads/$rama"
   if (-not $padre) { $padre = git rev-parse HEAD }
   git read-tree $padre
+  if ($LASTEXITCODE -ne 0) { throw 'No se pudo leer la rama base.' }
   git add -A --ignore-errors -- $Rutas 2>$null
   $arbol = git write-tree
+  if ($LASTEXITCODE -ne 0 -or -not $arbol) { throw 'No se pudo armar el árbol del commit.' }
   $arbolPadre = git rev-parse "$padre^{tree}"
   if ($arbol -eq $arbolPadre) {
     Write-Host "Sin cambios en esas rutas: no se creó ningún commit."
     return
   }
   $nuevo = git commit-tree $arbol -p $padre -F $archivoMensaje
+  if ($LASTEXITCODE -ne 0 -or -not $nuevo) { throw 'No se pudo crear el commit.' }
   git update-ref "refs/heads/$rama" $nuevo
+  if ($EnRamaActual) {
+    # el índice real ve el commit nuevo como cambios por deshacer: se alinea solo en las rutas confirmadas
+    $env:GIT_INDEX_FILE = $anterior
+    git reset -q -- $Rutas
+  }
   Write-Host "Commit $($nuevo.Substring(0, 7)) en $rama"
   if ($Subir) {
     if ($Remoto -eq 'origin' -and (git remote get-url origin) -match 'dynadrill-frontend(.git)?$') {
