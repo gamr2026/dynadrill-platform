@@ -60,6 +60,8 @@ model CategoriaArticulo {
   esQuimica   Boolean  @default(false) @map("es_quimica")
   /// Los artículos de la categoría son herramientas con lista de partes.
   llevaPartes Boolean  @default(false) @map("lleva_partes")
+  /// Los artículos de la categoría son repuestos y suministros: Mantenimiento los ofrece al registrar el repuesto usado.
+  esRepuesto  Boolean  @default(false) @map("es_repuesto")
   activo      Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy   String?  @map("created_by") @db.Uuid
@@ -181,6 +183,7 @@ enum MotivoEquivalencia {
   talla
   duplicado
   digitacion
+  formato
 
   @@map("motivo_equivalencia")
   @@schema("inventario")

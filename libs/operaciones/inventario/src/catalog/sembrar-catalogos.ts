@@ -21,6 +21,8 @@ export const UNIDADES_STOCK: ReadonlyArray<{ nombre: string; simbolo: string }> 
 /** Categorías que agrupan químicos y las que llevan lista de partes, por defecto (el nombre es el del export de AS2). Solo la semilla y la carga inicial usan estos nombres: el sistema decide siempre por `es_quimica` y `lleva_partes`. */
 export const CATEGORIAS_QUIMICAS: readonly string[] = ['QUIMICA'];
 export const CATEGORIAS_CON_PARTES: readonly string[] = ['FISHING & TOOLS', 'HERRAMIENTAS'];
+/** Categoría de repuestos y suministros de mantenimiento (reporte de AS2: «MANTENIMIENTO / SUMINISTROS Y MANTENIMIENTO»). */
+export const CATEGORIAS_REPUESTOS: readonly string[] = ['MANTENIMIENTO'];
 
 /** Unidad con la que se carga el catálogo de AS2, que no trae la unidad de cada producto (ver CONSULTAS-PARA-DYNADRILL.md). */
 export const UNIDAD_POR_DEFECTO = 'Unidad';
@@ -88,5 +90,9 @@ export async function marcarCategoriasBase(prisma: PrismaClient): Promise<void> 
   await prisma.categoriaArticulo.updateMany({
     where: { nombre: { in: [...CATEGORIAS_CON_PARTES] }, llevaPartes: false },
     data: { llevaPartes: true },
+  });
+  await prisma.categoriaArticulo.updateMany({
+    where: { nombre: { in: [...CATEGORIAS_REPUESTOS] }, esRepuesto: false },
+    data: { esRepuesto: true },
   });
 }

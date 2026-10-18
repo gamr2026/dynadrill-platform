@@ -46,6 +46,7 @@ function vista(a: ArticuloConNombres, stockActual: number) {
       nombre: a.categoria.nombre,
       esQuimica: a.categoria.esQuimica,
       llevaPartes: a.categoria.llevaPartes,
+      esRepuesto: a.categoria.esRepuesto,
     },
     subcategoria: a.subcategoria ? { id: a.subcategoria.id, nombre: a.subcategoria.nombre } : null,
     unidadStock: {
@@ -99,6 +100,7 @@ export class ArticulosService {
       ...(f.subcategoriaId ? { subcategoriaId: f.subcategoriaId } : {}),
       ...(f.activo !== undefined ? { activo: f.activo } : {}),
       ...(f.quimicos ? { categoria: { esQuimica: true } } : {}),
+      ...(f.repuestos ? { categoria: { esRepuesto: true } } : {}),
       ...(q
         ? {
             OR: [

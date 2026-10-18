@@ -7,6 +7,8 @@ import { INestApplication, Module } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Pool } from 'pg';
 import request from 'supertest';
 import { Permission, type RoleCode } from '@dyn/authz';
@@ -21,7 +23,9 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { cargarDatosReales } from '../prisma/cargar-datos-reales';
+import { cargarBienesAs2 } from '../prisma/cargar-bienes-as2';
 import { cargarEpp } from '../prisma/cargar-epp';
+import { normalizarCodigos } from '../prisma/normalizar-codigos';
 import { sembrarCatalogos } from './catalog/sembrar-catalogos';
 import { DespachosConsumer } from './consumers/despachos.consumer';
 import { InventarioModule } from './inventario.module';
@@ -60,6 +64,15 @@ const PEDIDO_DESPACHO = uuidv7();
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [BODEGUERO, OPERADOR, VENTAS],
   bodegas: [BODEGA_A, BODEGA_B],
+};
+
+/** Códigos que cargan después la carga inicial: el EPP y los bienes de AS2 (el recuento de la carga inicial no los cuenta). */
+const cargasPosteriores = (): string[] => {
+  const leer = (archivo: string) =>
+    JSON.parse(readFileSync(join(__dirname, '..', 'prisma', 'data', archivo), 'utf8')) as {
+      articulos: Array<{ codigo: string }>;
+    };
+  return [...leer('epp.json').articulos, ...leer('as2-bienes.json').articulos].map((a) => a.codigo);
 };
 
 run('Inventario: catálogo y kardex (base de datos real)', () => {
@@ -1289,12 +1302,92 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     });
   });
 
+  describe('bienes de AS2: químicos, completion, fishing y repuestos de mantenimiento', () => {
+    const url = '/api/operaciones/inventario/articulos';
+
+    it('la carga es idempotente y deja 1.268 artículos nuevos con los códigos sin espacios', async () => {
+      await cargarBienesAs2(prisma); // si aún no estaba cargada, la primera vez la carga
+      const r = await cargarBienesAs2(prisma);
+      expect(r).toMatchObject({ articulos: 0, yaExistian: 1268, equivalencias: 0 });
+      const c = await admin.query(
+        `SELECT c.nombre AS categoria, count(*)::int AS n
+           FROM inventario.articulo a JOIN inventario.categoria_articulo c ON c.id = a.categoria_id
+          WHERE a.codigo = ANY($1::text[]) GROUP BY 1 ORDER BY 1`,
+        [cargasPosteriores().filter((x) => !x.startsWith('EPP-'))],
+      );
+      expect(Object.fromEntries(c.rows.map((x) => [x.categoria, x.n]))).toEqual({
+        'COMPLETION BIENES': 98,
+        'FISHING & TOOLS': 46,
+        'FISHING CONSUMO': 129,
+        MANTENIMIENTO: 653,
+        QUIMICA: 342,
+      });
+      // los códigos con espacios se normalizan (también los de la carga inicial) y el original de AS2 queda como equivalencia «formato»
+      await normalizarCodigos(prisma);
+      expect((await normalizarCodigos(prisma)).normalizados).toBe(0); // idempotente
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM inventario.articulo WHERE codigo ~ '[[:space:]]' AND codigo NOT LIKE 'IT%'",
+          )
+        ).rows[0].n,
+      ).toBe(0);
+      const eq = await admin.query(
+        `SELECT a.codigo, e.codigo AS original FROM inventario.articulo_equivalencia e JOIN inventario.articulo a ON a.id = e.articulo_id
+          WHERE e.motivo = 'formato' AND e.codigo IN ('DYFE - 100', 'DYS - 302', 'DYFE - 200') ORDER BY e.codigo`,
+      );
+      expect(eq.rows).toEqual([
+        { codigo: 'DYFE-100-2', original: 'DYFE - 100' },
+        { codigo: 'DYFE-200-2', original: 'DYFE - 200' },
+        { codigo: 'DYS-302-2', original: 'DYS - 302' },
+      ]);
+    });
+
+    it('un producto de AS2 sin nombre se carga con su código como nombre y una nota que lo dice', async () => {
+      const r = await admin.query(
+        "SELECT codigo, nombre, nota FROM inventario.articulo WHERE nota LIKE 'AS2 no trae nombre%' ORDER BY codigo LIMIT 1",
+      );
+      expect(r.rows[0].nombre).toBe(r.rows[0].codigo);
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM inventario.articulo WHERE nota LIKE 'AS2 no trae nombre%'",
+          )
+        ).rows[0].n,
+      ).toBe(51);
+    });
+
+    it('los repuestos de mantenimiento se ofrecen por la marca de la categoría, no por su nombre', async () => {
+      const todos = await http().get(url).query({ repuestos: 'true' }).set(lector()).expect(200);
+      expect(todos.body.length).toBeGreaterThanOrEqual(653);
+      expect(
+        todos.body.every((a: { categoria: { esRepuesto: boolean } }) => a.categoria.esRepuesto),
+      ).toBe(true);
+      const cats = (
+        await http().get('/api/operaciones/inventario/categorias').set(lector()).expect(200)
+      ).body as Array<{
+        nombre: string;
+        esRepuesto: boolean;
+      }>;
+      expect(cats.filter((c) => c.esRepuesto).map((c) => c.nombre)).toEqual(['MANTENIMIENTO']);
+      // buscar un repuesto por su texto
+      const uno = todos.body[0] as { nombre: string };
+      const busqueda = await http()
+        .get(url)
+        .query({ repuestos: 'true', q: uno.nombre.slice(0, 12) })
+        .set(lector())
+        .expect(200);
+      expect(busqueda.body.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   describe('carga inicial desde AS2', () => {
     it('es idempotente: volver a cargarla no duplica artículos ni saldos', async () => {
       await cargarDatosReales(prisma); // si aún no estaba cargada, la primera vez la carga
       const antes = await admin.query(
-        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND codigo NOT LIKE 'EPP%')::int AS articulos,
+        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND NOT (codigo = ANY($1::text[])) AND codigo NOT LIKE 'EPP%')::int AS articulos,
                 (SELECT count(*) FROM inventario.movimiento WHERE origen = 'saldo_inicial')::int AS saldos`,
+        [cargasPosteriores()],
       );
       const r = await cargarDatosReales(prisma);
       expect(r).toMatchObject({
@@ -1307,8 +1400,9 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         partes: 0,
       });
       const despues = await admin.query(
-        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND codigo NOT LIKE 'EPP%')::int AS articulos,
+        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND NOT (codigo = ANY($1::text[])) AND codigo NOT LIKE 'EPP%')::int AS articulos,
                 (SELECT count(*) FROM inventario.movimiento WHERE origen = 'saldo_inicial')::int AS saldos`,
+        [cargasPosteriores()],
       );
       expect(despues.rows[0]).toEqual(antes.rows[0]);
       // 641 artículos del export de AS2 y 48 herramientas del registro de inspección, con sus 914 partes

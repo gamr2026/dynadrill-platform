@@ -140,7 +140,11 @@ export async function cargarDatosReales(
 
   for (const a of articulos) {
     const codigo = a.codigo.trim();
-    const existente = await prisma.articulo.findUnique({ where: { codigo }, select: { id: true } });
+    // el artículo puede estar ya con el código normalizado (sin espacios): se reconoce por la equivalencia con su código de AS2
+    const existente = await prisma.articulo.findFirst({
+      where: { OR: [{ codigo }, { equivalencias: { some: { codigo } } }] },
+      select: { id: true },
+    });
     if (existente) r.yaExistian++;
     let costo = a.costoUnitario;
     if (costo !== null && costo < 0) {

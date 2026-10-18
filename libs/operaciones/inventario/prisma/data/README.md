@@ -32,3 +32,38 @@ Para volver a mandarlos: `POST /api/operaciones/inventario/articulos/epi/republi
 
 **Pendiente de confirmar con Dynadrill:** qué productos de «entrega personal» se entregan de verdad (la clasificación la hizo
 Claude a partir del nombre) y los seriales que AS2 guarda en la columna de nombre comercial de los extintores.
+
+## `as2-bienes.json` — bienes de AS2 que Inventario no tenía
+
+Del mismo reporte de AS2: los productos de las categorías de **bienes** que no estaban en Inventario. Los carga `npm run db:cargar:bienes`
+(idempotente; sin saldos, costo ni bodega porque el reporte no los trae; unidad «Unidad» por defecto).
+
+| Categoría de AS2                                       | Artículos nuevos |
+| ------------------------------------------------------ | ---------------- |
+| QUIMICA                                                | 342              |
+| COMPLETION BIENES                                      | 98               |
+| FISHING CONSUMO                                        | 129              |
+| FISHING & TOOLS                                        | 46               |
+| MANTENIMIENTO (suministros y mantenimiento: repuestos) | 653              |
+| **Total**                                              | **1.268**        |
+
+**Los servicios no se cargan**: «SERVICIO FISHING», «SERVICIOS PUMPING», «COMPLETION SERVICIOS», «SERVICIOS COILED TUBING» y «SERVICIOS» son
+conceptos de facturación (listas de precios de Comercial), y «COMPRA IVA», «COMPRA 0%» y «GASTOS INDIRECTOS» son conceptos contables.
+
+**Códigos con espacios (normalización).** El alta de artículos no admite espacios en el código. La regla (`src/catalog/codigos.ts`): los
+espacios alrededor de «-» y «/» se pegan y los demás pasan a «-» (`DYFE - 100` → `DYFE-100`; `CT-MCR/ CT95706 9/5` →
+`CT-MCR/CT95706-9/5`). El código original queda como equivalencia con el motivo `formato`. Si el normalizado ya es de otro producto de AS2
+(que sí venía limpio), el normalizado recibe el sufijo `-2`: `DYFE - 200` → `DYFE-200-2`, `DYS - 302` → `DYS-302-2`, `DYFE - 100` → `DYFE-100-2`.
+Se normalizaron 103 códigos de este archivo y los 78 de la carga inicial de la demo (`npm run db:normalizar:codigos`, idempotente).
+**Orden de carga:** `db:cargar:inventario`, `db:cargar:epp`, `db:cargar:bienes` y al final `db:normalizar:codigos`.
+
+**Sin nombre en AS2:** 51 productos (casi todos de completion y fishing) no traen nombre ni nombre comercial; se cargan con su código
+como nombre y una nota que lo dice.
+
+**No se cargó:** la marca (casi siempre «GENERAL») ni el proveedor (GTM-ECUADOR S.A. en los de mantenimiento, ASOCIACION GRUPO 4 REGION
+ORIENTE en el EPP), porque Inventario no tiene catálogo de proveedores; si Mantenimiento o Compras lo necesitan, se modela como tabla y se
+vuelve a leer del reporte.
+
+**Repuestos.** La categoría MANTENIMIENTO lleva la marca `es_repuesto` (el comportamiento depende de la marca, no del nombre):
+`GET /api/operaciones/inventario/articulos?repuestos=true&q=<texto>` devuelve solo repuestos y suministros. Es lo que Mantenimiento
+ofrece al registrar el repuesto usado de una sub-orden (`mantenimiento.suborden_repuesto.articulo_id`, FK a `inventario.articulo`).

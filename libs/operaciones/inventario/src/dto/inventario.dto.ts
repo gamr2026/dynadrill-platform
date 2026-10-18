@@ -70,6 +70,8 @@ export class ListarArticulosDto {
   @IsOptional() @Transform(aBooleano) @IsBoolean() conStock?: boolean;
   /** Solo los de categorías de químicos. */
   @IsOptional() @Transform(aBooleano) @IsBoolean() quimicos?: boolean;
+  /** Solo los de categorías de repuestos y suministros de mantenimiento. */
+  @IsOptional() @Transform(aBooleano) @IsBoolean() repuestos?: boolean;
 }
 
 export class ListarMovimientosDto {
@@ -106,12 +108,14 @@ export class CategoriaDto {
   @IsString() @MinLength(1) @MaxLength(TEXTO_CORTO) nombre!: string;
   @IsOptional() @IsBoolean() esQuimica?: boolean;
   @IsOptional() @IsBoolean() llevaPartes?: boolean;
+  @IsOptional() @IsBoolean() esRepuesto?: boolean;
 }
 
 export class ActualizarCategoriaDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(TEXTO_CORTO) nombre?: string;
   @IsOptional() @IsBoolean() esQuimica?: boolean;
   @IsOptional() @IsBoolean() llevaPartes?: boolean;
+  @IsOptional() @IsBoolean() esRepuesto?: boolean;
   @IsOptional() @IsBoolean() activo?: boolean;
 }
 
