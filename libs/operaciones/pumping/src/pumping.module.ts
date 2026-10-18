@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InventarioModule } from '@dyn/inventario';
+import { ReportesDiariosController } from './controllers/reportes-diarios.controller';
+import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
 import { TicketsController } from './controllers/tickets.controller';
 import { TrasladoSalidaController } from './controllers/traslado-salida.controller';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
@@ -10,6 +12,8 @@ import { IngresoService } from './services/ingreso.service';
 import { EjecucionService } from './services/ejecucion.service';
 import { QuimicosService } from './services/quimicos.service';
 import { ReporteUnidadService } from './services/reporte-unidad.service';
+import { ReportesDiariosService } from './services/reportes-diarios.service';
+import { RevisionSalidaService } from './services/revision-salida.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TerminosService } from './services/terminos.service';
 import { TicketsService } from './services/tickets.service';
@@ -23,7 +27,7 @@ import { TicketsService } from './services/tickets.service';
  */
 @Module({
   imports: [InventarioModule],
-  controllers: [TicketsController, TrasladoSalidaController],
+  controllers: [TicketsController, TrasladoSalidaController, ReportesDiariosController],
   providers: [
     PrismaService,
     TicketsService,
@@ -34,6 +38,9 @@ import { TicketsService } from './services/tickets.service';
     ReporteUnidadService,
     EjecucionService,
     QuimicosService,
+    RevisionSalidaService,
+    ReportesDiariosService,
+    DiaCorregidoConsumer,
     PedidosAbiertosConsumer,
     RequisitosExternosConsumer,
   ],

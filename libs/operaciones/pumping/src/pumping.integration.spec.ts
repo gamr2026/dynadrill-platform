@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { EventBus, MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { DespachosConsumer } from '@dyn/inventario';
+import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { PumpingModule } from './pumping.module';
@@ -91,6 +92,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   let prisma: PrismaService;
   let consumer: PedidosAbiertosConsumer;
   let externos: RequisitosExternosConsumer;
+  let diaCorregido: DiaCorregidoConsumer;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -182,10 +184,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .spyOn(RequisitosExternosConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
     jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
+    jest
+      .spyOn(DiaCorregidoConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(PedidosAbiertosConsumer);
     externos = app.get(RequisitosExternosConsumer);
+    diaCorregido = app.get(DiaCorregidoConsumer);
   });
 
   afterAll(async () => {
@@ -1465,6 +1471,292 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         pendiente: 0,
       });
       expect(await stock()).toBe(antes + 4);
+    });
+  });
+
+  describe('revisión de reportes de salida: el Supervisor aprueba la inspección de cada unidad (P2)', () => {
+    const aprobar = (t: { url: string }, vehiculoId: string, h = supervisora()) =>
+      http().post(`${t.url}/revision-salida/inspecciones/${vehiculoId}/aprobar`).set(h);
+    const inspeccion = async (id: string, vehiculoId: string) =>
+      (
+        await admin.query(
+          "SELECT estado, origen, motivo, cumplido_por FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND vehiculo_id = $2",
+          [id, vehiculoId],
+        )
+      ).rows[0];
+
+    it('solo en su paso, por el Supervisor del equipo, una sola vez por unidad y dejando constancia', async () => {
+      const t = await ticketEnTraslado();
+      // fuera de su paso
+      expect((await aprobar(t, VEHICULO.id)).status).toBe(409);
+
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'revision_reportes_salida',
+      ]);
+      expect((await aprobar(t, VEHICULO.id, op1())).status).toBe(403); // el operador no aprueba
+      expect((await aprobar(t, uuidv7())).status).toBe(404); // una unidad que no es del ticket
+
+      const ok = await aprobar(t, VEHICULO.id);
+      expect(ok.status).toBe(201);
+      expect(await inspeccion(t.id, VEHICULO.id)).toMatchObject({
+        estado: 'cumplido',
+        origen: 'manual_temporal',
+        cumplido_por: SUPERVISORA.id,
+      });
+      expect((await inspeccion(t.id, VEHICULO.id)).motivo).toContain('Supervisor');
+      // la otra unidad sigue pendiente
+      expect((await inspeccion(t.id, VEHICULO_2.id)).estado).toBe('pendiente');
+      expect((await aprobar(t, VEHICULO.id)).status).toBe(409); // ya aprobada
+
+      // el evento de Flota, cuando exista, no choca con la aprobación ya hecha
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.aprobada',
+          { ticketId: t.id, vehiculoId: VEHICULO.id },
+          'flota',
+        ),
+      );
+      expect((await inspeccion(t.id, VEHICULO.id)).origen).toBe('manual_temporal');
+    });
+  });
+
+  describe('Reporte Diario de Actividades (DYN-SGI-RE-047): borrador, completar, reabrir y día corregido por Facturación', () => {
+    const FECHA = '2026-11-06';
+    const actividad = (extra: object = {}) => ({
+      horaInicio: '06:00',
+      horaFin: '09:30',
+      detalle: 'Armado de líneas y prueba de presión',
+      ...extra,
+    });
+    const url = (t: { url: string }, fecha = FECHA) => `${t.url}/reportes-diarios/${fecha}`;
+    const guardar = (t: { url: string }, cuerpo: object, h = op1(), fecha = FECHA) =>
+      http().put(url(t, fecha)).set(h).send(cuerpo);
+    const completar = (t: { url: string }, h = op1(), fecha = FECHA) =>
+      http()
+        .post(`${url(t, fecha)}/completar`)
+        .set(h);
+    const enEjecucion = async () => {
+      const t = await ticketEnTraslado();
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'ejecucion_operativa',
+      ]);
+      return t;
+    };
+    const eventosDe = async (ticketId: string) =>
+      (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_diario_completado' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+          [ticketId],
+        )
+      ).rows.map((r) => r.datos.data);
+    const corregido = (pedidoId: string, extra: Record<string, unknown> = {}): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'comercial.documento_operativo.corregido',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: pedidoId },
+        data: { pedidoId, documentoId: null, origen: 'pumping', fecha: FECHA, ...extra },
+      } as EventEnvelope;
+    };
+
+    it('guarda el día como borrador, con la duración y las tablas de cada actividad calculadas y leídas del servidor', async () => {
+      const t = await enEjecucion();
+      const r = await guardar(t, {
+        representanteCliente: 'Carlos Companyman',
+        cargoRepresentante: 'Representante de Campo',
+        tiempoProductivo: 7.5,
+        tiempoNoProductivo: 1,
+        observaciones: 'Sin novedades',
+        actividades: [
+          actividad({
+            tablas: [
+              {
+                titulo: 'Volúmenes',
+                columnas: ['Etapa', 'Bbl'],
+                filas: [
+                  ['1', '120'],
+                  ['2', '135.5'],
+                ],
+              },
+            ],
+          }),
+          actividad({ horaInicio: '22:00', horaFin: '02:00', detalle: 'Bombeo nocturno' }), // cruza la medianoche
+        ],
+      });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({
+        fecha: FECHA,
+        estado: 'borrador',
+        representanteCliente: 'Carlos Companyman',
+        tiempoProductivo: 7.5,
+        totalHoras: 7.5, // 3,5 + 4
+      });
+      expect(r.body.actividades.map((a: { duracionHoras: number }) => a.duracionHoras)).toEqual([
+        3.5, 4,
+      ]);
+      expect(r.body.actividades[0].tablas).toEqual([
+        {
+          titulo: 'Volúmenes',
+          columnas: ['Etapa', 'Bbl'],
+          filas: [
+            ['1', '120'],
+            ['2', '135.5'],
+          ],
+        },
+      ]);
+      expect(r.body.actividades[0].autor.id).toBe(OP1.id);
+
+      // volver a guardar reemplaza el día
+      const otra = await guardar(t, { actividades: [actividad({ detalle: 'Solo esta' })] });
+      expect(otra.body.actividades).toHaveLength(1);
+      const lista = await http().get(`${t.url}/reportes-diarios`).set(supervisora());
+      expect(lista.body).toEqual([
+        { fecha: FECHA, estado: 'borrador', actividades: 1, totalHoras: 3.5 },
+      ]);
+    });
+
+    it('rechaza lo mal armado, a quien no es el Operador del equipo y fuera de su paso', async () => {
+      const t = await enEjecucion();
+      const malos: Array<[string, object]> = [
+        ['hora mal escrita', { actividades: [actividad({ horaInicio: '6:00' })] }],
+        ['mismas horas', { actividades: [actividad({ horaInicio: '08:00', horaFin: '08:00' })] }],
+        ['detalle vacío', { actividades: [actividad({ detalle: '   ' })] }],
+        [
+          'fila con otra cantidad de celdas',
+          { actividades: [actividad({ tablas: [{ columnas: ['A', 'B'], filas: [['1']] }] })] },
+        ],
+        [
+          'tabla sin columnas',
+          { actividades: [actividad({ tablas: [{ columnas: [], filas: [] }] })] },
+        ],
+        ['tiempo de más de 24 h', { actividades: [actividad()], tiempoProductivo: 25 }],
+      ];
+      for (const [caso, cuerpo] of malos) {
+        const r = await guardar(t, cuerpo);
+        expect({ caso, status: r.status }).toEqual({ caso, status: 400 });
+      }
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-13-45')).status).toBe(
+        400,
+      );
+      expect((await guardar(t, { actividades: [actividad()] }, operador())).status).toBe(403); // no es del equipo
+      expect((await guardar(t, { actividades: [actividad()] }, supervisora())).status).toBe(403); // el paso es del Operador
+      expect((await guardar(t, { actividades: [actividad()] })).status).toBe(200); // el operador del equipo sí
+
+      // fuera de la Ejecución operativa
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'control_retorno',
+      ]);
+      expect((await guardar(t, { actividades: [actividad()] })).status).toBe(409);
+    });
+
+    it('completar exige actividades y publica el día para Comercial; editarlo lo reabre y se completa de nuevo', async () => {
+      const t = await enEjecucion();
+      expect((await completar(t)).status).toBe(404); // sin reporte guardado
+      await guardar(t, { actividades: [] });
+      const vacio = await completar(t);
+      expect(vacio.status).toBe(400);
+      expect(vacio.body.code).toBe('SIN_ACTIVIDADES');
+
+      await guardar(t, {
+        actividades: [
+          actividad({ tablas: [{ titulo: 'Resumen', columnas: ['Dato'], filas: [['x']] }] }),
+        ],
+      });
+      const ok = await completar(t);
+      expect(ok.status).toBe(201);
+      expect(ok.body.estado).toBe('completado');
+
+      const [e1] = await eventosDe(t.id);
+      expect(e1).toMatchObject({
+        ticketId: t.id,
+        pedidoId: t.pedidoId,
+        fecha: FECHA,
+        supervisorId: SUPERVISORA.id,
+        operadorId: OP1.id,
+        actividades: [
+          {
+            fecha: FECHA,
+            horaInicio: '06:00',
+            horaFin: '09:30',
+            duracionHoras: 3.5,
+            tablas: [{ titulo: 'Resumen', columnas: ['Dato'], filas: [['x']] }],
+          },
+        ],
+      });
+
+      // se puede reabrir aunque figure completado: guardar lo deja en borrador, y al completar se reenvía el día
+      const reabierto = await guardar(t, {
+        actividades: [actividad({ detalle: 'Corregido por el operador' })],
+      });
+      expect(reabierto.body.estado).toBe('borrador');
+      await completar(t).expect(201);
+      const eventos2 = await eventosDe(t.id);
+      expect(eventos2).toHaveLength(2);
+      expect(eventos2[1].actividades[0].detalle).toBe('Corregido por el operador');
+    });
+
+    it('si Facturación corrige el día (evento de Comercial), el ticket ya no lo edita ni lo reenvía; el evento es idempotente y solo cuenta el de Pumping', async () => {
+      const t = await enEjecucion();
+      await guardar(t, { actividades: [actividad()] });
+      await completar(t).expect(201);
+
+      const e = corregido(t.pedidoId);
+      await diaCorregido.consumir(e);
+      await diaCorregido.consumir(e); // mismo evento: lo ignora el inbox
+      const r = await http().get(url(t)).set(op1());
+      expect(r.body.estado).toBe('corregido');
+
+      const editar = await guardar(t, { actividades: [actividad()] });
+      expect(editar.status).toBe(409);
+      expect(editar.body.code).toBe('DIA_CORREGIDO');
+      expect((await completar(t)).status).toBe(409);
+      expect((await eventosDe(t.id)).length).toBe(1); // no se reenvió
+
+      // un día corregido por Facturación sin reporte en el ticket también queda bloqueado
+      await diaCorregido.consumir(corregido(t.pedidoId, { fecha: '2026-11-07' }));
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-11-07')).status).toBe(
+        409,
+      );
+      // lo de FCR no es de este módulo
+      await diaCorregido.consumir(corregido(t.pedidoId, { origen: 'fcr', fecha: '2026-11-08' }));
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-11-08')).status).toBe(
+        200,
+      );
+    });
+
+    it('la base impide una actividad sin duración, un completado sin quién y tiempos fuera de 0 a 24 h', async () => {
+      const t = await enEjecucion();
+      await guardar(t, { actividades: [actividad()] });
+      const rep = (
+        await admin.query('SELECT id FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id])
+      ).rows[0].id;
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.reporte_diario_actividad (id, reporte_id, orden, hora_inicio, hora_fin, detalle, autor_id) VALUES ($1, $2, 9, '08:00', '08:00', 'x', $3)",
+          [uuidv7(), rep, OP1.id],
+        ),
+      ).rejects.toThrow(/reporte_diario_actividad_horas_check/);
+      await expect(
+        admin.query('UPDATE pumping.reporte_diario SET completado_at = now() WHERE id = $1', [rep]),
+      ).rejects.toThrow(/reporte_diario_completado_check/);
+      await expect(
+        admin.query('UPDATE pumping.reporte_diario SET tiempo_productivo = 30 WHERE id = $1', [
+          rep,
+        ]),
+      ).rejects.toThrow(/reporte_diario_tiempos_check/);
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.reporte_diario_actividad (id, reporte_id, orden, hora_inicio, hora_fin, detalle, autor_id) VALUES ($1, $2, 0, '10:00', '11:00', 'x', $3)",
+          [uuidv7(), rep, OP1.id],
+        ),
+      ).rejects.toThrow(/reporte_diario_actividad_orden_key/);
     });
   });
 });

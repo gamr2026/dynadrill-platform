@@ -215,6 +215,7 @@ model Ticket {
   ingreso       TicketIngreso?
   reportesUnidad ReporteUnidad[]
   documentos     TicketDocumento[]
+  reportesDiarios ReporteDiario[]
 
   @@index([pasoCodigo])
   @@map("ticket")
@@ -242,6 +243,105 @@ model TicketDocumento {
   @@unique([ticketId, archivoId])
   @@index([ticketId, tipo])
   @@map("ticket_documento")
+  @@schema("pumping")
+}
+
+/// Reporte Diario de Actividades (DYN-SGI-RE-047) de un ticket: uno por día. Borrador hasta completarlo; se puede reabrir editándolo.
+model ReporteDiario {
+  id                   String    @id @db.Uuid
+  ticketId             String    @map("ticket_id") @db.Uuid
+  ticket               Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha                DateTime  @db.Date
+  /// Persona externa (Company Man del cliente): texto, no una cuenta.
+  representanteCliente String?   @map("representante_cliente")
+  cargoRepresentante   String?   @map("cargo_representante")
+  tiempoProductivo     Decimal?  @map("tiempo_productivo") @db.Decimal(5, 2)
+  tiempoNoProductivo   Decimal?  @map("tiempo_no_productivo") @db.Decimal(5, 2)
+  observaciones        String?
+  completadoAt         DateTime? @map("completado_at") @db.Timestamptz(6)
+  completadoPor        String?   @map("completado_por") @db.Uuid
+  /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
+  corregidoAt          DateTime? @map("corregido_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String    @map("created_by") @db.Uuid
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String    @map("updated_by") @db.Uuid
+
+  actividades ReporteDiarioActividad[]
+
+  @@unique([ticketId, fecha])
+  @@map("reporte_diario")
+  @@schema("pumping")
+}
+
+model ReporteDiarioActividad {
+  id         String        @id @db.Uuid
+  reporteId  String        @map("reporte_id") @db.Uuid
+  reporte    ReporteDiario @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  orden      Int
+  horaInicio DateTime      @map("hora_inicio") @db.Time(0)
+  horaFin    DateTime      @map("hora_fin") @db.Time(0)
+  detalle    String
+  autorId    String        @map("autor_id") @db.Uuid
+  autor      IdUsuario     @relation("actividadAutor", fields: [autorId], references: [id])
+
+  tablas ReporteDiarioTabla[]
+
+  @@unique([reporteId, orden])
+  @@map("reporte_diario_actividad")
+  @@schema("pumping")
+}
+
+/// Tabla dentro de una actividad: encabezados, filas y celdas, sin JSON.
+model ReporteDiarioTabla {
+  id          String                 @id @db.Uuid
+  actividadId String                 @map("actividad_id") @db.Uuid
+  actividad   ReporteDiarioActividad @relation(fields: [actividadId], references: [id], onDelete: Cascade)
+  orden       Int
+  titulo      String?
+
+  columnas ReporteDiarioTablaColumna[]
+  filas    ReporteDiarioTablaFila[]
+
+  @@unique([actividadId, orden])
+  @@map("reporte_diario_tabla")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaColumna {
+  id         String                    @id @db.Uuid
+  tablaId    String                    @map("tabla_id") @db.Uuid
+  tabla      ReporteDiarioTabla        @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden      Int
+  encabezado String
+  celdas     ReporteDiarioTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("reporte_diario_tabla_columna")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaFila {
+  id      String                    @id @db.Uuid
+  tablaId String                    @map("tabla_id") @db.Uuid
+  tabla   ReporteDiarioTabla        @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden   Int
+  celdas  ReporteDiarioTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("reporte_diario_tabla_fila")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaCelda {
+  filaId    String                    @map("fila_id") @db.Uuid
+  fila      ReporteDiarioTablaFila    @relation(fields: [filaId], references: [id], onDelete: Cascade)
+  columnaId String                    @map("columna_id") @db.Uuid
+  columna   ReporteDiarioTablaColumna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  valor     String
+
+  @@id([filaId, columnaId])
+  @@map("reporte_diario_tabla_celda")
   @@schema("pumping")
 }
 
@@ -704,6 +804,7 @@ model IdUsuario {
   historial    TicketHistorial[] @relation("historialActor")
   requisitos   TicketRequisito[] @relation("requisitoOperador")
   aceptaciones AceptacionTerminos[] @relation("aceptacionTerminos")
+  actividadesDiarias ReporteDiarioActividad[] @relation("actividadAutor")
 
   @@map("usuario")
   @@schema("identidad")

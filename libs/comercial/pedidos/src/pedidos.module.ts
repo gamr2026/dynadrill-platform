@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { OrdenesTrabajoController } from './controllers/ordenes-trabajo.controller';
+import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { CierrePedidoService } from './services/cierre-pedido.service';
 import { OrdenesTrabajoService } from './services/ordenes-trabajo.service';
@@ -53,6 +54,7 @@ import { WorkflowService } from './workflow/workflow.service';
     OrdenesTrabajoService,
     CierrePedidoService,
     TicketCerradoConsumer,
+    ReporteDiarioConsumer,
   ],
   exports: [SecuenciasService, WorkflowService, PedidosService],
 })

@@ -18,8 +18,9 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule } from '@dyn/messaging';
+import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { PedidosModule } from './index';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -62,6 +63,8 @@ run('documentos operativos (base de datos real)', () => {
   jest.setTimeout(60000);
   let app: INestApplication;
   let prisma: PrismaService;
+  let reporteDiario: ReporteDiarioConsumer;
+  const eventos: string[] = [];
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -163,9 +166,13 @@ run('documentos operativos (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    reporteDiario = app.get(ReporteDiarioConsumer);
   });
 
   afterAll(async () => {
+    if (eventos.length) {
+      await admin.query('DELETE FROM msg_comercial.inbox WHERE id = ANY($1::uuid[])', [eventos]);
+    }
     if (creados.length) {
       const ids = creados;
       await admin.query(
@@ -541,6 +548,108 @@ run('documentos operativos (base de datos real)', () => {
         .set(corrige())
         .send(cuerpo)
         .expect(200);
+    });
+  });
+
+  describe('Reporte Diario que completa el operador de Pumping (evento de Operaciones)', () => {
+    const reporteCompletado = (
+      pedidoId: string,
+      extra: Record<string, unknown> = {},
+    ): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'operaciones.pumping.reporte_diario_completado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'operador' },
+        data: {
+          ticketId: uuidv7(),
+          ticketNumero: 701234,
+          pedidoId,
+          fecha: '2026-11-01',
+          firmadoPor: 'Oscar Operador',
+          firmadoAt: '2026-11-01T22:00:00.000Z',
+          supervisorId: ACTOR,
+          operadorId: ACTOR,
+          actividades: [
+            {
+              fecha: '2026-11-01',
+              horaInicio: '06:00',
+              horaFin: '09:30',
+              duracionHoras: 3.5,
+              detalle: 'Armado de líneas',
+              autor: 'Oscar Operador',
+              tablas: [{ titulo: 'Volúmenes', columnas: ['Etapa', 'Bbl'], filas: [['1', '120']] }],
+            },
+          ],
+          ...extra,
+        },
+      } as EventEnvelope;
+    };
+    const docs = async (id: string) =>
+      (await http().get(`/api/comercial/pedidos/${id}/documentos-operativos`).set(ve()).expect(200))
+        .body;
+
+    it('llega como Reporte Job de origen Pumping, con sus tablas, y el pedido pasa a elaboración operativa', async () => {
+      const id = await pedido('pumping');
+      await reporteDiario.consumir(reporteCompletado(id));
+      const [d] = await docs(id);
+      expect(d).toMatchObject({
+        tipo: 'reporte_job',
+        origen: 'pumping',
+        ticketRef: '701234',
+        firmadoPor: 'Oscar Operador',
+      });
+      expect(d.actividades[0]).toMatchObject({
+        detalle: 'Armado de líneas',
+        duracionHoras: 3.5,
+        autor: 'Oscar Operador',
+      });
+      expect(d.actividades[0].tablas[0]).toMatchObject({
+        titulo: 'Volúmenes',
+        columnas: ['Etapa', 'Bbl'],
+        filas: [['1', '120']],
+      });
+      expect(await estadoDe(id)).toBe('en_elaboracion_operativa');
+    });
+
+    it('un día que se reabre y se completa de nuevo reemplaza al anterior; el mismo evento dos veces no duplica', async () => {
+      const id = await pedido('pumping');
+      const e = reporteCompletado(id);
+      await reporteDiario.consumir(e);
+      await reporteDiario.consumir(e); // mismo evento: lo ignora el inbox
+      expect(await docs(id)).toHaveLength(1);
+      const nuevo = reporteCompletado(id);
+      (nuevo.data['actividades'] as Array<{ detalle: string }>)[0].detalle =
+        'Corregido por el operador';
+      await reporteDiario.consumir(nuevo);
+      const lista = await docs(id);
+      expect(lista).toHaveLength(1);
+      expect(lista[0].actividades[0].detalle).toBe('Corregido por el operador');
+    });
+
+    it('no pisa un día que Facturación corrigió ni falla con un pedido que ya no recibe documentos', async () => {
+      const id = await pedido('pumping');
+      await reporteDiario.consumir(reporteCompletado(id));
+      await http()
+        .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
+        .set(bearer([P.DOCUMENTOS_OPERATIVOS_VER, P.DOCUMENTOS_OPERATIVOS_CORREGIR]))
+        .send({
+          origen: 'pumping',
+          fecha: '2026-11-01',
+          actividades: [{ ...job(1).actividades[0], detalle: 'Corregido por Facturación' }],
+        })
+        .expect(200);
+      await expect(reporteDiario.consumir(reporteCompletado(id))).resolves.toBeUndefined();
+      expect((await docs(id))[0].actividades[0].detalle).toBe('Corregido por Facturación');
+
+      const anulado = await pedido('pumping', 'anulado');
+      await expect(reporteDiario.consumir(reporteCompletado(anulado))).resolves.toBeUndefined();
+      expect(await docs(anulado)).toHaveLength(0);
     });
   });
 });
