@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { uuidv7 } from '@dyn/utils';
+import { REQ } from '../catalog/sembrar-pasos';
 import type { OrigenCumplimiento, Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -73,6 +74,21 @@ export class RequisitosService {
     }
     const r = await tx.ticketRequisito.createMany({ data, skipDuplicates: true });
     return r.count;
+  }
+
+  /**
+   * Mantiene `herramientas_recibidas`: cumplido cuando ninguna herramienta del ticket está sin recibir (sin herramientas también lo
+   * está). Lo llama cada cambio de herramientas, dentro de su transacción.
+   */
+  async sincronizarHerramientasRecibidas(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    actorId: string | null,
+  ): Promise<void> {
+    const sinRecibir = await tx.ticketHerramienta.count({ where: { ticketId, recibidaAt: null } });
+    const clave = { ticketId, codigo: REQ.herramientasRecibidas };
+    if (sinRecibir === 0) await this.marcar(tx, clave, 'sistema', actorId);
+    else await this.reabrir(tx, clave);
   }
 
   /** Marca como cumplido el requisito (si existe y estaba pendiente). Devuelve cuántas filas cambió. */

@@ -320,6 +320,16 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Confirmar a mano un requisito de FCR cuyo dato es de otro módulo que aún no publica su evento (puente temporal)',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
   ),
+  nuevo(
+    'fcr.configuracion.gestionar',
+    'Configurar qué hace FCR con cada código de la lista de precios de un cliente (herramienta o servicio) y armar su kit de artículos',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.INGENIERIA_VENTAS],
+  ),
+  nuevo(
+    'fcr.herramientas.preparar',
+    'Bodega: preparar y enviar las herramientas que el Supervisor de FCR solicitó, y recibir su retorno',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.BODEGUERO],
+  ),
   // pumping
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
   def(
@@ -484,6 +494,14 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Cargar y anular los documentos de seguridad de un pedido y anular el Acta de Entrega',
     ModuleRoles.qhse,
   ),
+  // ---- qhse: Permiso de Trabajo (PTW, HSE-SITIO-001).
+  nuevo('qhse.ptw.ver', 'Ver los permisos de trabajo (PTW) y sus documentos', ModuleRoles.qhse),
+  nuevo(
+    'qhse.ptw.gestionar',
+    'Abrir un PTW, validar su gabinete y registrar las confirmaciones de formalización',
+    ModuleRoles.qhse,
+  ),
+  nuevo('qhse.ptw.aprobar', 'Aprobar un PTW y anularlo (con motivo)', ModuleRoles.qhse),
   // El Supervisor entra SOLO a estos dos (el Acta la sube al finalizar el ticket); no ve el resto de QHSE.
   nuevo(
     'qhse.acta_entrega.cargar',
@@ -573,6 +591,8 @@ export const Permission = {
   FCR_OPERAR: 'fcr.tickets.operar',
   FCR_VER: 'fcr.tickets.ver',
   FCR_REQUISITOS_PUENTE: 'fcr.requisitos.puente',
+  FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
+  FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
@@ -613,6 +633,9 @@ export const Permission = {
   DOCUMENTOS_GESTIONAR: 'qhse.documentos.gestionar',
   ACTA_ENTREGA_CARGAR: 'qhse.acta_entrega.cargar',
   ACTA_ENTREGA_VER: 'qhse.acta_entrega.ver',
+  PTW_VER: 'qhse.ptw.ver',
+  PTW_GESTIONAR: 'qhse.ptw.gestionar',
+  PTW_APROBAR: 'qhse.ptw.aprobar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

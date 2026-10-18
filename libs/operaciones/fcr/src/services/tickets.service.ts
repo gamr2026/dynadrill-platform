@@ -11,6 +11,7 @@ import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma, TipoOt } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PrecargaService, type LineaPedido } from './precarga.service';
 import { RequisitosService } from './requisitos.service';
 
 /** Lo que `comercial` publica al abrir un pedido (`comercial.pedido.abierto`) y este módulo necesita. */
@@ -34,6 +35,8 @@ export interface PedidoAbiertoData {
   fechaInicioServicio?: string | null;
   fechaFinServicio?: string | null;
   as2Numero?: string | null;
+  /** Las líneas cotizadas: de ellas sale la precarga de herramientas. */
+  lineas?: LineaPedido[];
 }
 
 /** `control_fluidos` -> "Control fluidos" (para leerlo en un correo o en la campanita). */
@@ -152,6 +155,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
     private readonly requisitos: RequisitosService,
+    private readonly precarga: PrecargaService,
   ) {}
 
   /** Crea el ticket de un pedido de FCR abierto. `null` si el pedido no es de FCR o ya tiene su ticket. */
@@ -169,7 +173,9 @@ export class TicketsService {
       this.logger.warn(`Pedido ${d.codigo}: sin tipo de OT; se trata como venta`);
     }
     const entrada = await tx.entradaOt.findUniqueOrThrow({ where: { tipoOt } });
-    const creador = event.actor?.userId;
+    const actorId = event.actor?.userId;
+    // quien abrió el pedido, si es una cuenta de identidad; si no, la creación queda sin autor
+    const creador = actorId && (await this.existeCuenta(tx, actorId)) ? actorId : null;
     const id = uuidv7();
     await tx.ticket.create({
       data: {
@@ -189,8 +195,7 @@ export class TicketsService {
         as2Numero: d.as2Numero ?? null,
         fechaInicioServicio: deDia(d.fechaInicioServicio),
         fechaFinServicio: deDia(d.fechaFinServicio),
-        // quien abrió el pedido (si la cuenta existe en identidad; si no, queda sin autor)
-        createdBy: creador && (await this.existeCuenta(tx, creador)) ? creador : null,
+        createdBy: creador,
         tiposServicio: {
           create: [...new Set(d.tiposServicio ?? [])].map((tipoCodigo) => ({ tipoCodigo })),
         },
@@ -207,6 +212,10 @@ export class TicketsService {
     });
     // los requisitos del ticket (los de unidad u operador se crean al asignar el equipo)
     await this.requisitos.generar(tx, id);
+    // las líneas del pedido y la precarga de herramientas desde su configuración por cliente y código
+    await this.precarga.guardarLineas(tx, id, d.lineas ?? []);
+    await this.precarga.armar(tx, id, creador);
+    await this.requisitos.sincronizarHerramientasRecibidas(tx, id, creador);
 
     // el evento lleva los nombres ya resueltos (los avisos los muestran tal cual), obtenidos de los catálogos por las FK
     const n = await tx.ticket.findUniqueOrThrow({ where: { id }, include: NOMBRES });
@@ -236,6 +245,32 @@ export class TicketsService {
       }),
     );
     return { ticketId: id, pedidoCodigo: d.codigo };
+  }
+
+  /**
+   * El pedido cambió en `comercial` (`comercial.pedido.actualizado`): se actualizan las fechas del servicio y, si cambiaron los ítems, las
+   * líneas del ticket. Las herramientas NO se tocan solas: el Supervisor decide cuándo «Recargar desde el pedido» (consulta F-13).
+   * Un ticket ya cerrado no cambia.
+   */
+  async actualizarDesdePedido(
+    tx: Prisma.TransactionClient,
+    event: EventEnvelope<Partial<PedidoAbiertoData>>,
+  ): Promise<boolean> {
+    const t = await tx.ticket.findUnique({
+      where: { pedidoId: event.subject.id },
+      select: { id: true, paso: { select: { terminal: true } } },
+    });
+    if (!t || t.paso.terminal) return false;
+    const d = event.data;
+    const fechas = {
+      ...(d.fechaInicioServicio !== undefined
+        ? { fechaInicioServicio: deDia(d.fechaInicioServicio) }
+        : {}),
+      ...(d.fechaFinServicio !== undefined ? { fechaFinServicio: deDia(d.fechaFinServicio) } : {}),
+    };
+    if (Object.keys(fechas).length) await tx.ticket.update({ where: { id: t.id }, data: fechas });
+    if (Array.isArray(d.lineas)) await this.precarga.guardarLineas(tx, t.id, d.lineas);
+    return true;
   }
 
   /**

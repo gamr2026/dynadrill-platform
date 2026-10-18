@@ -24,6 +24,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.mantenimiento.orden.retornada',
       'operaciones.fcr.ticket_creado',
       'operaciones.fcr.asignacion_realizada',
+      'operaciones.fcr.herramientas_solicitadas',
     ],
   },
   { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas'] },

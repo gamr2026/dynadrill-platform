@@ -94,4 +94,31 @@ export const PLANTILLAS_FCR: PlantillaDef[] = [
     evento: 'operaciones.fcr.asignacion_realizada',
     rol: 'operador',
   },
+  {
+    codigo: 'fcr_herramientas_solicitadas_bodega',
+    descripcion:
+      'El Supervisor de FCR solicitó herramientas a Bodega (aviso a todo el rol de Bodega).',
+    asunto: 'Herramientas solicitadas a Bodega: {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{solicitadoPor}} solicitó <strong>{{cantidad}} herramienta(s)</strong> para el siguiente servicio de FCR:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Herramientas', 'herramientas') +
+      '</table>' +
+      '<p>Prepárelas y envíelas al Supervisor desde la bandeja de herramientas de Bodega.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{solicitadoPor}} solicitó {{cantidad}} herramienta(s) para el siguiente servicio de FCR:\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nHerramientas: {{herramientas}}\n\n' +
+      'Prepárelas y envíelas al Supervisor desde la bandeja de herramientas de Bodega.',
+    tituloAviso: 'Herramientas solicitadas: {{pedidoCodigo}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} · {{cantidad}} herramienta(s)',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'warning',
+    evento: 'operaciones.fcr.herramientas_solicitadas',
+    rol: 'bodeguero',
+  },
 ];

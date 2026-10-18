@@ -19,11 +19,14 @@ type Cliente = Pick<
   | 'tipoCompletacion'
   | 'tipoTrabajo'
   | 'tipoPicker'
+  | 'unidadCotizacion'
 >;
 
 /** Códigos de los requisitos (los usa el código; el catálogo vive en la base de datos). */
 export const REQ = {
   tipoOperadorDefinido: 'tipo_operador_definido',
+  listadoConfirmado: 'listado_herramientas_confirmado',
+  herramientasRecibidas: 'herramientas_recibidas',
 } as const;
 
 interface PasoDef {
@@ -171,7 +174,36 @@ export const REQUISITOS: RequisitoDef[] = [
     tipoOt: 'servicio',
     paso: 'tipo_operador',
   },
+  {
+    codigo: REQ.listadoConfirmado,
+    nombre: 'Listado de herramientas confirmado',
+    descripcion:
+      'El Supervisor confirmó que el listado de herramientas del ticket está completo (se puede deshacer mientras el ticket siga en la preparación).',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'preparacion_herramientas',
+  },
+  {
+    codigo: REQ.herramientasRecibidas,
+    nombre: 'Herramientas recibidas',
+    descripcion:
+      'Cada herramienta del ticket fue preparada por Bodega y recibida por el Supervisor, sin novedades pendientes.',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'preparacion_herramientas',
+  },
 ];
+
+/** Unidades de cotización: las de tiempo piden un solo juego del kit. El código es el nombre sin tildes, en minúscula y en singular. */
+const UNIDADES_COTIZACION = [
+  ['dia', 'Día', true],
+  ['hora', 'Hora', true],
+  ['semana', 'Semana', true],
+  ['mes', 'Mes', true],
+  ['corrida', 'Corrida', false],
+  ['unidad', 'Unidad', false],
+  ['servicio', 'Servicio', false],
+] as const;
 
 const CATALOGOS = {
   tipoOperador: [
@@ -273,6 +305,13 @@ export async function sembrarPasos(db: Cliente): Promise<{
   catalogos += await sembrarCatalogo(db.tipoCompletacion, CATALOGOS.tipoCompletacion);
   catalogos += await sembrarCatalogo(db.tipoTrabajo, CATALOGOS.tipoTrabajo);
   catalogos += await sembrarCatalogo(db.tipoPicker, CATALOGOS.tipoPicker);
+  for (const [i, [codigo, nombre, esTiempo]] of UNIDADES_COTIZACION.entries()) {
+    if (await db.unidadCotizacion.findUnique({ where: { codigo }, select: { id: true } })) continue;
+    await db.unidadCotizacion.create({
+      data: { id: uuidv7(), codigo, nombre, esTiempo, orden: (i + 1) * 10 },
+    });
+    catalogos++;
+  }
   return { pasos, transiciones, requisitos, catalogos };
 }
 

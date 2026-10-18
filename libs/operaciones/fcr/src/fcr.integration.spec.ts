@@ -18,6 +18,7 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
+import { DespachosConsumer } from '@dyn/inventario';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
@@ -172,10 +173,19 @@ run(
         )
       ).rows as Array<{ tipo: string; datos: { data: Record<string, unknown> } }>;
 
+    /** El pedido de estas pruebas no tiene herramientas: solo falta confirmar el listado para salir de la preparación. */
+    const confirmarListado = async (id: string, auth = supervisor()) =>
+      http()
+        .post(`/api/operaciones/fcr/tickets/${id}/herramientas/confirmar-listado`)
+        .set(auth)
+        .send({ confirmado: true })
+        .expect(201);
+
     /** Lleva un ticket de venta hasta el paso de Asignación, tomado por `supervisor`. */
     const hastaAsignacion = async () => {
       const t = await crear();
       await avanzar(t.id, 'preparacion_herramientas').expect(201);
+      await confirmarListado(t.id);
       await avanzar(t.id, 'asignacion').expect(201);
       return t;
     };
@@ -212,6 +222,9 @@ run(
       // sin RabbitMQ: el receptor se invoca a mano; evitamos que intente suscribirse al arrancar
       jest
         .spyOn(PedidosAbiertosConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
@@ -324,8 +337,10 @@ run(
           (await prisma.ticketRequisito.findMany({ where: { ticketId: id } })).map(
             (r) => r.requisitoCodigo,
           );
-        expect(await reqs(v.id)).toEqual([]);
-        expect(await reqs(s.id)).toEqual(['tipo_operador_definido']);
+        // los del tronco aplican a los dos; el del tipo de operador, solo a SERVICIOS
+        const comunes = ['herramientas_recibidas', 'listado_herramientas_confirmado'];
+        expect((await reqs(v.id)).sort()).toEqual(comunes);
+        expect((await reqs(s.id)).sort()).toEqual([...comunes, 'tipo_operador_definido']);
       });
     });
 
@@ -592,6 +607,7 @@ run(
         ).toBeTruthy();
         // el Supervisor de Operaciones no es del equipo: el ticket sigue siendo del Supervisor que lo tomó
         await avanzar(t.id, 'asignacion', otroSupervisor()).expect(403);
+        await confirmarListado(t.id);
         await avanzar(t.id, 'asignacion', supervisor()).expect(201);
       });
     });
@@ -666,7 +682,15 @@ run(
           operadores: [{ usuarioId: SUPERVISOR.id }],
         }).expect(400);
         expect((await detalle(t.id)).paso.codigo).toBe('asignacion');
-        expect(await prisma.ticketRequisito.count({ where: { ticketId: t.id } })).toBe(0);
+        // una asignación rechazada no deja requisitos de operador ni de unidad
+        expect(
+          await prisma.ticketRequisito.count({
+            where: {
+              ticketId: t.id,
+              OR: [{ usuarioId: { not: null } }, { vehiculoId: { not: null } }],
+            },
+          }),
+        ).toBe(0);
       });
 
       it('solo el equipo del ticket asigna y solo desde el paso de Asignación; el supervisor ya asignado no lo cambia otro Supervisor', async () => {
