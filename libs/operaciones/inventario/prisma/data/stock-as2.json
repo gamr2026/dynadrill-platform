@@ -2,9 +2,9 @@
   "fuente": "Reporte «Stock» por bodega de AS2 (STOCK_BODEGA_PRODUCTOS.xlsx, 17/10/2026)",
   "fecha": "2026-10-17",
   "renglonesEnElReporte": 1238,
-  "cargables": 1221,
+  "cargables": 1226,
   "resueltosPor": {
-    "exacto": 1218,
+    "exacto": 1223,
     "prefijo y nombre": 3,
     "prefijo": 10,
     "normalizado": 1
@@ -15,41 +15,6 @@
       "codigoAs2": "CT-ON",
       "nombre": "ON-OFF TOOL SIZE:- 3 1/2 X 7\", PPF:- 17-32, 41XX LOW ALLOY STEEL, MYS:- 110,000 PSI,",
       "saldo": 6,
-      "motivo": "articulo"
-    },
-    {
-      "bodega": "23 EQUIPO DE PROTECCION PERSONAL (EPP)",
-      "codigoAs2": "EPP-0069",
-      "nombre": "OVEROL BORDADO (nombre de persona omitido)",
-      "saldo": 4,
-      "motivo": "articulo"
-    },
-    {
-      "bodega": "23 EQUIPO DE PROTECCION PERSONAL (EPP)",
-      "codigoAs2": "EPP-0068",
-      "nombre": "OVEROL BORDADO (nombre de persona omitido)",
-      "saldo": 4,
-      "motivo": "articulo"
-    },
-    {
-      "bodega": "23 EQUIPO DE PROTECCION PERSONAL (EPP)",
-      "codigoAs2": "EPP-0070",
-      "nombre": "OVEROL BORDADO (nombre de persona omitido)",
-      "saldo": 2,
-      "motivo": "articulo"
-    },
-    {
-      "bodega": "23 EQUIPO DE PROTECCION PERSONAL (EPP)",
-      "codigoAs2": "EPP-0071",
-      "nombre": "OVEROL BORDADO (nombre de persona omitido)",
-      "saldo": 2,
-      "motivo": "articulo"
-    },
-    {
-      "bodega": "23 EQUIPO DE PROTECCION PERSONAL (EPP)",
-      "codigoAs2": "EPP-0072",
-      "nombre": "OVEROL BORDADO (nombre de persona omitido)",
-      "saldo": 4,
       "motivo": "articulo"
     }
   ],
@@ -9804,6 +9769,46 @@
       "codigoAs2": "EPP-0064",
       "unidad": "Unidad",
       "saldo": 1,
+      "via": "exacto"
+    },
+    {
+      "bodega": "EQUIPO DE PROTECCION PERSONAL (EPP)",
+      "codigo": "EPP-0068",
+      "codigoAs2": "EPP-0068",
+      "unidad": "Unidad",
+      "saldo": 4,
+      "via": "exacto"
+    },
+    {
+      "bodega": "EQUIPO DE PROTECCION PERSONAL (EPP)",
+      "codigo": "EPP-0069",
+      "codigoAs2": "EPP-0069",
+      "unidad": "Unidad",
+      "saldo": 4,
+      "via": "exacto"
+    },
+    {
+      "bodega": "EQUIPO DE PROTECCION PERSONAL (EPP)",
+      "codigo": "EPP-0070",
+      "codigoAs2": "EPP-0070",
+      "unidad": "Unidad",
+      "saldo": 2,
+      "via": "exacto"
+    },
+    {
+      "bodega": "EQUIPO DE PROTECCION PERSONAL (EPP)",
+      "codigo": "EPP-0071",
+      "codigoAs2": "EPP-0071",
+      "unidad": "Unidad",
+      "saldo": 2,
+      "via": "exacto"
+    },
+    {
+      "bodega": "EQUIPO DE PROTECCION PERSONAL (EPP)",
+      "codigo": "EPP-0072",
+      "codigoAs2": "EPP-0072",
+      "unidad": "Unidad",
+      "saldo": 4,
       "via": "exacto"
     },
     {

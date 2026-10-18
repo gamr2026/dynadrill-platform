@@ -1,28 +1,7 @@
 {
   "fuente": "Reporte «Atributos por Producto» de AS2 (INVENTARIO PRODUCTO ATRIBUTO AS2.xlsx), categoría EQUIPO PROTECCION PERSONAL (EPP)",
   "productosEnAs2": 74,
-  "excluidos": [
-    {
-      "codigo": "EPP-0068",
-      "motivo": "lleva el nombre de una persona (dato personal)"
-    },
-    {
-      "codigo": "EPP-0069",
-      "motivo": "lleva el nombre de una persona (dato personal)"
-    },
-    {
-      "codigo": "EPP-0070",
-      "motivo": "lleva el nombre de una persona (dato personal)"
-    },
-    {
-      "codigo": "EPP-0071",
-      "motivo": "lleva el nombre de una persona (dato personal)"
-    },
-    {
-      "codigo": "EPP-0072",
-      "motivo": "lleva el nombre de una persona (dato personal)"
-    }
-  ],
+  "excluidos": [],
   "fusionados": [
     {
       "base": "EPP-0005",
@@ -609,6 +588,56 @@
       "subcategoria": "INV EPP",
       "entregaPersonal": false,
       "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0068",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0069",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0070",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0071",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0072",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
       "codigosAlternos": []
     },
     {

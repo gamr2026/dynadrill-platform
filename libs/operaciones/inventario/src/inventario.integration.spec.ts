@@ -1271,17 +1271,17 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
   });
 
   describe('carga del EPP de AS2', () => {
-    it('es idempotente y deja los 58 artículos depurados (37 de entrega personal) con las 11 equivalencias de AS2', async () => {
+    it('es idempotente y deja los 63 artículos depurados (42 de entrega personal) con las 11 equivalencias de AS2', async () => {
       await cargarEpp(prisma); // si aún no estaba cargado, la primera vez lo carga
       const r = await cargarEpp(prisma);
-      expect(r).toMatchObject({ articulos: 0, yaExistian: 58, equivalencias: 0 });
+      expect(r).toMatchObject({ articulos: 0, yaExistian: 63, equivalencias: 0 });
       const c = await admin.query(
         `SELECT count(*)::int AS articulos,
                 count(*) FILTER (WHERE entrega_personal)::int AS personales,
                 (SELECT count(*)::int FROM inventario.articulo_equivalencia q JOIN inventario.articulo x ON x.id = q.articulo_id WHERE x.codigo LIKE 'EPP-%') AS equivalencias
            FROM inventario.articulo WHERE codigo LIKE 'EPP-%'`,
       );
-      expect(c.rows[0]).toEqual({ articulos: 58, personales: 37, equivalencias: 11 });
+      expect(c.rows[0]).toEqual({ articulos: 63, personales: 42, equivalencias: 11 });
       // las tallas no son artículos: las botas, el overol y los guantes llevan su tipo de talla y las tallas fusionadas son equivalencias
       const botas = await admin.query(
         `SELECT a.tipo_talla, array_agg(e.codigo ORDER BY e.codigo) AS equivalentes
@@ -1292,11 +1292,18 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         tipo_talla: 'calzado',
         equivalentes: ['EPP-0039', 'EPP-0040', 'EPP-0041', 'EPP-0042'],
       });
-      // el dato personal (overoles bordados con nombre de persona) no se cargó
+      // los overoles bordados entran con su código de AS2 pero sin el nombre de la persona que AS2 trae en el nombre del producto
+      const bordados = await admin.query(
+        `SELECT codigo, nombre, nombre_comercial FROM inventario.articulo WHERE codigo BETWEEN 'EPP-0068' AND 'EPP-0072' ORDER BY codigo`,
+      );
+      expect(bordados.rows).toHaveLength(5);
+      expect(
+        bordados.rows.every((x) => x.nombre === 'OVEROL BORDADO' && x.nombre_comercial === null),
+      ).toBe(true);
       expect(
         (
           await admin.query(
-            "SELECT count(*)::int AS n FROM inventario.articulo WHERE nombre ILIKE '%BORDADO%'",
+            "SELECT count(*)::int AS n FROM inventario.articulo WHERE nombre ILIKE '%BORDADO,%'",
           )
         ).rows[0].n,
       ).toBe(0);
