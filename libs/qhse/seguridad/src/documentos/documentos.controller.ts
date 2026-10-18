@@ -38,6 +38,8 @@ export class CargarActaDto {
   /** Archivo subido antes a `/api/archivos` con el módulo `qhse_acta_entrega`. */
   @IsUUID() archivoId!: string;
   @IsOptional() @IsString() @MaxLength(100) referencia?: string;
+  /** Obligatorio si quien sube no es el supervisor asignado al ticket: por qué el asignado no pudo. */
+  @IsOptional() @IsString() @MaxLength(500) motivoSuplencia?: string;
 }
 
 export class AnularDto {
@@ -84,15 +86,11 @@ export class DocumentosController {
     return this.documentos.anular(id, dto.motivo, actor);
   }
 
-  /** El Acta vigente del ticket (y las anuladas, para el historial). */
+  /** El Acta vigente del ticket (y las anuladas) y el supervisor asignado. */
   @RequirePermission(P.ACTA_ENTREGA_VER)
   @Get('tickets/:ticketId/acta-entrega')
   acta(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
-    return this.documentos.listar({
-      ticketId,
-      tipo: TipoDocumentoPedido.formato_entrega,
-      incluirAnulados: true,
-    });
+    return this.documentos.actaDelTicket(ticketId);
   }
 
   @RequirePermission(P.ACTA_ENTREGA_CARGAR)

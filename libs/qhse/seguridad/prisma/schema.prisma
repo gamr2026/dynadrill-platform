@@ -36,6 +36,37 @@ enum TipoDocumentoPedido {
   @@schema("qhse")
 }
 
+enum FasePtw {
+  gabinete
+  formalizacion
+  aprobacion
+  aprobado
+
+  @@map("fase_ptw")
+  @@schema("qhse")
+}
+
+enum TipoFirmaPtw {
+  ptw_en_sitio
+  acta_recibimiento
+  barricadas
+  aprobacion
+
+  @@map("tipo_firma_ptw")
+  @@schema("qhse")
+}
+
+enum AccionPtw {
+  abierto
+  documentos_validados
+  firmado
+  aprobado
+  anulado
+
+  @@map("accion_ptw")
+  @@schema("qhse")
+}
+
 enum TipoTalla {
   ropa
   calzado
@@ -47,15 +78,23 @@ enum TipoTalla {
 
 /// Ticket (de otro contenedor) que origina casos de QHSE. Se llena por evento; no hay FK al schema ajeno (decisión D1).
 model TicketRef {
-  ticketId     String   @id @map("ticket_id") @db.Uuid
-  ticketNumero Int?     @map("ticket_numero")
-  pedidoId     String   @map("pedido_id") @db.Uuid
-  pedidoCodigo String   @map("pedido_codigo")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  ticketId     String     @id @map("ticket_id") @db.Uuid
+  ticketNumero Int?       @map("ticket_numero")
+  pedidoId     String     @map("pedido_id") @db.Uuid
+  pedidoCodigo String     @map("pedido_codigo")
+  /// Supervisor asignado al ticket (identidad.usuario).
+  supervisorId String?    @map("supervisor_id") @db.Uuid
+  supervisor   IdUsuario? @relation("ticketSupervisor", fields: [supervisorId], references: [id])
+  /// Copias justificadas (ver COMMENT en la base): cliente, campo y pozo del pedido, mantenidas por evento.
+  cliente      String?
+  campo        String?
+  pozo         String?
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   entregasEpi EpiEntrega[]
   documentos  DocumentoPedido[]
+  ptws        Ptw[]
 
   @@unique([ticketId, pedidoId])
   @@index([pedidoId])
@@ -203,6 +242,8 @@ model DocumentoPedido {
   archivoId       String              @map("archivo_id") @db.Uuid
   archivo         ArchivoRef          @relation(fields: [archivoId], references: [id])
   referencia      String?
+  /// Solo el Acta: por qué la subió otra persona y no el supervisor asignado.
+  motivoSuplencia String?             @map("motivo_suplencia")
   fecha           DateTime?           @db.Date
   vigenteHasta    DateTime?           @map("vigente_hasta") @db.Date
   anuladoAt       DateTime?           @map("anulado_at") @db.Timestamptz(6)
@@ -216,10 +257,85 @@ model DocumentoPedido {
   updatedBy       String?             @map("updated_by") @db.Uuid
   editor          IdUsuario?          @relation("documentoEditor", fields: [updatedBy], references: [id])
 
+  ptwRecepcion Ptw[] @relation("ptwRecepcion")
+  ptwArt       Ptw[] @relation("ptwArt")
+  ptwPt        Ptw[] @relation("ptwPt")
+  ptwSfi       Ptw[] @relation("ptwSfi")
+
   @@index([pedidoId, tipo])
   @@index([ticketId])
   @@index([archivoId])
   @@map("documento_pedido")
+  @@schema("qhse")
+}
+
+/// Permiso de Trabajo (HSE-SITIO-001): uno vigente por pedido y día de operación. Las fases las garantiza el trigger `ptw_validar`.
+model Ptw {
+  id                   String           @id @db.Uuid
+  numero               Int              @unique @default(autoincrement())
+  ticketId             String           @map("ticket_id") @db.Uuid
+  /// Pedido de comercial (otro contenedor, D1: sin FK); se valida por la FK compuesta con el ticket.
+  pedidoId             String           @map("pedido_id") @db.Uuid
+  ticket               TicketRef        @relation(fields: [ticketId, pedidoId], references: [ticketId, pedidoId])
+  diaOperacion         DateTime         @map("dia_operacion") @db.Date
+  fase                 FasePtw          @default(gabinete)
+  documentoRecepcionId String?          @map("documento_recepcion_id") @db.Uuid
+  documentoRecepcion   DocumentoPedido? @relation("ptwRecepcion", fields: [documentoRecepcionId], references: [id])
+  documentoArtId       String?          @map("documento_art_id") @db.Uuid
+  documentoArt         DocumentoPedido? @relation("ptwArt", fields: [documentoArtId], references: [id])
+  documentoPtId        String?          @map("documento_pt_id") @db.Uuid
+  documentoPt          DocumentoPedido? @relation("ptwPt", fields: [documentoPtId], references: [id])
+  documentoSfiId       String?          @map("documento_sfi_id") @db.Uuid
+  documentoSfi         DocumentoPedido? @relation("ptwSfi", fields: [documentoSfiId], references: [id])
+  anuladoAt            DateTime?        @map("anulado_at") @db.Timestamptz(6)
+  anuladoPor           String?          @map("anulado_por") @db.Uuid
+  anulador             IdUsuario?       @relation("ptwAnulador", fields: [anuladoPor], references: [id])
+  motivoAnulacion      String?          @map("motivo_anulacion")
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String           @map("created_by") @db.Uuid
+  creador              IdUsuario        @relation("ptwCreador", fields: [createdBy], references: [id])
+  updatedAt            DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?          @map("updated_by") @db.Uuid
+  editor               IdUsuario?       @relation("ptwEditor", fields: [updatedBy], references: [id])
+
+  firmas    PtwFirma[]
+  historial PtwHistorial[]
+
+  @@index([ticketId])
+  @@index([pedidoId, diaOperacion])
+  @@index([fase])
+  @@map("ptw")
+  @@schema("qhse")
+}
+
+/// Confirmación «de una línea» (usuario + hora del servidor) del PTW; migrará a la plataforma de Firmas (D6). Inmutable.
+model PtwFirma {
+  id        String       @id @db.Uuid
+  ptwId     String       @map("ptw_id") @db.Uuid
+  ptw       Ptw          @relation(fields: [ptwId], references: [id], onDelete: Cascade)
+  tipo      TipoFirmaPtw
+  usuarioId String       @map("usuario_id") @db.Uuid
+  usuario   IdUsuario    @relation("ptwFirmante", fields: [usuarioId], references: [id])
+  firmadoAt DateTime     @default(now()) @map("firmado_at") @db.Timestamptz(6)
+
+  @@unique([ptwId, tipo])
+  @@map("ptw_firma")
+  @@schema("qhse")
+}
+
+/// Rastro de cada acción sobre un PTW (solo se agrega).
+model PtwHistorial {
+  id        String    @id @db.Uuid
+  ptwId     String    @map("ptw_id") @db.Uuid
+  ptw       Ptw       @relation(fields: [ptwId], references: [id], onDelete: Cascade)
+  accion    AccionPtw
+  motivo    String?
+  actorId   String    @map("actor_id") @db.Uuid
+  actor     IdUsuario @relation("ptwHistorialActor", fields: [actorId], references: [id])
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ptwId, createdAt])
+  @@map("ptw_historial")
   @@schema("qhse")
 }
 
@@ -262,6 +378,12 @@ model IdUsuario {
   documentosCreados      DocumentoPedido[]     @relation("documentoCreador")
   documentosEditados     DocumentoPedido[]     @relation("documentoEditor")
   documentosAnulados     DocumentoPedido[]     @relation("documentoAnulador")
+  ticketsSupervisados    TicketRef[]           @relation("ticketSupervisor")
+  ptwCreados             Ptw[]                 @relation("ptwCreador")
+  ptwEditados            Ptw[]                 @relation("ptwEditor")
+  ptwAnulados            Ptw[]                 @relation("ptwAnulador")
+  ptwFirmas              PtwFirma[]            @relation("ptwFirmante")
+  ptwHistorial           PtwHistorial[]        @relation("ptwHistorialActor")
 
   @@map("usuario")
   @@schema("identidad")

@@ -4,6 +4,7 @@
  */
 import { Permission } from '@dyn/authz';
 import { uuidv7 } from '@dyn/utils';
+import { PumpingEventosConsumer } from '../consumers/pumping-eventos.consumer';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 
@@ -13,11 +14,13 @@ const P = Permission;
 
 const TECNICO = { id: uuidv7(), nombre: 'Tania Técnica HSE' };
 const SUPERVISOR = { id: uuidv7(), nombre: 'Sara Supervisora' };
+const SUPLENTE = { id: uuidv7(), nombre: 'Silvia Suplente' };
 const OPERADOR = { id: uuidv7(), nombre: 'Oscar Operador' };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { ...TECNICO, rol: 'tecnico_hse' },
     { ...SUPERVISOR, rol: 'supervisor' },
+    { ...SUPLENTE, rol: 'supervisor' },
     { ...OPERADOR, rol: 'operador' },
   ],
 };
@@ -32,6 +35,7 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
   const pedidos: string[] = [];
   const tickets: string[] = [];
   const archivos: string[] = [];
+  const eventosUsados: string[] = [];
   const modulo: Record<string, string> = {};
 
   const tecnico = () =>
@@ -49,10 +53,17 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       [P.ACTA_ENTREGA_VER, P.ACTA_ENTREGA_CARGAR],
       SUPERVISOR.id,
     );
+  const suplente = () =>
+    t.token(
+      'supervisor',
+      SUPLENTE.nombre,
+      [P.ACTA_ENTREGA_VER, P.ACTA_ENTREGA_CARGAR],
+      SUPLENTE.id,
+    );
   const operador = () => t.token('operador', OPERADOR.nombre, [P.PUMPING_OPERAR], OPERADOR.id);
 
   /** Un pedido con un ticket que QHSE ya conoce (llega por evento de Pumping). */
-  const ticketNuevo = async () => {
+  const ticketNuevo = async (supervisorId?: string) => {
     const ticketId = uuidv7();
     const pedidoId = uuidv7();
     tickets.push(ticketId);
@@ -63,6 +74,7 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
         pedidoId,
         pedidoCodigo: `PED-DOC${n}`,
         ticketNumero: 900_000 + pedidos.length,
+        ...(supervisorId ? { supervisorId } : {}),
       },
     });
     return { ticketId, pedidoId };
@@ -118,6 +130,7 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       "DELETE FROM msg_qhse.outbox WHERE datos->'data'->>'pedidoId' = ANY($1::text[])",
       [pedidos],
     );
+    await t.admin.query('DELETE FROM msg_qhse.inbox WHERE id = ANY($1::uuid[])', [eventosUsados]);
     await t.admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [archivos]);
     await quitarMaestros(t.admin, MAESTROS);
     await t.cerrar();
@@ -154,7 +167,7 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       .get(`/api/qhse/tickets/${ticketId}/acta-entrega`)
       .set(supervisor());
     expect(lista.status).toBe(200);
-    expect(lista.body).toHaveLength(1);
+    expect(lista.body.documentos).toHaveLength(1);
   });
 
   it('un pedido solo tiene una Acta vigente; anularla (con motivo) publica .anulada y permite cargar otra', async () => {
@@ -186,10 +199,124 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       .http()
       .get(`/api/qhse/tickets/${ticketId}/acta-entrega`)
       .set(tecnico());
-    expect(historial.body.map((d: { anulado: boolean }) => d.anulado).sort()).toEqual([
+    expect(historial.body.documentos.map((d: { anulado: boolean }) => d.anulado).sort()).toEqual([
       false,
       true,
     ]);
+  });
+
+  it('otro supervisor puede subir el Acta solo si dice por qué el asignado no pudo (lo exige también la base)', async () => {
+    const { ticketId, pedidoId } = await ticketNuevo(SUPERVISOR.id);
+    // el asignado la sube sin más
+    const propia = await acta(ticketId, { archivoId: await archivo('qhse_acta_entrega') });
+    expect(propia.status).toBe(201);
+    expect(propia.body.motivoSuplencia).toBeNull();
+    expect((await anular(propia.body.id, 'la sube otra persona')).status).toBe(201);
+
+    // otro supervisor: sin motivo, no
+    const sin = await acta(ticketId, { archivoId: await archivo('qhse_acta_entrega') }, suplente());
+    expect(sin.status).toBe(400);
+    expect(sin.body.detail).toMatch(/por qué el supervisor asignado no pudo/);
+    const con = await acta(
+      ticketId,
+      {
+        archivoId: await archivo('qhse_acta_entrega'),
+        motivoSuplencia: 'Sara está en traslado de unidad',
+      },
+      suplente(),
+    );
+    expect(con.status).toBe(201);
+    expect(con.body).toMatchObject({
+      motivoSuplencia: 'Sara está en traslado de unidad',
+      cargadoPor: SUPLENTE.nombre,
+    });
+    // la pantalla sabe quién es el asignado para pedir el motivo de antemano
+    const ctx = await t.http().get(`/api/qhse/tickets/${ticketId}/acta-entrega`).set(suplente());
+    expect(ctx.body.supervisorAsignado).toEqual({ id: SUPERVISOR.id, nombre: SUPERVISOR.nombre });
+
+    // aunque se salte el servicio, la base lo rechaza
+    await t.admin.query(
+      'UPDATE qhse.documento_pedido SET anulado_at = now(), anulado_por = $2, motivo_anulacion = $3 WHERE id = $1',
+      [con.body.id, TECNICO.id, 'prueba'],
+    );
+    await expect(
+      t.prisma.$executeRawUnsafe(
+        `INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, created_by)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'formato_entrega', $4::uuid, $5::uuid)`,
+        uuidv7(),
+        pedidoId,
+        ticketId,
+        await archivo('qhse_acta_entrega'),
+        SUPLENTE.id,
+      ),
+    ).rejects.toThrow(/si la sube otra persona debe indicar por qué/);
+    // el motivo de suplencia solo existe en el Acta
+    await expect(
+      t.prisma.$executeRawUnsafe(
+        `INSERT INTO qhse.documento_pedido (id, pedido_id, tipo, archivo_id, created_by, motivo_suplencia)
+         VALUES ($1::uuid, $2::uuid, 'sfi', $3::uuid, $4::uuid, 'x')`,
+        uuidv7(),
+        pedidoId,
+        await archivo('qhse_documento_pedido'),
+        TECNICO.id,
+      ),
+    ).rejects.toThrow(/suplencia_check/);
+  });
+
+  it('el consumidor de Pumping guarda el supervisor asignado y el cliente, campo y pozo sin borrarlos después', async () => {
+    const consumidor = t.app.get(PumpingEventosConsumer);
+    const ticketId = uuidv7();
+    const pedidoId = uuidv7();
+    tickets.push(ticketId);
+    pedidos.push(pedidoId);
+    const evento = (tipo: string, extra: Record<string, unknown>) => {
+      const id = uuidv7();
+      eventosUsados.push(id);
+      return {
+        id,
+        type: tipo,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: { ticketId, pedidoId, ticketNumero: 955_001, pedidoCodigo: `PED-DOC${n}`, ...extra },
+      } as never;
+    };
+    await consumidor.consumir(
+      evento('operaciones.pumping.asignacion_realizada', {
+        cliente: 'Cliente X',
+        campo: 'Campo Y',
+        pozo: 'Pozo Z',
+        operadoresUnidades: [],
+        asignados: [
+          { usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' },
+          { usuarioId: OPERADOR.id, rolCodigo: 'operador' },
+        ],
+      }),
+    );
+    expect(await t.prisma.ticketRef.findUniqueOrThrow({ where: { ticketId } })).toMatchObject({
+      supervisorId: SUPERVISOR.id,
+      cliente: 'Cliente X',
+      campo: 'Campo Y',
+      pozo: 'Pozo Z',
+    });
+    // un evento posterior sin esos datos no los borra
+    await consumidor.consumir(evento('operaciones.pumping.ticket_creado', {}));
+    expect(await t.prisma.ticketRef.findUniqueOrThrow({ where: { ticketId } })).toMatchObject({
+      supervisorId: SUPERVISOR.id,
+      cliente: 'Cliente X',
+    });
+    // la bandeja muestra el cliente, campo y pozo
+    const r = await t
+      .http()
+      .get('/api/qhse/documentos/pedidos')
+      .query({ q: `PED-DOC${n}` })
+      .set(tecnico());
+    expect(r.body.find((p: { pedidoId: string }) => p.pedidoId === pedidoId)).toMatchObject({
+      cliente: 'Cliente X',
+      campo: 'Campo Y',
+      pozo: 'Pozo Z',
+    });
   });
 
   it('rechaza un ticket desconocido, un archivo ajeno o inexistente y a quien no tiene el permiso', async () => {

@@ -50,10 +50,28 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
             return;
           }
           const numero = Number(d['ticketNumero']);
+          // cliente, campo y pozo: copias justificadas (la bandeja y los avisos los muestran); solo se pisan si el evento los trae
+          const opcional = (k: string) =>
+            typeof d[k] === 'string' && d[k] ? { [k]: d[k] as string } : {};
+          // el supervisor asignado (solo viene en la asignación) debe ser una cuenta existente
+          const supervisor = Array.isArray(d['asignados'])
+            ? (d['asignados'] as Array<Record<string, unknown>>).find(
+                (a) => a['rolCodigo'] === 'supervisor' && esUuid(a['usuarioId']),
+              )?.['usuarioId']
+            : undefined;
+          const supervisorId =
+            typeof supervisor === 'string' &&
+            (await tx.idUsuario.count({ where: { id: supervisor } }))
+              ? { supervisorId: supervisor }
+              : {};
           const datos = {
             ticketNumero: Number.isInteger(numero) ? numero : null,
             pedidoId,
             pedidoCodigo: d['pedidoCodigo'],
+            ...opcional('cliente'),
+            ...opcional('campo'),
+            ...opcional('pozo'),
+            ...supervisorId,
           };
           await tx.ticketRef.upsert({
             where: { ticketId },

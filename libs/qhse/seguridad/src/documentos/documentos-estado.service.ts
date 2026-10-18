@@ -68,6 +68,10 @@ export class DocumentosEstadoService {
       return {
         pedidoId,
         pedidoCodigo: ts[0].pedidoCodigo,
+        // copias justificadas de ticket_ref (se toman del ticket más reciente)
+        cliente: ts.find((t) => t.cliente)?.cliente ?? null,
+        campo: ts.find((t) => t.campo)?.campo ?? null,
+        pozo: ts.find((t) => t.pozo)?.pozo ?? null,
         creadoAt: ts[0].createdAt,
         tickets: ts
           .map((t) => ({ ticketId: t.ticketId, numero: t.ticketNumero }))

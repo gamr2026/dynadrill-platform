@@ -10,6 +10,7 @@ import { uuidv7 } from '@dyn/utils';
 import { TipoDocumentoPedido, type Prisma } from '../generated/client';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { PrismaService } from '../prisma/prisma.service';
+import { codigoPtw } from '../ptw/ptw-documentos';
 
 /** Código del módulo de archivos que guarda cada tipo (el archivo debe haberse subido por ahí: así se verifica el permiso de subida). */
 export const MODULO_ARCHIVO_ACTA = 'qhse_acta_entrega';
@@ -28,6 +29,8 @@ export interface CargarDocumentoEntrada {
   referencia?: string | null;
   /** AAAA-MM-DD. ART: emisión. PT: día de operación. */
   fecha?: string | null;
+  /** Solo el Acta, cuando la sube alguien que no es el supervisor asignado. */
+  motivoSuplencia?: string | null;
 }
 
 const aFecha = (s: string): Date => new Date(`${s}T00:00:00.000Z`);
@@ -67,7 +70,7 @@ export class DocumentosPedidoService {
       where,
       orderBy: [{ tipo: 'asc' }, { createdAt: 'desc' }],
       include: {
-        ticket: { select: { ticketNumero: true, pedidoCodigo: true } },
+        ticket: { select: { ticketNumero: true, pedidoCodigo: true, supervisorId: true } },
         creador: { select: { nombre: true } },
         anulador: { select: { nombre: true } },
       },
@@ -82,6 +85,7 @@ export class DocumentosPedidoService {
       tipo: d.tipo,
       archivoId: d.archivoId,
       referencia: d.referencia,
+      motivoSuplencia: d.motivoSuplencia,
       fecha: d.fecha?.toISOString().slice(0, 10) ?? null,
       vigenteHasta: d.vigenteHasta?.toISOString().slice(0, 10) ?? null,
       // solo el ART vence; se calcula (no se guarda) contra el día de hoy
@@ -93,6 +97,21 @@ export class DocumentosPedidoService {
       anuladoPor: d.anulador?.nombre ?? null,
       motivoAnulacion: d.motivoAnulacion,
     }));
+  }
+
+  /** El Acta de un ticket (vigente y anuladas) con el supervisor asignado, para que la pantalla sepa si quien sube es suplente. */
+  async actaDelTicket(ticketId: string) {
+    const t = await this.prisma.ticketRef.findUnique({
+      where: { ticketId },
+      select: { supervisor: { select: { id: true, nombre: true } } },
+    });
+    if (!t) throw new NotFoundException('QHSE no conoce ese ticket');
+    const documentos = await this.listar({
+      ticketId,
+      tipo: TipoDocumentoPedido.formato_entrega,
+      incluirAnulados: true,
+    });
+    return { supervisorAsignado: t.supervisor, documentos };
   }
 
   /** Carga ART, PT, SFI o el formato de recepción (el Acta tiene su propio camino: `cargarActa`). */
@@ -112,13 +131,20 @@ export class DocumentosPedidoService {
   /** El Supervisor sube el Acta al finalizar el ticket (una vigente por pedido). */
   async cargarActa(
     ticketId: string,
-    entrada: { archivoId: string; referencia?: string | null },
+    entrada: { archivoId: string; referencia?: string | null; motivoSuplencia?: string | null },
     actor: AuthUser,
   ) {
     const id = await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticketRef.findUnique({ where: { ticketId } });
       if (!t)
         throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+      // la sube el supervisor asignado; si es otra persona debe decir por qué el asignado no pudo (lo exige también la base)
+      const motivo = texto(entrada.motivoSuplencia);
+      const esSuplente = t.supervisorId !== null && t.supervisorId !== actor.id;
+      if (esSuplente && !motivo)
+        throw new BadRequestException(
+          'El Acta la sube el supervisor asignado al ticket. Si la sube usted, indique por qué el supervisor asignado no pudo',
+        );
       const id = await this.insertar(
         tx,
         {
@@ -127,6 +153,7 @@ export class DocumentosPedidoService {
           tipo: TipoDocumentoPedido.formato_entrega,
           archivoId: entrada.archivoId,
           referencia: entrada.referencia,
+          motivoSuplencia: esSuplente ? motivo : null,
         },
         MODULO_ARCHIVO_ACTA,
         actor,
@@ -145,6 +172,23 @@ export class DocumentosPedidoService {
       const d = await tx.documentoPedido.findUnique({ where: { id } });
       if (!d) throw new NotFoundException('El documento no existe');
       if (d.anuladoAt) throw new ConflictException('El documento ya está anulado');
+      // un documento en uso por un PTW vigente no se anula (la base también lo impide: trigger documento_pedido_en_uso)
+      const enUso = await tx.ptw.findFirst({
+        where: {
+          anuladoAt: null,
+          OR: [
+            { documentoRecepcionId: id },
+            { documentoArtId: id },
+            { documentoPtId: id },
+            { documentoSfiId: id },
+          ],
+        },
+        select: { numero: true },
+      });
+      if (enUso)
+        throw new ConflictException(
+          `El documento está en uso por el PTW ${codigoPtw(enUso.numero)}; anule primero ese PTW`,
+        );
       await tx.documentoPedido.update({
         where: { id },
         data: {
@@ -216,6 +260,7 @@ export class DocumentosPedidoService {
         tipo: e.tipo,
         archivoId: e.archivoId,
         referencia: texto(e.referencia),
+        motivoSuplencia: texto(e.motivoSuplencia),
         fecha,
         vigenteHasta,
         createdBy: actor.id,
