@@ -135,6 +135,7 @@ model Orden {
   reporte              ReporteRecibido    @relation(fields: [reporteId], references: [id])
   retornadaAt          DateTime?          @map("retornada_at") @db.Timestamptz(6)
   retornadaPor         String?            @map("retornada_por") @db.Uuid
+  retornador           IdUsuario?         @relation("ordenRetornada", fields: [retornadaPor], references: [id])
   estadoFinal          EstadoFinalUnidad? @map("estado_final")
   observacionesFinales String?            @map("observaciones_finales")
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -312,6 +313,7 @@ model IdUsuario {
   reportesDescartados ReporteRecibido[] @relation("reporteDescartadoPor")
   subordenesAsignadas Suborden[]        @relation("subordenAsignada")
   subordenesQueAsigno Suborden[]        @relation("subordenAsignador")
+  ordenesRetornadas   Orden[]           @relation("ordenRetornada")
 
   @@map("usuario")
   @@schema("identidad")

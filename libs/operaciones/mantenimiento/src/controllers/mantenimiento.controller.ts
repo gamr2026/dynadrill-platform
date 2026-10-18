@@ -17,6 +17,7 @@ import {
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { HistorialService, type ClaseMantenimiento } from '../services/historial.service';
 import { EjecucionService } from '../services/ejecucion.service';
 import { OrdenesService } from '../services/ordenes.service';
 import { ReportesService, type EstadoReporte } from '../services/reportes.service';
@@ -97,6 +98,7 @@ export class MantenimientoController {
     private readonly reportes: ReportesService,
     private readonly ordenes: OrdenesService,
     private readonly ejecucion: EjecucionService,
+    private readonly historial: HistorialService,
   ) {}
 
   @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
@@ -217,6 +219,22 @@ export class MantenimientoController {
   @Get('tickets/:ticketId/ordenes')
   ordenesDeTicket(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
     return this.ordenes.ordenesDeTicket(ticketId);
+  }
+
+  /**
+   * Historial de mantenimientos de una unidad (MAN-003): los preventivos de Flota y los correctivos (órdenes ya devueltas a
+   * operación), del más reciente al más antiguo. `?clase=preventivo|correctivo` filtra.
+   */
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
+  @Get('unidades/:unidadId/historial')
+  historialDeUnidad(
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
+    @Query('clase') clase?: ClaseMantenimiento,
+  ) {
+    return this.historial.deUnidad(
+      unidadId,
+      clase === 'preventivo' || clase === 'correctivo' ? clase : undefined,
+    );
   }
 
   /** Todas las sub-órdenes de una unidad: la tarjeta «Mantenimientos» del ticket de Pumping. */

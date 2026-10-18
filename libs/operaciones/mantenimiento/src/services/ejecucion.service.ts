@@ -13,6 +13,8 @@ import { uuidv7 } from '@dyn/utils';
 import { ESTADO } from '../catalog/sembrar-catalogos';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { datosDeOrden, datosDeSuborden } from './datos-de-aviso';
+import { estadoDeOrden } from './estado-orden';
 import { INCLUIR_SUBORDEN_DETALLE, vistaSuborden } from './suborden-vista';
 
 /**
@@ -183,8 +185,39 @@ export class EjecucionService {
         await tx.subordenRepuesto.update({ where: { id: repuestoId }, data: { movimientoId } });
       }
       await this.publicar(tx, s, 'cerrada', actor);
+      await this.publicarAceptadaSiCorresponde(tx, s, actor);
     });
     return this.obtener(id);
+  }
+
+  /** Con la última sub-orden resuelta la orden queda «aceptada»: se avisa al Jefe de Mantenimiento que ya puede devolver la unidad. */
+  private async publicarAceptadaSiCorresponde(
+    tx: Prisma.TransactionClient,
+    s: SubordenConDatos,
+    actor: AuthUser,
+  ) {
+    const todas = await tx.suborden.findMany({
+      where: { ordenId: s.ordenId },
+      include: { estado: true },
+    });
+    const estado = estadoDeOrden(
+      false,
+      todas.map((x) => ({ estadoCodigo: x.estado.codigo, resuelta: x.estado.resuelta })),
+    );
+    if (estado !== 'aceptada') return;
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.mantenimiento.orden.aceptada',
+        subject: { type: 'mantenimiento_orden', id: s.ordenId },
+        actor: { userId: actor.id, role: actor.roleCode },
+        data: {
+          ordenId: s.ordenId,
+          unidadId: s.orden.reporte.unidadId,
+          ...(await datosDeOrden(tx, s.ordenId)),
+        },
+      }),
+    );
   }
 
   /** El Jefe devuelve la sub-orden al operador, con la nota de lo que debe corregir. */
@@ -335,6 +368,8 @@ export class EjecucionService {
     hecho: 'enviada_a_revision' | 'cerrada' | 'correccion_solicitada',
     actor: AuthUser,
   ) {
+    const orden = await datosDeOrden(tx, s.ordenId);
+    const suborden = await datosDeSuborden(tx, orden.ordenCodigo, s.tipo.codigo);
     await this.bus.publish(
       tx,
       this.bus.create({
@@ -346,6 +381,8 @@ export class EjecucionService {
           ordenId: s.ordenId,
           unidadId: s.orden.reporte.unidadId,
           tipo: s.tipo.codigo,
+          ...orden,
+          ...suborden,
           ...(hecho === 'correccion_solicitada' && s.asignadaA
             ? { asignados: [{ usuarioId: s.asignadaA, rolCodigo: 'operador_mantenimiento' }] }
             : {}),

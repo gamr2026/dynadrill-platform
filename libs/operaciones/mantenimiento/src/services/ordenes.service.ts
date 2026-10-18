@@ -11,6 +11,7 @@ import { ESTADO } from '../catalog/sembrar-catalogos';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { estadoDeOrden } from './estado-orden';
+import { datosDeOrden, datosDeSuborden } from './datos-de-aviso';
 import { INCLUIR_SUBORDEN_DETALLE, vistaSuborden } from './suborden-vista';
 
 /** Rol de las cuentas a las que se asigna una sub-orden mecánica o instrumental. */
@@ -186,7 +187,9 @@ export class OrdenesService {
             ordenId,
             codigo: orden.reporte.codigo,
             unidadId: orden.reporte.unidadId,
+            ...(await datosDeOrden(tx, ordenId)),
             estadoFinal,
+            estadoFinalNombre: estadoFinal === 'disponible' ? 'Disponible' : 'Con restricciones',
           },
         }),
       );
@@ -460,6 +463,8 @@ export class OrdenesService {
     const asignada = !!s.asignadaA;
     const derivada = s.estadoCodigo === ESTADO.derivadoAPumping;
     if (!asignada && !derivada) return;
+    const orden = await datosDeOrden(tx, ordenId);
+    const suborden = await datosDeSuborden(tx, orden.ordenCodigo, s.tipo);
     await this.bus.publish(
       tx,
       this.bus.create({
@@ -472,6 +477,8 @@ export class OrdenesService {
           ordenId,
           unidadId,
           tipo: s.tipo,
+          ...orden,
+          ...suborden,
           ...(asignada
             ? { asignados: [{ usuarioId: s.asignadaA, rolCodigo: ROL_OPERADOR_MANTENIMIENTO }] }
             : {}),

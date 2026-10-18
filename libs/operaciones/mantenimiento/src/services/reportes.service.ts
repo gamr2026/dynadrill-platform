@@ -64,7 +64,10 @@ export class ReportesService {
     reporteUnidadId: string,
     actorId: string | null,
   ): Promise<string | null> {
-    const origen = await tx.pumpingReporteUnidad.findUnique({ where: { id: reporteUnidadId } });
+    const origen = await tx.pumpingReporteUnidad.findUnique({
+      where: { id: reporteUnidadId },
+      include: { ticket: { select: { ticketNumero: true } } },
+    });
     if (!origen) {
       this.logger.warn(`Reporte de unidad ${reporteUnidadId} de Pumping no existe; se ignora`);
       return null;
@@ -119,7 +122,9 @@ export class ReportesService {
           codigo,
           origen: 'pumping',
           unidadId: unidad.id,
+          unidad: unidad.codigo,
           ticketId: origen.ticketId,
+          ticketNumero: origen.ticket.ticketNumero,
         },
       }),
     );

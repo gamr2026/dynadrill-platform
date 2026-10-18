@@ -21,6 +21,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { PreventivosService } from '@dyn/flota';
 import { DespachosConsumer, MovimientosService } from '@dyn/inventario';
 import { ReporteUnidadLlegadaConsumer } from './consumers/reporte-unidad-llegada.consumer';
 import { MantenimientoModule } from './mantenimiento.module';
@@ -271,6 +272,11 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       [ARTICULO.id],
     );
     await admin.query('DELETE FROM pumping.ticket WHERE id = ANY($1::uuid[])', [tickets]);
+    await admin.query('DELETE FROM flota.unidad_preventivo WHERE unidad_id = $1', [UNIDAD.id]);
+    await admin.query('DELETE FROM flota.unidad_lectura WHERE unidad_id = $1', [UNIDAD.id]);
+    await admin.query("DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'unidadId' = $1", [
+      UNIDAD.id,
+    ]);
     await admin.query('DELETE FROM flota.unidad WHERE id = $1', [UNIDAD.id]);
     if (eventos.length) {
       await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [eventos]);
@@ -362,7 +368,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       ).toBe(0);
     });
 
-    it('publica el aviso de reporte recibido con ids (sin nombres)', async () => {
+    it('publica el aviso de reporte recibido con ids y códigos (sin nombres de personas)', async () => {
       const r = await recibido();
       const salida = await admin.query(
         "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.mantenimiento.reporte.recibido' AND datos->'data'->>'reporteId' = $1",
@@ -375,7 +381,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         unidadId: UNIDAD.id,
       });
       expect(Object.keys(salida.rows[0].d).sort()).toEqual(
-        ['codigo', 'origen', 'reporteId', 'ticketId', 'unidadId'].sort(),
+        ['codigo', 'origen', 'reporteId', 'ticketId', 'ticketNumero', 'unidad', 'unidadId'].sort(),
       );
     });
   });
@@ -1180,6 +1186,156 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       // con menos de 2 letras no busca; sin permiso, no entra
       expect((await buscar('a')).body).toEqual([]);
       expect((await buscar('ab', sinPermiso())).status).toBe(403);
+    });
+  });
+
+  describe('historial de mantenimientos y avisos (M3 y M4)', () => {
+    const base = '/api/operaciones/mantenimiento';
+    const eventosDe = async (tipo: string, filtro: string, valor: string) =>
+      (
+        await admin.query(
+          `SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = $1 AND datos->'data'->>'${filtro}' = $2`,
+          [tipo, valor],
+        )
+      ).rows.map((r) => r.d);
+    /** Una orden con una sola sub-orden mecánica: avance, revisión, aprobación y retorno. */
+    const ordenDevuelta = async () => {
+      const r = await recibido();
+      const o = await http()
+        .post(`${base}/reportes/${r.id}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }] })
+        .expect(201);
+      const subId = o.body.subordenes[0].id as string;
+      const operador = mecanico();
+      await http()
+        .put(`${base}/subordenes/${subId}/avance`)
+        .set(operador)
+        .send({ diagnostico: 'Fuga', actividadesCorrectivas: 'Cambio de sello', horasTrabajo: 2.5 })
+        .expect(200);
+      await http().post(`${base}/subordenes/${subId}/enviar-revision`).set(operador).expect(201);
+      await http().post(`${base}/subordenes/${subId}/aprobar-cierre`).set(jefe()).expect(201);
+      await http()
+        .post(`${base}/ordenes/${o.body.id}/retornar`)
+        .set(jefe())
+        .send({ estadoFinal: 'con_restricciones', observaciones: 'Vigilar la fuga' })
+        .expect(201);
+      return { reporte: r, ordenId: o.body.id as string, subId };
+    };
+
+    it('une los preventivos de Flota con los correctivos devueltos a operación, del más reciente al más antiguo', async () => {
+      const { reporte, ordenId } = await ordenDevuelta();
+      await app.get(PreventivosService).registrar(
+        UNIDAD.id,
+        {
+          fecha: '2026-10-01',
+          valor: 5200,
+          ejecutadoPor: 'interno',
+          observaciones: 'Cambio de aceite',
+        },
+        { id: JEFE.id, roleCode: 'jefe_mantenimiento' },
+      );
+
+      const h = await http().get(`${base}/unidades/${UNIDAD.id}/historial`).set(jefe());
+      expect(h.status).toBe(200);
+      const clases = h.body.map((x: { clase: string }) => x.clase);
+      expect(clases).toContain('preventivo');
+      expect(clases).toContain('correctivo');
+      // el correctivo es de hoy y el preventivo del 1 de octubre: el más reciente va primero
+      expect(h.body.map((x: { fecha: string }) => x.fecha)).toEqual(
+        [...h.body.map((x: { fecha: string }) => x.fecha)].sort().reverse(),
+      );
+
+      const c = h.body.find(
+        (x: { correctivo: { ordenId: string } | null }) => x.correctivo?.ordenId === ordenId,
+      );
+      expect(c).toMatchObject({
+        clase: 'correctivo',
+        unidadId: UNIDAD.id,
+        ejecutadoPor: 'interno',
+        responsable: { id: JEFE.id },
+        observaciones: 'Vigilar la fuga',
+        correctivo: { ordenCodigo: reporte.codigo, estadoFinal: 'con_restricciones' },
+      });
+      expect(c.correctivo.subordenes).toEqual([
+        { codigo: `${reporte.codigo}-M`, tipo: 'Mecánico', horasTrabajo: 2.5, repuestos: 0 },
+      ]);
+      const p = h.body.find(
+        (x: { clase: string; fecha: string }) =>
+          x.clase === 'preventivo' && x.fecha === '2026-10-01',
+      );
+      expect(p).toMatchObject({
+        observaciones: 'Cambio de aceite',
+        ejecutadoPor: 'interno',
+        preventivo: { valor: 5200 },
+      });
+
+      // filtros, unidad que no existe y permiso
+      const soloPm = await http()
+        .get(`${base}/unidades/${UNIDAD.id}/historial`)
+        .query({ clase: 'preventivo' })
+        .set(jefe());
+      expect(soloPm.body.every((x: { clase: string }) => x.clase === 'preventivo')).toBe(true);
+      const soloCm = await http()
+        .get(`${base}/unidades/${UNIDAD.id}/historial`)
+        .query({ clase: 'correctivo' })
+        .set(jefe());
+      expect(soloCm.body.every((x: { clase: string }) => x.clase === 'correctivo')).toBe(true);
+      expect((await http().get(`${base}/unidades/${uuidv7()}/historial`).set(jefe())).status).toBe(
+        404,
+      );
+      expect(
+        (await http().get(`${base}/unidades/${UNIDAD.id}/historial`).set(sinPermiso())).status,
+      ).toBe(403);
+    });
+
+    it('los eventos traen lo que los avisos necesitan (unidad y códigos) y, al cerrar la última sub-orden, la orden queda aceptada una sola vez', async () => {
+      const { reporte, ordenId, subId } = await ordenDevuelta();
+      const aceptada = await eventosDe(
+        'operaciones.mantenimiento.orden.aceptada',
+        'ordenId',
+        ordenId,
+      );
+      expect(aceptada).toHaveLength(1);
+      expect(aceptada[0]).toMatchObject({
+        unidadId: UNIDAD.id,
+        unidad: UNIDAD.codigo,
+        ordenCodigo: reporte.codigo,
+      });
+
+      const [asignada] = await eventosDe(
+        'operaciones.mantenimiento.suborden.asignada',
+        'subordenId',
+        subId,
+      );
+      expect(asignada).toMatchObject({
+        unidad: UNIDAD.codigo,
+        subordenCodigo: `${reporte.codigo}-M`,
+        tipoNombre: 'Mecánico',
+        asignados: [{ usuarioId: MECANICO.id, rolCodigo: 'operador_mantenimiento' }],
+      });
+      const [revision] = await eventosDe(
+        'operaciones.mantenimiento.suborden.enviada_a_revision',
+        'subordenId',
+        subId,
+      );
+      expect(revision).toMatchObject({
+        unidad: UNIDAD.codigo,
+        subordenCodigo: `${reporte.codigo}-M`,
+        ordenCodigo: reporte.codigo,
+      });
+      const [retornada] = await eventosDe(
+        'operaciones.mantenimiento.orden.retornada',
+        'ordenId',
+        ordenId,
+      );
+      expect(retornada).toMatchObject({ unidad: UNIDAD.codigo, estadoFinal: 'con_restricciones' });
+      const [recibidoEv] = await eventosDe(
+        'operaciones.mantenimiento.reporte.recibido',
+        'reporteId',
+        reporte.id,
+      );
+      expect(recibidoEv).toMatchObject({ unidad: UNIDAD.codigo, ticketNumero: expect.any(Number) });
     });
   });
 });
