@@ -67,6 +67,15 @@ enum AccionPtw {
   @@schema("qhse")
 }
 
+enum EstadoSwa {
+  activo
+  evaluado
+  cerrado
+
+  @@map("estado_swa")
+  @@schema("qhse")
+}
+
 enum TipoTalla {
   ropa
   calzado
@@ -95,6 +104,7 @@ model TicketRef {
   entregasEpi EpiEntrega[]
   documentos  DocumentoPedido[]
   ptws        Ptw[]
+  swas        Swa[]
 
   @@unique([ticketId, pedidoId])
   @@index([pedidoId])
@@ -339,6 +349,148 @@ model PtwHistorial {
   @@schema("qhse")
 }
 
+/// Tipo de peligro que motiva una SWA (catálogo).
+model SwaTipoPeligro {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  swas Swa[]
+
+  @@map("swa_tipo_peligro")
+  @@schema("qhse")
+}
+
+/// Roles que deben enterarse de una SWA; la evaluación exige haberlos notificado a todos.
+model SwaRolCadena {
+  id        String   @id @db.Uuid
+  rolId     String   @unique @map("rol_id") @db.Uuid
+  rol       IdRol    @relation(fields: [rolId], references: [id])
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  notificaciones SwaNotificacion[]
+
+  @@map("swa_rol_cadena")
+  @@schema("qhse")
+}
+
+/// Criterio del checklist de reinicio (catálogo).
+model SwaCriterioReinicio {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  confirmaciones SwaReinicio[]
+
+  @@map("swa_criterio_reinicio")
+  @@schema("qhse")
+}
+
+/// Stop Work Authority. Una SWA sin cerrar bloquea el ticket (D10). Las transiciones las garantiza el trigger `swa_validar`.
+model Swa {
+  id             String         @id @db.Uuid
+  numero         Int            @unique @default(autoincrement())
+  ticketId       String?        @map("ticket_id") @db.Uuid
+  ticket         TicketRef?     @relation(fields: [ticketId], references: [ticketId])
+  tipoPeligroId  String         @map("tipo_peligro_id") @db.Uuid
+  tipoPeligro    SwaTipoPeligro @relation(fields: [tipoPeligroId], references: [id])
+  descripcion    String
+  ubicacion      String?
+  activadoPor    String         @map("activado_por") @db.Uuid
+  activador      IdUsuario      @relation("swaActivador", fields: [activadoPor], references: [id])
+  activadoAt     DateTime       @default(now()) @map("activado_at") @db.Timestamptz(6)
+  estado         EstadoSwa      @default(activo)
+  riesgoReal     Boolean?       @map("riesgo_real")
+  evaluacionNota String?        @map("evaluacion_nota")
+  evaluadoPor    String?        @map("evaluado_por") @db.Uuid
+  evaluador      IdUsuario?     @relation("swaEvaluador", fields: [evaluadoPor], references: [id])
+  evaluadoAt     DateTime?      @map("evaluado_at") @db.Timestamptz(6)
+  reanudadoPor   String?        @map("reanudado_por") @db.Uuid
+  reanudador     IdUsuario?     @relation("swaReanudador", fields: [reanudadoPor], references: [id])
+  reanudadoAt    DateTime?      @map("reanudado_at") @db.Timestamptz(6)
+  heroeSeguridad Boolean        @default(false) @map("heroe_seguridad")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String         @map("created_by") @db.Uuid
+  creador        IdUsuario      @relation("swaCreador", fields: [createdBy], references: [id])
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?        @map("updated_by") @db.Uuid
+  editor         IdUsuario?     @relation("swaEditor", fields: [updatedBy], references: [id])
+
+  notificaciones SwaNotificacion[]
+  reinicio       SwaReinicio[]
+  historial      SwaHistorial[]
+
+  @@index([estado])
+  @@index([tipoPeligroId])
+  @@map("swa")
+  @@schema("qhse")
+}
+
+/// Quién notificó a cada rol de la cadena. Inmutable.
+model SwaNotificacion {
+  id            String       @id @db.Uuid
+  swaId         String       @map("swa_id") @db.Uuid
+  swa           Swa          @relation(fields: [swaId], references: [id], onDelete: Cascade)
+  rolCadenaId   String       @map("rol_cadena_id") @db.Uuid
+  rolCadena     SwaRolCadena @relation(fields: [rolCadenaId], references: [id])
+  notificadoPor String       @map("notificado_por") @db.Uuid
+  notificador   IdUsuario    @relation("swaNotificador", fields: [notificadoPor], references: [id])
+  notificadoAt  DateTime     @default(now()) @map("notificado_at") @db.Timestamptz(6)
+
+  @@unique([swaId, rolCadenaId])
+  @@map("swa_notificacion")
+  @@schema("qhse")
+}
+
+/// Confirmación de un criterio del checklist de reinicio. Inmutable.
+model SwaReinicio {
+  id            String              @id @db.Uuid
+  swaId         String              @map("swa_id") @db.Uuid
+  swa           Swa                 @relation(fields: [swaId], references: [id], onDelete: Cascade)
+  criterioId    String              @map("criterio_id") @db.Uuid
+  criterio      SwaCriterioReinicio @relation(fields: [criterioId], references: [id])
+  confirmadoPor String              @map("confirmado_por") @db.Uuid
+  confirmador   IdUsuario           @relation("swaConfirmador", fields: [confirmadoPor], references: [id])
+  confirmadoAt  DateTime            @default(now()) @map("confirmado_at") @db.Timestamptz(6)
+
+  @@unique([swaId, criterioId])
+  @@map("swa_reinicio")
+  @@schema("qhse")
+}
+
+/// Rastro de cada cambio de estado de una SWA (solo se agrega).
+model SwaHistorial {
+  id             String     @id @db.Uuid
+  swaId          String     @map("swa_id") @db.Uuid
+  swa            Swa        @relation(fields: [swaId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoSwa? @map("estado_anterior")
+  estadoNuevo    EstadoSwa  @map("estado_nuevo")
+  actorId        String     @map("actor_id") @db.Uuid
+  actor          IdUsuario  @relation("swaHistorialActor", fields: [actorId], references: [id])
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([swaId, createdAt])
+  @@map("swa_historial")
+  @@schema("qhse")
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de `identidad`, para obtener el nombre con JOIN a partir de las FK. Este módulo nunca
 // escribe en ellas (`app_qhse` solo tiene SELECT sobre estas columnas). Las administra el módulo de identidad.
@@ -346,10 +498,11 @@ model PtwHistorial {
 
 /// `identidad.rol`.
 model IdRol {
-  id       String      @id @db.Uuid
-  codigo   String
-  nombre   String
-  usuarios IdUsuario[]
+  id         String         @id @db.Uuid
+  codigo     String
+  nombre     String
+  usuarios   IdUsuario[]
+  cadenasSwa SwaRolCadena[]
 
   @@map("rol")
   @@schema("identidad")
@@ -384,6 +537,14 @@ model IdUsuario {
   ptwAnulados            Ptw[]                 @relation("ptwAnulador")
   ptwFirmas              PtwFirma[]            @relation("ptwFirmante")
   ptwHistorial           PtwHistorial[]        @relation("ptwHistorialActor")
+  swaActivadas           Swa[]                 @relation("swaActivador")
+  swaEvaluadas           Swa[]                 @relation("swaEvaluador")
+  swaReanudadas          Swa[]                 @relation("swaReanudador")
+  swaCreadas             Swa[]                 @relation("swaCreador")
+  swaEditadas            Swa[]                 @relation("swaEditor")
+  swaNotificaciones      SwaNotificacion[]     @relation("swaNotificador")
+  swaConfirmaciones      SwaReinicio[]         @relation("swaConfirmador")
+  swaHistorial           SwaHistorial[]        @relation("swaHistorialActor")
 
   @@map("usuario")
   @@schema("identidad")

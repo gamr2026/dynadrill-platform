@@ -9,6 +9,9 @@ import { EpiController } from './epi/epi.controller';
 import { EpiRenglonesService } from './epi/epi-renglones.service';
 import { EpiService } from './epi/epi.service';
 import { PrismaService } from './prisma/prisma.service';
+import { SwaConsultaService } from './swa/swa-consulta.service';
+import { SwaController } from './swa/swa.controller';
+import { SwaService } from './swa/swa.service';
 import { PtwConsultaService } from './ptw/ptw-consulta.service';
 import { PtwController } from './ptw/ptw.controller';
 import { PtwService } from './ptw/ptw.service';
@@ -18,11 +21,11 @@ import { PtwService } from './ptw/ptw.service';
  * `CommonModule` y `MessagingModule`.
  *
  * Tramo Q1: entrega de EPI (solicitar, aprobar o rechazar, despachar) y la referencia de los tickets que la originan. Documentos por
- * pedido y Acta de Entrega de Locación (contrato 4.11); Permiso de Trabajo (PTW) por día y pedido. Los demás
+ * pedido y Acta de Entrega de Locación (contrato 4.11); Permiso de Trabajo (PTW) por día y pedido; Stop Work Authority (SWA). Los demás
  * subdominios (SWA, STOP, inspecciones, IPERC, PTW, ambiental, emergencias, investigaciones) se agregan por tramos.
  */
 @Module({
-  controllers: [EpiController, DocumentosController, PtwController],
+  controllers: [EpiController, DocumentosController, PtwController, SwaController],
   providers: [
     PrismaService,
     EpiService,
@@ -32,9 +35,11 @@ import { PtwService } from './ptw/ptw.service';
     DocumentosEstadoService,
     PtwService,
     PtwConsultaService,
+    SwaService,
+    SwaConsultaService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
-  exports: [EpiService, DocumentosPedidoService, PtwService],
+  exports: [EpiService, DocumentosPedidoService, PtwService, SwaService],
 })
 export class QhseModule {}

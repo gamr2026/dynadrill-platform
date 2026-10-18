@@ -7,6 +7,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
+import { sembrarSwa } from '../src/catalog/sembrar-swa';
 import { PrismaClient } from '../src/generated/client';
 
 loadDotenv('apps/qhse/.env', '.env');
@@ -21,6 +22,10 @@ async function main() {
   try {
     const r = await sembrarEpi(prisma);
     console.log(`qhse: ${r.tallas} tallas de EPI nuevas`);
+    const swa = await sembrarSwa(prisma);
+    console.log(
+      `qhse: SWA con ${swa.tipos} tipos de peligro, ${swa.roles} roles de la cadena y ${swa.criterios} criterios de reinicio nuevos`,
+    );
   } finally {
     await prisma.$disconnect();
   }

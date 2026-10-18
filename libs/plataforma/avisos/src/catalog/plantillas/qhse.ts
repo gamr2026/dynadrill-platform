@@ -59,6 +59,35 @@ const ptwAprobadoSupervisor: PlantillaDef = {
   rol: 'supervisor',
 };
 
+/** Una SWA activada: la cadena (Supervisor, Técnico y Gerente HSE) debe enterarse al instante. El evento trae `asignados`. */
+const swaActivada = (rol: 'supervisor' | 'tecnico_hse' | 'gerente_hse'): PlantillaDef => ({
+  codigo: `qhse_swa_activado_${rol}`,
+  descripcion:
+    'Un trabajador activó una SWA (Stop Work Authority): avisa a la cadena de notificación.',
+  asunto: 'SWA activada: {{codigo}} — trabajo detenido ({{tipoPeligroNombre}})',
+  cuerpoHtml:
+    '<p>Hola {{nombre}},</p>' +
+    '<p>Como <strong>{{cargo}}</strong>, debe saber que se activó la <strong>{{codigo}}</strong>: el trabajo está detenido hasta que se evalúe el riesgo y se reanude.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+    FILA('Peligro', 'tipoPeligroNombre') +
+    FILA('Descripción', 'descripcion') +
+    FILA('Ubicación', 'ubicacion') +
+    FILA('Ticket', 'ticketNumero') +
+    FILA('Pedido', 'pedidoCodigo') +
+    FILA('Cliente', 'cliente') +
+    FILA('Activada por', 'activadoPor') +
+    '</table>' +
+    '<p>Política de cero represalias: nadie puede ser sancionado por detener un trabajo de buena fe.</p>',
+  cuerpoTexto:
+    'Hola {{nombre}},\n\nComo {{cargo}}, debe saber que se activó la {{codigo}}: el trabajo está detenido hasta que se evalúe el riesgo y se reanude.\n\nPeligro: {{tipoPeligroNombre}}\nDescripción: {{descripcion}}\nUbicación: {{ubicacion}}\nTicket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nActivada por: {{activadoPor}}\n\nPolítica de cero represalias: nadie puede ser sancionado por detener un trabajo de buena fe.',
+  tituloAviso: 'SWA activada: {{codigo}}',
+  detalleAviso: '{{tipoPeligroNombre}} · {{pedidoCodigo}}',
+  enlaceAviso: '/dashboard/qhse/swa',
+  tono: 'error',
+  evento: 'qhse.swa.activado',
+  rol,
+});
+
 /**
  * Plantillas del módulo QHSE. Cada regla liga un evento y un rol con el texto que ese cargo debe leer; los demás subdominios de QHSE
  * agregan aquí las suyas (SWA, PTW, documentos por vencer...).
@@ -67,4 +96,7 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   solicitudesDeEpi('tecnico_hse'),
   solicitudesDeEpi('gerente_hse'),
   ptwAprobadoSupervisor,
+  swaActivada('supervisor'),
+  swaActivada('tecnico_hse'),
+  swaActivada('gerente_hse'),
 ];
