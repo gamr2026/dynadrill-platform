@@ -6,14 +6,18 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { EjecucionService } from '../services/ejecucion.service';
 import { OrdenesService } from '../services/ordenes.service';
 import { ReportesService, type EstadoReporte } from '../services/reportes.service';
 
@@ -54,12 +58,40 @@ export class ClasificarDto {
   asignaciones!: AsignacionDto[];
 }
 
+export class RepuestoDto {
+  /** Repuesto del catálogo de Inventario (con su bodega)… */
+  @IsOptional() @IsUUID() articuloId?: string | null;
+  @IsOptional() @IsUUID() bodegaId?: string | null;
+  /** …o, si no existe en el catálogo, su número de parte y descripción. */
+  @IsOptional() @IsString() @MaxLength(80) numeroParte?: string | null;
+  @IsOptional() @IsString() @MaxLength(300) descripcion?: string | null;
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(99999999) cantidad!: number;
+}
+
+export class AvanceDto {
+  @IsOptional() @IsString() @MaxLength(4000) diagnostico?: string | null;
+  @IsOptional() @IsString() @MaxLength(4000) actividadesCorrectivas?: string | null;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(9999) horasTrabajo?: number | null;
+  @IsOptional() @IsString() @MaxLength(4000) trabajosAdicionales?: string | null;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => RepuestoDto)
+  repuestos?: RepuestoDto[];
+}
+
+export class CorreccionDto {
+  @IsString() @MaxLength(1000) nota!: string;
+}
+
 /** Reportes de unidad recibidos, clasificación y órdenes de mantenimiento. */
 @Controller('operaciones/mantenimiento')
 export class MantenimientoController {
   constructor(
     private readonly reportes: ReportesService,
     private readonly ordenes: OrdenesService,
+    private readonly ejecucion: EjecucionService,
   ) {}
 
   @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
@@ -120,6 +152,48 @@ export class MantenimientoController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.ordenes.reclasificar(id, dto.asignaciones, actor);
+  }
+
+  // ── ejecución y cierre de la sub-orden (M2) ──────────────────────────────────────────────────────
+
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER, P.MANTENIMIENTO_TAREAS)
+  @Get('subordenes/:id')
+  obtenerSuborden(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ejecucion.obtener(id);
+  }
+
+  /** El operador guarda el avance: diagnóstico, actividades, horas y repuestos usados. */
+  @RequirePermission(P.MANTENIMIENTO_TAREAS, P.MANTENIMIENTO_GESTIONAR)
+  @Put('subordenes/:id/avance')
+  guardarAvance(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AvanceDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ejecucion.guardarAvance(id, dto, actor);
+  }
+
+  @RequirePermission(P.MANTENIMIENTO_TAREAS, P.MANTENIMIENTO_GESTIONAR)
+  @Post('subordenes/:id/enviar-revision')
+  enviarARevision(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.ejecucion.enviarARevision(id, actor);
+  }
+
+  /** El Jefe aprueba el cierre: los repuestos del catálogo salen de bodega. */
+  @RequirePermission(P.MANTENIMIENTO_GESTIONAR)
+  @Post('subordenes/:id/aprobar-cierre')
+  aprobarCierre(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.ejecucion.aprobarCierre(id, actor);
+  }
+
+  @RequirePermission(P.MANTENIMIENTO_GESTIONAR)
+  @Post('subordenes/:id/solicitar-correccion')
+  solicitarCorreccion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CorreccionDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ejecucion.solicitarCorreccion(id, dto.nota, actor);
   }
 
   /** Todas las sub-órdenes de una unidad: la tarjeta «Mantenimientos» del ticket de Pumping. */

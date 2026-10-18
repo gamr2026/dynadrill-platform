@@ -120,6 +120,50 @@ export class ArticulosService {
     return f.conStock ? todos.filter((a) => a.stockActual > 0) : todos;
   }
 
+  /**
+   * Selector de repuestos de Mantenimiento: artículos activos de las categorías de repuestos que coinciden con el texto, cada uno
+   * con su existencia por bodega (solo las bodegas con saldo). Devuelve pocos resultados a propósito: se busca escribiendo.
+   */
+  async repuestosDisponibles(texto: string | undefined) {
+    const q = texto?.trim();
+    if (!q || q.length < 2) return [];
+    const articulos = await this.prisma.articulo.findMany({
+      where: {
+        activo: true,
+        categoria: { esRepuesto: true },
+        OR: [
+          { codigo: { contains: q, mode: 'insensitive' } },
+          { nombre: { contains: q, mode: 'insensitive' } },
+          { nombreComercial: { contains: q, mode: 'insensitive' } },
+          { codigos: { some: { codigo: { contains: q, mode: 'insensitive' } } } },
+        ],
+      },
+      include: { unidadStock: true },
+      orderBy: { codigo: 'asc' },
+      take: 30,
+    });
+    const filas = [];
+    for (const a of articulos) {
+      const saldos = (await saldosPorBodega(this.prisma, a.id)).filter((s) => s.saldo > 0);
+      const bodegas = await this.prisma.catBodega.findMany({
+        where: { id: { in: saldos.map((s) => s.bodegaId) } },
+      });
+      filas.push({
+        id: a.id,
+        codigo: a.codigo,
+        nombre: a.nombre,
+        unidad: a.unidadStock.simbolo,
+        stockActual: saldos.reduce((t, s) => t + s.saldo, 0),
+        porBodega: saldos.map((s) => ({
+          bodegaId: s.bodegaId,
+          bodega: bodegas.find((b) => b.id === s.bodegaId)?.nombre ?? '',
+          stock: s.saldo,
+        })),
+      });
+    }
+    return filas;
+  }
+
   async detalle(id: string) {
     const a = await this.prisma.articulo.findUnique({ where: { id }, include: INCLUIR });
     if (!a) throw new NotFoundException('El artículo no existe');

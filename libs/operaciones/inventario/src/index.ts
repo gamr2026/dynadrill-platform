@@ -7,6 +7,7 @@ export {
   type EntradaManual,
   type MovimientoDeDespacho,
   type MovimientoDeTicket,
+  type SalidaDeMantenimiento,
 } from './services/movimientos.service';
 export { DespachosConsumer } from './consumers/despachos.consumer';
 export { ArticulosService } from './services/articulos.service';

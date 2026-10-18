@@ -38,7 +38,8 @@ type Motivo = {
     | 'ajuste'
     | 'despacho_bodega'
     | 'salida_ticket'
-    | 'devolucion_ticket';
+    | 'devolucion_ticket'
+    | 'consumo_mantenimiento';
   manual: boolean;
 };
 
@@ -66,6 +67,12 @@ export const MOTIVOS: ReadonlyArray<Motivo> = [
   },
   { nombre: 'Salida para ticket', tipo: 'salida', origen: 'salida_ticket', manual: false },
   { nombre: 'Devolución de ticket', tipo: 'entrada', origen: 'devolucion_ticket', manual: false },
+  {
+    nombre: 'Consumo en mantenimiento',
+    tipo: 'salida',
+    origen: 'consumo_mantenimiento',
+    manual: false,
+  },
 ];
 
 /** Siembra las unidades y los motivos (idempotente: lo que ya existe no se toca). */

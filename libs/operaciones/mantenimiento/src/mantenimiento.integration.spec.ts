@@ -21,6 +21,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { DespachosConsumer, MovimientosService } from '@dyn/inventario';
 import { ReporteUnidadLlegadaConsumer } from './consumers/reporte-unidad-llegada.consumer';
 import { MantenimientoModule } from './mantenimiento.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -53,6 +54,9 @@ const SUPERVISOR = { id: uuidv7(), nombre: 'Sara Supervisora' };
 const VEHICULO = { id: uuidv7(), placa: `MT${String(n).slice(-5)}A` };
 const VEHICULO_SIN_UNIDAD = { id: uuidv7(), placa: `MT${String(n).slice(-5)}B` };
 const UNIDAD = { id: uuidv7(), codigo: `IT-${n}` };
+const BODEGA = { id: uuidv7(), nombre: `BODEGA-MT ${n}` };
+const CATEGORIA = uuidv7();
+const ARTICULO = { id: uuidv7(), codigo: `REP-MT-${n}` };
 
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
@@ -69,6 +73,7 @@ const MAESTROS: MaestrosDePrueba = {
     { id: SUPERVISOR.id, nombre: SUPERVISOR.nombre, rol: 'supervisor' },
   ],
   vehiculos: [VEHICULO, VEHICULO_SIN_UNIDAD],
+  bodegas: [BODEGA],
 };
 
 run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', () => {
@@ -94,6 +99,13 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     );
   const soloLectura = () =>
     token('supervisor', SUPERVISOR.nombre, [P.MANTENIMIENTO_OPERACIONES_VER], SUPERVISOR.id);
+  const mecanico = (id = MECANICO.id) =>
+    token(
+      'operador_mantenimiento',
+      MECANICO.nombre,
+      [P.MANTENIMIENTO_TAREAS, P.MANTENIMIENTO_VER],
+      id,
+    );
   const sinPermiso = () => token('operador', OPERADOR.nombre, [], OPERADOR.id);
 
   const tickets: string[] = [];
@@ -174,6 +186,15 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
        VALUES ($1, $2, 'Unidad de prueba', 'transporte', $3, false, true)`,
       [UNIDAD.id, UNIDAD.codigo, VEHICULO.id],
     );
+    await admin.query(
+      'INSERT INTO inventario.categoria_articulo (id, nombre, es_repuesto) VALUES ($1, $2, true)',
+      [CATEGORIA, `CAT-MT ${n}`],
+    );
+    await admin.query(
+      `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
+       VALUES ($1, $2, 'Filtro de aceite de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+      [ARTICULO.id, ARTICULO.codigo, CATEGORIA],
+    );
     contadorInicial = (
       await admin.query("SELECT valor FROM mantenimiento.contador WHERE clave = 'reporte'")
     ).rows[0].valor;
@@ -208,12 +229,26 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     jest
       .spyOn(ReporteUnidadLlegadaConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
+    jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(ReporteUnidadLlegadaConsumer);
+    // 20 unidades del repuesto en la bodega de prueba (compra, por la API de Inventario)
+    const compra = (
+      await admin.query("SELECT id FROM inventario.motivo_movimiento WHERE origen = 'compra'")
+    ).rows[0].id;
+    const entrada = await http()
+      .post('/api/operaciones/inventario/movimientos')
+      .set(token('bodeguero', 'Bruno Bodeguero', [P.ARTICULOS_GESTIONAR, P.ARTICULOS_VER], JEFE.id))
+      .send({ articuloId: ARTICULO.id, bodegaId: BODEGA.id, motivoId: compra, cantidad: 20 });
+    expect(entrada.status).toBe(201);
   });
 
   afterAll(async () => {
+    // los renglones con salida registrada están protegidos (trigger): se desactiva solo para limpiar la prueba
+    await admin.query(
+      'ALTER TABLE mantenimiento.suborden_repuesto DISABLE TRIGGER suborden_repuesto_con_salida',
+    );
     await admin.query(
       'DELETE FROM mantenimiento.orden WHERE reporte_id IN (SELECT id FROM mantenimiento.reporte_recibido WHERE unidad_id = $1)',
       [UNIDAD.id],
@@ -221,6 +256,20 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     await admin.query('DELETE FROM mantenimiento.reporte_recibido WHERE unidad_id = $1', [
       UNIDAD.id,
     ]);
+    await admin.query(
+      'ALTER TABLE mantenimiento.suborden_repuesto ENABLE TRIGGER suborden_repuesto_con_salida',
+    );
+    await admin.query(
+      'DELETE FROM inventario.salida_mantenimiento WHERE movimiento_id IN (SELECT id FROM inventario.movimiento WHERE articulo_id = $1)',
+      [ARTICULO.id],
+    );
+    await admin.query('DELETE FROM inventario.movimiento WHERE articulo_id = $1', [ARTICULO.id]);
+    await admin.query('DELETE FROM inventario.articulo WHERE id = $1', [ARTICULO.id]);
+    await admin.query('DELETE FROM inventario.categoria_articulo WHERE id = $1', [CATEGORIA]);
+    await admin.query(
+      "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'articuloId' = $1",
+      [ARTICULO.id],
+    );
     await admin.query('DELETE FROM pumping.ticket WHERE id = ANY($1::uuid[])', [tickets]);
     await admin.query('DELETE FROM flota.unidad WHERE id = $1', [UNIDAD.id]);
     if (eventos.length) {
@@ -745,12 +794,36 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       await expect(repuesto('P-100', 1)).rejects.toThrow(/suborden_repuesto_parte_key/);
       await expect(repuesto('P-101', 0)).rejects.toThrow(/suborden_repuesto_cantidad_check/);
       await expect(repuesto('   ', 1)).rejects.toThrow(/suborden_repuesto_parte_check/);
+      const deCatalogo = (
+        articuloId: string,
+        bodegaId: string | null,
+        parte: string | null = null,
+      ) =>
+        admin.query(
+          'INSERT INTO mantenimiento.suborden_repuesto (id, suborden_id, numero_parte, cantidad, articulo_id, bodega_id) VALUES ($1, $2, $3, 1, $4, $5)',
+          [uuidv7(), subId, parte, articuloId, bodegaId],
+        );
+      await expect(deCatalogo(uuidv7(), BODEGA.id)).rejects.toThrow(
+        /suborden_repuesto_articulo_fkey/,
+      );
+      await expect(deCatalogo(ARTICULO.id, uuidv7())).rejects.toThrow(
+        /suborden_repuesto_bodega_fkey/,
+      );
+      // de catálogo = artículo + bodega y sin texto; de texto = parte y sin artículo ni bodega
+      await expect(deCatalogo(ARTICULO.id, null)).rejects.toThrow(/suborden_repuesto_origen_check/);
+      await expect(deCatalogo(ARTICULO.id, BODEGA.id, 'P-103')).rejects.toThrow(
+        /suborden_repuesto_origen_check/,
+      );
       await expect(
         admin.query(
-          'INSERT INTO mantenimiento.suborden_repuesto (id, suborden_id, numero_parte, cantidad, articulo_id) VALUES ($1, $2, $3, 1, $4)',
-          [uuidv7(), subId, 'P-102', uuidv7()],
+          'INSERT INTO mantenimiento.suborden_repuesto (id, suborden_id, cantidad) VALUES ($1, $2, 1)',
+          [uuidv7(), subId],
         ),
-      ).rejects.toThrow(/suborden_repuesto_articulo_fkey/);
+      ).rejects.toThrow(/suborden_repuesto_origen_check/);
+      await deCatalogo(ARTICULO.id, BODEGA.id);
+      await expect(deCatalogo(ARTICULO.id, BODEGA.id)).rejects.toThrow(
+        /suborden_repuesto_articulo_key/,
+      );
 
       await expect(
         admin.query(
@@ -795,6 +868,230 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect(new Set(codigos).size).toBe(25);
       const numeros = codigos.map((c) => Number(c.slice(1))).sort((a, b) => a - b);
       expect(numeros[24] - numeros[0]).toBe(24);
+    });
+  });
+  describe('ejecución y cierre de la sub-orden, con repuestos del catálogo (M2)', () => {
+    const base = '/api/operaciones/mantenimiento';
+    const stockDe = async () =>
+      Number(
+        (
+          await admin.query(
+            'SELECT saldo_resultante FROM inventario.movimiento WHERE articulo_id = $1 AND bodega_id = $2 ORDER BY secuencia DESC LIMIT 1',
+            [ARTICULO.id, BODEGA.id],
+          )
+        ).rows[0].saldo_resultante,
+      );
+
+    /** Una orden con la sub-orden mecánica asignada a MECANICO; devuelve el id de la sub-orden. */
+    const subordenMecanica = async () => {
+      const r = await recibido();
+      const o = await http()
+        .post(`${base}/reportes/${r.id}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }] });
+      expect(o.status).toBe(201);
+      return o.body.subordenes[0].id as string;
+    };
+    const avance = (id: string, body: object, auth = mecanico()) =>
+      http().put(`${base}/subordenes/${id}/avance`).set(auth).send(body);
+    const enviar = (id: string) =>
+      http().post(`${base}/subordenes/${id}/enviar-revision`).set(mecanico());
+    const aprobar = (id: string, auth = jefe()) =>
+      http().post(`${base}/subordenes/${id}/aprobar-cierre`).set(auth);
+    const corregir = (id: string, nota: string) =>
+      http().post(`${base}/subordenes/${id}/solicitar-correccion`).set(jefe()).send({ nota });
+
+    it('el operador elige el repuesto del catálogo, el Jefe aprueba y la salida queda en el kardex', async () => {
+      const id = await subordenMecanica();
+      const guardado = await avance(id, {
+        diagnostico: 'Filtro saturado',
+        actividadesCorrectivas: 'Cambio de filtro de aceite',
+        horasTrabajo: 1.5,
+        repuestos: [
+          { articuloId: ARTICULO.id, bodegaId: BODEGA.id, cantidad: 3 },
+          { numeroParte: 'XZ-900', descripcion: 'Empaque sin código en Inventario', cantidad: 1 },
+        ],
+      });
+      expect(guardado.status).toBe(200);
+      expect(guardado.body.estado.codigo).toBe('en_ejecucion');
+      expect(guardado.body.repuestos).toHaveLength(2);
+      expect(guardado.body.repuestos[0]).toMatchObject({
+        cantidad: 3,
+        articulo: { id: ARTICULO.id, codigo: ARTICULO.codigo },
+        bodega: { id: BODEGA.id },
+        numeroParte: null,
+        movimientoId: null,
+      });
+      expect(await stockDe()).toBe(20); // guardar el avance no mueve el stock
+
+      const enviada = await enviar(id);
+      expect(enviada.status).toBe(201);
+      expect(enviada.body.estado.codigo).toBe('en_revision_cierre');
+      expect(await stockDe()).toBe(20);
+
+      const cerrada = await aprobar(id);
+      expect(cerrada.status).toBe(201);
+      expect(cerrada.body.estado.codigo).toBe('cerrado');
+      expect(await stockDe()).toBe(17);
+      const catalogo = cerrada.body.repuestos.find((x: { articulo: unknown }) => x.articulo);
+      const texto = cerrada.body.repuestos.find(
+        (x: { numeroParte: string | null }) => x.numeroParte,
+      );
+      expect(catalogo.movimientoId).toEqual(expect.any(String));
+      expect(texto.movimientoId).toBeNull(); // el de texto no existe en Inventario: no sale nada
+
+      const m = (
+        await admin.query(
+          `SELECT m.tipo, m.origen, m.cantidad, m.bodega_id, mo.nombre AS motivo, s.suborden_repuesto_id
+             FROM inventario.movimiento m
+             JOIN inventario.motivo_movimiento mo ON mo.id = m.motivo_id
+             JOIN inventario.salida_mantenimiento s ON s.movimiento_id = m.id
+            WHERE m.id = $1`,
+          [catalogo.movimientoId],
+        )
+      ).rows[0];
+      expect(m).toMatchObject({
+        tipo: 'salida',
+        origen: 'consumo_mantenimiento',
+        bodega_id: BODEGA.id,
+        motivo: 'Consumo en mantenimiento',
+        suborden_repuesto_id: catalogo.id,
+      });
+      expect(Number(m.cantidad)).toBe(3);
+
+      // el renglón con salida ya no se puede cambiar ni borrar (ni siquiera la base lo permite)
+      await expect(
+        admin.query('UPDATE mantenimiento.suborden_repuesto SET cantidad = 9 WHERE id = $1', [
+          catalogo.id,
+        ]),
+      ).rejects.toThrow(/ya salió de bodega/);
+      await expect(
+        admin.query('DELETE FROM mantenimiento.suborden_repuesto WHERE id = $1', [catalogo.id]),
+      ).rejects.toThrow(/ya salió de bodega/);
+      // una sub-orden cerrada no se vuelve a editar
+      expect((await avance(id, { diagnostico: 'otro' })).status).toBe(409);
+    });
+
+    it('la corrección devuelve la sub-orden al operador, que puede volver a enviarla', async () => {
+      const id = await subordenMecanica();
+      await avance(id, { actividadesCorrectivas: 'Ajuste de correa' });
+      expect((await enviar(id)).status).toBe(201);
+
+      expect((await corregir(id, '   ')).status).toBe(400);
+      const pedida = await corregir(id, 'Falta el torque de la correa');
+      expect(pedida.status).toBe(201);
+      expect(pedida.body).toMatchObject({
+        estado: { codigo: 'correccion_solicitada' },
+        notaCorreccion: 'Falta el torque de la correa',
+      });
+
+      const corregida = await avance(id, { actividadesCorrectivas: 'Ajuste de correa a 40 N·m' });
+      expect(corregida.body.estado.codigo).toBe('en_ejecucion');
+      expect((await enviar(id)).status).toBe(201);
+    });
+
+    it('aplica las reglas: quién puede actuar, el orden de los pasos y qué repuestos se aceptan', async () => {
+      const id = await subordenMecanica();
+      // otra cuenta de operador no toca una sub-orden ajena
+      expect((await avance(id, { diagnostico: 'x' }, mecanico(INSTRUMENTISTA.id))).status).toBe(
+        403,
+      );
+      // no se envía a revisión sin actividades, ni se aprueba lo que no está en revisión
+      expect((await enviar(id)).status).toBe(400);
+      expect((await aprobar(id)).status).toBe(409);
+      // el operador no aprueba
+      expect((await aprobar(id, mecanico())).status).toBe(403);
+
+      const malos: Array<[string, object[]]> = [
+        [
+          'mezcla catálogo y texto',
+          [{ articuloId: ARTICULO.id, bodegaId: BODEGA.id, numeroParte: 'A', cantidad: 1 }],
+        ],
+        ['catálogo sin bodega', [{ articuloId: ARTICULO.id, cantidad: 1 }]],
+        ['bodega que no existe', [{ articuloId: ARTICULO.id, bodegaId: uuidv7(), cantidad: 1 }]],
+        ['artículo que no existe', [{ articuloId: uuidv7(), bodegaId: BODEGA.id, cantidad: 1 }]],
+        ['sin artículo ni parte', [{ cantidad: 1 }]],
+        [
+          'artículo repetido',
+          [
+            { articuloId: ARTICULO.id, bodegaId: BODEGA.id, cantidad: 1 },
+            { articuloId: ARTICULO.id, bodegaId: BODEGA.id, cantidad: 2 },
+          ],
+        ],
+        [
+          'parte repetida',
+          [
+            { numeroParte: 'A-1', cantidad: 1 },
+            { numeroParte: ' A-1 ', cantidad: 1 },
+          ],
+        ],
+        ['cantidad cero', [{ numeroParte: 'A-2', cantidad: 0 }]],
+      ];
+      for (const [caso, repuestos] of malos) {
+        const r = await avance(id, { repuestos });
+        expect({ caso, status: r.status }).toEqual({ caso, status: 400 });
+      }
+      // nada de lo rechazado quedó guardado
+      const s = await http().get(`${base}/subordenes/${id}`).set(jefe());
+      expect(s.body.repuestos).toHaveLength(0);
+    });
+
+    it('si no alcanza el stock, el cierre se rechaza y no cambia nada; al corregir la cantidad se puede aprobar', async () => {
+      const id = await subordenMecanica();
+      await avance(id, {
+        actividadesCorrectivas: 'Cambio masivo',
+        repuestos: [{ articuloId: ARTICULO.id, bodegaId: BODEGA.id, cantidad: 500 }],
+      });
+      expect((await enviar(id)).status).toBe(201);
+      const antes = await stockDe();
+
+      expect((await aprobar(id)).status).toBe(409);
+      expect(await stockDe()).toBe(antes);
+      const s = await http().get(`${base}/subordenes/${id}`).set(jefe());
+      expect(s.body.estado.codigo).toBe('en_revision_cierre');
+      expect(s.body.repuestos[0].movimientoId).toBeNull();
+
+      expect((await corregir(id, 'Verifique la cantidad')).status).toBe(201);
+      await avance(id, {
+        repuestos: [{ articuloId: ARTICULO.id, bodegaId: BODEGA.id, cantidad: 2 }],
+      });
+      expect((await enviar(id)).status).toBe(201);
+      expect((await aprobar(id)).status).toBe(201);
+      expect(await stockDe()).toBe(antes - 2);
+    });
+
+    it('la salida de un renglón es idempotente: repetirla no vuelve a descontar', async () => {
+      const inventario = app.get(MovimientosService);
+      const antes = await stockDe();
+      const linea = {
+        subordenRepuestoId: uuidv7(),
+        articuloId: ARTICULO.id,
+        bodegaId: BODEGA.id,
+        cantidad: 1,
+      };
+      const actor = { id: JEFE.id, roleCode: 'jefe_mantenimiento' as const };
+      const a = await inventario.registrarSalidasDeMantenimiento([linea], actor);
+      const b = await inventario.registrarSalidasDeMantenimiento([linea], actor);
+      expect(b.get(linea.subordenRepuestoId)).toBe(a.get(linea.subordenRepuestoId));
+      expect(await stockDe()).toBe(antes - 1);
+    });
+
+    it('el selector de repuestos busca por código o nombre y muestra la existencia por bodega', async () => {
+      const buscar = (q: string, auth = mecanico()) =>
+        http().get('/api/operaciones/inventario/articulos/repuestos').query({ q }).set(auth);
+      const r = await buscar(ARTICULO.codigo.toLowerCase());
+      expect(r.status).toBe(200);
+      expect(r.body).toHaveLength(1);
+      const stock = await stockDe();
+      expect(r.body[0]).toMatchObject({
+        id: ARTICULO.id,
+        codigo: ARTICULO.codigo,
+        stockActual: stock,
+        porBodega: [{ bodegaId: BODEGA.id, bodega: BODEGA.nombre, stock }],
+      });
+      // con menos de 2 letras no busca; sin permiso, no entra
+      expect((await buscar('a')).body).toEqual([]);
+      expect((await buscar('ab', sinPermiso())).status).toBe(403);
     });
   });
 });

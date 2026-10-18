@@ -13,7 +13,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["mantenimiento", "flota", "pumping", "identidad", "inventario"]
+  schemas  = ["mantenimiento", "flota", "pumping", "identidad", "inventario", "catalogos"]
 }
 
 enum OrigenReporte {
@@ -193,11 +193,18 @@ model SubordenRepuesto {
   id          String         @id @db.Uuid
   subordenId  String         @map("suborden_id") @db.Uuid
   suborden    Suborden       @relation(fields: [subordenId], references: [id], onDelete: Cascade)
-  numeroParte String         @map("numero_parte")
+  /// Solo en los repuestos de texto (los de catálogo lo leen del artículo).
+  numeroParte String?        @map("numero_parte")
   cantidad    Decimal        @db.Decimal(10, 2)
   descripcion String?
   articuloId  String?        @map("articulo_id") @db.Uuid
   articulo    InvArticulo?   @relation(fields: [articuloId], references: [id])
+  /// Bodega de la que sale el repuesto de catálogo.
+  bodegaId    String?        @map("bodega_id") @db.Uuid
+  bodega      CatBodega?     @relation(fields: [bodegaId], references: [id])
+  /// Salida del kardex que respalda el renglón (se llena al aprobar el cierre).
+  movimientoId String?       @unique @map("movimiento_id") @db.Uuid
+  movimiento  InvMovimiento? @relation(fields: [movimientoId], references: [id])
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   /// FK a `identidad.usuario` (solo en la base de datos).
   createdBy   String?        @map("created_by") @db.Uuid
@@ -309,11 +316,34 @@ model IdUsuario {
   @@schema("identidad")
 }
 
+/// `inventario.movimiento`: dueño Inventario. Solo el id, para enlazar el repuesto con la salida que lo respalda.
+model InvMovimiento {
+  id String @id @db.Uuid
+
+  repuestos SubordenRepuesto[]
+
+  @@map("movimiento")
+  @@schema("inventario")
+}
+
+/// `catalogos.bodega`: dueño Plataforma. Solo para nombrar la bodega de un repuesto.
+model CatBodega {
+  id         String  @id @db.Uuid
+  nombre     String
+  habilitado Boolean
+
+  repuestos SubordenRepuesto[]
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
 /// `inventario.articulo`: dueño Inventario. Solo para enlazar un repuesto con su artículo.
 model InvArticulo {
-  id     String @id @db.Uuid
+  id     String  @id @db.Uuid
   codigo String
   nombre String
+  activo Boolean
 
   repuestos SubordenRepuesto[]
 

@@ -31,6 +31,7 @@ enum OrigenMovimiento {
   despacho_bodega
   salida_ticket
   devolucion_ticket
+  consumo_mantenimiento
 
   @@map("origen_movimiento")
   @@schema("inventario")
@@ -269,6 +270,8 @@ model Movimiento {
   despacho        Despacho?        @relation(fields: [despachoId], references: [id])
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  salidaMantenimiento SalidaMantenimiento?
+
   @@index([articuloId, bodegaId, secuencia])
   @@index([ticketPumpingId])
   @@index([despachoId])
@@ -319,6 +322,18 @@ model ConsumoTicket {
 
   @@index([ticketPumpingId, articuloId])
   @@map("consumo_ticket")
+  @@schema("inventario")
+}
+
+/// Salida de bodega de un repuesto usado en Mantenimiento. INMUTABLE. `subordenRepuestoId` (mantenimiento.suborden_repuesto) no tiene FK:
+/// la dependencia va de Mantenimiento hacia Inventario; aquí solo es la llave de idempotencia.
+model SalidaMantenimiento {
+  subordenRepuestoId String     @id @map("suborden_repuesto_id") @db.Uuid
+  movimientoId       String     @unique @map("movimiento_id") @db.Uuid
+  movimiento         Movimiento @relation(fields: [movimientoId], references: [id])
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("salida_mantenimiento")
   @@schema("inventario")
 }
 

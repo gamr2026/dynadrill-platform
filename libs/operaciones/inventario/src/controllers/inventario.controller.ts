@@ -58,6 +58,13 @@ export class InventarioController {
     return this.articulos.listar(q);
   }
 
+  /** Selector de repuestos de Mantenimiento (antes de `articulos/:id`, para que no se tome «repuestos» como un id). */
+  @RequirePermission(P.ARTICULOS_VER, P.MANTENIMIENTO_TAREAS)
+  @Get('articulos/repuestos')
+  repuestos(@Query('q') q?: string) {
+    return this.articulos.repuestosDisponibles(q);
+  }
+
   @RequirePermission(P.ARTICULOS_VER)
   @Get('articulos/:id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {

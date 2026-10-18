@@ -42,6 +42,16 @@ export interface MovimientoDeDespacho {
   observacion?: string | null;
 }
 
+/** Un renglón de repuesto de Mantenimiento que debe salir de bodega. */
+export interface SalidaDeMantenimiento {
+  /** `mantenimiento.suborden_repuesto.id`: llave de idempotencia (un renglón sale una sola vez). */
+  subordenRepuestoId: string;
+  articuloId: string;
+  bodegaId: string;
+  cantidad: number | string;
+  observacion?: string | null;
+}
+
 export interface EntradaManual {
   articuloId: string;
   bodegaId: string;
@@ -249,6 +259,47 @@ export class MovimientosService {
       { ...e, motivoId: await this.motivoDe(tx, 'despacho_bodega') },
       actor,
     );
+  }
+
+  /**
+   * Salida de bodega de los repuestos de una sub-orden de Mantenimiento, todos en UNA transacción de Inventario (o salen todos o
+   * ninguno). Es idempotente por renglón: lo que ya salió devuelve su movimiento sin duplicar la salida, de modo que el cierre de la
+   * sub-orden se puede reintentar. Devuelve el movimiento de cada renglón. Mantenimiento no puede compartir su transacción con la
+   * de Inventario (cada módulo tiene su propio cliente de base de datos), por eso esta puerta abre la suya.
+   */
+  async registrarSalidasDeMantenimiento(
+    lineas: SalidaDeMantenimiento[],
+    actor: ActorInventario,
+  ): Promise<Map<string, string>> {
+    return this.prisma.$transaction(async (tx) => {
+      const motivoId = await this.motivoDe(tx, 'consumo_mantenimiento');
+      const movimientos = new Map<string, string>();
+      for (const l of lineas) {
+        const previa = await tx.salidaMantenimiento.findUnique({
+          where: { subordenRepuestoId: l.subordenRepuestoId },
+        });
+        if (previa) {
+          movimientos.set(l.subordenRepuestoId, previa.movimientoId);
+          continue;
+        }
+        const m = await this.registrar(
+          tx,
+          {
+            articuloId: l.articuloId,
+            bodegaId: l.bodegaId,
+            motivoId,
+            cantidad: l.cantidad,
+            observacion: l.observacion ?? null,
+          },
+          actor,
+        );
+        await tx.salidaMantenimiento.create({
+          data: { subordenRepuestoId: l.subordenRepuestoId, movimientoId: m.id },
+        });
+        movimientos.set(l.subordenRepuestoId, m.id);
+      }
+      return movimientos;
+    });
   }
 
   /** Asignado, usado y devuelto de un ticket, por artículo (todo calculado). */
