@@ -1,0 +1,522 @@
+// Módulo `fcr` (contenedor operaciones). Schema PostgreSQL: fcr. FCR = Fishing, Completion & Remedial.
+// El ticket de FCR nace cuando Ventas abre un pedido de la línea FCR (evento `comercial.pedido.abierto`). Hay DOS entradas según el tipo de
+// OT del pedido (venta: revisión inicial; servicios: tipo de operador, inspección y aprobación del Supervisor de Operaciones FCR) que
+// confluyen en el mismo tronco: preparación de herramientas, asignación, reunión operativa, ejecución, revisión de reportes, control de
+// retorno y cierre. Plan: documentacion/modulos/plan-fcr.md.
+// Los ids son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie más lo importa.
+// Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["fcr", "catalogos", "identidad"]
+}
+
+enum MacroEstado {
+  pendiente
+  en_proceso
+  esperando_aprobacion
+  aprobado
+  rechazado
+
+  @@map("macro_estado")
+  @@schema("fcr")
+}
+
+enum OrigenCambio {
+  manual
+  sistema
+
+  @@map("origen_cambio")
+  @@schema("fcr")
+}
+
+/// Tipo de orden de trabajo del pedido: lo decide Ventas (pedido.tipo_ot) y FCR lo hereda. Fijo del sistema: define por dónde entra el ticket.
+enum TipoOt {
+  venta
+  servicio
+
+  @@map("tipo_ot")
+  @@schema("fcr")
+}
+
+enum EstadoRequisito {
+  pendiente
+  cumplido
+
+  @@map("estado_requisito")
+  @@schema("fcr")
+}
+
+enum OrigenCumplimiento {
+  sistema
+  evento
+  manual_temporal
+
+  @@map("origen_cumplimiento")
+  @@schema("fcr")
+}
+
+enum AmbitoRequisito {
+  ticket
+  unidad
+  operador
+
+  @@map("ambito_requisito")
+  @@schema("fcr")
+}
+
+/// Módulo que es dueño del dato que cumple un requisito.
+enum ModuloDueno {
+  fcr
+  qhse
+  flota
+
+  @@map("modulo_dueno")
+  @@schema("fcr")
+}
+
+/// Rol con el que una persona queda asignada a un ticket (no es el rol de su cuenta). El operador que inspecciona en SERVICIOS no va
+/// aquí: es `ticket.inspector_id`.
+enum RolAsignado {
+  supervisor
+  operador
+
+  @@map("rol_asignado")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pasos, transiciones y requisitos (catálogos del proceso)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Pasos del servicio de FCR (catálogo): los de la entrada VENTA, los de la entrada SERVICIOS y los del tronco común.
+model Paso {
+  codigo        String      @id
+  nombre        String
+  macro         MacroEstado
+  orden         Int         @unique
+  terminal      Boolean     @default(false)
+  /// Verdadero: solo el equipo asignado al ticket (o quien coordina) actúa en el paso. Falso: cualquier cuenta del rol (pasos de arranque y de bodega).
+  requiereEquipo Boolean    @default(true) @map("requiere_equipo")
+  activo        Boolean     @default(true)
+
+  roles      PasoRol[]
+  requisitos PasoRequisito[]
+  salidas    Transicion[]    @relation("origen")
+  entradas   Transicion[]    @relation("destino")
+  inicios    EntradaOt[]
+  tickets    Ticket[]
+
+  @@map("paso")
+  @@schema("fcr")
+}
+
+/// Roles de cuenta (`identidad.rol.codigo`) que pueden actuar en cada paso.
+model PasoRol {
+  pasoCodigo String @map("paso_codigo")
+  paso       Paso   @relation(fields: [pasoCodigo], references: [codigo])
+  rolCodigo  String @map("rol_codigo")
+  rol        IdRol  @relation(fields: [rolCodigo], references: [codigo])
+
+  @@id([pasoCodigo, rolCodigo])
+  @@map("paso_rol")
+  @@schema("fcr")
+}
+
+/// Paso en el que nace el ticket según el tipo de OT: es lo que separa los dos recorridos.
+model EntradaOt {
+  tipoOt     TipoOt @id @map("tipo_ot")
+  pasoCodigo String @map("paso_codigo")
+  paso       Paso   @relation(fields: [pasoCodigo], references: [codigo])
+
+  @@map("entrada_ot")
+  @@schema("fcr")
+}
+
+/// Pasos válidos entre dos pasos.
+model Transicion {
+  id              String  @id @db.Uuid
+  origenCodigo    String  @map("origen_codigo")
+  origen          Paso    @relation("origen", fields: [origenCodigo], references: [codigo])
+  destinoCodigo   String  @map("destino_codigo")
+  destino         Paso    @relation("destino", fields: [destinoCodigo], references: [codigo])
+  requiereMotivo  Boolean @default(false) @map("requiere_motivo")
+  /// Falso en los rechazos (vuelven a un paso anterior): no se exige que el paso de origen esté completo.
+  exigeRequisitos Boolean @default(true) @map("exige_requisitos")
+  activa          Boolean @default(true)
+
+  @@unique([origenCodigo, destinoCodigo])
+  @@map("transicion")
+  @@schema("fcr")
+}
+
+/// Condiciones que el proceso exige (catálogo): de qué ámbito son, qué módulo es dueño del dato que las cumple y, si aplica a un solo
+/// tipo de OT, cuál.
+model Requisito {
+  codigo      String          @id
+  nombre      String
+  descripcion String?
+  ambito      AmbitoRequisito
+  modulo      ModuloDueno
+  tipoOt      TipoOt?         @map("tipo_ot")
+  activo      Boolean         @default(true)
+
+  pasos   PasoRequisito[]
+  tickets TicketRequisito[]
+
+  @@map("requisito")
+  @@schema("fcr")
+}
+
+/// Requisitos que deben estar cumplidos para SALIR de un paso.
+model PasoRequisito {
+  pasoCodigo      String    @map("paso_codigo")
+  paso            Paso      @relation(fields: [pasoCodigo], references: [codigo])
+  requisitoCodigo String    @map("requisito_codigo")
+  requisito       Requisito @relation(fields: [requisitoCodigo], references: [codigo])
+
+  @@id([pasoCodigo, requisitoCodigo])
+  @@map("paso_requisito")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Catálogos fijos del negocio (listas cerradas que se amplían con una fila)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Quién repara e inspecciona en la entrada SERVICIOS: mecánico o soldador.
+model TipoOperador {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  tickets Ticket[]
+
+  @@map("tipo_operador")
+  @@schema("fcr")
+}
+
+/// Tipo de completación (OT de venta): selectiva, inyección, power oil.
+model TipoCompletacion {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("tipo_completacion")
+  @@schema("fcr")
+}
+
+/// Tipo de trabajo (OT de servicios): fractura, estimulación, evaluación, cemento, picking.
+model TipoTrabajo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("tipo_trabajo")
+  @@schema("fcr")
+}
+
+/// Medida del picker: 7/8", 9.5/8", 5.5/8", 5/8".
+model TipoPicker {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("tipo_picker")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ticket
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Ticket de servicio de FCR: uno por pedido. NO tiene numeración propia: el «ticket» de Dynadrill es la prefactura, así que lleva el
+/// número que `comercial` le reservó al pedido (el de la prefactura que vendrá).
+model Ticket {
+  id           String  @id @db.Uuid
+  /// Pedido de `comercial` (otro contenedor, D1): uuid sin FK.
+  pedidoId     String  @unique @map("pedido_id") @db.Uuid
+  /// Copia del código del pedido (PED-...) de otro contenedor: la usan la bandeja y los avisos; el código no cambia.
+  pedidoCodigo String  @map("pedido_codigo")
+  ticketNumero Int?    @unique @map("ticket_numero")
+  pasoCodigo   String  @map("paso_codigo")
+  paso         Paso    @relation(fields: [pasoCodigo], references: [codigo])
+  version      Int     @default(1)
+  tipoOt       TipoOt  @map("tipo_ot")
+
+  /// Mecánico o soldador (solo SERVICIOS), elegido por el Supervisor en el paso «Tipo de operador».
+  tipoOperadorId String?       @map("tipo_operador_id") @db.Uuid
+  tipoOperador   TipoOperador? @relation(fields: [tipoOperadorId], references: [id])
+  /// Operador FCR que repara e inspecciona las herramientas (solo SERVICIOS).
+  inspectorId    String?       @map("inspector_id") @db.Uuid
+  inspector      IdUsuario?    @relation("ticketInspector", fields: [inspectorId], references: [id])
+
+  // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
+  clienteId           String?     @map("cliente_id") @db.Uuid
+  cliente             CatCliente? @relation(fields: [clienteId], references: [id])
+  campoId             String?     @map("campo_id") @db.Uuid
+  campo               CatCampo?   @relation(fields: [campoId], references: [id])
+  bloqueId            String?     @map("bloque_id") @db.Uuid
+  bloque              CatBloque?  @relation(fields: [bloqueId], references: [id])
+  pozoId              String?     @map("pozo_id") @db.Uuid
+  pozo                CatPozo?    @relation(fields: [pozoId], references: [id])
+  taladroId           String?     @map("taladro_id") @db.Uuid
+  taladro             CatTaladro? @relation(fields: [taladroId], references: [id])
+  rigless             Boolean     @default(false)
+  numeroContrato      String?     @map("numero_contrato")
+  as2Numero           String?     @map("as2_numero")
+  fechaInicioServicio DateTime?   @map("fecha_inicio_servicio") @db.Date
+  fechaFinServicio    DateTime?   @map("fecha_fin_servicio") @db.Date
+
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?    @map("created_by") @db.Uuid
+  creador   IdUsuario? @relation("ticketCreador", fields: [createdBy], references: [id])
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?    @map("updated_by") @db.Uuid
+  editor    IdUsuario? @relation("ticketEditor", fields: [updatedBy], references: [id])
+
+  tiposServicio TicketTipoServicio[]
+  historial     TicketHistorial[]
+  personas      TicketPersona[]
+  unidades      TicketUnidad[]
+  requisitos    TicketRequisito[]
+
+  @@index([pasoCodigo])
+  @@map("ticket")
+  @@schema("fcr")
+}
+
+/// Tipos de servicio del pedido (código del catálogo de `comercial`: otro contenedor, sin FK).
+model TicketTipoServicio {
+  ticketId   String @map("ticket_id") @db.Uuid
+  ticket     Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipoCodigo String @map("tipo_codigo")
+
+  @@id([ticketId, tipoCodigo])
+  @@map("ticket_tipo_servicio")
+  @@schema("fcr")
+}
+
+/// Seguimiento: cada cambio de paso con quién lo hizo. INMUTABLE (sin UPDATE ni DELETE para la aplicación).
+model TicketHistorial {
+  id           String       @id @db.Uuid
+  ticketId     String       @map("ticket_id") @db.Uuid
+  ticket       Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  pasoAnterior String?      @map("paso_anterior")
+  pasoNuevo    String       @map("paso_nuevo")
+  motivo       String?
+  actorId      String?      @map("actor_id") @db.Uuid
+  actor        IdUsuario?   @relation("historialActor", fields: [actorId], references: [id])
+  /// Rol con el que actuó (dato histórico: la cuenta puede cambiar de rol después).
+  actorRol     String?      @map("actor_rol")
+  origen       OrigenCambio @default(manual)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_historial")
+  @@schema("fcr")
+}
+
+/// Personas del equipo: un supervisor y uno o más operadores (cada uno con su unidad, si el servicio lleva).
+model TicketPersona {
+  ticketId    String       @map("ticket_id") @db.Uuid
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  usuarioId   String       @map("usuario_id") @db.Uuid
+  usuario     IdUsuario    @relation("personaAsignada", fields: [usuarioId], references: [id])
+  rol         RolAsignado
+  /// Unidad que lleva este operador (solo operadores; FK compuesta a `ticket_unidad` en la base de datos).
+  vehiculoId  String?      @map("vehiculo_id") @db.Uuid
+  vehiculo    CatVehiculo? @relation("operadorUnidad", fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor String?      @map("asignado_por") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, usuarioId])
+  @@index([usuarioId])
+  @@map("ticket_persona")
+  @@schema("fcr")
+}
+
+/// Unidades (vehículos del catálogo) asignadas al ticket: la placa y la descripción salen del JOIN.
+model TicketUnidad {
+  ticketId    String      @map("ticket_id") @db.Uuid
+  ticket      Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId  String      @map("vehiculo_id") @db.Uuid
+  vehiculo    CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor String?     @map("asignado_por") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, vehiculoId])
+  @@map("ticket_unidad")
+  @@schema("fcr")
+}
+
+/// Un requisito de un ticket, de una de sus unidades o de uno de sus operadores. Un índice único (en la base de datos) impide duplicados.
+/// Se cumple desde FCR (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con el puente temporal
+/// (`manual_temporal`, con motivo).
+model TicketRequisito {
+  id              String              @id @db.Uuid
+  ticketId        String              @map("ticket_id") @db.Uuid
+  ticket          Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requisitoCodigo String              @map("requisito_codigo")
+  requisito       Requisito           @relation(fields: [requisitoCodigo], references: [codigo])
+  vehiculoId      String?             @map("vehiculo_id") @db.Uuid
+  vehiculo        CatVehiculo?        @relation(fields: [vehiculoId], references: [id])
+  usuarioId       String?             @map("usuario_id") @db.Uuid
+  usuario         IdUsuario?          @relation("requisitoOperador", fields: [usuarioId], references: [id])
+  estado          EstadoRequisito     @default(pendiente)
+  cumplidoAt      DateTime?           @map("cumplido_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  cumplidoPor     String?             @map("cumplido_por") @db.Uuid
+  origen          OrigenCumplimiento?
+  motivo          String?
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ticketId, estado])
+  @@map("ticket_requisito")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
+// Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatCliente {
+  id              String  @id @db.Uuid
+  identificacion  String
+  nombreComercial String  @map("nombre_comercial")
+  nombreFiscal    String? @map("nombre_fiscal")
+
+  tickets Ticket[]
+
+  @@map("cliente")
+  @@schema("catalogos")
+}
+
+model CatCampo {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+model CatBloque {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("bloque")
+  @@schema("catalogos")
+}
+
+model CatPozo {
+  id             String   @id @db.Uuid
+  codigo         String
+  nombreCompleto String   @map("nombre_completo")
+  tickets        Ticket[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+model CatTaladro {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("taladro")
+  @@schema("catalogos")
+}
+
+model CatTipoVehiculo {
+  id        String        @id @db.Uuid
+  nombre    String
+  vehiculos CatVehiculo[]
+
+  @@map("tipo_vehiculo")
+  @@schema("catalogos")
+}
+
+model CatVehiculo {
+  id             String            @id @db.Uuid
+  placa          String
+  marca          String?
+  modelo         String?
+  tipoVehiculoId String?           @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo   CatTipoVehiculo?  @relation(fields: [tipoVehiculoId], references: [id])
+  habilitado     Boolean           @default(true)
+  unidades       TicketUnidad[]
+  operadores     TicketPersona[]   @relation("operadorUnidad")
+  requisitos     TicketRequisito[]
+
+  @@map("vehiculo")
+  @@schema("catalogos")
+}
+
+/// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde y para ligar los pasos a sus roles.
+model IdRol {
+  id       String      @id @db.Uuid
+  codigo   String      @unique
+  nombre   String
+  usuarios IdUsuario[]
+  pasos    PasoRol[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  asignaciones TicketPersona[]   @relation("personaAsignada")
+  historial    TicketHistorial[] @relation("historialActor")
+  requisitos   TicketRequisito[] @relation("requisitoOperador")
+  inspecciones Ticket[]          @relation("ticketInspector")
+  creados      Ticket[]          @relation("ticketCreador")
+  editados     Ticket[]          @relation("ticketEditor")
+
+  @@map("usuario")
+  @@schema("identidad")
+}

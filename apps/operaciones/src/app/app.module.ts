@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AppConfigModule } from '@dyn/config';
 import { CommonModule } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
+import { FcrModule } from '@dyn/fcr';
 import { FlotaModule } from '@dyn/flota';
 import { InventarioModule } from '@dyn/inventario';
 import { MantenimientoModule } from '@dyn/mantenimiento';
@@ -33,6 +34,7 @@ const envFiles = ['apps/operaciones/.env', '.env'];
       }),
     }),
     PumpingModule,
+    FcrModule,
     FlotaModule,
     InventarioModule,
     MantenimientoModule,
