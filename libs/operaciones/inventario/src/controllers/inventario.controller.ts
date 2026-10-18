@@ -65,6 +65,13 @@ export class InventarioController {
     return this.articulos.repuestosDisponibles(q);
   }
 
+  /** Selector de químicos para la asignación de Pumping, con la existencia por bodega. */
+  @RequirePermission(P.ARTICULOS_VER, P.PUMPING_OPERAR)
+  @Get('articulos/quimicos')
+  quimicos(@Query('q') q?: string) {
+    return this.articulos.quimicosDisponibles(q);
+  }
+
   @RequirePermission(P.ARTICULOS_VER)
   @Get('articulos/:id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {

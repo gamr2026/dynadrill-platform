@@ -402,6 +402,14 @@ export class MovimientosService {
       where: { id: { in: balance.map((b) => b.articuloId) } },
       include: { unidadStock: true },
     });
+    // las bodegas de las que salió cada químico: a ellas se puede devolver
+    const salidas = await this.prisma.movimiento.groupBy({
+      by: ['articuloId', 'bodegaId'],
+      where: { ticketPumpingId, origen: 'salida_ticket' },
+    });
+    const bodegas = await this.prisma.catBodega.findMany({
+      where: { id: { in: [...new Set(salidas.map((s) => s.bodegaId))] } },
+    });
     return balance
       .map((b) => {
         const a = articulos.find((x) => x.id === b.articuloId);
@@ -414,6 +422,12 @@ export class MovimientosService {
           usada: Number(b.usada),
           devuelta: Number(b.devuelta),
           pendiente: Number(b.pendiente),
+          bodegas: salidas
+            .filter((s) => s.articuloId === b.articuloId)
+            .map((s) => ({
+              bodegaId: s.bodegaId,
+              bodega: bodegas.find((x) => x.id === s.bodegaId)?.nombre ?? '',
+            })),
         };
       })
       .sort((x, y) => x.codigo.localeCompare(y.codigo));

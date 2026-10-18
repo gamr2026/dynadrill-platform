@@ -127,24 +127,46 @@ export class ArticulosService {
   async repuestosDisponibles(texto: string | undefined) {
     const q = texto?.trim();
     if (!q || q.length < 2) return [];
+    return this.disponiblesPorBodega({ esRepuesto: true }, q, false);
+  }
+
+  /**
+   * Selector de químicos para la asignación de Pumping: artículos activos de las categorías de químicos **con existencia**, cada uno con
+   * su saldo por bodega. El texto es opcional (la lista de químicos es corta).
+   */
+  async quimicosDisponibles(texto: string | undefined) {
+    return this.disponiblesPorBodega({ esQuimica: true }, texto?.trim() ?? '', true);
+  }
+
+  private async disponiblesPorBodega(
+    categoria: Prisma.CategoriaArticuloWhereInput,
+    q: string,
+    soloConStock: boolean,
+  ) {
     const articulos = await this.prisma.articulo.findMany({
       where: {
         activo: true,
-        categoria: { esRepuesto: true },
-        OR: [
-          { codigo: { contains: q, mode: 'insensitive' } },
-          { nombre: { contains: q, mode: 'insensitive' } },
-          { nombreComercial: { contains: q, mode: 'insensitive' } },
-          { codigos: { some: { codigo: { contains: q, mode: 'insensitive' } } } },
-        ],
+        categoria,
+        ...(q
+          ? {
+              OR: [
+                { codigo: { contains: q, mode: 'insensitive' } },
+                { nombre: { contains: q, mode: 'insensitive' } },
+                { nombreComercial: { contains: q, mode: 'insensitive' } },
+                { codigos: { some: { codigo: { contains: q, mode: 'insensitive' } } } },
+              ],
+            }
+          : {}),
       },
       include: { unidadStock: true },
       orderBy: { codigo: 'asc' },
-      take: 30,
+      take: 200,
     });
     const filas = [];
     for (const a of articulos) {
       const saldos = (await saldosPorBodega(this.prisma, a.id)).filter((s) => s.saldo > 0);
+      if (soloConStock && saldos.length === 0) continue;
+      if (filas.length >= 30) break;
       const bodegas = await this.prisma.catBodega.findMany({
         where: { id: { in: saldos.map((s) => s.bodegaId) } },
       });

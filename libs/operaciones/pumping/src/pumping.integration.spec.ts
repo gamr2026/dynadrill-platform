@@ -1314,6 +1314,23 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const enPaso = (id: string, paso: string) =>
       admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [id, paso]);
 
+    it('el selector de químicos de la asignación trae solo químicos con existencia, por bodega', async () => {
+      await preparar();
+      const r = await http()
+        .get('/api/operaciones/inventario/articulos/quimicos')
+        .query({ q: '-PU-' + n })
+        .set(jefe());
+      expect(r.status).toBe(200);
+      expect(r.body.map((a: { codigo: string }) => a.codigo)).toEqual([QUIMICO.codigo]); // el no químico no aparece
+      expect(r.body[0].porBodega).toEqual([
+        expect.objectContaining({ bodegaId: BODEGA.id, stock: expect.any(Number) }),
+      ]);
+      expect(
+        (await http().get('/api/operaciones/inventario/articulos/quimicos').set(sinPermiso()))
+          .status,
+      ).toBe(403);
+    });
+
     it('asignar con químicos exige el documento de mezcla; con él, los químicos salen de bodega a cargo del ticket', async () => {
       await preparar();
       const t = await ticketEnAsignacion();
@@ -1339,6 +1356,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           usada: 0,
           devuelta: 0,
           pendiente: 10,
+          bodegas: [{ bodegaId: BODEGA.id, bodega: BODEGA.nombre }],
         }),
       ]);
       expect(q.body.documentos).toEqual([

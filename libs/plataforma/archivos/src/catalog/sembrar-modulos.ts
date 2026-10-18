@@ -61,6 +61,14 @@ export const MODULOS_ARCHIVO = [
     tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'ticket_mezcla_documento',
+    nombre: 'Documento de mezcla de químicos de un ticket de Pumping',
+    permisoSubir: 'pumping.tickets.operar',
+    permisoVer: 'pumping.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */
