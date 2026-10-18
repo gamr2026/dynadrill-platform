@@ -38,6 +38,7 @@
     "db:cargar:inventario": "tsx --tsconfig tsconfig.base.json libs/operaciones/inventario/prisma/cargar-datos-reales.ts",
     "db:cargar:epp": "tsx --tsconfig tsconfig.base.json libs/operaciones/inventario/prisma/cargar-epp.ts",
     "db:cargar:bienes": "tsx --tsconfig tsconfig.base.json libs/operaciones/inventario/prisma/cargar-bienes-as2.ts",
+    "db:cargar:stock": "tsx --tsconfig tsconfig.base.json libs/operaciones/inventario/prisma/cargar-stock-as2.ts",
     "db:normalizar:codigos": "tsx --tsconfig tsconfig.base.json libs/operaciones/inventario/prisma/normalizar-codigos.ts",
     "db:migrate:avisos": "cd libs/plataforma/avisos && prisma migrate deploy",
     "db:seed:avisos": "tsx --tsconfig tsconfig.base.json libs/plataforma/avisos/prisma/seed.ts",

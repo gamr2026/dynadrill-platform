@@ -25,6 +25,7 @@ import { uuidv7 } from '@dyn/utils';
 import { cargarDatosReales } from '../prisma/cargar-datos-reales';
 import { cargarBienesAs2 } from '../prisma/cargar-bienes-as2';
 import { cargarEpp } from '../prisma/cargar-epp';
+import { cargarStockAs2 } from '../prisma/cargar-stock-as2';
 import { normalizarCodigos } from '../prisma/normalizar-codigos';
 import { sembrarCatalogos } from './catalog/sembrar-catalogos';
 import { DespachosConsumer } from './consumers/despachos.consumer';
@@ -1378,6 +1379,86 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         .set(lector())
         .expect(200);
       expect(busqueda.body.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('stock real por bodega y costos de AS2', () => {
+    const leerJson = <T>(archivo: string): T =>
+      JSON.parse(readFileSync(join(__dirname, '..', 'prisma', 'data', archivo), 'utf8')) as T;
+
+    it('deja el saldo de cada artículo y bodega igual al reporte de stock de AS2 y es idempotente', async () => {
+      await cargarStockAs2(prisma); // si aún no estaba cargado, la primera vez lo carga
+      const r = await cargarStockAs2(prisma);
+      expect(r).toMatchObject({
+        saldosIniciales: 0,
+        sobrantes: 0,
+        faltantes: 0,
+        aCero: 0,
+        unidadesCorregidas: 0,
+        costos: 0,
+      });
+      const reporte = leerJson<{ stock: Array<{ bodega: string; codigo: string; saldo: number }> }>(
+        'stock-as2.json',
+      ).stock;
+      expect(r.sinCambio).toBe(reporte.length);
+      const filas = await admin.query(
+        `SELECT b.nombre AS bodega, a.codigo, s.saldo::float AS saldo
+           FROM (SELECT DISTINCT ON (articulo_id, bodega_id) articulo_id, bodega_id, saldo_resultante AS saldo
+                   FROM inventario.movimiento ORDER BY articulo_id, bodega_id, secuencia DESC) s
+           JOIN inventario.articulo a ON a.id = s.articulo_id JOIN catalogos.bodega b ON b.id = s.bodega_id`,
+      );
+      // el archivo guarda los códigos en mayúsculas (AS2 los compara sin distinguir)
+      const portal = new Map(
+        filas.rows.map((x) => [`${x.bodega}|${x.codigo.toUpperCase()}`, Number(x.saldo)]),
+      );
+      const distintos = reporte.filter(
+        (x) => Math.abs((portal.get(`${x.bodega}|${x.codigo}`) ?? 0) - x.saldo) > 0.0005,
+      );
+      expect(distintos).toEqual([]);
+      // el reporte manda también sobre lo que no lista: ningún artículo con saldo en las bodegas del reporte fuera de él
+      const bodegasReporte = new Set(reporte.map((x) => x.bodega));
+      const clavesReporte = new Set(reporte.map((x) => `${x.bodega}|${x.codigo.toUpperCase()}`));
+      const sobrantes = filas.rows.filter(
+        (x) =>
+          bodegasReporte.has(x.bodega) &&
+          Number(x.saldo) > 0 &&
+          !clavesReporte.has(`${x.bodega}|${x.codigo.toUpperCase()}`) &&
+          !x.codigo.startsWith('IT'),
+      );
+      expect(sobrantes).toEqual([]);
+    });
+
+    it('cada artículo con saldo queda con la unidad real de AS2 y los ajustes quedan como movimientos con su motivo (el kardex no se edita)', async () => {
+      const u = await admin.query(
+        `SELECT u.nombre FROM inventario.articulo a JOIN inventario.unidad_stock u ON u.id = a.unidad_stock_id WHERE a.codigo = 'DYACET-100'`,
+      );
+      expect(u.rows[0].nombre).toBe('Galón');
+      const m = await admin.query(
+        `SELECT m2.nombre AS motivo, count(*)::int AS n FROM inventario.movimiento m
+           JOIN inventario.motivo_movimiento m2 ON m2.id = m.motivo_id
+          WHERE m.observacion LIKE 'Saldo según el reporte de stock de AS2%' GROUP BY 1`,
+      );
+      const por = Object.fromEntries(m.rows.map((x) => [x.motivo, x.n]));
+      expect(por['Saldo inicial']).toBeGreaterThan(900);
+      expect(por['Ajuste por conteo físico (faltante)']).toBeGreaterThan(0);
+    });
+
+    it('el costo unitario es el último costo de ingreso y no pisa un costo ya cargado', async () => {
+      const costos = leerJson<{ costos: Array<{ codigo: string; costoUnitario: number }> }>(
+        'costos-as2.json',
+      ).costos;
+      const c = costos.find((x) => x.codigo === '0256822');
+      expect(c?.costoUnitario).toBe(2600);
+      // el artículo ya tenía costo de la carga inicial: se conserva
+      const a = await admin.query(
+        "SELECT costo_unitario::float AS costo FROM inventario.articulo WHERE codigo = '0256822'",
+      );
+      expect(a.rows[0].costo).not.toBeNull();
+      const sinCosto = await admin.query(
+        'SELECT count(*)::int AS n FROM inventario.articulo WHERE costo_unitario IS NULL AND codigo = ANY($1::text[])',
+        [costos.map((x) => x.codigo)],
+      );
+      expect(sinCosto.rows[0].n).toBe(0);
     });
   });
 

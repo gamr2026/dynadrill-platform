@@ -67,3 +67,31 @@ vuelve a leer del reporte.
 **Repuestos.** La categoría MANTENIMIENTO lleva la marca `es_repuesto` (el comportamiento depende de la marca, no del nombre):
 `GET /api/operaciones/inventario/articulos?repuestos=true&q=<texto>` devuelve solo repuestos y suministros. Es lo que Mantenimiento
 ofrece al registrar el repuesto usado de una sub-orden (`mantenimiento.suborden_repuesto.articulo_id`, FK a `inventario.articulo`).
+
+## `stock-as2.json` y `costos-as2.json` — stock real por bodega y costos
+
+**Stock.** Reporte «Stock» de AS2 al **17/10/2026** agrupado por bodega (`STOCK_BODEGA_PRODUCTOS.xlsx`): 1.238 renglones; 1.221 se cargan
+(1.218 por código exacto, 1 normalizado, 13 recortados por AS2 que se resuelven por prefijo y nombre). Lo carga `npm run db:cargar:stock`
+(idempotente). **El reporte manda**: deja el saldo de cada artículo y bodega igual al suyo con un movimiento (el kardex no se edita):
+
+| Situación                                                                                                     | Movimiento                                               |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Sin movimientos en esa bodega                                                                                 | «Saldo inicial» (964)                                    |
+| Con movimientos y distinto (el stock cargado de la demo estaba en una sola bodega y desactualizado)           | «Ajuste por conteo físico» sobrante (11) o faltante (58) |
+| El portal tenía saldo en una bodega del reporte y el reporte ya no lo lista (AS2 solo lista saldos positivos) | Ajuste faltante hasta cero (46)                          |
+
+Bodegas: 01 Matriz (435 artículos con saldo), 02 PETROECUADOR (74), 03 PAÑATURI (3), 21 PCR (7), 22 SUMINISTROS Y MANTENIMIENTO (644) y 23 EQUIPO DE
+PROTECCION PERSONAL (58); las dos últimas no existían y se agregaron a `catalogos.bodega` (sin id de AS2 conocido). Las unidades de stock salen del
+reporte (gls → Galón, lbs → Libra, sx → Saco, Kg → Kilogramo, bbl → Barril, M2 → Metro cuadrado; UN, unidad y EA → Unidad): se corrigieron 76
+artículos que estaban todos en «Unidad».
+
+**No se cargaron (6 renglones):** `CT-ON` en Matriz (6 unidades, el código recortado coincide con varios artículos y el nombre no desempata) y los 5
+overoles bordados con nombre de persona (16 unidades; excluidos del catálogo a propósito). Por eso Matriz queda 6 y EPP 16 por debajo del reporte.
+
+**Costos.** Del kardex de AS2 (`file (2).xlsx`, 48.401 movimientos): el **último costo de ingreso** de cada producto (compras, ajustes de ingreso con
+costo y saldos iniciales; si no hay, el de la última transformación). 690 productos con costo; solo se asigna a los artículos **sin costo** (59 nuevos): un
+costo ya cargado no se pisa. **El historial del kardex de AS2 no se importó** (transferencias, transformaciones, bodegas de clientes): hay 7 diferencias
+menores entre ese kardex y el reporte de stock, y sus fechas llegan al 24/10/2026, posteriores al reporte.
+
+**Orden de carga:** `db:cargar:inventario`, `db:cargar:epp`, `db:cargar:bienes`, `db:normalizar:codigos` y `db:cargar:stock` (este requiere las bodegas:
+`npm run db:seed:catalogos`).

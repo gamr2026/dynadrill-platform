@@ -7,6 +7,8 @@ export const UNIDADES_STOCK: ReadonlyArray<{ nombre: string; simbolo: string }> 
   { nombre: 'Galón', simbolo: 'gal' },
   { nombre: 'Litro', simbolo: 'l' },
   { nombre: 'Kilogramo', simbolo: 'kg' },
+  { nombre: 'Barril', simbolo: 'bbl' },
+  { nombre: 'Metro cuadrado', simbolo: 'm2' },
   { nombre: 'Libra', simbolo: 'lb' },
   { nombre: 'Saco', simbolo: 'sc' },
   { nombre: 'Tambor', simbolo: 'tbr' },

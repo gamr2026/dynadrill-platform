@@ -1,0 +1,4838 @@
+{
+  "fuente": "Kardex de AS2 (file (2).xlsx): ÚLTIMO costo de ingreso (compras, ajustes de ingreso con costo y saldos iniciales; si no hay, el de la última transformación)",
+  "productos": 690,
+  "porCompras": 504,
+  "porProduccion": 186,
+  "costos": [
+    {
+      "codigo": "0256822",
+      "costoUnitario": 2600,
+      "fecha": "2023-08-14",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "0335035BP",
+      "costoUnitario": 238,
+      "fecha": "2026-08-17",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "050-5687-001",
+      "costoUnitario": 809.78,
+      "fecha": "2024-07-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "050-8125-001",
+      "costoUnitario": 1742.44,
+      "fecha": "2024-07-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "0705350501",
+      "costoUnitario": 3151,
+      "fecha": "2026-04-15",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "0705350512",
+      "costoUnitario": 2960,
+      "fecha": "2026-05-30",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "1-GOIL",
+      "costoUnitario": 598.5,
+      "fecha": "2023-03-05",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1-PUMQ",
+      "costoUnitario": 10.7048,
+      "fecha": "2020-11-29",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "1-TOOLS",
+      "costoUnitario": 161.25,
+      "fecha": "2019-10-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "10-049-0700-DK-02",
+      "costoUnitario": 744.4429,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "10-GOIL",
+      "costoUnitario": 1092.4873,
+      "fecha": "2023-03-27",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "10-GOILB13",
+      "costoUnitario": 0.9289,
+      "fecha": "2024-05-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "10-PUMQ",
+      "costoUnitario": 10.45,
+      "fecha": "2020-11-29",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "102025/005",
+      "costoUnitario": 38,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "10563/025",
+      "costoUnitario": 1450,
+      "fecha": "2023-11-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "10564/005",
+      "costoUnitario": 519.36,
+      "fecha": "2023-11-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "11-GOILB13",
+      "costoUnitario": 8.729,
+      "fecha": "2024-05-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "11-PUMQ",
+      "costoUnitario": 31.4771,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1110150003",
+      "costoUnitario": 1138.8067,
+      "fecha": "2026-03-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1110170003",
+      "costoUnitario": 1100,
+      "fecha": "2026-05-09",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "1150570021",
+      "costoUnitario": 1181.8671,
+      "fecha": "2026-05-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1150570901",
+      "costoUnitario": 505.0115,
+      "fecha": "2026-05-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "12-GOILB13",
+      "costoUnitario": 8,
+      "fecha": "2024-05-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1230-2438",
+      "costoUnitario": 915.12,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "1230-2938",
+      "costoUnitario": 1200,
+      "fecha": "2022-12-04",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "1230/005",
+      "costoUnitario": 1998,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "1230/007",
+      "costoUnitario": 1900,
+      "fecha": "2026-07-17",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "1230/055",
+      "costoUnitario": 1900,
+      "fecha": "2025-09-12",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "1230/100",
+      "costoUnitario": 1998,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "13068-BG-3500",
+      "costoUnitario": 1436,
+      "fecha": "2022-11-24",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "13068-BG-4000",
+      "costoUnitario": 1050,
+      "fecha": "2022-01-20",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "13068/005",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13068/025",
+      "costoUnitario": 1436,
+      "fecha": "2023-10-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13068/040",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13068/110",
+      "costoUnitario": 1436,
+      "fecha": "2024-01-31",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "13068/120",
+      "costoUnitario": 1005,
+      "fecha": "2025-09-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13068/145",
+      "costoUnitario": 1436,
+      "fecha": "2023-10-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13068/160",
+      "costoUnitario": 1436,
+      "fecha": "2023-10-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13069-BGC-3500",
+      "costoUnitario": 978.3,
+      "fecha": "2021-09-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "13069-BGCS-4250",
+      "costoUnitario": 305.67,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "13069/005",
+      "costoUnitario": 288,
+      "fecha": "2023-10-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "14-TOOLS",
+      "costoUnitario": 165.31,
+      "fecha": "2019-10-14",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "152314/005",
+      "costoUnitario": 4255,
+      "fecha": "2025-11-20",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "152317/010",
+      "costoUnitario": 1800,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "152797/005",
+      "costoUnitario": 5764,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "152801/005",
+      "costoUnitario": 683.58,
+      "fecha": "2025-07-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "152819/005",
+      "costoUnitario": 1100,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "153183/005",
+      "costoUnitario": 8833,
+      "fecha": "2026-01-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "153355/005",
+      "costoUnitario": 4980,
+      "fecha": "2025-07-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "153456/005",
+      "costoUnitario": 372,
+      "fecha": "2025-07-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "17233/006",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "17233/030",
+      "costoUnitario": 979.79,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "17236/090",
+      "costoUnitario": 4300,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "17236/6274",
+      "costoUnitario": 5644.3,
+      "fecha": "2025-05-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "173-2180-ST-1.37",
+      "costoUnitario": 1294.0884,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "173-2180-ST-1.75",
+      "costoUnitario": 1294.0884,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "173-2250-R002",
+      "costoUnitario": 69.9507,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "18-LS-GOILCT",
+      "costoUnitario": 10539.4719,
+      "fecha": "2025-07-10",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "1810GR0352",
+      "costoUnitario": 900,
+      "fecha": "2025-05-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "2-GOIL",
+      "costoUnitario": 10269,
+      "fecha": "2023-03-05",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "2-TOOLS",
+      "costoUnitario": 373.69,
+      "fecha": "2019-10-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "20-CTU",
+      "costoUnitario": 51.952,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "20-GOILCT",
+      "costoUnitario": 5.7462,
+      "fecha": "2025-07-10",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "21100606",
+      "costoUnitario": 996,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "22-CTU",
+      "costoUnitario": 0.2087,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "22059280281",
+      "costoUnitario": 1255.8,
+      "fecha": "2026-05-04",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "2250GR0354",
+      "costoUnitario": 202.8785,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "2250GRB21371",
+      "costoUnitario": 788.3279,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "23-CTU",
+      "costoUnitario": 12.3422,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 28
+    },
+    {
+      "codigo": "2312GL0347",
+      "costoUnitario": 869.4793,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "231GF10125",
+      "costoUnitario": 621,
+      "fecha": "2026-06-17",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "231GL11332",
+      "costoUnitario": 2790,
+      "fecha": "2026-07-20",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "24-CTU",
+      "costoUnitario": 0.7,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "25-CTU",
+      "costoUnitario": 2.258,
+      "fecha": "2019-11-26",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "26-CTU",
+      "costoUnitario": 4.5543,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "27-CTU",
+      "costoUnitario": 8.2283,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 15
+    },
+    {
+      "codigo": "2750GR0352",
+      "costoUnitario": 695,
+      "fecha": "2026-10-06",
+      "fuente": "compras",
+      "ingresos": 28
+    },
+    {
+      "codigo": "2750GRB20351",
+      "costoUnitario": 921.0522,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "275GR10123-L80",
+      "costoUnitario": 231.7112,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "28-CTU",
+      "costoUnitario": 4.9027,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "2812GL0676",
+      "costoUnitario": 1106.4212,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 8
+    },
+    {
+      "codigo": "2812GL3391",
+      "costoUnitario": 1216.2856,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "2812GL3391.",
+      "costoUnitario": 1213.1162,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "281GF10124",
+      "costoUnitario": 652.5,
+      "fecha": "2026-08-28",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "281GF27287",
+      "costoUnitario": 720,
+      "fecha": "2026-03-04",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "2875B22325",
+      "costoUnitario": 250,
+      "fecha": "2020-08-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "30-CTU",
+      "costoUnitario": 7.3015,
+      "fecha": "2020-05-29",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "33-CTU",
+      "costoUnitario": 1.6263,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "33173",
+      "costoUnitario": 33.4625,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "34-CTU",
+      "costoUnitario": 20.7832,
+      "fecha": "2020-09-19",
+      "fuente": "produccion",
+      "ingresos": 21
+    },
+    {
+      "codigo": "35-CTU",
+      "costoUnitario": 9.2,
+      "fecha": "2020-09-19",
+      "fuente": "produccion",
+      "ingresos": 19
+    },
+    {
+      "codigo": "350B22330",
+      "costoUnitario": 120,
+      "fecha": "2021-03-03",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "350B23187",
+      "costoUnitario": 80,
+      "fecha": "2021-03-03",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "350FC12420-L80",
+      "costoUnitario": 538.6408,
+      "fecha": "2026-02-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "350FC12420-L80.",
+      "costoUnitario": 1028.6408,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "350GL0994",
+      "costoUnitario": 520,
+      "fecha": "2021-03-03",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "375GR0450",
+      "costoUnitario": 996,
+      "fecha": "2026-01-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "375GRB-20450",
+      "costoUnitario": 2104,
+      "fecha": "2026-09-11",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "38-CTU",
+      "costoUnitario": 10.1808,
+      "fecha": "2020-02-24",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "39542",
+      "costoUnitario": 17.9264,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4-GOIL",
+      "costoUnitario": 3664.4593,
+      "fecha": "2023-03-05",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4-PUMQ",
+      "costoUnitario": 19.5509,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "4.5CBS-BOXX3.5EUE",
+      "costoUnitario": 1200,
+      "fecha": "2024-08-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4.5CBS-BOXX4.5EUE",
+      "costoUnitario": 1200,
+      "fecha": "2024-08-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4.5CBSBOXX4.5EUE",
+      "costoUnitario": 950,
+      "fecha": "2026-02-26",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "4.5EUE-PINX4.5CBS",
+      "costoUnitario": 1200,
+      "fecha": "2024-08-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "401-0213-0501-001",
+      "costoUnitario": 11975.56,
+      "fecha": "2023-12-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "43916",
+      "costoUnitario": 250.9689,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4580M",
+      "costoUnitario": 4.9749,
+      "fecha": "2026-08-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4581F1",
+      "costoUnitario": 3266.0621,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4589",
+      "costoUnitario": 161.6056,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4590",
+      "costoUnitario": 10.8642,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4591",
+      "costoUnitario": 12.2223,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4592",
+      "costoUnitario": 61.1114,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4595F",
+      "costoUnitario": 121.8858,
+      "fecha": "2026-08-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4597F",
+      "costoUnitario": 46.0181,
+      "fecha": "2026-08-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4598F",
+      "costoUnitario": 6.2187,
+      "fecha": "2026-08-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4599",
+      "costoUnitario": 32.5927,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "4602",
+      "costoUnitario": 4.0741,
+      "fecha": "2026-02-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS04",
+      "costoUnitario": 268.8952,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS07",
+      "costoUnitario": 215.1162,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS08",
+      "costoUnitario": 985.9492,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS12",
+      "costoUnitario": 322.6743,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS15",
+      "costoUnitario": 268.8952,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS16",
+      "costoUnitario": 8.3656,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS17",
+      "costoUnitario": 89.6318,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS20",
+      "costoUnitario": 448.1588,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "47MS27",
+      "costoUnitario": 250.9689,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "5-PUMQ",
+      "costoUnitario": 14.527,
+      "fecha": "2021-02-16",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "57378",
+      "costoUnitario": 261.7247,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "57597",
+      "costoUnitario": 19.1214,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6-PUMQ",
+      "costoUnitario": 6.1941,
+      "fecha": "2020-11-29",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "60070135C",
+      "costoUnitario": 210.3358,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "60373",
+      "costoUnitario": 8245,
+      "fecha": "2026-03-15",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "6112-BG-3125",
+      "costoUnitario": 995,
+      "fecha": "2023-02-10",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6112-BG-3750",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6112-SG-4500",
+      "costoUnitario": 915,
+      "fecha": "2022-12-10",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "6112/020",
+      "costoUnitario": 998,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6112/021",
+      "costoUnitario": 998,
+      "fecha": "2024-07-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/046",
+      "costoUnitario": 500,
+      "fecha": "2024-02-16",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/125",
+      "costoUnitario": 995,
+      "fecha": "2024-07-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/155",
+      "costoUnitario": 400,
+      "fecha": "2024-02-16",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/185",
+      "costoUnitario": 1200,
+      "fecha": "2024-11-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/215",
+      "costoUnitario": 1200,
+      "fecha": "2024-07-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/255",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6112/260",
+      "costoUnitario": 915,
+      "fecha": "2026-04-10",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "6112/275",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/320",
+      "costoUnitario": 1100,
+      "fecha": "2026-08-25",
+      "fuente": "compras",
+      "ingresos": 11
+    },
+    {
+      "codigo": "6112/425",
+      "costoUnitario": 995,
+      "fecha": "2026-07-28",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6112/445",
+      "costoUnitario": 998,
+      "fecha": "2025-04-20",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6112/500",
+      "costoUnitario": 1080,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6112/585",
+      "costoUnitario": 998,
+      "fecha": "2025-06-02",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6112/605",
+      "costoUnitario": 998,
+      "fecha": "2026-06-22",
+      "fuente": "compras",
+      "ingresos": 17
+    },
+    {
+      "codigo": "6112/725",
+      "costoUnitario": 1080,
+      "fecha": "2026-06-29",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/740",
+      "costoUnitario": 845.36,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6112/760",
+      "costoUnitario": 998,
+      "fecha": "2026-07-28",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "6112BG-3500",
+      "costoUnitario": 995,
+      "fecha": "2023-08-10",
+      "fuente": "compras",
+      "ingresos": 20
+    },
+    {
+      "codigo": "6113-SGCS-4750",
+      "costoUnitario": 530,
+      "fecha": "2022-05-12",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6113/005",
+      "costoUnitario": 190,
+      "fecha": "2026-07-28",
+      "fuente": "compras",
+      "ingresos": 8
+    },
+    {
+      "codigo": "6114R-BMCP-2875",
+      "costoUnitario": 531,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6114R-BMCP-3500",
+      "costoUnitario": 466.39,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "6114R-BMCP-3750",
+      "costoUnitario": 536,
+      "fecha": "2022-12-04",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "6114R-BMCP-3875",
+      "costoUnitario": 786,
+      "fecha": "2022-12-19",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "6114R-BMCP-4000",
+      "costoUnitario": 250,
+      "fecha": "2024-01-12",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "6114R-BMCP-4250",
+      "costoUnitario": 796,
+      "fecha": "2023-08-10",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "6114R/005",
+      "costoUnitario": 785,
+      "fecha": "2026-07-28",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6114R/010",
+      "costoUnitario": 785,
+      "fecha": "2026-07-28",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "6114R/025",
+      "costoUnitario": 350,
+      "fecha": "2025-06-16",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "6114R/100",
+      "costoUnitario": 600,
+      "fecha": "2026-06-10",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "6114R/180",
+      "costoUnitario": 350,
+      "fecha": "2025-06-16",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "6114R/250",
+      "costoUnitario": 250,
+      "fecha": "2023-06-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6114R/295",
+      "costoUnitario": 785,
+      "fecha": "2026-03-09",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "6114R/405",
+      "costoUnitario": 531,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "617T/005",
+      "costoUnitario": 8.15,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "63673",
+      "costoUnitario": 27.4871,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6662/325",
+      "costoUnitario": 716.49,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6662/445",
+      "costoUnitario": 716.49,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "6665R/055",
+      "costoUnitario": 250,
+      "fecha": "2024-01-12",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "6665R/165",
+      "costoUnitario": 578.27,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "7-GOIL",
+      "costoUnitario": 8084.1214,
+      "fecha": "2023-05-10",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "7-PUMQ",
+      "costoUnitario": 4.8431,
+      "fecha": "2020-10-22",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "7170901",
+      "costoUnitario": 8.3656,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "72570710",
+      "costoUnitario": 842.5384,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "72570870-25",
+      "costoUnitario": 59.7545,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "72570920",
+      "costoUnitario": 135.0452,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "72571115C",
+      "costoUnitario": 199.58,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "72571125",
+      "costoUnitario": 118.3139,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "8-GOIL",
+      "costoUnitario": 4719.2343,
+      "fecha": "2023-05-10",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "8-GOILB13",
+      "costoUnitario": 18.0634,
+      "fecha": "2024-05-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "8977/005",
+      "costoUnitario": 2500,
+      "fecha": "2026-01-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9-GOIL",
+      "costoUnitario": 3812.6248,
+      "fecha": "2023-05-10",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "9-GOILB13",
+      "costoUnitario": 28.4667,
+      "fecha": "2024-05-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9008903-57",
+      "costoUnitario": 825.7009,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9008904-47",
+      "costoUnitario": 143.4867,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9009556-57",
+      "costoUnitario": 797.0035,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9009570-47",
+      "costoUnitario": 143.4867,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9070900C",
+      "costoUnitario": 92.0219,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9101900",
+      "costoUnitario": 9.5607,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9222/210",
+      "costoUnitario": 1288.66,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9224R/155",
+      "costoUnitario": 522.47,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9268/009",
+      "costoUnitario": 5510.39,
+      "fecha": "2026-06-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9268/011",
+      "costoUnitario": 3812,
+      "fecha": "2025-10-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "9268/065",
+      "costoUnitario": 3812,
+      "fecha": "2026-07-29",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9268/090",
+      "costoUnitario": 3812,
+      "fecha": "2025-10-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9403-BG-1.25",
+      "costoUnitario": 2333.33,
+      "fecha": "2026-05-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9403/007",
+      "costoUnitario": 1100,
+      "fecha": "2025-09-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9412-3198",
+      "costoUnitario": 1580,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9412/025",
+      "costoUnitario": 2050,
+      "fecha": "2026-07-27",
+      "fuente": "compras",
+      "ingresos": 8
+    },
+    {
+      "codigo": "9412/040",
+      "costoUnitario": 1500,
+      "fecha": "2026-04-09",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "9487-3681",
+      "costoUnitario": 2084,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9487-4228",
+      "costoUnitario": 2198,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9487/013",
+      "costoUnitario": 1320.82,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9487/060",
+      "costoUnitario": 2901,
+      "fecha": "2026-06-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "9487/070",
+      "costoUnitario": 2901,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "957100020",
+      "costoUnitario": 1232.6814,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "957100021",
+      "costoUnitario": 675.692,
+      "fecha": "2026-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "958YT-0006-13CR",
+      "costoUnitario": 5721.205,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9682/005",
+      "costoUnitario": 3200,
+      "fecha": "2025-10-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "9682/006",
+      "costoUnitario": 3200,
+      "fecha": "2025-11-28",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "9682/045",
+      "costoUnitario": 900,
+      "fecha": "2023-06-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9682/050",
+      "costoUnitario": 3200,
+      "fecha": "2026-03-25",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "9917-1470",
+      "costoUnitario": 907,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9917-1596",
+      "costoUnitario": 907,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "9917-1972",
+      "costoUnitario": 907,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "A11829/005",
+      "costoUnitario": 153.51,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "A1829/008",
+      "costoUnitario": 325.98,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "A1829/090",
+      "costoUnitario": 233.2,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "A1830/005",
+      "costoUnitario": 84.74,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "A1830/010",
+      "costoUnitario": 111.34,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "ADD-TOOL-440",
+      "costoUnitario": 601.25,
+      "fecha": "2026-04-24",
+      "fuente": "produccion",
+      "ingresos": 9
+    },
+    {
+      "codigo": "ADD-TOOL-440.1",
+      "costoUnitario": 1002.0833,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "ADD-TOOL-440.2",
+      "costoUnitario": 200.4167,
+      "fecha": "2026-03-31",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "ADD-TOOL-443",
+      "costoUnitario": 338.658,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "ADD-TOOL-446",
+      "costoUnitario": 372,
+      "fecha": "2026-02-12",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "AN-37",
+      "costoUnitario": 6.5204,
+      "fecha": "2026-05-10",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "AND-15",
+      "costoUnitario": 1.5576,
+      "fecha": "2022-07-24",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "AND-18",
+      "costoUnitario": 13.0351,
+      "fecha": "2022-07-24",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "AND-19",
+      "costoUnitario": 4.091,
+      "fecha": "2022-01-18",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "AND-20",
+      "costoUnitario": 37.0609,
+      "fecha": "2022-07-24",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "AND-23",
+      "costoUnitario": 0.6047,
+      "fecha": "2022-07-23",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "AND-24",
+      "costoUnitario": 0.4389,
+      "fecha": "2022-07-24",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "ASBPRDK47A",
+      "costoUnitario": 1100,
+      "fecha": "2026-08-19",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "ASIX-60355",
+      "costoUnitario": 6245,
+      "fecha": "2025-12-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "ASIX-60395",
+      "costoUnitario": 14980,
+      "fecha": "2023-03-06",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "B.JOINT3.5EU-10FT",
+      "costoUnitario": 1750,
+      "fecha": "2026-04-16",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B.JOINT3.5EU-20FT",
+      "costoUnitario": 3500,
+      "fecha": "2026-04-16",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B11828/010",
+      "costoUnitario": 487.77,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/045",
+      "costoUnitario": 1064.88,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/060",
+      "costoUnitario": 1036.77,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/085",
+      "costoUnitario": 1275.72,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/090",
+      "costoUnitario": 943.12,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/105",
+      "costoUnitario": 1036.77,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B2374/115",
+      "costoUnitario": 1064.88,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B5359/064",
+      "costoUnitario": 1850,
+      "fecha": "2022-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "B5360-006",
+      "costoUnitario": 750,
+      "fecha": "2022-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "BP-2750-01-13CRA",
+      "costoUnitario": 2215.5,
+      "fecha": "2026-07-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "BPC0962501313CR",
+      "costoUnitario": 1115.76,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "BULL.PLUG.2-7/8''EU",
+      "costoUnitario": 288.61,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "BULL.PLUG.3-1/2''EU",
+      "costoUnitario": 288.61,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "COT-1",
+      "costoUnitario": 884.4536,
+      "fecha": "2023-06-20",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "COT-2",
+      "costoUnitario": 625.1014,
+      "fecha": "2023-06-19",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CP-3.-5CBS3",
+      "costoUnitario": 80,
+      "fecha": "2026-02-09",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CP-4.-5CBS3",
+      "costoUnitario": 110,
+      "fecha": "2026-01-27",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-ERD-2/CT95423",
+      "costoUnitario": 4320.5789,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-HYDRO-1/CT95201",
+      "costoUnitario": 3291.0244,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CT-HYDRO-1/CT95201-3.5",
+      "costoUnitario": 2290.0481,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-HYDRO-1/CT95201-3.5RDK",
+      "costoUnitario": 397.0867,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-HYDRO-3/CT95203",
+      "costoUnitario": 2565.289,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "CT-HYDRO-3/CT95203-RDK",
+      "costoUnitario": 461.752,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-LTSA-SO1/CT95628",
+      "costoUnitario": 3316.5998,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-MCR/CT95706",
+      "costoUnitario": 1700,
+      "fecha": "2024-06-21",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "CT-MCR/CT95706-9/5",
+      "costoUnitario": 1138.7816,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-MH-4/CT95304",
+      "costoUnitario": 2770.9038,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "CT-MH-4/CT95304-RDK",
+      "costoUnitario": 498.7627,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-ON-OFF/CT95603-L",
+      "costoUnitario": 1275.0292,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-ON-OFF/CT95603-R",
+      "costoUnitario": 1275.0291,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-POP-G/CT95726",
+      "costoUnitario": 471.1103,
+      "fecha": "2025-05-23",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-SBE/CT95612-10FT",
+      "costoUnitario": 1557.8642,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CT-SBE/CT95612-6-FT-9-5/8",
+      "costoUnitario": 1491.4414,
+      "fecha": "2026-06-06",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-SBE/CT95612-6FT",
+      "costoUnitario": 1150,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CT-SSJ-AR/CT95621",
+      "costoUnitario": 145.9846,
+      "fecha": "2025-05-23",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-WBP/CT95501",
+      "costoUnitario": 509.9998,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-WBP/CT95501-5\"",
+      "costoUnitario": 237.564,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-WBP/CT95501-9/5",
+      "costoUnitario": 1087.5637,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-WCR/CT95502",
+      "costoUnitario": 611.958,
+      "fecha": "2023-11-09",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT-WRBP-2/CT922512",
+      "costoUnitario": 3083.243,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT90615/7",
+      "costoUnitario": 5452.5063,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT90615/9-5/8",
+      "costoUnitario": 6026.4544,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CT95401/7",
+      "costoUnitario": 4213.9279,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT95401/9-5/8",
+      "costoUnitario": 3975.2632,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT95423",
+      "costoUnitario": 3680,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "CT95603",
+      "costoUnitario": 1277.179,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT95614/7",
+      "costoUnitario": 2400,
+      "fecha": "2025-05-13",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "CT95614/9-5/8",
+      "costoUnitario": 3220.5943,
+      "fecha": "2024-03-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT95621",
+      "costoUnitario": 729.9228,
+      "fecha": "2025-05-23",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CT95628",
+      "costoUnitario": 3100,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "CT95710",
+      "costoUnitario": 4325,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "CTZ-6.12-3.5EUP-B",
+      "costoUnitario": 1380,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D22-0500-001",
+      "costoUnitario": 1600,
+      "fecha": "2023-06-20",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "D22-0500-008",
+      "costoUnitario": 625.1014,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D22-0550-001",
+      "costoUnitario": 677.1931,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D22-0550-008",
+      "costoUnitario": 656.3564,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D220700001",
+      "costoUnitario": 781.3765,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D220700002",
+      "costoUnitario": 781.3764,
+      "fecha": "2023-02-12",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "D220700308",
+      "costoUnitario": 729.2847,
+      "fecha": "2023-02-12",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "D220962001",
+      "costoUnitario": 1927.3954,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D220962002",
+      "costoUnitario": 1967.57,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D220962002H",
+      "costoUnitario": 1927.3953,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D220962008",
+      "costoUnitario": 1823.2118,
+      "fecha": "2023-02-13",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "D317010312",
+      "costoUnitario": 10023.33,
+      "fecha": "2026-05-29",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "D317010380",
+      "costoUnitario": 343.79,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D320700049",
+      "costoUnitario": 362.37,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D320700220",
+      "costoUnitario": 3298.5125,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D320962100",
+      "costoUnitario": 585.37,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D320962120",
+      "costoUnitario": 5444.87,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D420700006",
+      "costoUnitario": 8245,
+      "fecha": "2026-02-05",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "D420700232",
+      "costoUnitario": 380.9567,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D902225410",
+      "costoUnitario": 271.998,
+      "fecha": "2021-04-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D902275410",
+      "costoUnitario": 365.886,
+      "fecha": "2021-04-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D905350527",
+      "costoUnitario": 1449.488,
+      "fecha": "2020-09-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D907231100",
+      "costoUnitario": 1280,
+      "fecha": "2023-06-17",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "D907231111",
+      "costoUnitario": 352.6573,
+      "fecha": "2021-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D907281100",
+      "costoUnitario": 1238.488,
+      "fecha": "2021-04-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D907281111",
+      "costoUnitario": 358.8443,
+      "fecha": "2021-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D917225101",
+      "costoUnitario": 642.026,
+      "fecha": "2021-04-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D917225112",
+      "costoUnitario": 197.9831,
+      "fecha": "2021-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "D917275101",
+      "costoUnitario": 1330,
+      "fecha": "2023-09-23",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "D917275112",
+      "costoUnitario": 197.9831,
+      "fecha": "2021-11-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DL-STINGER-7X3-1/2¨",
+      "costoUnitario": 1350,
+      "fecha": "2023-02-07",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DY-30L",
+      "costoUnitario": 0.39,
+      "fecha": "2020-02-13",
+      "fuente": "produccion",
+      "ingresos": 8
+    },
+    {
+      "codigo": "DY-70L",
+      "costoUnitario": 5.98,
+      "fecha": "2024-09-08",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "DY-ACIDHT",
+      "costoUnitario": 9.6764,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DY-FILL",
+      "costoUnitario": 0.2719,
+      "fecha": "2025-08-31",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DY-MSINA-150",
+      "costoUnitario": 20.5,
+      "fecha": "2025-08-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DY-NACL-100",
+      "costoUnitario": 0.25,
+      "fecha": "2021-09-18",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DY-SINA-150",
+      "costoUnitario": 3,
+      "fecha": "2025-08-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DY-ULTRA",
+      "costoUnitario": 26.3796,
+      "fecha": "2025-07-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYABR-1000",
+      "costoUnitario": 42.915,
+      "fecha": "2024-11-30",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYACET-100",
+      "costoUnitario": 6.2,
+      "fecha": "2026-10-14",
+      "fuente": "compras",
+      "ingresos": 17
+    },
+    {
+      "codigo": "DYAE-100",
+      "costoUnitario": 0.3769,
+      "fecha": "2025-07-31",
+      "fuente": "compras",
+      "ingresos": 16
+    },
+    {
+      "codigo": "DYAF-200L",
+      "costoUnitario": 12.91,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 34
+    },
+    {
+      "codigo": "DYAF-500",
+      "costoUnitario": 4.07,
+      "fecha": "2026-01-31",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYAM-675",
+      "costoUnitario": 1.9818,
+      "fecha": "2022-07-11",
+      "fuente": "compras",
+      "ingresos": 11
+    },
+    {
+      "codigo": "DYARF-100",
+      "costoUnitario": 1.11,
+      "fecha": "2026-07-01",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYAS-60",
+      "costoUnitario": 19.0898,
+      "fecha": "2021-07-06",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYASCB-200",
+      "costoUnitario": 3.84,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYAX-200",
+      "costoUnitario": 5.14,
+      "fecha": "2023-11-22",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYBF-40",
+      "costoUnitario": 0.7682,
+      "fecha": "2023-11-20",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYBF-50L",
+      "costoUnitario": 0.77,
+      "fecha": "2026-09-22",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYBGU-100",
+      "costoUnitario": 8,
+      "fecha": "2026-09-30",
+      "fuente": "compras",
+      "ingresos": 68
+    },
+    {
+      "codigo": "DYBY-100L",
+      "costoUnitario": 16.6,
+      "fecha": "2026-03-11",
+      "fuente": "compras",
+      "ingresos": 14
+    },
+    {
+      "codigo": "DYCACL-100",
+      "costoUnitario": 0.2845,
+      "fecha": "2026-06-30",
+      "fuente": "compras",
+      "ingresos": 31
+    },
+    {
+      "codigo": "DYCAMON-100",
+      "costoUnitario": 0.24,
+      "fecha": "2026-02-28",
+      "fuente": "compras",
+      "ingresos": 31
+    },
+    {
+      "codigo": "DYCC-100",
+      "costoUnitario": 0.08,
+      "fecha": "2026-06-30",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYCC-200",
+      "costoUnitario": 0.085,
+      "fecha": "2026-06-30",
+      "fuente": "compras",
+      "ingresos": 16
+    },
+    {
+      "codigo": "DYCC-B-M-325",
+      "costoUnitario": 0.075,
+      "fecha": "2026-06-30",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYCD-200",
+      "costoUnitario": 8.6959,
+      "fecha": "2026-09-07",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYCEM-G",
+      "costoUnitario": 25.6,
+      "fecha": "2024-11-25",
+      "fuente": "compras",
+      "ingresos": 23
+    },
+    {
+      "codigo": "DYCEMMF",
+      "costoUnitario": 39.75,
+      "fecha": "2025-06-28",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYCG-300",
+      "costoUnitario": 70.3675,
+      "fecha": "2026-09-20",
+      "fuente": "produccion",
+      "ingresos": 48
+    },
+    {
+      "codigo": "DYCLAY-PLUS-50",
+      "costoUnitario": 17.7864,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 41
+    },
+    {
+      "codigo": "DYCLAYM-500",
+      "costoUnitario": 19.845,
+      "fecha": "2019-10-24",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYCLEAN-OIL-100",
+      "costoUnitario": 15.4901,
+      "fecha": "2024-07-19",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYCN-100",
+      "costoUnitario": 39.56,
+      "fecha": "2025-08-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYCP-1000",
+      "costoUnitario": 330.5816,
+      "fecha": "2026-04-16",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYCP-102",
+      "costoUnitario": 22.74,
+      "fecha": "2026-08-09",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "DYCP-102-(H)",
+      "costoUnitario": 0.064,
+      "fecha": "2025-12-08",
+      "fuente": "compras",
+      "ingresos": 11
+    },
+    {
+      "codigo": "DYCQ-400",
+      "costoUnitario": 11.272,
+      "fecha": "2026-09-20",
+      "fuente": "produccion",
+      "ingresos": 74
+    },
+    {
+      "codigo": "DYCT10080",
+      "costoUnitario": 26624.87,
+      "fecha": "2025-11-29",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYCX-500",
+      "costoUnitario": 13.2636,
+      "fecha": "2026-10-03",
+      "fuente": "produccion",
+      "ingresos": 267
+    },
+    {
+      "codigo": "DYCY-321-HT",
+      "costoUnitario": 11.4983,
+      "fecha": "2026-02-10",
+      "fuente": "compras",
+      "ingresos": 25
+    },
+    {
+      "codigo": "DYCY-330-HT",
+      "costoUnitario": 5.6781,
+      "fecha": "2025-12-01",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYCYDE-57",
+      "costoUnitario": 14.6,
+      "fecha": "2019-02-15",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYEF6061",
+      "costoUnitario": 656.3564,
+      "fecha": "2023-12-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYEF6062",
+      "costoUnitario": 1181.8671,
+      "fecha": "2026-10-04",
+      "fuente": "produccion",
+      "ingresos": 20
+    },
+    {
+      "codigo": "DYEF6063",
+      "costoUnitario": 2400,
+      "fecha": "2020-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYEF6065",
+      "costoUnitario": 1181.8671,
+      "fecha": "2026-07-12",
+      "fuente": "produccion",
+      "ingresos": 7
+    },
+    {
+      "codigo": "DYEF6067",
+      "costoUnitario": 1399.0956,
+      "fecha": "2026-05-14",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYEF6068",
+      "costoUnitario": 809.78,
+      "fecha": "2026-07-12",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYEF6071",
+      "costoUnitario": 1800,
+      "fecha": "2020-02-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYEF6072",
+      "costoUnitario": 2400,
+      "fecha": "2020-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYEG-100L",
+      "costoUnitario": 49.2403,
+      "fecha": "2025-08-21",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYF-250",
+      "costoUnitario": 27.8509,
+      "fecha": "2020-03-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYF10075",
+      "costoUnitario": 7.33,
+      "fecha": "2026-06-12",
+      "fuente": "compras",
+      "ingresos": 11
+    },
+    {
+      "codigo": "DYF10076",
+      "costoUnitario": 7.0481,
+      "fecha": "2026-08-01",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYFCC-10",
+      "costoUnitario": 3.7885,
+      "fecha": "2026-09-20",
+      "fuente": "produccion",
+      "ingresos": 228
+    },
+    {
+      "codigo": "DYFCE-10",
+      "costoUnitario": 0.3436,
+      "fecha": "2024-02-14",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYFCE-20",
+      "costoUnitario": 0.3036,
+      "fecha": "2026-08-09",
+      "fuente": "produccion",
+      "ingresos": 57
+    },
+    {
+      "codigo": "DYFCE-30",
+      "costoUnitario": 0.3869,
+      "fecha": "2023-05-29",
+      "fuente": "produccion",
+      "ingresos": 8
+    },
+    {
+      "codigo": "DYFCE-40",
+      "costoUnitario": 0.8965,
+      "fecha": "2023-10-29",
+      "fuente": "produccion",
+      "ingresos": 74
+    },
+    {
+      "codigo": "DYFCE-50",
+      "costoUnitario": 1.0535,
+      "fecha": "2022-04-29",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYFCE-60",
+      "costoUnitario": 0.2848,
+      "fecha": "2023-12-22",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYFCE-60A",
+      "costoUnitario": 0.489,
+      "fecha": "2023-03-05",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYFCE-70",
+      "costoUnitario": 16.9883,
+      "fecha": "2026-10-13",
+      "fuente": "produccion",
+      "ingresos": 171
+    },
+    {
+      "codigo": "DYFCE-80",
+      "costoUnitario": 5.6103,
+      "fecha": "2026-10-02",
+      "fuente": "produccion",
+      "ingresos": 71
+    },
+    {
+      "codigo": "DYFCE-81",
+      "costoUnitario": 12.1345,
+      "fecha": "2026-09-30",
+      "fuente": "produccion",
+      "ingresos": 26
+    },
+    {
+      "codigo": "DYFCE-82",
+      "costoUnitario": 14.7611,
+      "fecha": "2026-08-24",
+      "fuente": "produccion",
+      "ingresos": 17
+    },
+    {
+      "codigo": "DYFCE-83",
+      "costoUnitario": 22.5624,
+      "fecha": "2026-06-20",
+      "fuente": "produccion",
+      "ingresos": 19
+    },
+    {
+      "codigo": "DYFCE-84",
+      "costoUnitario": 23.701,
+      "fecha": "2026-06-08",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYFCE-T1",
+      "costoUnitario": 2442.4224,
+      "fecha": "2019-05-24",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYFCEN-10",
+      "costoUnitario": 15.8198,
+      "fecha": "2024-04-10",
+      "fuente": "produccion",
+      "ingresos": 166
+    },
+    {
+      "codigo": "DYFE-100-2",
+      "costoUnitario": 0.4136,
+      "fecha": "2026-02-20",
+      "fuente": "compras",
+      "ingresos": 8
+    },
+    {
+      "codigo": "DYFNA",
+      "costoUnitario": 0.36,
+      "fecha": "2020-11-26",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "DYFNA-98",
+      "costoUnitario": 0.3,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 91
+    },
+    {
+      "codigo": "DYFP-125",
+      "costoUnitario": 15.4259,
+      "fecha": "2025-11-21",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYFP135",
+      "costoUnitario": 12.5,
+      "fecha": "2026-10-04",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "DYFR-100",
+      "costoUnitario": 4.0729,
+      "fecha": "2023-05-31",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYFR-200",
+      "costoUnitario": 45.1182,
+      "fecha": "2025-08-21",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYFRY-180",
+      "costoUnitario": 18.2762,
+      "fecha": "2021-01-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYFY-320",
+      "costoUnitario": 32.67,
+      "fecha": "2025-05-27",
+      "fuente": "compras",
+      "ingresos": 17
+    },
+    {
+      "codigo": "DYFY-330L",
+      "costoUnitario": 48.5441,
+      "fecha": "2025-07-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYGUAR-100",
+      "costoUnitario": 1.78,
+      "fecha": "2019-08-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYGUAR-200",
+      "costoUnitario": 2,
+      "fecha": "2019-03-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYGUAR-300",
+      "costoUnitario": 1.63,
+      "fecha": "2026-10-06",
+      "fuente": "compras",
+      "ingresos": 56
+    },
+    {
+      "codigo": "DYGY-120",
+      "costoUnitario": 24.9784,
+      "fecha": "2020-03-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYHCL-100",
+      "costoUnitario": 2.95,
+      "fecha": "2026-10-14",
+      "fuente": "compras",
+      "ingresos": 69
+    },
+    {
+      "codigo": "DYHEC-600",
+      "costoUnitario": 24.0424,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYHOT-400",
+      "costoUnitario": 11.75,
+      "fecha": "2024-06-04",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYHS-654",
+      "costoUnitario": 3.26,
+      "fecha": "2019-05-24",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYIC-100",
+      "costoUnitario": 21.0107,
+      "fecha": "2024-02-21",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYIC-150",
+      "costoUnitario": 49.4571,
+      "fecha": "2020-03-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYIC-200",
+      "costoUnitario": 27.185,
+      "fecha": "2019-03-23",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYIC-250",
+      "costoUnitario": 42.4448,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 20
+    },
+    {
+      "codigo": "DYICTE-150",
+      "costoUnitario": 39.7541,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYKCL-98",
+      "costoUnitario": 0.3682,
+      "fecha": "2024-01-11",
+      "fuente": "compras",
+      "ingresos": 27
+    },
+    {
+      "codigo": "DYLIG-SCL",
+      "costoUnitario": 32.67,
+      "fecha": "2025-12-10",
+      "fuente": "compras",
+      "ingresos": 28
+    },
+    {
+      "codigo": "DYLX-100",
+      "costoUnitario": 3.536,
+      "fecha": "2025-07-31",
+      "fuente": "compras",
+      "ingresos": 25
+    },
+    {
+      "codigo": "DYMBA-100",
+      "costoUnitario": 5.68,
+      "fecha": "2025-06-24",
+      "fuente": "compras",
+      "ingresos": 12
+    },
+    {
+      "codigo": "DYMBA-100.17",
+      "costoUnitario": 2.0251,
+      "fecha": "2026-09-29",
+      "fuente": "produccion",
+      "ingresos": 14
+    },
+    {
+      "codigo": "DYMBA-3034",
+      "costoUnitario": 7.2,
+      "fecha": "2026-10-09",
+      "fuente": "compras",
+      "ingresos": 8
+    },
+    {
+      "codigo": "DYMETH-200",
+      "costoUnitario": 8.03,
+      "fecha": "2026-09-28",
+      "fuente": "compras",
+      "ingresos": 125
+    },
+    {
+      "codigo": "DYNACLEAN-PLUS",
+      "costoUnitario": 4.56,
+      "fecha": "2026-07-07",
+      "fuente": "compras",
+      "ingresos": 54
+    },
+    {
+      "codigo": "DYNITRO-200",
+      "costoUnitario": 2.93,
+      "fecha": "2026-05-02",
+      "fuente": "compras",
+      "ingresos": 63
+    },
+    {
+      "codigo": "DYNNA-100",
+      "costoUnitario": 2.3048,
+      "fecha": "2026-06-20",
+      "fuente": "compras",
+      "ingresos": 66
+    },
+    {
+      "codigo": "DYOP-100",
+      "costoUnitario": 0.15,
+      "fecha": "2026-03-30",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYORGSOLV-376",
+      "costoUnitario": 7.36,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYPK0005",
+      "costoUnitario": 1275.0292,
+      "fecha": "2026-07-26",
+      "fuente": "produccion",
+      "ingresos": 7
+    },
+    {
+      "codigo": "DYPK0006",
+      "costoUnitario": 2960,
+      "fecha": "2026-05-30",
+      "fuente": "produccion",
+      "ingresos": 7
+    },
+    {
+      "codigo": "DYPK0007",
+      "costoUnitario": 3337.7539,
+      "fecha": "2025-12-14",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYPK0008",
+      "costoUnitario": 3620.3906,
+      "fecha": "2026-08-30",
+      "fuente": "produccion",
+      "ingresos": 21
+    },
+    {
+      "codigo": "DYPK0009",
+      "costoUnitario": 11247.435,
+      "fecha": "2023-09-28",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYPK0011",
+      "costoUnitario": 3428.596,
+      "fecha": "2025-11-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYPK0012",
+      "costoUnitario": 14980,
+      "fecha": "2023-03-26",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYPK0012-1",
+      "costoUnitario": 13500,
+      "fecha": "2022-12-03",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYPK0039",
+      "costoUnitario": 4389.0784,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYPK0040",
+      "costoUnitario": 3975.2632,
+      "fecha": "2025-09-25",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYPLUG",
+      "costoUnitario": 0.3757,
+      "fecha": "2026-04-16",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYRBH-100L",
+      "costoUnitario": 5.1205,
+      "fecha": "2020-03-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYRF-700",
+      "costoUnitario": 16.743,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "DYRF-900",
+      "costoUnitario": 10.19,
+      "fecha": "2024-09-05",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYRPM-100",
+      "costoUnitario": 24.0912,
+      "fecha": "2024-05-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYRY-80",
+      "costoUnitario": 8.1638,
+      "fecha": "2026-02-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYRYS-1",
+      "costoUnitario": 1.6515,
+      "fecha": "2025-08-31",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYS-301",
+      "costoUnitario": 10.14,
+      "fecha": "2022-05-28",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYS-302",
+      "costoUnitario": 9.6882,
+      "fecha": "2021-04-23",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYS-400",
+      "costoUnitario": 42.2553,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 20
+    },
+    {
+      "codigo": "DYSASH-100",
+      "costoUnitario": 0.4182,
+      "fecha": "2023-09-07",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "DYSCALY-90C",
+      "costoUnitario": 24.4714,
+      "fecha": "2026-07-10",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYSFILT-ADICIONAL",
+      "costoUnitario": 543.32,
+      "fecha": "2019-05-24",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYSGL-1",
+      "costoUnitario": 0.2323,
+      "fecha": "2021-04-28",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "DYSOLVE-II",
+      "costoUnitario": 13.9,
+      "fecha": "2023-06-08",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "DYSOR-1",
+      "costoUnitario": 0.7914,
+      "fecha": "2026-09-01",
+      "fuente": "produccion",
+      "ingresos": 27
+    },
+    {
+      "codigo": "DYSOR-1-LSB",
+      "costoUnitario": 8652.2172,
+      "fecha": "2022-09-25",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYSRC-2",
+      "costoUnitario": 3.4855,
+      "fecha": "2026-09-30",
+      "fuente": "produccion",
+      "ingresos": 45
+    },
+    {
+      "codigo": "DYSRF-100",
+      "costoUnitario": 1.56,
+      "fecha": "2026-07-01",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "DYSRP-1",
+      "costoUnitario": 1.3613,
+      "fecha": "2020-07-16",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYSTIM-76",
+      "costoUnitario": 2.5215,
+      "fecha": "2024-05-29",
+      "fuente": "produccion",
+      "ingresos": 26
+    },
+    {
+      "codigo": "DYSTIM-76.15",
+      "costoUnitario": 1.2356,
+      "fecha": "2026-05-28",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "DYSTIM-80",
+      "costoUnitario": 14.6127,
+      "fecha": "2026-07-21",
+      "fuente": "produccion",
+      "ingresos": 115
+    },
+    {
+      "codigo": "DYSTIM-80.15",
+      "costoUnitario": 1.543,
+      "fecha": "2026-09-17",
+      "fuente": "produccion",
+      "ingresos": 39
+    },
+    {
+      "codigo": "DYSTIM-87",
+      "costoUnitario": 2.1703,
+      "fecha": "2026-07-21",
+      "fuente": "produccion",
+      "ingresos": 22
+    },
+    {
+      "codigo": "DYSTIM-87.1",
+      "costoUnitario": 2.175,
+      "fecha": "2023-08-11",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYSURF-250",
+      "costoUnitario": 5.8488,
+      "fecha": "2026-07-10",
+      "fuente": "compras",
+      "ingresos": 51
+    },
+    {
+      "codigo": "DYSURF-260",
+      "costoUnitario": 16.9,
+      "fecha": "2026-08-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "DYTERP-100",
+      "costoUnitario": 2.2139,
+      "fecha": "2026-06-30",
+      "fuente": "produccion",
+      "ingresos": 28
+    },
+    {
+      "codigo": "DYTERP-150",
+      "costoUnitario": 16.9,
+      "fecha": "2026-08-08",
+      "fuente": "compras",
+      "ingresos": 52
+    },
+    {
+      "codigo": "DYTHY-757",
+      "costoUnitario": 28.5323,
+      "fecha": "2022-10-27",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "DYXYC-2007",
+      "costoUnitario": 10,
+      "fecha": "2026-10-03",
+      "fuente": "compras",
+      "ingresos": 59
+    },
+    {
+      "codigo": "DYXYL-100",
+      "costoUnitario": 6.05,
+      "fecha": "2026-07-02",
+      "fuente": "compras",
+      "ingresos": 26
+    },
+    {
+      "codigo": "ETI-MST-47",
+      "costoUnitario": 6892.15,
+      "fecha": "2021-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "ETI94830",
+      "costoUnitario": 10.7558,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "F10077",
+      "costoUnitario": 145,
+      "fecha": "2026-07-02",
+      "fuente": "produccion",
+      "ingresos": 15
+    },
+    {
+      "codigo": "F10082",
+      "costoUnitario": 7.0857,
+      "fecha": "2026-07-11",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "F10083",
+      "costoUnitario": 0.5,
+      "fecha": "2026-07-11",
+      "fuente": "compras",
+      "ingresos": 10
+    },
+    {
+      "codigo": "G656-95A-000",
+      "costoUnitario": 15572,
+      "fecha": "2026-07-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55012",
+      "costoUnitario": 1750,
+      "fecha": "2026-04-18",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55019",
+      "costoUnitario": 3500,
+      "fecha": "2026-04-18",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55044",
+      "costoUnitario": 288.61,
+      "fecha": "2026-03-27",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55046",
+      "costoUnitario": 288.61,
+      "fecha": "2025-12-06",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "GPK55049",
+      "costoUnitario": 814.31,
+      "fecha": "2024-11-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55054",
+      "costoUnitario": 750,
+      "fecha": "2026-03-27",
+      "fuente": "produccion",
+      "ingresos": 15
+    },
+    {
+      "codigo": "GPK55054-1",
+      "costoUnitario": 990,
+      "fecha": "2023-08-17",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55055",
+      "costoUnitario": 190.24,
+      "fecha": "2024-05-20",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55055-1",
+      "costoUnitario": 1180,
+      "fecha": "2023-08-17",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55057",
+      "costoUnitario": 1073,
+      "fecha": "2026-07-12",
+      "fuente": "produccion",
+      "ingresos": 17
+    },
+    {
+      "codigo": "GPK55057-1",
+      "costoUnitario": 1420,
+      "fecha": "2023-08-17",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55058",
+      "costoUnitario": 875,
+      "fecha": "2026-07-31",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55059",
+      "costoUnitario": 875,
+      "fecha": "2026-07-31",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "GPK55061",
+      "costoUnitario": 544.7,
+      "fecha": "2026-06-03",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "GPK55062",
+      "costoUnitario": 538.6408,
+      "fecha": "2026-07-22",
+      "fuente": "produccion",
+      "ingresos": 12
+    },
+    {
+      "codigo": "GPK55064",
+      "costoUnitario": 546.6666,
+      "fecha": "2026-02-05",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "GPK55066",
+      "costoUnitario": 1435.94,
+      "fecha": "2026-03-02",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "GPK55067",
+      "costoUnitario": 883.7791,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "GPK55067-1",
+      "costoUnitario": 381.71,
+      "fecha": "2022-11-22",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55070",
+      "costoUnitario": 6245,
+      "fecha": "2026-03-23",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55073",
+      "costoUnitario": 1371.587,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "GPK55074",
+      "costoUnitario": 471.1103,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "GPK55075",
+      "costoUnitario": 883.7791,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "GPK55076",
+      "costoUnitario": 883.7791,
+      "fecha": "2026-03-08",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "GPK55077",
+      "costoUnitario": 1750,
+      "fecha": "2025-06-18",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55079",
+      "costoUnitario": 260.68,
+      "fecha": "2025-11-12",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55079-1",
+      "costoUnitario": 260.88,
+      "fecha": "2025-10-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "GPK55080",
+      "costoUnitario": 288.61,
+      "fecha": "2025-11-15",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "GR650-73A-000-EUE",
+      "costoUnitario": 7820,
+      "fecha": "2026-01-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "H81080-BLANK",
+      "costoUnitario": 6450,
+      "fecha": "2026-08-27",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HA1001",
+      "costoUnitario": 2.3902,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HC1007",
+      "costoUnitario": 2.3902,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HCF10003",
+      "costoUnitario": 720,
+      "fecha": "2026-06-29",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "HCF10006",
+      "costoUnitario": 240.3153,
+      "fecha": "2025-11-14",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "HCF10007",
+      "costoUnitario": 695,
+      "fecha": "2026-09-08",
+      "fuente": "produccion",
+      "ingresos": 89
+    },
+    {
+      "codigo": "HCF10008",
+      "costoUnitario": 996,
+      "fecha": "2026-02-05",
+      "fuente": "produccion",
+      "ingresos": 7
+    },
+    {
+      "codigo": "HCF10010",
+      "costoUnitario": 1350,
+      "fecha": "2023-11-10",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "HCF10011",
+      "costoUnitario": 1213.1162,
+      "fecha": "2026-08-30",
+      "fuente": "produccion",
+      "ingresos": 50
+    },
+    {
+      "codigo": "HCF10015",
+      "costoUnitario": 1380,
+      "fecha": "2023-10-28",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "HCF10018",
+      "costoUnitario": 823.0801,
+      "fecha": "2025-10-20",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HCF10019",
+      "costoUnitario": 967.5293,
+      "fecha": "2026-08-30",
+      "fuente": "produccion",
+      "ingresos": 27
+    },
+    {
+      "codigo": "HCF10020",
+      "costoUnitario": 1960,
+      "fecha": "2026-02-05",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "HK1002",
+      "costoUnitario": 5.9754,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HP1003",
+      "costoUnitario": 2.3902,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "HWW-G51B-0H0",
+      "costoUnitario": 4.7804,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "IMPOR-REP",
+      "costoUnitario": 74809.73,
+      "fecha": "2026-09-23",
+      "fuente": "compras",
+      "ingresos": 1488
+    },
+    {
+      "codigo": "JC958YT-0159ALK",
+      "costoUnitario": 22884.82,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "JCBPC0962501313CR",
+      "costoUnitario": 1115.76,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "JCBYPASS2785FT",
+      "costoUnitario": 375,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "JCMBP-0006-4130",
+      "costoUnitario": 825.64,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "JCP287565F2J151CRE",
+      "costoUnitario": 1025,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "JCWEG-00002-14130",
+      "costoUnitario": 725.45,
+      "fecha": "2026-05-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "K1-3BB",
+      "costoUnitario": 1800,
+      "fecha": "2019-12-18",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "KXJWXB510",
+      "costoUnitario": 338.658,
+      "fecha": "2025-04-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "L6635R/085",
+      "costoUnitario": 809.99,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "L6635R/095",
+      "costoUnitario": 809.99,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "L6665R/045",
+      "costoUnitario": 578.27,
+      "fecha": "2022-11-01",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "LUMP-SUM-FC-01",
+      "costoUnitario": 3635.7689,
+      "fecha": "2020-04-17",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "MBP-0064130",
+      "costoUnitario": 412.82,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "MS-287-TSH-BLUE",
+      "costoUnitario": 840,
+      "fecha": "2023-08-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "MS-2875-EUE",
+      "costoUnitario": 260.68,
+      "fecha": "2026-08-04",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "MS-3375-EUE",
+      "costoUnitario": 215,
+      "fecha": "2025-12-03",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "MS-3500-EUE",
+      "costoUnitario": 288.61,
+      "fecha": "2026-07-25",
+      "fuente": "compras",
+      "ingresos": 12
+    },
+    {
+      "codigo": "MS-400-ESP",
+      "costoUnitario": 550.45,
+      "fecha": "2025-05-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "MS-450-EUE",
+      "costoUnitario": 381.71,
+      "fecha": "2024-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "MS-500-BTC",
+      "costoUnitario": 459.56,
+      "fecha": "2024-11-22",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "MS-500-LC",
+      "costoUnitario": 431.27,
+      "fecha": "2025-07-07",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "MS-600-ACME",
+      "costoUnitario": 786,
+      "fecha": "2026-09-12",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "MZ-2021-002-003",
+      "costoUnitario": 1380,
+      "fecha": "2023-10-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "N2750D-0001-4140",
+      "costoUnitario": 5721.205,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "NA",
+      "costoUnitario": 412.82,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PCK-50002",
+      "costoUnitario": 3337.7539,
+      "fecha": "2025-11-11",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "PCK-50003",
+      "costoUnitario": 3620.3906,
+      "fecha": "2026-06-29",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "PCK-50006",
+      "costoUnitario": 3620.3906,
+      "fecha": "2026-07-02",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "PCK-50010",
+      "costoUnitario": 8245,
+      "fecha": "2026-02-20",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PCK-50014",
+      "costoUnitario": 2770.9038,
+      "fecha": "2026-08-05",
+      "fuente": "produccion",
+      "ingresos": 5
+    },
+    {
+      "codigo": "PCK-50018",
+      "costoUnitario": 2770.9038,
+      "fecha": "2026-08-29",
+      "fuente": "produccion",
+      "ingresos": 7
+    },
+    {
+      "codigo": "PCK-50024",
+      "costoUnitario": 1275.0292,
+      "fecha": "2026-08-30",
+      "fuente": "produccion",
+      "ingresos": 9
+    },
+    {
+      "codigo": "PDB900",
+      "costoUnitario": 71.7054,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PESCA-046",
+      "costoUnitario": 1748.5767,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "PESCA-046.1",
+      "costoUnitario": 1748.5767,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PESCA-046.2",
+      "costoUnitario": 1748.5766,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PESCA-046.3",
+      "costoUnitario": 1748.5767,
+      "fecha": "2026-04-14",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-2.8EUE-15FT",
+      "costoUnitario": 740,
+      "fecha": "2025-11-11",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PJ-2.8EUE-6FT",
+      "costoUnitario": 350,
+      "fecha": "2026-09-03",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-2.8EUE-8FT",
+      "costoUnitario": 445,
+      "fecha": "2026-03-11",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PJ-3.5EUE-12FT",
+      "costoUnitario": 806.4,
+      "fecha": "2025-11-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-3.5EUE-15FT",
+      "costoUnitario": 896,
+      "fecha": "2025-11-28",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PJ-3.5EUE-3FT",
+      "costoUnitario": 265,
+      "fecha": "2026-03-11",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-3.5EUE-5FT",
+      "costoUnitario": 448,
+      "fecha": "2025-11-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-3.5EUE-6FT",
+      "costoUnitario": 410,
+      "fecha": "2026-03-11",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-3.5EUE-8FT",
+      "costoUnitario": 475,
+      "fecha": "2026-08-21",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PJ-4.5EUE-4FT",
+      "costoUnitario": 620,
+      "fecha": "2026-02-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-4.5EUE-6FT",
+      "costoUnitario": 780,
+      "fecha": "2026-02-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ-4.5EUE-8FT",
+      "costoUnitario": 1100,
+      "fecha": "2026-02-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "PJ287564F2J154140",
+      "costoUnitario": 86.1345,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "PN-#-93595-WBAE",
+      "costoUnitario": 17050,
+      "fecha": "2023-09-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "Q21081",
+      "costoUnitario": 9.99,
+      "fecha": "2025-07-03",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "Q21082",
+      "costoUnitario": 18.2762,
+      "fecha": "2021-02-28",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "Q21083",
+      "costoUnitario": 2.0394,
+      "fecha": "2024-06-27",
+      "fuente": "produccion",
+      "ingresos": 8
+    },
+    {
+      "codigo": "Q21147",
+      "costoUnitario": 0.9,
+      "fecha": "2026-03-17",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "Q40001",
+      "costoUnitario": 0.858,
+      "fecha": "2020-02-20",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "QAM-0100",
+      "costoUnitario": 2.49,
+      "fecha": "2025-04-17",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "QP21304",
+      "costoUnitario": 31.6364,
+      "fecha": "2026-07-01",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "QP21305",
+      "costoUnitario": 14.55,
+      "fecha": "2019-04-17",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "QP21307",
+      "costoUnitario": 14.1673,
+      "fecha": "2019-03-23",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "QP21317",
+      "costoUnitario": 28.7572,
+      "fecha": "2024-06-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "QP21319",
+      "costoUnitario": 26.69,
+      "fecha": "2025-10-29",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "QP21323",
+      "costoUnitario": 18.4,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "QS-5000",
+      "costoUnitario": 5.2,
+      "fecha": "2021-11-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDK-4323B",
+      "costoUnitario": 950,
+      "fecha": "2019-06-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDK-4727B",
+      "costoUnitario": 1250,
+      "fecha": "2019-06-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDK-CT95423",
+      "costoUnitario": 809.6,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDK-CT95628",
+      "costoUnitario": 750,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDK-CT95710",
+      "costoUnitario": 525,
+      "fecha": "2026-10-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDKARK-4727B",
+      "costoUnitario": 627.7185,
+      "fecha": "2026-07-21",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RDKEA4727B",
+      "costoUnitario": 627.7185,
+      "fecha": "2026-07-21",
+      "fuente": "compras",
+      "ingresos": 15
+    },
+    {
+      "codigo": "RDKMSTDB47",
+      "costoUnitario": 93.8342,
+      "fecha": "2026-07-21",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "REDRESS-KITS-MST-47",
+      "costoUnitario": 84.019,
+      "fecha": "2021-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RK2250GFB20916",
+      "costoUnitario": 203.98,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RK2312GL0347",
+      "costoUnitario": 373.69,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "RK2750GRB20351",
+      "costoUnitario": 120,
+      "fecha": "2021-03-03",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "RK2812GL0676",
+      "costoUnitario": 86,
+      "fecha": "2021-03-03",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "SCS7219",
+      "costoUnitario": 0.0066,
+      "fecha": "2025-06-04",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "SCSD7102",
+      "costoUnitario": 30,
+      "fecha": "2024-06-14",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "SCSD7106",
+      "costoUnitario": 33.42,
+      "fecha": "2019-01-31",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "SFC33023-UNI",
+      "costoUnitario": 543.32,
+      "fecha": "2019-07-23",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "SFS6100",
+      "costoUnitario": 1900,
+      "fecha": "2026-07-17",
+      "fuente": "produccion",
+      "ingresos": 6
+    },
+    {
+      "codigo": "SFS6100-2",
+      "costoUnitario": 911.06,
+      "fecha": "2023-02-07",
+      "fuente": "produccion",
+      "ingresos": 3
+    },
+    {
+      "codigo": "SFS6101",
+      "costoUnitario": 2050,
+      "fecha": "2026-08-13",
+      "fuente": "produccion",
+      "ingresos": 21
+    },
+    {
+      "codigo": "SFS6101-01",
+      "costoUnitario": 1580,
+      "fecha": "2020-07-13",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "SFS6102",
+      "costoUnitario": 2901,
+      "fecha": "2025-12-28",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "SFS6218",
+      "costoUnitario": 845.36,
+      "fecha": "2026-09-27",
+      "fuente": "produccion",
+      "ingresos": 132
+    },
+    {
+      "codigo": "SFS6219",
+      "costoUnitario": 1850,
+      "fecha": "2025-11-21",
+      "fuente": "produccion",
+      "ingresos": 4
+    },
+    {
+      "codigo": "SFS6220",
+      "costoUnitario": 754.3333,
+      "fecha": "2026-09-05",
+      "fuente": "produccion",
+      "ingresos": 69
+    },
+    {
+      "codigo": "SFS6221",
+      "costoUnitario": 193.1184,
+      "fecha": "2026-09-05",
+      "fuente": "produccion",
+      "ingresos": 51
+    },
+    {
+      "codigo": "SFS6222",
+      "costoUnitario": 4300,
+      "fecha": "2026-09-05",
+      "fuente": "produccion",
+      "ingresos": 11
+    },
+    {
+      "codigo": "SIP-12",
+      "costoUnitario": 1553.165,
+      "fecha": "2024-07-14",
+      "fuente": "produccion",
+      "ingresos": 2
+    },
+    {
+      "codigo": "SU-400-GBH",
+      "costoUnitario": 990,
+      "fecha": "2025-05-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "TB-4.-5EUP-B",
+      "costoUnitario": 600,
+      "fecha": "2026-02-23",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "TIW.LP.006",
+      "costoUnitario": 25000,
+      "fecha": "2021-04-28",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "TSN-00007-4140",
+      "costoUnitario": 5721.205,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "W202100/002-06",
+      "costoUnitario": 680,
+      "fecha": "2023-10-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "W210216/002-009",
+      "costoUnitario": 998,
+      "fecha": "2026-09-11",
+      "fuente": "compras",
+      "ingresos": 5
+    },
+    {
+      "codigo": "W210610-001-003",
+      "costoUnitario": 1700,
+      "fecha": "2023-09-07",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "W220815-007-007",
+      "costoUnitario": 1970,
+      "fecha": "2024-02-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "WE-02",
+      "costoUnitario": 1967.57,
+      "fecha": "2023-03-26",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "WE-10",
+      "costoUnitario": 1499.2376,
+      "fecha": "2023-03-26",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "WEG-00002-1-4130",
+      "costoUnitario": 725.45,
+      "fecha": "2026-05-07",
+      "fuente": "produccion",
+      "ingresos": 1
+    },
+    {
+      "codigo": "WHM-275",
+      "costoUnitario": 9.5607,
+      "fecha": "2026-05-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XK-4323B4",
+      "costoUnitario": 950,
+      "fecha": "2019-06-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XMS-3500-EUE",
+      "costoUnitario": 423.1,
+      "fecha": "2026-08-23",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO-2-7/8-CBS3-EUE",
+      "costoUnitario": 750,
+      "fecha": "2026-01-25",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO-2-7/8EUE-CBS3",
+      "costoUnitario": 750,
+      "fecha": "2026-01-25",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO-3.500EUEB-4.500EU",
+      "costoUnitario": 875,
+      "fecha": "2026-05-05",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO-4.500EUEB-3.500EU",
+      "costoUnitario": 1250,
+      "fecha": "2023-03-15",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO1.20ACMEP-2.87STLB",
+      "costoUnitario": 920,
+      "fecha": "2025-08-10",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO1.9EUP-X-1.5AMTB",
+      "costoUnitario": 460,
+      "fecha": "2026-03-19",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2-3/8EUBOXX2-7/8\"EUBOX",
+      "costoUnitario": 544.7,
+      "fecha": "2026-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2-3/8EUPINX2-7/8\"EUPIN",
+      "costoUnitario": 544.7,
+      "fecha": "2026-06-02",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2-7/8EU.3-1/2CBS3",
+      "costoUnitario": 850,
+      "fecha": "2026-03-10",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.37EUEP-2.87THSB",
+      "costoUnitario": 990,
+      "fecha": "2023-08-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.37EUEP-3.5EUEB",
+      "costoUnitario": 628.5,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO2.875EUB-3.5EUEP",
+      "costoUnitario": 628.5,
+      "fecha": "2026-09-18",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "XO2.87EUEP-2.87TSHB",
+      "costoUnitario": 990,
+      "fecha": "2023-08-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.87EUP-ESPB",
+      "costoUnitario": 420,
+      "fecha": "2026-08-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.87STLP-1.95ACMEB",
+      "costoUnitario": 780,
+      "fecha": "2025-07-27",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.87THSP-2.37EUEB",
+      "costoUnitario": 990,
+      "fecha": "2023-08-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO2.87THSP-3.5EUEB",
+      "costoUnitario": 780,
+      "fecha": "2023-09-28",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO3,5EUB3,5CBS3P",
+      "costoUnitario": 800,
+      "fecha": "2026-03-04",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "XO3,5EUP3,5CBS3B",
+      "costoUnitario": 800,
+      "fecha": "2026-03-04",
+      "fuente": "compras",
+      "ingresos": 14
+    },
+    {
+      "codigo": "XO3,5EUP3,5CBS3P",
+      "costoUnitario": 750,
+      "fecha": "2026-02-09",
+      "fuente": "compras",
+      "ingresos": 12
+    },
+    {
+      "codigo": "XO3.5-TSHBLUEP-3.5EUEB",
+      "costoUnitario": 980,
+      "fecha": "2026-03-31",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO3.5EUB-2.875EUEP",
+      "costoUnitario": 628.5,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "XO3.5EUEB-2.875EUP",
+      "costoUnitario": 628.5,
+      "fecha": "2026-09-03",
+      "fuente": "compras",
+      "ingresos": 12
+    },
+    {
+      "codigo": "XO3.5EUEP-3.5TSHBLUEB",
+      "costoUnitario": 980,
+      "fecha": "2026-03-31",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "XO3.5EUEP-4.5TSHBB",
+      "costoUnitario": 1200,
+      "fecha": "2026-05-03",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5EUEP-4.5TSHP",
+      "costoUnitario": 1270,
+      "fecha": "2023-09-08",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5EUEPX3.5HSM-2B",
+      "costoUnitario": 750,
+      "fecha": "2026-07-05",
+      "fuente": "compras",
+      "ingresos": 9
+    },
+    {
+      "codigo": "XO3.5EUP-2.875EUP",
+      "costoUnitario": 628.5,
+      "fecha": "2024-07-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5EUP-2.87EUEB",
+      "costoUnitario": 628.5,
+      "fecha": "2026-09-25",
+      "fuente": "compras",
+      "ingresos": 7
+    },
+    {
+      "codigo": "XO3.5EUP-3.5EUP",
+      "costoUnitario": 628.5,
+      "fecha": "2026-08-22",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5HSM-2PX3.5EUEB",
+      "costoUnitario": 750,
+      "fecha": "2026-05-05",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO3.5HSM-2PX3.5EUEP",
+      "costoUnitario": 750,
+      "fecha": "2026-07-22",
+      "fuente": "compras",
+      "ingresos": 6
+    },
+    {
+      "codigo": "XO3.5RTS-8BX3.5CBS3P",
+      "costoUnitario": 980,
+      "fecha": "2026-06-19",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5RTS-8PX3.5CBS3B",
+      "costoUnitario": 980,
+      "fecha": "2026-06-19",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5TSHBLUEP-3.5EUEP",
+      "costoUnitario": 1150,
+      "fecha": "2026-07-20",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO3.5TSHBLUEP-7.2ACMEB",
+      "costoUnitario": 1750,
+      "fecha": "2025-06-12",
+      "fuente": "compras",
+      "ingresos": 2
+    },
+    {
+      "codigo": "XO4.5BOX-3.5EUEP",
+      "costoUnitario": 1420,
+      "fecha": "2023-08-17",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUB3.5CBS3P",
+      "costoUnitario": 750,
+      "fecha": "2024-05-14",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUEB-3.5EUEP",
+      "costoUnitario": 875,
+      "fecha": "2026-07-25",
+      "fuente": "compras",
+      "ingresos": 4
+    },
+    {
+      "codigo": "XO4.5EUEP-3.5EUEP",
+      "costoUnitario": 875,
+      "fecha": "2026-07-25",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUEP-4.5TSHB",
+      "costoUnitario": 1270,
+      "fecha": "2023-09-08",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUEP-5.5BTCB",
+      "costoUnitario": 828.9,
+      "fecha": "2024-12-30",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUEP-5.5BTCP",
+      "costoUnitario": 828.9,
+      "fecha": "2025-09-17",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO4.5EUEPX3.5HSM-2P",
+      "costoUnitario": 1073,
+      "fecha": "2026-07-05",
+      "fuente": "compras",
+      "ingresos": 3
+    },
+    {
+      "codigo": "XO4.5EUP-2.87EUB",
+      "costoUnitario": 875,
+      "fecha": "2026-07-03",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO5.5BCB-7BCP",
+      "costoUnitario": 1435.94,
+      "fecha": "2024-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO5.5BTCB-5.0BTCP",
+      "costoUnitario": 1062.39,
+      "fecha": "2023-05-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO5BCP-3.5EUB",
+      "costoUnitario": 666.06,
+      "fecha": "2024-11-22",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO5BTCP-4.5EUEB",
+      "costoUnitario": 1390,
+      "fecha": "2023-09-08",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO5LCP-5ACMEB",
+      "costoUnitario": 890,
+      "fecha": "2026-08-23",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO7.0BTCB-5.5BTCP",
+      "costoUnitario": 1355.89,
+      "fecha": "2023-05-26",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO7BCB-4.5-EUP",
+      "costoUnitario": 1501,
+      "fecha": "2024-02-13",
+      "fuente": "compras",
+      "ingresos": 1
+    },
+    {
+      "codigo": "XO7BCP-5.5BCB",
+      "costoUnitario": 1450,
+      "fecha": "2026-03-06",
+      "fuente": "compras",
+      "ingresos": 2
+    }
+  ]
+}
