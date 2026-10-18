@@ -21,8 +21,10 @@ export function backoffMs(attempt: number, baseMs: number, maxMs: number): numbe
 
 export const DLX = 'dyn.dlx';
 export const exchangeOf = (source: string) => `dyn.${source}`;
-export const queueOf = (consumer: string, source: string) => `${consumer}.${source}`;
-export const dlqOf = (consumer: string, source: string) => `dlq.${consumer}.${source}`;
+export const queueOf = (consumer: string, source: string, group?: string) =>
+  group ? `${consumer}.${source}.${group}` : `${consumer}.${source}`;
+export const dlqOf = (consumer: string, source: string, group?: string) =>
+  `dlq.${queueOf(consumer, source, group)}`;
 
 /**
  * Equivalente local de Azure Service Bus:
@@ -101,8 +103,8 @@ export class RabbitMqTransport implements EventTransport {
   async subscribe(sub: Subscription): Promise<void> {
     const ch = await this.ensureChannel();
     const exchange = exchangeOf(sub.source);
-    const queue = queueOf(sub.consumer, sub.source);
-    const dlq = dlqOf(sub.consumer, sub.source);
+    const queue = queueOf(sub.consumer, sub.source, sub.group);
+    const dlq = dlqOf(sub.consumer, sub.source, sub.group);
 
     await ch.assertExchange(exchange, 'topic', { durable: true });
     await ch.assertQueue(dlq, { durable: true, arguments: { 'x-queue-type': 'quorum' } });

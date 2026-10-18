@@ -48,6 +48,11 @@ export class CrearArticuloDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) costoUnitario?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) descuentoSugerido?: number;
   @IsOptional() @IsBoolean() activo?: boolean;
+  /** Se entrega a una persona (EPI y ropa de trabajo): QHSE lo recibe por evento. */
+  @IsOptional() @IsBoolean() entregaPersonal?: boolean;
+  /** Tipo de talla que admite al entregarse; `null` quita la talla. Exige `entregaPersonal`. */
+  @IsOptional() @IsIn(['ropa', 'calzado', 'guante']) tipoTalla?:
+    'ropa' | 'calzado' | 'guante' | null;
   @IsOptional() @ValidateNested() @Type(() => CodigosArticuloDto) codigos?: CodigosArticuloDto;
 }
 

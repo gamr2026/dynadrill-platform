@@ -1,4 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { currentTraceparent } from '@dyn/common';
+import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type {
   ActualizarArticuloDto,
@@ -14,7 +16,17 @@ const INCLUIR = {
   subcategoria: true,
   unidadStock: true,
   codigos: true,
+  equivalencias: true,
 } satisfies Prisma.ArticuloInclude;
+
+/** Quién hace el cambio: su id (auditoría) y su rol (el evento lo lleva). */
+export interface ActorCambio {
+  id: string;
+  roleCode: string;
+}
+
+/** Evento con el que QHSE (otro contenedor) recibe los artículos que se entregan a una persona. */
+export const EVENTO_ARTICULO_EPI = 'operaciones.inventario.articulo_epi_actualizado';
 
 type ArticuloConNombres = Prisma.ArticuloGetPayload<{ include: typeof INCLUIR }>;
 
@@ -46,6 +58,9 @@ function vista(a: ArticuloConNombres, stockActual: number) {
       comercial: codigo('comercial'),
       barras: codigo('barras'),
     },
+    entregaPersonal: a.entregaPersonal,
+    tipoTalla: a.tipoTalla,
+    equivalencias: a.equivalencias.map((e) => ({ codigo: e.codigo, motivo: e.motivo })),
     nota: a.nota,
     informacionAdicional: a.informacionAdicional,
     costoUnitario: num(a.costoUnitario),
@@ -59,7 +74,10 @@ const TIPOS_CODIGO = ['alterno', 'comercial', 'barras'] as const;
 
 @Injectable()
 export class ArticulosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly bus: EventBus,
+  ) {}
 
   /** Stock de todos los artículos: el último saldo de cada bodega, sumado. Nunca se guarda. */
   private async stockPorArticulo(): Promise<Map<string, number>> {
@@ -123,8 +141,10 @@ export class ArticulosService {
     };
   }
 
-  async crear(dto: CrearArticuloDto, actorId: string) {
+  async crear(dto: CrearArticuloDto, actor: ActorCambio) {
+    const actorId = actor.id;
     const codigo = dto.codigo.trim();
+    this.validarEntrega(dto.entregaPersonal ?? false, dto.tipoTalla ?? null);
     await this.validarClasificacion(dto.categoriaId, dto.subcategoriaId ?? null, dto.unidadStockId);
     if (await this.prisma.articulo.findUnique({ where: { codigo }, select: { id: true } })) {
       throw new ConflictException({
@@ -147,19 +167,31 @@ export class ArticulosService {
           informacionAdicional: dto.informacionAdicional?.trim() || null,
           costoUnitario: dto.costoUnitario ?? null,
           descuentoSugerido: dto.descuentoSugerido ?? null,
+          entregaPersonal: dto.entregaPersonal ?? false,
+          tipoTalla: dto.tipoTalla ?? null,
           activo: dto.activo ?? true,
           createdBy: actorId,
           updatedBy: actorId,
         },
       });
       await this.guardarCodigos(tx, id, dto.codigos, actorId);
+      if (dto.entregaPersonal) await this.publicarEpi(tx, id, actor);
     });
     return this.detalle(id);
   }
 
-  async actualizar(id: string, dto: ActualizarArticuloDto, actorId: string) {
+  async actualizar(id: string, dto: ActualizarArticuloDto, actor: ActorCambio) {
+    const actorId = actor.id;
     const actual = await this.prisma.articulo.findUnique({ where: { id } });
     if (!actual) throw new NotFoundException('El artículo no existe');
+    const entregaPersonal = dto.entregaPersonal ?? actual.entregaPersonal;
+    // `null` explícito quita la talla; si deja de entregarse a una persona, tampoco lleva talla
+    const tipoTalla = !entregaPersonal
+      ? null
+      : dto.tipoTalla !== undefined
+        ? dto.tipoTalla
+        : actual.tipoTalla;
+    this.validarEntrega(entregaPersonal, tipoTalla);
     const categoriaId = dto.categoriaId ?? actual.categoriaId;
     // `null` explícito quita la subcategoría; si cambia la categoría y no se indica otra subcategoría, la anterior deja de valer
     const pedida = dto.subcategoriaId as string | null | undefined;
@@ -194,12 +226,61 @@ export class ArticulosService {
             ? { descuentoSugerido: dto.descuentoSugerido }
             : {}),
           ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
+          entregaPersonal,
+          tipoTalla,
           updatedBy: actorId,
         },
       });
       await this.guardarCodigos(tx, id, dto.codigos, actorId);
+      // si dejó de entregarse a una persona también se avisa: QHSE lo desactiva
+      if (entregaPersonal || actual.entregaPersonal) await this.publicarEpi(tx, id, actor);
     });
     return this.detalle(id);
+  }
+
+  /** Solo un artículo que se entrega a una persona lleva talla (la base lo garantiza también con un CHECK). */
+  private validarEntrega(entregaPersonal: boolean, tipoTalla: string | null) {
+    if (tipoTalla && !entregaPersonal) {
+      throw new ConflictException({
+        message: 'Solo un artículo que se entrega a una persona lleva tipo de talla',
+        code: 'TALLA_SIN_ENTREGA',
+      });
+    }
+  }
+
+  /** Publica el artículo para QHSE, en la transacción de quien cambia (outbox). Lleva solo lo que QHSE necesita. */
+  private async publicarEpi(tx: Prisma.TransactionClient, articuloId: string, actor: ActorCambio) {
+    const a = await tx.articulo.findUniqueOrThrow({ where: { id: articuloId } });
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: EVENTO_ARTICULO_EPI,
+        subject: { type: 'inventario_articulo', id: a.id },
+        data: {
+          articuloId: a.id,
+          codigo: a.codigo,
+          nombre: a.nombre,
+          tipoTalla: a.tipoTalla,
+          entregaPersonal: a.entregaPersonal,
+          activo: a.activo,
+        },
+        actor: { userId: actor.id, role: actor.roleCode },
+        traceparent: currentTraceparent(),
+      }),
+    );
+  }
+
+  /** Vuelve a publicar todos los artículos que se entregan a una persona (carga inicial o recuperación de QHSE). */
+  async republicarEpi(actor: ActorCambio): Promise<{ publicados: number }> {
+    const ids = await this.prisma.articulo.findMany({
+      where: { entregaPersonal: true },
+      select: { id: true },
+      orderBy: { codigo: 'asc' },
+    });
+    await this.prisma.$transaction(async (tx) => {
+      for (const { id } of ids) await this.publicarEpi(tx, id, actor);
+    });
+    return { publicados: ids.length };
   }
 
   private async validarClasificacion(

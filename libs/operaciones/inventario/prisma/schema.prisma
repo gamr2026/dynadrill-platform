@@ -144,6 +144,10 @@ model Articulo {
   costoUnitario        Decimal?              @map("costo_unitario") @db.Decimal(14, 4)
   /// % de descuento sugerido a nivel general (no por cliente).
   descuentoSugerido    Decimal?              @map("descuento_sugerido") @db.Decimal(5, 2)
+  /// Se entrega a una persona (EPI y ropa de trabajo): QHSE lo recibe por evento.
+  entregaPersonal      Boolean               @default(false) @map("entrega_personal")
+  /// Tipo de talla que admite al entregarse; nulo = no lleva talla.
+  tipoTalla            TipoTalla?            @map("tipo_talla")
   /// Id del producto en AS2, cuando AS2 lo exponga.
   as2Id                Int?                  @unique @map("as2_id")
   activo               Boolean               @default(true)
@@ -152,14 +156,48 @@ model Articulo {
   updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy            String?               @map("updated_by") @db.Uuid
 
-  codigos     ArticuloCodigo[]
-  partes      ArticuloParte[]
-  movimientos Movimiento[]
-  consumos    ConsumoTicket[]
+  codigos       ArticuloCodigo[]
+  equivalencias ArticuloEquivalencia[]
+  partes        ArticuloParte[]
+  movimientos   Movimiento[]
+  consumos      ConsumoTicket[]
 
   @@index([categoriaId])
   @@index([subcategoriaId])
   @@map("articulo")
+  @@schema("inventario")
+}
+
+enum TipoTalla {
+  ropa
+  calzado
+  guante
+
+  @@map("tipo_talla")
+  @@schema("inventario")
+}
+
+enum MotivoEquivalencia {
+  talla
+  duplicado
+  digitacion
+
+  @@map("motivo_equivalencia")
+  @@schema("inventario")
+}
+
+/// Códigos de producto de AS2 fusionados en un artículo (tallas que eran productos, duplicados, errores de digitación).
+model ArticuloEquivalencia {
+  id         String             @id @db.Uuid
+  articuloId String             @map("articulo_id") @db.Uuid
+  articulo   Articulo           @relation(fields: [articuloId], references: [id], onDelete: Cascade)
+  codigo     String             @unique
+  motivo     MotivoEquivalencia
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?            @map("created_by") @db.Uuid
+
+  @@index([articuloId])
+  @@map("articulo_equivalencia")
   @@schema("inventario")
 }
 

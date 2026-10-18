@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { cargarDatosReales } from '../prisma/cargar-datos-reales';
+import { cargarEpp } from '../prisma/cargar-epp';
 import { sembrarCatalogos } from './catalog/sembrar-catalogos';
 import { DespachosConsumer } from './consumers/despachos.consumer';
 import { InventarioModule } from './inventario.module';
@@ -1149,11 +1150,150 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     });
   });
 
+  describe('EPP: artículos que se entregan a una persona (QHSE los recibe por evento)', () => {
+    const url = '/api/operaciones/inventario/articulos';
+    const eventosDe = async (articuloId: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.articulo_epi_actualizado' AND datos->'data'->>'articuloId' = $1 ORDER BY id",
+          [articuloId],
+        )
+      ).rows.map((x) => x.d);
+    const crearEpp = async (sufijo: string, extra: object = {}) => {
+      const r = await http()
+        .post(url)
+        .set(bodeguero())
+        .send({
+          codigo: `EPP${n}${sufijo}`,
+          nombre: `Botas de prueba ${sufijo}`,
+          categoriaId: ids.categoria,
+          unidadStockId: ids.unidad,
+          entregaPersonal: true,
+          tipoTalla: 'calzado',
+          ...extra,
+        });
+      if (r.body?.id) articulos.push(r.body.id);
+      return r;
+    };
+
+    it('crear un artículo de entrega personal con su tipo de talla publica el evento para QHSE; uno que no se entrega no lo publica', async () => {
+      const r = await crearEpp('A');
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
+        entregaPersonal: true,
+        tipoTalla: 'calzado',
+        equivalencias: [],
+      });
+      expect(await eventosDe(r.body.id)).toEqual([
+        {
+          articuloId: r.body.id,
+          codigo: `EPP${n}A`,
+          nombre: 'Botas de prueba A',
+          tipoTalla: 'calzado',
+          entregaPersonal: true,
+          activo: true,
+        },
+      ]);
+      const comun = await crearArticulo('E1');
+      expect(await eventosDe(comun.id)).toEqual([]);
+    });
+
+    it('la talla exige que el artículo se entregue a una persona: el servicio lo rechaza y la base también', async () => {
+      const r = await crearEpp('B', { entregaPersonal: false });
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('TALLA_SIN_ENTREGA');
+      const a = await crearArticulo('E2');
+      await expect(
+        admin.query("UPDATE inventario.articulo SET tipo_talla = 'ropa' WHERE id = $1", [a.id]),
+      ).rejects.toThrow(/articulo_tipo_talla_check/);
+    });
+
+    it('dejar de entregarlo a una persona quita la talla y vuelve a publicar (QHSE lo desactiva); un cambio de nombre también se publica', async () => {
+      const r = await crearEpp('C');
+      await http()
+        .put(`${url}/${r.body.id}`)
+        .set(bodeguero())
+        .send({ nombre: 'Botas renombradas' })
+        .expect(200);
+      const baja = await http()
+        .put(`${url}/${r.body.id}`)
+        .set(bodeguero())
+        .send({ entregaPersonal: false })
+        .expect(200);
+      expect(baja.body).toMatchObject({ entregaPersonal: false, tipoTalla: null });
+      const eventos = await eventosDe(r.body.id);
+      expect(eventos.map((e) => [e.nombre, e.entregaPersonal, e.tipoTalla])).toEqual([
+        ['Botas de prueba C', true, 'calzado'],
+        ['Botas renombradas', true, 'calzado'],
+        ['Botas renombradas', false, null],
+      ]);
+    });
+
+    it('republicar manda todos los que se entregan a una persona; solo lo hace quien administra el catálogo', async () => {
+      const a = await crearEpp('D');
+      await http().post(`${url}/epi/republicar`).set(lector()).expect(403);
+      const r = await http().post(`${url}/epi/republicar`).set(bodeguero()).expect(201);
+      expect(r.body.publicados).toBeGreaterThanOrEqual(1);
+      expect((await eventosDe(a.body.id)).length).toBe(2);
+    });
+
+    it('un código de AS2 fusionado equivale a un solo artículo y se ve en su ficha', async () => {
+      const a = await crearEpp('F');
+      const b = await crearEpp('G');
+      const codigo = `EQ${n}`;
+      await admin.query(
+        "INSERT INTO inventario.articulo_equivalencia (id, articulo_id, codigo, motivo) VALUES ($1, $2, $3, 'talla')",
+        [uuidv7(), a.body.id, codigo],
+      );
+      await expect(
+        admin.query(
+          "INSERT INTO inventario.articulo_equivalencia (id, articulo_id, codigo, motivo) VALUES ($1, $2, $3, 'duplicado')",
+          [uuidv7(), b.body.id, codigo],
+        ),
+      ).rejects.toThrow(/articulo_equivalencia_codigo_key/);
+      const ficha = await http().get(`${url}/${a.body.id}`).set(lector()).expect(200);
+      expect(ficha.body.equivalencias).toEqual([{ codigo, motivo: 'talla' }]);
+    });
+  });
+
+  describe('carga del EPP de AS2', () => {
+    it('es idempotente y deja los 58 artículos depurados (37 de entrega personal) con las 11 equivalencias de AS2', async () => {
+      await cargarEpp(prisma); // si aún no estaba cargado, la primera vez lo carga
+      const r = await cargarEpp(prisma);
+      expect(r).toMatchObject({ articulos: 0, yaExistian: 58, equivalencias: 0 });
+      const c = await admin.query(
+        `SELECT count(*)::int AS articulos,
+                count(*) FILTER (WHERE entrega_personal)::int AS personales,
+                (SELECT count(*)::int FROM inventario.articulo_equivalencia q JOIN inventario.articulo x ON x.id = q.articulo_id WHERE x.codigo LIKE 'EPP-%') AS equivalencias
+           FROM inventario.articulo WHERE codigo LIKE 'EPP-%'`,
+      );
+      expect(c.rows[0]).toEqual({ articulos: 58, personales: 37, equivalencias: 11 });
+      // las tallas no son artículos: las botas, el overol y los guantes llevan su tipo de talla y las tallas fusionadas son equivalencias
+      const botas = await admin.query(
+        `SELECT a.tipo_talla, array_agg(e.codigo ORDER BY e.codigo) AS equivalentes
+           FROM inventario.articulo a JOIN inventario.articulo_equivalencia e ON e.articulo_id = a.id
+          WHERE a.codigo = 'EPP-0038' GROUP BY a.tipo_talla`,
+      );
+      expect(botas.rows[0]).toEqual({
+        tipo_talla: 'calzado',
+        equivalentes: ['EPP-0039', 'EPP-0040', 'EPP-0041', 'EPP-0042'],
+      });
+      // el dato personal (overoles bordados con nombre de persona) no se cargó
+      expect(
+        (
+          await admin.query(
+            "SELECT count(*)::int AS n FROM inventario.articulo WHERE nombre ILIKE '%BORDADO%'",
+          )
+        ).rows[0].n,
+      ).toBe(0);
+    });
+  });
+
   describe('carga inicial desde AS2', () => {
     it('es idempotente: volver a cargarla no duplica artículos ni saldos', async () => {
       await cargarDatosReales(prisma); // si aún no estaba cargada, la primera vez la carga
       const antes = await admin.query(
-        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%')::int AS articulos,
+        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND codigo NOT LIKE 'EPP%')::int AS articulos,
                 (SELECT count(*) FROM inventario.movimiento WHERE origen = 'saldo_inicial')::int AS saldos`,
       );
       const r = await cargarDatosReales(prisma);
@@ -1167,7 +1307,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         partes: 0,
       });
       const despues = await admin.query(
-        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%')::int AS articulos,
+        `SELECT (SELECT count(*) FROM inventario.articulo WHERE codigo NOT LIKE 'IT%' AND codigo NOT LIKE 'EPP%')::int AS articulos,
                 (SELECT count(*) FROM inventario.movimiento WHERE origen = 'saldo_inicial')::int AS saldos`,
       );
       expect(despues.rows[0]).toEqual(antes.rows[0]);

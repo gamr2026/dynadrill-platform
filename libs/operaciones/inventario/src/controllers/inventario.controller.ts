@@ -67,7 +67,7 @@ export class InventarioController {
   @RequirePermission(P.ARTICULOS_GESTIONAR)
   @Post('articulos')
   crear(@Body() dto: CrearArticuloDto, @CurrentUser() actor: AuthUser) {
-    return this.articulos.crear(dto, actor.id);
+    return this.articulos.crear(dto, actor);
   }
 
   @RequirePermission(P.ARTICULOS_GESTIONAR)
@@ -77,7 +77,14 @@ export class InventarioController {
     @Body() dto: ActualizarArticuloDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.articulos.actualizar(id, dto, actor.id);
+    return this.articulos.actualizar(id, dto, actor);
+  }
+
+  /** Vuelve a publicar los artículos que se entregan a una persona para que QHSE los reciba (carga inicial o recuperación). */
+  @RequirePermission(P.ARTICULOS_GESTIONAR)
+  @Post('articulos/epi/republicar')
+  republicarEpi(@CurrentUser() actor: AuthUser) {
+    return this.articulos.republicarEpi(actor);
   }
 
   // --- kardex y existencias ---

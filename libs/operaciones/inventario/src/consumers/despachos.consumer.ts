@@ -21,6 +21,8 @@ export class DespachosConsumer implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.bus.subscribe({
       source: 'comercial',
+      // Pumping también consume de comercial en este contenedor: sin grupo propio compartirían la cola y se perderían eventos
+      group: 'inventario',
       patterns: ['comercial.despacho.solicitado', 'comercial.despacho.resuelto'],
       handler: (event) => this.consumir(event),
     });

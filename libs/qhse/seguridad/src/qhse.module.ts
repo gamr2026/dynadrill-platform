@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ArticulosEpiConsumer } from './consumers/articulos-epi.consumer';
 import { PumpingEventosConsumer } from './consumers/pumping-eventos.consumer';
 import { EpiConsultaService } from './epi/epi-consulta.service';
 import { EpiController } from './epi/epi.controller';
@@ -21,6 +22,7 @@ import { PrismaService } from './prisma/prisma.service';
     EpiConsultaService,
     EpiRenglonesService,
     PumpingEventosConsumer,
+    ArticulosEpiConsumer,
   ],
   exports: [EpiService],
 })

@@ -22,7 +22,7 @@ const INCLUDE_DETALLE = {
   trabajador: { include: { perfil: true, rol: true } },
   ticket: true,
   lugar: true,
-  items: { include: { elemento: true, talla: true }, orderBy: { elemento: { orden: 'asc' } } },
+  items: { include: { elemento: true, talla: true }, orderBy: { elemento: { nombre: 'asc' } } },
   firmaTrabajador: true,
   firmaTh: true,
   aprobador: true,
@@ -42,7 +42,7 @@ export class EpiConsultaService {
   elementos() {
     return this.prisma.epiElemento.findMany({
       where: { activo: true },
-      orderBy: { orden: 'asc' },
+      orderBy: { nombre: 'asc' },
       select: { id: true, codigo: true, nombre: true, tipoTalla: true },
     });
   }

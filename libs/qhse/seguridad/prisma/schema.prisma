@@ -50,20 +50,24 @@ model TicketRef {
   @@schema("qhse")
 }
 
-/// Catálogo de elementos de protección individual y ropa de trabajo.
+/// RÉPLICA de los artículos de Inventario que se entregan a una persona (otro contenedor, D1: sin FK). La mantiene el evento
+/// `operaciones.inventario.articulo_epi_actualizado`; QHSE no la edita.
 model EpiElemento {
-  id        String     @id @db.Uuid
-  /// Código estable (minúsculas y guion bajo): el comportamiento nunca se decide comparando nombres.
-  codigo    String     @unique
-  nombre    String
+  id             String     @id @db.Uuid
+  /// Id del artículo en Inventario.
+  articuloId     String     @unique @map("articulo_id") @db.Uuid
+  /// Código del producto en AS2 (copia justificada).
+  codigo         String     @unique
+  nombre         String
   /// Tipo de talla que lleva el elemento; `null` = no lleva talla.
-  tipoTalla TipoTalla? @map("tipo_talla")
-  orden     Int
-  activo    Boolean    @default(true)
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?    @map("created_by") @db.Uuid
-  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?    @map("updated_by") @db.Uuid
+  tipoTalla      TipoTalla? @map("tipo_talla")
+  activo         Boolean    @default(true)
+  /// Momento (del evento) del último cambio aplicado.
+  sincronizadoAt DateTime   @default(now()) @map("sincronizado_at") @db.Timestamptz(6)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?    @map("created_by") @db.Uuid
+  updatedAt      DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?    @map("updated_by") @db.Uuid
 
   items EpiEntregaItem[]
 
@@ -73,15 +77,15 @@ model EpiElemento {
 
 /// Tallas por tipo (ropa, calzado, guante).
 model EpiTalla {
-  id        String   @id @db.Uuid
+  id        String    @id @db.Uuid
   tipo      TipoTalla
   codigo    String
   orden     Int
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?   @map("updated_by") @db.Uuid
 
   items EpiEntregaItem[]
 
@@ -93,38 +97,38 @@ model EpiTalla {
 
 /// Entrega de EPI (DYN-SGI-RE-032): una por trabajador (y por ticket, si la origina un servicio).
 model EpiEntrega {
-  id                 String    @id @db.Uuid
-  numero             Int       @unique @default(autoincrement())
-  trabajadorId       String    @map("trabajador_id") @db.Uuid
-  trabajador         IdUsuario @relation("epiTrabajador", fields: [trabajadorId], references: [id])
-  ticketId           String?   @map("ticket_id") @db.Uuid
+  id                 String     @id @db.Uuid
+  numero             Int        @unique @default(autoincrement())
+  trabajadorId       String     @map("trabajador_id") @db.Uuid
+  trabajador         IdUsuario  @relation("epiTrabajador", fields: [trabajadorId], references: [id])
+  ticketId           String?    @map("ticket_id") @db.Uuid
   ticket             TicketRef? @relation(fields: [ticketId], references: [ticketId])
   /// Base o bodega donde se entrega (catalogos.bodega).
-  lugarBodegaId      String?   @map("lugar_bodega_id") @db.Uuid
+  lugarBodegaId      String?    @map("lugar_bodega_id") @db.Uuid
   lugar              CatBodega? @relation(fields: [lugarBodegaId], references: [id])
-  estado             EstadoEpi @default(solicitado)
-  firmaTrabajadorPor String?   @map("firma_trabajador_por") @db.Uuid
+  estado             EstadoEpi  @default(solicitado)
+  firmaTrabajadorPor String?    @map("firma_trabajador_por") @db.Uuid
   firmaTrabajador    IdUsuario? @relation("epiFirmaTrabajador", fields: [firmaTrabajadorPor], references: [id])
-  firmaTrabajadorAt  DateTime? @map("firma_trabajador_at") @db.Timestamptz(6)
-  firmaThPor         String?   @map("firma_th_por") @db.Uuid
+  firmaTrabajadorAt  DateTime?  @map("firma_trabajador_at") @db.Timestamptz(6)
+  firmaThPor         String?    @map("firma_th_por") @db.Uuid
   firmaTh            IdUsuario? @relation("epiFirmaTh", fields: [firmaThPor], references: [id])
-  firmaThAt          DateTime? @map("firma_th_at") @db.Timestamptz(6)
-  aprobadoPor        String?   @map("aprobado_por") @db.Uuid
+  firmaThAt          DateTime?  @map("firma_th_at") @db.Timestamptz(6)
+  aprobadoPor        String?    @map("aprobado_por") @db.Uuid
   aprobador          IdUsuario? @relation("epiAprobador", fields: [aprobadoPor], references: [id])
-  aprobadoAt         DateTime? @map("aprobado_at") @db.Timestamptz(6)
-  rechazadoPor       String?   @map("rechazado_por") @db.Uuid
+  aprobadoAt         DateTime?  @map("aprobado_at") @db.Timestamptz(6)
+  rechazadoPor       String?    @map("rechazado_por") @db.Uuid
   rechazador         IdUsuario? @relation("epiRechazador", fields: [rechazadoPor], references: [id])
-  rechazadoAt        DateTime? @map("rechazado_at") @db.Timestamptz(6)
-  motivoRechazo      String?   @map("motivo_rechazo")
-  despachadoPor      String?   @map("despachado_por") @db.Uuid
+  rechazadoAt        DateTime?  @map("rechazado_at") @db.Timestamptz(6)
+  motivoRechazo      String?    @map("motivo_rechazo")
+  despachadoPor      String?    @map("despachado_por") @db.Uuid
   despachador        IdUsuario? @relation("epiDespachador", fields: [despachadoPor], references: [id])
-  despachadoAt       DateTime? @map("despachado_at") @db.Timestamptz(6)
-  createdBy          String?   @map("created_by") @db.Uuid
+  despachadoAt       DateTime?  @map("despachado_at") @db.Timestamptz(6)
+  createdBy          String?    @map("created_by") @db.Uuid
   creador            IdUsuario? @relation("epiCreador", fields: [createdBy], references: [id])
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedBy          String?   @map("updated_by") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedBy          String?    @map("updated_by") @db.Uuid
   editor             IdUsuario? @relation("epiEditor", fields: [updatedBy], references: [id])
-  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   items     EpiEntregaItem[]
   historial EpiEntregaHistorial[]
