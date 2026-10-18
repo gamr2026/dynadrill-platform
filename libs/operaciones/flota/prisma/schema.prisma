@@ -146,6 +146,7 @@ model Unidad {
   preventivos  UnidadPreventivo[]
   casos        InspeccionCaso[]
   inspecciones InspeccionVehiculo[]
+  viajes       GerenciamientoViaje[]
 
   @@index([tipo])
   @@map("unidad")
@@ -420,11 +421,221 @@ model InspeccionVehiculoRevision {
 
 /// `pumping.ticket`: solo el id (espejo de solo lectura, para la FK del caso de inspección).
 model PumTicket {
-  id    String           @id @db.Uuid
-  casos InspeccionCaso[]
+  id     String                @id @db.Uuid
+  casos  InspeccionCaso[]
+  viajes GerenciamientoViaje[]
 
   @@map("ticket")
   @@schema("pumping")
+}
+
+enum TipoGerenciamiento {
+  salida
+  retorno
+
+  @@map("tipo_gerenciamiento")
+  @@schema("flota")
+}
+
+enum NivelRiesgoViaje {
+  bajo
+  medio
+  alto
+
+  @@map("nivel_riesgo_viaje")
+  @@schema("flota")
+}
+
+enum DecisionViaje {
+  autorizado
+  rechazado
+
+  @@map("decision_viaje")
+  @@schema("flota")
+}
+
+/// Las 12 preguntas del cuestionario de riesgo del viaje (DYN-SGI-RE-049).
+model PreguntaRiesgoViaje {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  orden     Int      @unique @db.SmallInt
+  texto     String
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  opciones   OpcionRiesgoViaje[]
+  respuestas GerenciamientoViajeRespuesta[]
+
+  @@map("pregunta_riesgo_viaje")
+  @@schema("flota")
+}
+
+model OpcionRiesgoViaje {
+  id             String              @id @db.Uuid
+  preguntaId     String              @map("pregunta_id") @db.Uuid
+  pregunta       PreguntaRiesgoViaje @relation(fields: [preguntaId], references: [id])
+  orden          Int                 @db.SmallInt
+  etiqueta       String
+  puntos         Int
+  /// Respuesta «Deténgase» / «no conduce»: la solicitud no se acepta.
+  impideConducir Boolean             @default(false) @map("impide_conducir")
+  activa         Boolean             @default(true)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?             @map("created_by") @db.Uuid
+  updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?             @map("updated_by") @db.Uuid
+
+  respuestas GerenciamientoViajeRespuesta[]
+
+  @@unique([preguntaId, orden])
+  @@unique([id, preguntaId])
+  @@map("opcion_riesgo_viaje")
+  @@schema("flota")
+}
+
+/// El nivel es el de mayor `desdePuntos` que no supere el puntaje; `permisoAutoriza` autoriza ese nivel.
+model UmbralRiesgoViaje {
+  nivel           NivelRiesgoViaje @id
+  desdePuntos     Int              @unique @map("desde_puntos")
+  permisoAutoriza String           @map("permiso_autoriza")
+  descripcion     String
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String?          @map("created_by") @db.Uuid
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?          @map("updated_by") @db.Uuid
+
+  @@map("umbral_riesgo_viaje")
+  @@schema("flota")
+}
+
+/// Gerenciamiento de Viaje firmado por el Conductor. Solo admite que se le marque la decisión, una vez.
+model GerenciamientoViaje {
+  id                       String             @id @db.Uuid
+  numero                   BigInt             @unique @default(autoincrement())
+  tipo                     TipoGerenciamiento
+  ticketId                 String?            @map("ticket_id") @db.Uuid
+  ticket                   PumTicket?         @relation(fields: [ticketId], references: [id])
+  conductorId              String             @map("conductor_id") @db.Uuid
+  conductor                IdUsuario          @relation("viajeConductor", fields: [conductorId], references: [id])
+  unidadId                 String             @map("unidad_id") @db.Uuid
+  unidad                   Unidad             @relation(fields: [unidadId], references: [id])
+  fecha                    DateTime           @db.Date
+  motivo                   String
+  origenBodegaId           String?            @map("origen_bodega_id") @db.Uuid
+  origenBodega             CatBodega?         @relation("viajeOrigenBodega", fields: [origenBodegaId], references: [id])
+  origenPozoId             String?            @map("origen_pozo_id") @db.Uuid
+  origenPozo               CatPozo?           @relation("viajeOrigenPozo", fields: [origenPozoId], references: [id])
+  destinoBodegaId          String?            @map("destino_bodega_id") @db.Uuid
+  destinoBodega            CatBodega?         @relation("viajeDestinoBodega", fields: [destinoBodegaId], references: [id])
+  destinoPozoId            String?            @map("destino_pozo_id") @db.Uuid
+  destinoPozo              CatPozo?           @relation("viajeDestinoPozo", fields: [destinoPozoId], references: [id])
+  puntajeTotal             Int                @map("puntaje_total")
+  nivel                    NivelRiesgoViaje
+  pasajeros                String?
+  puedeCombinarViajes      Boolean?           @map("puede_combinar_viajes")
+  horaSalida               DateTime?          @map("hora_salida") @db.Time(0)
+  horaLlegada              DateTime?          @map("hora_llegada") @db.Time(0)
+  datosPernocta            String?            @map("datos_pernocta")
+  aprobacionTelefonicaDe   String?            @map("aprobacion_telefonica_de")
+  aprobacionTelefonicaHora DateTime?          @map("aprobacion_telefonica_hora") @db.Time(0)
+  decision                 DecisionViaje?
+  decididoPor              String?            @map("decidido_por") @db.Uuid
+  decisor                  IdUsuario?         @relation("viajeDecisor", fields: [decididoPor], references: [id])
+  decididoAt               DateTime?          @map("decidido_at") @db.Timestamptz(6)
+  motivoDecision           String?            @map("motivo_decision")
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String             @map("created_by") @db.Uuid
+  registrador              IdUsuario          @relation("viajeRegistrador", fields: [createdBy], references: [id])
+
+  respuestas     GerenciamientoViajeRespuesta[]
+  paradas        GerenciamientoViajeParada[]
+  comunicaciones GerenciamientoViajeComunicacion[]
+
+  @@index([conductorId, createdAt(sort: Desc)])
+  @@map("gerenciamiento_viaje")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeRespuesta {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  preguntaId       String              @map("pregunta_id") @db.Uuid
+  pregunta         PreguntaRiesgoViaje @relation(fields: [preguntaId], references: [id])
+  opcionId         String              @map("opcion_id") @db.Uuid
+  opcion           OpcionRiesgoViaje   @relation(fields: [opcionId, preguntaId], references: [id, preguntaId])
+
+  @@id([gerenciamientoId, preguntaId])
+  @@map("gerenciamiento_viaje_respuesta")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeParada {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  orden            Int                 @db.SmallInt
+  lugar            String
+  horaLlegada      DateTime?           @map("hora_llegada") @db.Time(0)
+  horaSalida       DateTime?           @map("hora_salida") @db.Time(0)
+  detallePernocta  String?             @map("detalle_pernocta")
+
+  @@id([gerenciamientoId, orden])
+  @@map("gerenciamiento_viaje_parada")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeComunicacion {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  orden            Int                 @db.SmallInt
+  frecuencia       String
+  personaContacto  String              @map("persona_contacto")
+  datosContacto    String?             @map("datos_contacto")
+
+  @@id([gerenciamientoId, orden])
+  @@map("gerenciamiento_viaje_comunicacion")
+  @@schema("flota")
+}
+
+/// `catalogos.bodega`: solo id, nombre y habilitado.
+model CatBodega {
+  id         String  @id @db.Uuid
+  nombre     String
+  habilitado Boolean @default(true)
+
+  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenBodega")
+  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoBodega")
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// `catalogos.campo`: solo id y nombre.
+model CatCampo {
+  id     String    @id @db.Uuid
+  nombre String
+  pozos  CatPozo[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+/// `catalogos.pozo`: lo necesario para nombrar el origen o el destino de un viaje.
+model CatPozo {
+  id             String    @id @db.Uuid
+  codigo         String?
+  nombreCompleto String    @map("nombre_completo")
+  campoId        String?   @map("campo_id") @db.Uuid
+  campo          CatCampo? @relation(fields: [campoId], references: [id])
+  habilitado     Boolean   @default(true)
+
+  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenPozo")
+  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoPozo")
+
+  @@map("pozo")
+  @@schema("catalogos")
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -487,6 +698,9 @@ model IdUsuario {
   inspeccionesAnuladas    InspeccionVehiculo[]         @relation("inspeccionAnulador")
   inspeccionesRegistradas InspeccionVehiculo[]         @relation("inspeccionRegistrador")
   revisiones              InspeccionVehiculoRevision[] @relation("revisionRevisor")
+  viajesConductor         GerenciamientoViaje[]        @relation("viajeConductor")
+  viajesDecididos         GerenciamientoViaje[]        @relation("viajeDecisor")
+  viajesRegistrados       GerenciamientoViaje[]        @relation("viajeRegistrador")
 
   @@map("usuario")
   @@schema("identidad")

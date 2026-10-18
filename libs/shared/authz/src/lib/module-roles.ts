@@ -210,7 +210,11 @@ export const ModuleRoles = {
    * `GerenciamientoViajeController` (un Supervisor que intente autorizar
    * MEDIO/ALTO recibe 403), no esta lista de roles.
    */
-  gerenciamientoViajeApprove: withAdmins(RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING),
+  gerenciamientoViajeApprove: withAdmins(
+    RoleCode.SUPERVISOR,
+    RoleCode.SUPERVISOR_PUMPING,
+    RoleCode.GERENTE_HSE, // lo autoriza también (MEDIO/ALTO), según la demo `main`
+  ),
 
   /**
    * Lectura del dominio de Mantenimiento / Unidades desde el flujo de

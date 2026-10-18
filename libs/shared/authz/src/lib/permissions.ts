@@ -331,6 +331,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.BODEGUERO],
   ),
   // pumping
+  nuevo(
+    'pumping.tickets.contexto_conductor',
+    'Consultar los tickets en los que la cuenta es operador asignado, con los datos mínimos del viaje (portal del Conductor)',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.OPERADOR, RoleCode.CONDUCTOR],
+  ),
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
   def(
     'pumpingDocumentosRead',
@@ -435,6 +440,13 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y anular los documentos de un conductor',
     ModuleRoles.maintenance,
   ),
+  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza el riesgo BAJO; MEDIO y ALTO exigen además este permiso
+  // (qué permiso exige cada nivel lo dice la tabla `umbral_riesgo_viaje`, no el código).
+  nuevo(
+    'flota.viajes.autorizar_mayor',
+    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo MEDIO o ALTO',
+    [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  ),
   // mantenimiento
   def(
     'maintenance',
@@ -502,6 +514,13 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     ModuleRoles.qhse,
   ),
   nuevo('qhse.ptw.aprobar', 'Aprobar un PTW y anularlo (con motivo)', ModuleRoles.qhse),
+  // ---- qhse: Stop Work Authority (SWA). Activarla es de cualquier trabajador (`qhse.eventos.reportar`); la gestión es del equipo HSE.
+  nuevo('qhse.swa.ver', 'Ver las SWA (Stop Work Authority) y su historial', ModuleRoles.qhse),
+  nuevo(
+    'qhse.swa.gestionar',
+    'Gestionar una SWA: notificar a la cadena, evaluar el riesgo, confirmar el reinicio y reanudar',
+    ModuleRoles.qhse,
+  ),
   // El Supervisor entra SOLO a estos dos (el Acta la sube al finalizar el ticket); no ve el resto de QHSE.
   nuevo(
     'qhse.acta_entrega.cargar',
@@ -594,6 +613,7 @@ export const Permission = {
   FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
   FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
+  PUMPING_CONTEXTO_CONDUCTOR: 'pumping.tickets.contexto_conductor',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
@@ -602,6 +622,7 @@ export const Permission = {
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
+  VIAJES_AUTORIZAR_MAYOR: 'flota.viajes.autorizar_mayor',
   UNIDADES_VER: 'flota.unidades.ver',
   UNIDADES_CREAR: 'flota.unidades.crear',
   UNIDADES_EDITAR: 'flota.unidades.editar',
@@ -636,6 +657,8 @@ export const Permission = {
   PTW_VER: 'qhse.ptw.ver',
   PTW_GESTIONAR: 'qhse.ptw.gestionar',
   PTW_APROBAR: 'qhse.ptw.aprobar',
+  SWA_VER: 'qhse.swa.ver',
+  SWA_GESTIONAR: 'qhse.swa.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

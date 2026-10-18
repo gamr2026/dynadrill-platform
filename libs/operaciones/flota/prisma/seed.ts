@@ -22,7 +22,8 @@ async function main() {
     const r = await sembrarFlota(prisma);
     console.log(
       `flota: ${r.reglas} reglas preventivas, ${r.proveedores} proveedores, ${r.unidades} unidades, ` +
-        `${r.tiposPermiso} tipos de documento de conductor y ${r.itemsInspeccion} ítems de inspección nuevos`,
+        `${r.tiposPermiso} tipos de documento de conductor y ${r.itemsInspeccion} ítems de inspección, ` +
+        `${r.preguntasViaje} preguntas y ${r.umbralesViaje} umbrales de riesgo de viaje nuevos`,
     );
   } finally {
     await prisma.$disconnect();
