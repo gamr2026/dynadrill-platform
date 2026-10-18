@@ -81,6 +81,11 @@ export class AvanceDto {
   repuestos?: RepuestoDto[];
 }
 
+export class RetornoDto {
+  @IsIn(['disponible', 'con_restricciones']) estadoFinal!: 'disponible' | 'con_restricciones';
+  @IsOptional() @IsString() @MaxLength(2000) observaciones?: string | null;
+}
+
 export class CorreccionDto {
   @IsString() @MaxLength(1000) nota!: string;
 }
@@ -194,6 +199,17 @@ export class MantenimientoController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.ejecucion.solicitarCorreccion(id, dto.nota, actor);
+  }
+
+  /** Fin correctivo: devuelve la unidad a Operaciones (solo con todas las sub-órdenes resueltas). */
+  @RequirePermission(P.MANTENIMIENTO_GESTIONAR)
+  @Post('ordenes/:id/retornar')
+  retornar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RetornoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ordenes.retornar(id, dto.estadoFinal, dto.observaciones ?? null, actor);
   }
 
   /** Todas las sub-órdenes de una unidad: la tarjeta «Mantenimientos» del ticket de Pumping. */

@@ -13,6 +13,7 @@ import { uuidv7 } from '@dyn/utils';
 import { ESTADO } from '../catalog/sembrar-catalogos';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { INCLUIR_SUBORDEN_DETALLE, vistaSuborden } from './suborden-vista';
 
 /**
  * Un repuesto usado. Es **de catálogo** (artículo de Inventario y la bodega de la que sale) o **de texto** (número de parte y
@@ -44,22 +45,11 @@ const EDITABLES: ReadonlySet<string> = new Set([
 ]);
 
 const INCLUIR = {
-  tipo: true,
-  estado: true,
-  asignada: { select: { id: true, nombre: true } },
+  ...INCLUIR_SUBORDEN_DETALLE,
   orden: { include: { reporte: { include: { unidad: true } } } },
-  repuestos: {
-    include: {
-      articulo: { select: { id: true, codigo: true, nombre: true } },
-      bodega: { select: { id: true, nombre: true } },
-    },
-    orderBy: { createdAt: 'asc' },
-  },
 } satisfies Prisma.SubordenInclude;
 
 type SubordenConDatos = Prisma.SubordenGetPayload<{ include: typeof INCLUIR }>;
-
-const num = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
 
 /**
  * Ejecución y cierre de una sub-orden (M2): el operador registra el avance (diagnóstico, actividades, horas y repuestos), la envía a
@@ -367,32 +357,9 @@ export class EjecucionService {
   private vista(s: SubordenConDatos) {
     const r = s.orden.reporte;
     return {
-      id: s.id,
-      codigo: `${r.codigo}-${s.tipo.sufijo}`,
-      ordenId: s.ordenId,
+      ...vistaSuborden(s, r.codigo),
       reporte: { id: r.id, codigo: r.codigo },
       unidad: { id: r.unidad.id, codigo: r.unidad.codigo, nombre: r.unidad.nombre },
-      tipo: { codigo: s.tipo.codigo, nombre: s.tipo.nombre },
-      estado: { codigo: s.estado.codigo, nombre: s.estado.nombre },
-      asignada: s.asignada,
-      diagnostico: s.diagnostico,
-      actividadesCorrectivas: s.actividadesCorrectivas,
-      horasTrabajo: num(s.horasTrabajo),
-      trabajosAdicionales: s.trabajosAdicionales,
-      notaCorreccion: s.notaCorreccion,
-      ejecucionIniciadaAt: s.ejecucionIniciadaAt,
-      ejecucionTerminadaAt: s.ejecucionTerminadaAt,
-      cierreAprobadoAt: s.cierreAprobadoAt,
-      repuestos: s.repuestos.map((x) => ({
-        id: x.id,
-        cantidad: Number(x.cantidad),
-        articulo: x.articulo,
-        bodega: x.bodega,
-        numeroParte: x.numeroParte,
-        descripcion: x.descripcion,
-        /** Salida del kardex que respalda el renglón (solo tras aprobar el cierre). */
-        movimientoId: x.movimientoId,
-      })),
     };
   }
 }

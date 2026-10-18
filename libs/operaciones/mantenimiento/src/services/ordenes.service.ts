@@ -11,6 +11,7 @@ import { ESTADO } from '../catalog/sembrar-catalogos';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { estadoDeOrden } from './estado-orden';
+import { INCLUIR_SUBORDEN_DETALLE, vistaSuborden } from './suborden-vista';
 
 /** Rol de las cuentas a las que se asigna una sub-orden mecánica o instrumental. */
 export const ROL_OPERADOR_MANTENIMIENTO = 'operador_mantenimiento';
@@ -33,10 +34,7 @@ const INCLUIR_ORDEN = {
       pumpingReporteUnidad: { include: { ticket: { select: { id: true, ticketNumero: true } } } },
     },
   },
-  subordenes: {
-    include: { tipo: true, estado: true, asignada: { select: { id: true, nombre: true } } },
-    orderBy: { tipo: { orden: 'asc' } },
-  },
+  subordenes: { include: INCLUIR_SUBORDEN_DETALLE, orderBy: { tipo: { orden: 'asc' } } },
 } satisfies Prisma.OrdenInclude;
 
 type OrdenConDatos = Prisma.OrdenGetPayload<{ include: typeof INCLUIR_ORDEN }>;
@@ -128,6 +126,70 @@ export class OrdenesService {
       }
       await tx.orden.update({ where: { id: ordenId }, data: { updatedBy: actor.id } });
       for (const n of nuevas) await this.publicarSuborden(tx, ordenId, orden.reporte.unidadId, n);
+    });
+    return this.obtener(ordenId);
+  }
+
+  /**
+   * Fin correctivo: el Jefe devuelve la unidad a Operaciones. Solo cuando todas las sub-órdenes están resueltas (cerradas o
+   * derivadas a Pumping), es decir, con la orden «aceptada». Deja quién, cuándo y en qué estado quedó la unidad.
+   */
+  async retornar(
+    ordenId: string,
+    estadoFinal: 'disponible' | 'con_restricciones',
+    observaciones: string | null,
+    actor: AuthUser,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const orden = await tx.orden.findUnique({
+        where: { id: ordenId },
+        include: { subordenes: { include: { estado: true } }, reporte: true },
+      });
+      if (!orden) throw new NotFoundException('La orden no existe');
+      if (orden.retornadaAt) {
+        throw new ConflictException({
+          message: 'La unidad ya volvió a operación',
+          code: 'ORDEN_CERRADA',
+        });
+      }
+      const estado = estadoDeOrden(
+        false,
+        orden.subordenes.map((s) => ({
+          estadoCodigo: s.estado.codigo,
+          resuelta: s.estado.resuelta,
+        })),
+      );
+      if (estado !== 'aceptada') {
+        throw new ConflictException({
+          message:
+            'Todas las sub-órdenes deben estar cerradas o derivadas antes de devolver la unidad',
+          code: 'ORDEN_NO_ACEPTADA',
+        });
+      }
+      await tx.orden.update({
+        where: { id: ordenId },
+        data: {
+          retornadaAt: new Date(),
+          retornadaPor: actor.id,
+          estadoFinal,
+          observacionesFinales: observaciones?.trim() || null,
+          updatedBy: actor.id,
+        },
+      });
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'operaciones.mantenimiento.orden.retornada',
+          subject: { type: 'mantenimiento_orden', id: ordenId },
+          actor: { userId: actor.id, role: actor.roleCode },
+          data: {
+            ordenId,
+            codigo: orden.reporte.codigo,
+            unidadId: orden.reporte.unidadId,
+            estadoFinal,
+          },
+        }),
+      );
     });
     return this.obtener(ordenId);
   }
@@ -426,15 +488,7 @@ export class OrdenesService {
             observaciones: o.observacionesFinales,
           }
         : null,
-      subordenes: o.subordenes.map((s) => ({
-        id: s.id,
-        codigo: `${r.codigo}-${s.tipo.sufijo}`,
-        tipo: { codigo: s.tipo.codigo, nombre: s.tipo.nombre },
-        estado: { codigo: s.estado.codigo, nombre: s.estado.nombre },
-        asignada: s.asignada,
-        notaDerivacion: s.notaDerivacion,
-        notaCorreccion: s.notaCorreccion,
-      })),
+      subordenes: o.subordenes.map((s) => vistaSuborden(s, r.codigo)),
     };
   }
 }

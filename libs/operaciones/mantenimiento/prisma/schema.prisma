@@ -160,8 +160,8 @@ model Suborden {
   estado                EstadoSuborden @relation(fields: [estadoId], references: [id])
   asignadaA             String?        @map("asignada_a") @db.Uuid
   asignada              IdUsuario?     @relation("subordenAsignada", fields: [asignadaA], references: [id])
-  /// FK a `identidad.usuario` (solo en la base de datos).
   asignadaPor           String?        @map("asignada_por") @db.Uuid
+  asignador             IdUsuario?     @relation("subordenAsignador", fields: [asignadaPor], references: [id])
   notaDerivacion        String?        @map("nota_derivacion")
   diagnostico           String?
   actividadesCorrectivas String?       @map("actividades_correctivas")
@@ -311,6 +311,7 @@ model IdUsuario {
 
   reportesDescartados ReporteRecibido[] @relation("reporteDescartadoPor")
   subordenesAsignadas Suborden[]        @relation("subordenAsignada")
+  subordenesQueAsigno Suborden[]        @relation("subordenAsignador")
 
   @@map("usuario")
   @@schema("identidad")

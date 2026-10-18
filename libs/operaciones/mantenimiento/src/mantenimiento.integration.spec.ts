@@ -959,6 +959,50 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       });
       expect(Number(m.cantidad)).toBe(3);
 
+      // la orden trae sus sub-órdenes completas (lo que muestra la bandeja del Jefe), no solo el estado
+      const orden = await http().get(`${base}/ordenes/${cerrada.body.ordenId}`).set(jefe());
+      expect(orden.body.subordenes[0]).toMatchObject({
+        id,
+        diagnostico: 'Filtro saturado',
+        horasTrabajo: 1.5,
+        asignada: { id: MECANICO.id },
+        asignadaPor: { id: JEFE.id },
+        estado: { codigo: 'cerrado' },
+      });
+      expect(orden.body.subordenes[0].repuestos).toHaveLength(2);
+      expect(orden.body.subordenes[0].cierreAprobadoAt).toEqual(expect.any(String));
+
+      // fin correctivo: con la única sub-orden cerrada, el Jefe devuelve la unidad (una sola vez)
+      expect(
+        (
+          await http()
+            .post(`${base}/ordenes/${cerrada.body.ordenId}/retornar`)
+            .set(mecanico())
+            .send({ estadoFinal: 'disponible' })
+        ).status,
+      ).toBe(403);
+      const retorno = await http()
+        .post(`${base}/ordenes/${cerrada.body.ordenId}/retornar`)
+        .set(jefe())
+        .send({ estadoFinal: 'con_restricciones', observaciones: 'Operar sin la bomba auxiliar' });
+      expect(retorno.status).toBe(201);
+      expect(retorno.body).toMatchObject({
+        estado: 'cerrada',
+        retorno: {
+          por: JEFE.id,
+          estadoFinal: 'con_restricciones',
+          observaciones: 'Operar sin la bomba auxiliar',
+        },
+      });
+      expect(
+        (
+          await http()
+            .post(`${base}/ordenes/${cerrada.body.ordenId}/retornar`)
+            .set(jefe())
+            .send({ estadoFinal: 'disponible' })
+        ).status,
+      ).toBe(409);
+
       // el renglón con salida ya no se puede cambiar ni borrar (ni siquiera la base lo permite)
       await expect(
         admin.query('UPDATE mantenimiento.suborden_repuesto SET cantidad = 9 WHERE id = $1', [
@@ -970,6 +1014,25 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       ).rejects.toThrow(/ya salió de bodega/);
       // una sub-orden cerrada no se vuelve a editar
       expect((await avance(id, { diagnostico: 'otro' })).status).toBe(409);
+    });
+
+    it('no se devuelve la unidad mientras haya sub-órdenes sin resolver', async () => {
+      const id = await subordenMecanica();
+      const orden = await http().get(`${base}/subordenes/${id}`).set(jefe());
+      const r = await http()
+        .post(`${base}/ordenes/${orden.body.ordenId}/retornar`)
+        .set(jefe())
+        .send({ estadoFinal: 'disponible' });
+      expect(r.status).toBe(409);
+      expect(r.body.code ?? r.body.message).toBeDefined();
+      expect(
+        (
+          await http()
+            .post(`${base}/ordenes/${orden.body.ordenId}/retornar`)
+            .set(jefe())
+            .send({ estadoFinal: 'roto' })
+        ).status,
+      ).toBe(400);
     });
 
     it('la corrección devuelve la sub-orden al operador, que puede volver a enviarla', async () => {
