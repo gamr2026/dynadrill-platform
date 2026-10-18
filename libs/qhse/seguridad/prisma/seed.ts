@@ -20,7 +20,7 @@ async function main() {
   });
   try {
     const r = await sembrarEpi(prisma);
-    console.log(`qhse: ${r.elementos} elementos y ${r.tallas} tallas de EPI nuevos`);
+    console.log(`qhse: ${r.tallas} tallas de EPI nuevas`);
   } finally {
     await prisma.$disconnect();
   }

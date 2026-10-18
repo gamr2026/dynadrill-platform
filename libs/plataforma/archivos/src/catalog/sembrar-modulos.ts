@@ -61,6 +61,38 @@ export const MODULOS_ARCHIVO = [
     tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'ticket_mezcla_documento',
+    nombre: 'Documento de mezcla de químicos de un ticket de Pumping',
+    permisoSubir: 'pumping.tickets.operar',
+    permisoVer: 'pumping.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'ticket_monitoreo_documento',
+    nombre: 'Monitoreo de un día de operación de un ticket de Pumping',
+    permisoSubir: 'pumping.tickets.operar',
+    permisoVer: 'pumping.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_acta_entrega',
+    nombre: 'Acta de Entrega de Locación (DYN-PMP-RE-027) de un pedido',
+    permisoSubir: 'qhse.acta_entrega.cargar',
+    permisoVer: 'qhse.acta_entrega.ver',
+    tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_documento_pedido',
+    nombre: 'Documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
+    permisoSubir: 'qhse.documentos.gestionar',
+    permisoVer: 'qhse.documentos.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */

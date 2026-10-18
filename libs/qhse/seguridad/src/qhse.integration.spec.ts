@@ -20,6 +20,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { ArticulosEpiConsumer } from './consumers/articulos-epi.consumer';
 import { PumpingEventosConsumer } from './consumers/pumping-eventos.consumer';
 import { PrismaService } from './prisma/prisma.service';
 import { QhseModule } from './qhse.module';
@@ -151,7 +152,38 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
   type Elemento = { id: string; codigo: string; tipoTalla: string | null };
   let elementos: Elemento[] = [];
   let tallas: Array<{ id: string; tipo: string; codigo: string }> = [];
-  const elemento = (codigo: string) => elementos.find((e) => e.codigo === codigo) as Elemento;
+  /** Código con el que la prueba crea cada elemento (los reales son códigos de AS2: EPP-0004...). */
+  const codigoDe = (clave: string) => `IT${n}-${clave}`;
+  const elemento = (clave: string) =>
+    elementos.find((e) => e.codigo === codigoDe(clave)) as Elemento;
+  let articulosEpi: ArticulosEpiConsumer;
+  const eventoArticulo = (
+    articuloId: string,
+    clave: string,
+    extra: Record<string, unknown> = {},
+    occurredAt = new Date().toISOString(),
+  ): EventEnvelope => {
+    const id = uuidv7();
+    eventos.push(id);
+    return {
+      id,
+      type: 'operaciones.inventario.articulo_epi_actualizado',
+      version: 1,
+      occurredAt,
+      source: 'operaciones',
+      subject: { type: 'inventario_articulo', id: articuloId },
+      actor: { userId: JEFE.id, role: 'jefe_base' },
+      data: {
+        articuloId,
+        codigo: codigoDe(clave),
+        nombre: `Elemento de prueba ${clave}`,
+        tipoTalla: null,
+        entregaPersonal: true,
+        activo: true,
+        ...extra,
+      },
+    } as EventEnvelope;
+  };
   const talla = (tipo: string, codigo: string) =>
     tallas.find((t) => t.tipo === tipo && t.codigo === codigo) as (typeof tallas)[number];
   /** Un renglón válido: con talla de guante si se pide, o un casco (que no lleva talla). */
@@ -198,11 +230,22 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     jest
       .spyOn(PumpingEventosConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
+    jest
+      .spyOn(ArticulosEpiConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(PumpingEventosConsumer);
+    articulosEpi = app.get(ArticulosEpiConsumer);
+    for (const [clave, tipoTalla] of [
+      ['casco', null],
+      ['guantes_nitrilo', 'guante'],
+      ['overol', 'ropa'],
+    ] as const) {
+      await articulosEpi.consumir(eventoArticulo(uuidv7(), clave, { tipoTalla }));
+    }
     elementos = await prisma.epiElemento.findMany({
-      where: { activo: true },
+      where: { codigo: { startsWith: `IT${n}-` } },
       select: { id: true, codigo: true, tipoTalla: true },
     });
     tallas = await prisma.epiTalla.findMany({ select: { id: true, tipo: true, codigo: true } });
@@ -219,6 +262,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     await admin.query('DELETE FROM qhse.epi_entrega WHERE trabajador_id = ANY($1::uuid[])', [
       [OP1.id, OP2.id, OP_INACTIVO.id],
     ]);
+    await admin.query('DELETE FROM qhse.epi_elemento WHERE codigo LIKE $1', [`IT${n}-%`]);
     if (eventos.length) {
       await admin.query('DELETE FROM msg_qhse.inbox WHERE id = ANY($1::uuid[])', [eventos]);
     }
@@ -610,17 +654,100 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
 
     it('el catálogo de elementos trae los activos, con su regla de talla', async () => {
       const r = await http().get('/api/qhse/epi/elementos').set(soloVer()).expect(200);
-      expect(r.body.length).toBeGreaterThanOrEqual(12);
-      expect(r.body.find((x: { codigo: string }) => x.codigo === 'casco')).toMatchObject({
+      expect(r.body.find((x: { codigo: string }) => x.codigo === codigoDe('casco'))).toMatchObject({
         tipoTalla: null,
       });
-      expect(r.body.find((x: { codigo: string }) => x.codigo === 'overol')).toMatchObject({
-        tipoTalla: 'ropa',
-      });
+      expect(r.body.find((x: { codigo: string }) => x.codigo === codigoDe('overol'))).toMatchObject(
+        {
+          tipoTalla: 'ropa',
+        },
+      );
       const t = await http().get('/api/qhse/epi/tallas').set(soloVer()).expect(200);
       expect(t.body.filter((x: { tipo: string }) => x.tipo === 'calzado')).toHaveLength(12);
       const l = await http().get('/api/qhse/epi/lugares').set(soloVer()).expect(200);
       expect(l.body.some((x: { id: string }) => x.id === BODEGA.id)).toBe(true);
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------ réplica de artículos
+
+  describe('elementos de EPI: réplica de los artículos de Inventario (evento)', () => {
+    const fila = (articuloId: string) => prisma.epiElemento.findUnique({ where: { articuloId } });
+
+    it('un artículo que se entrega a una persona entra al catálogo; un evento repetido no lo duplica', async () => {
+      const articuloId = uuidv7();
+      const e = eventoArticulo(articuloId, 'botas', { tipoTalla: 'calzado' });
+      await articulosEpi.consumir(e);
+      await articulosEpi.consumir(e); // repetido: lo ignora el inbox
+      expect(await fila(articuloId)).toMatchObject({
+        codigo: codigoDe('botas'),
+        nombre: 'Elemento de prueba botas',
+        tipoTalla: 'calzado',
+        activo: true,
+      });
+      expect(await prisma.epiElemento.count({ where: { articuloId } })).toBe(1);
+    });
+
+    it('un cambio posterior actualiza el elemento; uno más viejo no pisa al más nuevo', async () => {
+      const articuloId = uuidv7();
+      await articulosEpi.consumir(
+        eventoArticulo(articuloId, 'gafas', {}, '2026-11-02T10:00:00.000Z'),
+      );
+      await articulosEpi.consumir(
+        eventoArticulo(articuloId, 'gafas', { nombre: 'Gafas nuevas' }, '2026-11-02T12:00:00.000Z'),
+      );
+      await articulosEpi.consumir(
+        eventoArticulo(articuloId, 'gafas', { nombre: 'Gafas viejas' }, '2026-11-02T11:00:00.000Z'),
+      );
+      expect((await fila(articuloId))?.nombre).toBe('Gafas nuevas');
+    });
+
+    it('si el artículo deja de entregarse a una persona o se da de baja, el elemento se desactiva (no se borra)', async () => {
+      const a = uuidv7();
+      const b = uuidv7();
+      await articulosEpi.consumir(eventoArticulo(a, 'tapones', {}, '2026-11-03T10:00:00.000Z'));
+      await articulosEpi.consumir(eventoArticulo(b, 'orejeras', {}, '2026-11-03T10:00:00.000Z'));
+      await articulosEpi.consumir(
+        eventoArticulo(a, 'tapones', { entregaPersonal: false }, '2026-11-03T11:00:00.000Z'),
+      );
+      await articulosEpi.consumir(
+        eventoArticulo(b, 'orejeras', { activo: false }, '2026-11-03T11:00:00.000Z'),
+      );
+      expect((await fila(a))?.activo).toBe(false);
+      expect((await fila(b))?.activo).toBe(false);
+      const r = await http().get('/api/qhse/epi/elementos').set(soloVer()).expect(200);
+      const codigos = r.body.map((x: { codigo: string }) => x.codigo);
+      expect(codigos).not.toContain(codigoDe('tapones'));
+      expect(codigos).not.toContain(codigoDe('orejeras'));
+    });
+
+    it('un artículo que nunca se entregó a una persona no entra; un evento incompleto o con una talla inválida se ignora sin error', async () => {
+      const noEntra = uuidv7();
+      await articulosEpi.consumir(eventoArticulo(noEntra, 'extintor', { entregaPersonal: false }));
+      expect(await fila(noEntra)).toBeNull();
+      const incompleto = uuidv7();
+      await articulosEpi.consumir(eventoArticulo(incompleto, 'sin_nombre', { nombre: '' }));
+      await articulosEpi.consumir(
+        eventoArticulo(incompleto, 'talla_mala', { tipoTalla: 'sombrero' }),
+      );
+      expect(await fila(incompleto)).toBeNull();
+    });
+
+    it('la base no permite dos elementos del mismo artículo ni del mismo código', async () => {
+      const articuloId = uuidv7();
+      await articulosEpi.consumir(eventoArticulo(articuloId, 'unico'));
+      await expect(
+        admin.query(
+          "INSERT INTO qhse.epi_elemento (id, articulo_id, codigo, nombre) VALUES ($1, $2, $3, 'otro')",
+          [uuidv7(), articuloId, `${codigoDe('distinto')}`],
+        ),
+      ).rejects.toThrow(/epi_elemento_articulo_id_key/);
+      await expect(
+        admin.query(
+          "INSERT INTO qhse.epi_elemento (id, articulo_id, codigo, nombre) VALUES ($1, $2, $3, 'otro')",
+          [uuidv7(), uuidv7(), codigoDe('unico')],
+        ),
+      ).rejects.toThrow(/epi_elemento_codigo_key/);
     });
   });
 

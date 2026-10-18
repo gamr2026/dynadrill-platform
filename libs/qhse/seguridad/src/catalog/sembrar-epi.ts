@@ -2,61 +2,19 @@ import { uuidv7 } from '@dyn/utils';
 import type { PrismaClient, TipoTalla } from '../generated/client';
 
 /**
- * Elementos de protección individual y ropa de trabajo del formato DYN-SGI-RE-032. Lista inicial conservadora: QHSE la ajusta (altas
- * y bajas lógicas) y la consulta a Dynadrill queda anotada en documentacion/qhse/CONSULTAS-PARA-DYNADRILL.md. `codigo` es estable
- * (nunca cambia el comportamiento por el nombre); `tipoTalla` dice qué tallas admite (`null` = no lleva talla).
+ * Tallas del formato DYN-SGI-RE-032 por tipo de talla. Es lo único que QHSE siembra: los ELEMENTOS de EPI son artículos de Inventario
+ * (categoría EPP de AS2) y llegan por el evento `operaciones.inventario.articulo_epi_actualizado` (decisión D16); para la carga
+ * inicial, Inventario los republica (`POST /api/operaciones/inventario/articulos/epi/republicar`).
+ * Las tallas son valores de uso común (la talla no es parte del artículo en AS2: iba en el nombre del producto); QHSE las ajusta.
  */
-export const ELEMENTOS_EPI: ReadonlyArray<{
-  codigo: string;
-  nombre: string;
-  tipoTalla: TipoTalla | null;
-}> = [
-  { codigo: 'casco', nombre: 'Casco de seguridad', tipoTalla: null },
-  { codigo: 'gafas', nombre: 'Gafas de seguridad', tipoTalla: null },
-  { codigo: 'protector_facial', nombre: 'Protector facial', tipoTalla: null },
-  { codigo: 'tapones_auditivos', nombre: 'Tapones auditivos', tipoTalla: null },
-  { codigo: 'orejeras', nombre: 'Orejeras', tipoTalla: null },
-  { codigo: 'respirador', nombre: 'Mascarilla o respirador', tipoTalla: null },
-  { codigo: 'guantes_nitrilo', nombre: 'Guantes de nitrilo', tipoTalla: 'guante' },
-  { codigo: 'guantes_cuero', nombre: 'Guantes de cuero', tipoTalla: 'guante' },
-  {
-    codigo: 'botas_punta_acero',
-    nombre: 'Botas de seguridad con punta de acero',
-    tipoTalla: 'calzado',
-  },
-  { codigo: 'overol', nombre: 'Overol', tipoTalla: 'ropa' },
-  { codigo: 'chaleco_reflectivo', nombre: 'Chaleco reflectivo', tipoTalla: 'ropa' },
-  { codigo: 'arnes', nombre: 'Arnés de seguridad', tipoTalla: null },
-];
-
 export const TALLAS_EPI: Readonly<Record<TipoTalla, readonly string[]>> = {
   ropa: ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'],
   calzado: ['35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46'],
   guante: ['7', '8', '9', '10', '11'],
 };
 
-/** Idempotente: solo agrega los que faltan (por código) y no toca lo que QHSE ya ajustó. */
-export async function sembrarEpi(
-  prisma: PrismaClient,
-): Promise<{ elementos: number; tallas: number }> {
-  const elementos = await prisma.epiElemento.findMany({ select: { codigo: true, orden: true } });
-  const codigos = new Set(elementos.map((e) => e.codigo));
-  let orden = elementos.reduce((m, e) => Math.max(m, e.orden), 0);
-  let nuevosElementos = 0;
-  for (const e of ELEMENTOS_EPI) {
-    if (codigos.has(e.codigo)) continue;
-    await prisma.epiElemento.create({
-      data: {
-        id: uuidv7(),
-        codigo: e.codigo,
-        nombre: e.nombre,
-        tipoTalla: e.tipoTalla,
-        orden: ++orden,
-      },
-    });
-    nuevosElementos++;
-  }
-
+/** Idempotente: solo agrega las tallas que faltan y no toca lo que QHSE ya ajustó. */
+export async function sembrarEpi(prisma: PrismaClient): Promise<{ tallas: number }> {
   let nuevasTallas = 0;
   for (const [tipo, codigosTalla] of Object.entries(TALLAS_EPI) as [
     TipoTalla,
@@ -73,5 +31,5 @@ export async function sembrarEpi(
       nuevasTallas++;
     }
   }
-  return { elementos: nuevosElementos, tallas: nuevasTallas };
+  return { tallas: nuevasTallas };
 }
