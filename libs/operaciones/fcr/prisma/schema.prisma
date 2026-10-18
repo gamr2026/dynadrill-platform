@@ -213,15 +213,16 @@ model TipoOperador {
 
 /// Tipo de completación (OT de venta): selectiva, inyección, power oil.
 model TipoCompletacion {
-  id        String   @id @db.Uuid
-  codigo    String   @unique
-  nombre    String
-  orden     Int
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
 
   @@map("tipo_completacion")
   @@schema("fcr")
@@ -229,15 +230,16 @@ model TipoCompletacion {
 
 /// Tipo de trabajo (OT de servicios): fractura, estimulación, evaluación, cemento, picking.
 model TipoTrabajo {
-  id        String   @id @db.Uuid
-  codigo    String   @unique
-  nombre    String
-  orden     Int
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
 
   @@map("tipo_trabajo")
   @@schema("fcr")
@@ -245,15 +247,16 @@ model TipoTrabajo {
 
 /// Medida del picker: 7/8", 9.5/8", 5.5/8", 5/8".
 model TipoPicker {
-  id        String   @id @db.Uuid
-  codigo    String   @unique
-  nombre    String
-  orden     Int
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
 
   @@map("tipo_picker")
   @@schema("fcr")
@@ -317,6 +320,8 @@ model Ticket {
   herramientas   TicketHerramienta[]
   avisosPrecarga TicketAvisoPrecarga[]
   documentos     TicketDocumento[]
+  reunion        ReunionOperativa?
+  bitacora       BitacoraDia[]
 
   @@index([pasoCodigo])
   @@map("ticket")
@@ -578,6 +583,7 @@ model TicketHerramienta {
 
   eventos      TicketHerramientaEvento[]
   inspecciones InspeccionHerramienta[]
+  usos         UsoHerramientaDia[]
 
   @@index([ticketId])
   @@map("ticket_herramienta")
@@ -774,6 +780,99 @@ model TicketDocumento {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Reunión operativa, bitácora diaria y uso diario de las herramientas
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Estado de cobro de una herramienta en un día (el mismo que recibe Comercial en el Reporte de Herramientas).
+enum EstadoUsoHerramienta {
+  operacion
+  stand_by
+  daily_charge
+  venta
+
+  @@map("estado_uso_herramienta")
+  @@schema("fcr")
+}
+
+/// Acta de la reunión operativa (una por ticket).
+model ReunionOperativa {
+  ticketId   String    @id @map("ticket_id") @db.Uuid
+  ticket     Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha      DateTime  @db.Date
+  firmadaAt  DateTime  @default(now()) @map("firmada_at") @db.Timestamptz(6)
+  firmadaPor String    @map("firmada_por") @db.Uuid
+  firmante   IdUsuario @relation("reunionFirmante", fields: [firmadaPor], references: [id])
+
+  @@map("reunion_operativa")
+  @@schema("fcr")
+}
+
+/// Bitácora de un día del ticket: fuente del Reporte Job de ese día.
+model BitacoraDia {
+  id          String     @id @db.Uuid
+  ticketId    String     @map("ticket_id") @db.Uuid
+  ticket      Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha       DateTime   @db.Date
+  enviadaAt   DateTime?  @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor  String?    @map("enviada_por") @db.Uuid
+  enviador    IdUsuario? @relation("bitacoraEnviador", fields: [enviadaPor], references: [id])
+  /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
+  corregidaAt DateTime?  @map("corregida_at") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String     @map("created_by") @db.Uuid
+  updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String     @map("updated_by") @db.Uuid
+
+  actividades BitacoraActividad[]
+
+  @@unique([ticketId, fecha])
+  @@map("bitacora_dia")
+  @@schema("fcr")
+}
+
+model BitacoraActividad {
+  id            String      @id @db.Uuid
+  bitacoraDiaId String      @map("bitacora_dia_id") @db.Uuid
+  dia           BitacoraDia @relation(fields: [bitacoraDiaId], references: [id], onDelete: Cascade)
+  orden         Int
+  horaInicio    DateTime    @map("hora_inicio") @db.Time(0)
+  horaFin       DateTime    @map("hora_fin") @db.Time(0)
+  detalle       String
+  autorId       String      @map("autor_id") @db.Uuid
+  autor         IdUsuario   @relation("bitacoraAutor", fields: [autorId], references: [id])
+
+  @@unique([bitacoraDiaId, orden])
+  @@map("bitacora_actividad")
+  @@schema("fcr")
+}
+
+/// Uso de una herramienta en un día, con su registro de completación o trabajo y picker.
+model UsoHerramientaDia {
+  id                 String               @id @db.Uuid
+  herramientaId      String               @map("herramienta_id") @db.Uuid
+  herramienta        TicketHerramienta    @relation(fields: [herramientaId], references: [id], onDelete: Cascade)
+  fecha              DateTime             @db.Date
+  estado             EstadoUsoHerramienta
+  tipoCompletacionId String?              @map("tipo_completacion_id") @db.Uuid
+  tipoCompletacion   TipoCompletacion?    @relation(fields: [tipoCompletacionId], references: [id])
+  tipoTrabajoId      String?              @map("tipo_trabajo_id") @db.Uuid
+  tipoTrabajo        TipoTrabajo?         @relation(fields: [tipoTrabajoId], references: [id])
+  tipoPickerId       String?              @map("tipo_picker_id") @db.Uuid
+  tipoPicker         TipoPicker?          @relation(fields: [tipoPickerId], references: [id])
+  presion            Decimal?             @db.Decimal(10, 2)
+  peso               Decimal?             @db.Decimal(10, 2)
+  observacion        String?
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String               @map("created_by") @db.Uuid
+  updatedAt          DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String               @map("updated_by") @db.Uuid
+
+  @@unique([herramientaId, fecha])
+  @@map("uso_herramienta_dia")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
 // Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
 // ---------------------------------------------------------------------------------------------------------------
@@ -886,6 +985,9 @@ model IdUsuario {
   inspeccionesDecididas InspeccionHerramienta[]   @relation("inspeccionDecisor")
   firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
   documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
+  reuniones             ReunionOperativa[]        @relation("reunionFirmante")
+  bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
+  actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
 
   @@map("usuario")
   @@schema("identidad")

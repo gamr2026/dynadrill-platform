@@ -30,6 +30,9 @@ export const REQ = {
   herramientasRecibidas: 'herramientas_recibidas',
   inspeccionesEnviadas: 'inspecciones_enviadas',
   formularioInspeccionExterno: 'formulario_inspeccion_externo',
+  actaReunionOperativa: 'acta_reunion_operativa',
+  bitacoraEnviada: 'bitacora_enviada',
+  listadoUsoConfirmado: 'listado_uso_confirmado',
 } as const;
 
 interface PasoDef {
@@ -152,9 +155,15 @@ export const TRANSICIONES: Array<{
   { de: 'asignacion', a: 'reunion_operativa', porAccion: true },
   { de: 'preparacion_herramientas', a: 'asignacion' },
   { de: 'reunion_operativa', a: 'ejecucion_operativa' },
-  { de: 'ejecucion_operativa', a: 'revision_reportes' },
-  { de: 'revision_reportes', a: 'control_retorno' },
-  { de: 'revision_reportes', a: 'ejecucion_operativa', motivo: true, exigeRequisitos: false },
+  { de: 'ejecucion_operativa', a: 'revision_reportes', porAccion: true },
+  { de: 'revision_reportes', a: 'control_retorno', porAccion: true },
+  {
+    de: 'revision_reportes',
+    a: 'ejecucion_operativa',
+    motivo: true,
+    exigeRequisitos: false,
+    porAccion: true,
+  },
   { de: 'control_retorno', a: 'cierre' },
   { de: 'cierre', a: 'cerrado' },
 ];
@@ -171,6 +180,32 @@ interface RequisitoDef {
 }
 
 export const REQUISITOS: RequisitoDef[] = [
+  {
+    codigo: REQ.actaReunionOperativa,
+    nombre: 'Acta de la reunión operativa confirmada',
+    descripcion: 'El Supervisor confirmó el acta de la reunión operativa con su fecha.',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'reunion_operativa',
+  },
+  {
+    codigo: REQ.bitacoraEnviada,
+    nombre: 'Bitácora enviada a Facturación',
+    descripcion:
+      'Al menos un día de la bitácora se envió a Facturación (el operador los envía día por día).',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'ejecucion_operativa',
+  },
+  {
+    codigo: REQ.listadoUsoConfirmado,
+    nombre: 'Listado de uso de herramientas confirmado',
+    descripcion:
+      'El operador confirmó que el listado de uso diario de las herramientas está completo.',
+    ambito: 'ticket',
+    modulo: 'fcr',
+    paso: 'ejecucion_operativa',
+  },
   {
     codigo: REQ.inspeccionesEnviadas,
     nombre: 'Inspecciones de herramientas enviadas',

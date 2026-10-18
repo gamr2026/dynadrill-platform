@@ -338,7 +338,13 @@ run(
             (r) => r.requisitoCodigo,
           );
         // los del tronco aplican a los dos; el del tipo de operador, solo a SERVICIOS
-        const comunes = ['herramientas_recibidas', 'listado_herramientas_confirmado'];
+        const comunes = [
+          'acta_reunion_operativa',
+          'bitacora_enviada',
+          'herramientas_recibidas',
+          'listado_herramientas_confirmado',
+          'listado_uso_confirmado',
+        ];
         expect((await reqs(v.id)).sort()).toEqual(comunes);
         expect((await reqs(s.id)).sort()).toEqual(
           [
@@ -695,14 +701,21 @@ run(
         await asignar(t.id, { operadores: [{ usuarioId: OPERADOR.id }] }, jefe()).expect(403);
       });
 
-      it('después de asignar, en la ejecución solo actúa el operador asignado y los pasos siguientes siguen su camino', async () => {
+      it('después de asignar, la reunión es del Supervisor del ticket y la ejecución solo del operador asignado', async () => {
         const t = await hastaAsignacion();
         await asignar(t.id, { operadores: [{ usuarioId: OPERADOR.id }] }).expect(201);
-        // reunión operativa: la atiende el Supervisor del ticket
+        // reunión operativa: la atiende el Supervisor del ticket y exige el acta
         await avanzar(t.id, 'ejecucion_operativa', otroSupervisor()).expect(403);
+        const sinActa = await avanzar(t.id, 'ejecucion_operativa', supervisor()).expect(409);
+        expect(sinActa.body.detail ?? sinActa.body.message).toMatch(/Acta de la reunión operativa/);
+        await http()
+          .put(`/api/operaciones/fcr/tickets/${t.id}/reunion-operativa`)
+          .set(supervisor())
+          .send({ fecha: '2026-11-05' })
+          .expect(200);
         await avanzar(t.id, 'ejecucion_operativa', supervisor()).expect(201);
         // ejecución: el rol es operador FCR y además debe ser del equipo
-        await avanzar(t.id, 'revision_reportes', otroOperador()).expect(403);
+        await avanzar(t.id, 'revision_reportes', operador()).expect(409); // finalizar es una acción propia
         const mios = await http()
           .get('/api/operaciones/fcr/tickets?mios=true')
           .set(operador())
@@ -713,33 +726,11 @@ run(
           .set(otroOperador())
           .expect(200);
         expect(ajenos.body.some((x: { id: string }) => x.id === t.id)).toBe(false);
-        await avanzar(t.id, 'revision_reportes', operador()).expect(201);
-        // el rechazo de la revisión vuelve a la ejecución con motivo
-        await avanzar(t.id, 'ejecucion_operativa', supervisor()).expect(400);
-        await avanzar(
-          t.id,
-          'ejecucion_operativa',
-          supervisor(),
-          'Falta el reporte del día 2',
-        ).expect(201);
-        await avanzar(t.id, 'revision_reportes', operador()).expect(201);
-        await avanzar(t.id, 'control_retorno', supervisor()).expect(201);
-        // Bodega atiende el retorno sin ser del equipo (el paso no requiere equipo)
-        const bodega = token('bodeguero', BODEGUERO.nombre, [P.FCR_OPERAR], BODEGUERO.id);
-        const deBodega = await http()
-          .get('/api/operaciones/fcr/tickets?mios=true')
-          .set(bodega)
-          .expect(200);
-        expect(deBodega.body.some((x: { id: string }) => x.id === t.id)).toBe(true);
-        await avanzar(t.id, 'cierre', bodega).expect(201);
-        await avanzar(t.id, 'cerrado', supervisor()).expect(201);
-        const out = (await salidas(t.pedidoId)).map((s) => s.tipo);
-        expect(out.filter((x) => x === 'operaciones.fcr.cerrado')).toHaveLength(1);
-        // cerrado: ya no hay pasos siguientes (solo lectura)
-        const cerrado = await detalle(t.id);
-        expect(cerrado.siguientes).toEqual([]);
-        expect(cerrado.paso).toMatchObject({ codigo: 'cerrado', macro: 'aprobado' });
-        await avanzar(t.id, 'cierre', supervisor()).expect(409);
+        await http()
+          .post(`/api/operaciones/fcr/tickets/${t.id}/finalizar-ejecucion`)
+          .set(otroOperador())
+          .expect(403);
+        // el recorrido completo de la ejecución, el retorno y el cierre se prueba en fcr-ejecucion y fcr-cierre
       });
     });
 
