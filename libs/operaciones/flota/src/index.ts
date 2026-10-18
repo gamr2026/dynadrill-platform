@@ -8,5 +8,11 @@ export {
   type ActorLectura,
   type LecturaEntrada,
 } from './services/lecturas.service';
+export {
+  ConductoresService,
+  estadoDeDocumento,
+  hoyEcuador,
+  type EstadoDocumento,
+} from './services/conductores.service';
 export { PreventivosService, type PreventivoEntrada } from './services/preventivos.service';
 export { calcularAlertas, type AlertaPreventiva, type NivelAlerta } from './catalog/alertas';
