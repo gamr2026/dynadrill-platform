@@ -1053,6 +1053,31 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect((await enviar(id)).status).toBe(201);
     });
 
+    it('las órdenes de las unidades de un ticket salen por el ticket, aunque no las haya originado él', async () => {
+      const { reporteId, ticketId } = await reportePumping();
+      await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
+      const reporte = await prisma.reporteRecibido.findUniqueOrThrow({
+        where: { pumpingReporteUnidadId: reporteId },
+      });
+      const o = await http()
+        .post(`${base}/reportes/${reporte.id}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }] })
+        .expect(201);
+      const r = await http().get(`${base}/tickets/${ticketId}/ordenes`).set(jefe());
+      expect(r.status).toBe(200);
+      expect(r.body.map((x: { id: string }) => x.id)).toContain(o.body.id);
+      expect(r.body.every((x: { unidad: { id: string } }) => x.unidad.id === UNIDAD.id)).toBe(true);
+      // otro ticket sin esa unidad no la ve; sin permiso, no entra
+      const otro = await reportePumping({ vehiculoId: VEHICULO_SIN_UNIDAD.id });
+      expect(
+        (await http().get(`${base}/tickets/${otro.ticketId}/ordenes`).set(jefe())).body,
+      ).toEqual([]);
+      expect(
+        (await http().get(`${base}/tickets/${ticketId}/ordenes`).set(sinPermiso())).status,
+      ).toBe(403);
+    });
+
     it('aplica las reglas: quién puede actuar, el orden de los pasos y qué repuestos se aceptan', async () => {
       const id = await subordenMecanica();
       // otra cuenta de operador no toca una sub-orden ajena

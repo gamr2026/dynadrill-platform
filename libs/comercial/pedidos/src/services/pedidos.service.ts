@@ -336,6 +336,57 @@ export class PedidosService {
     return this.detalle(id, ctx);
   }
 
+  /**
+   * Reemplaza los ítems del pedido con un cambio que Operaciones propuso y su Supervisor aprobó (Pumping, contrato 4.13). Los
+   * ítems siguen saliendo de la lista de precios del cliente (precio y descripción no los pone quien propone). Solo mientras el
+   * pedido es editable y ya está abierto; no pide la versión (el cambio ya fue autorizado por quien corresponde).
+   */
+  async aplicarCambioDeItems(
+    pedidoId: string,
+    items: ItemPedidoDto[],
+    ctx: Contexto,
+  ): Promise<void> {
+    const actual = await this.cargar(this.prisma, pedidoId);
+    if (actual.estado === 'borrador' || !EDITABLES.has(actual.estado)) {
+      throw new ConflictException(
+        `Un pedido en "${actual.estadoRef.nombre}" ya no admite cambios de ítems`,
+      );
+    }
+    if (!items.length) throw new BadRequestException('El cambio debe dejar al menos un ítem');
+    const elegidos = (await this.prepararItems(items, actual.clienteId, pedidoId, ctx)) ?? [];
+    // Los ítems que no vienen de la lista (los que trajo AS2) no se pueden proponer desde Operaciones: se conservan al final.
+    const sinLista = actual.items
+      .filter((i) => i.listaPreciosItemId === null)
+      .map((i, k) => ({
+        id: uuidv7(),
+        pedidoId,
+        orden: elegidos.length + k + 1,
+        codigo: i.codigo,
+        descripcion: i.descripcion,
+        unidad: i.unidad,
+        cantidad: i.cantidad,
+        valorUnitario: i.valorUnitario,
+        descuentoPct: i.descuentoPct,
+        origenItem: i.origenItem,
+        listaPreciosItemId: null,
+        tipoLinea: i.tipoLinea,
+      }));
+    const nuevos = [...elegidos, ...sinLista];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.pedido.update({
+        where: { id: pedidoId },
+        data: { version: { increment: 1 }, updatedBy: ctx.actor.id },
+      });
+      await this.escribirHijos(tx, pedidoId, undefined, undefined, nuevos);
+      await this.publicar(tx, 'comercial.pedido.actualizado', pedidoId, ctx, {
+        codigo: actual.codigo,
+        campos: [],
+        itemsModificados: true,
+        origenCambio: 'operaciones',
+      });
+    });
+  }
+
   /** Valida todo, emite el código y abre el pedido. Desde `borrador` o desde `en_correccion`. */
   async abrir(id: string, ctx: Contexto) {
     await this.prisma.$transaction((tx) => this.abrirEnTx(tx, id, ctx));

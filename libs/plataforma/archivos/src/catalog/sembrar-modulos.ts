@@ -69,6 +69,14 @@ export const MODULOS_ARCHIVO = [
     tiposMime: DOCUMENTOS,
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'ticket_monitoreo_documento',
+    nombre: 'Monitoreo de un día de operación de un ticket de Pumping',
+    permisoSubir: 'pumping.tickets.operar',
+    permisoVer: 'pumping.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */

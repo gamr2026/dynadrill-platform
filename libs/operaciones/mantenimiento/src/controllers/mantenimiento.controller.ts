@@ -212,6 +212,13 @@ export class MantenimientoController {
     return this.ordenes.retornar(id, dto.estadoFinal, dto.observaciones ?? null, actor);
   }
 
+  /** Las órdenes de las unidades que lleva un ticket de Pumping: la tarjeta «Mantenimientos» del ticket. */
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
+  @Get('tickets/:ticketId/ordenes')
+  ordenesDeTicket(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
+    return this.ordenes.ordenesDeTicket(ticketId);
+  }
+
   /** Todas las sub-órdenes de una unidad: la tarjeta «Mantenimientos» del ticket de Pumping. */
   @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
   @Get('unidades/:unidadId/subordenes')

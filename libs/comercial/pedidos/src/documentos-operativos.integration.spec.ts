@@ -20,6 +20,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { PedidosModule } from './index';
 import { PrismaService } from './prisma/prisma.service';
@@ -64,6 +65,8 @@ run('documentos operativos (base de datos real)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let reporteDiario: ReporteDiarioConsumer;
+  let cambioItems: CambioItemsConsumer;
+  let listaCambio: string | null = null;
   const eventos: string[] = [];
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
@@ -167,6 +170,7 @@ run('documentos operativos (base de datos real)', () => {
     await app.init();
     prisma = app.get(PrismaService);
     reporteDiario = app.get(ReporteDiarioConsumer);
+    cambioItems = app.get(CambioItemsConsumer);
   });
 
   afterAll(async () => {
@@ -176,6 +180,13 @@ run('documentos operativos (base de datos real)', () => {
     if (creados.length) {
       const ids = creados;
       await admin.query(
+        "DELETE FROM msg_comercial.outbox WHERE datos->'data'->>'pedidoId' = ANY($1::text[])",
+        [ids],
+      );
+      await admin.query('DELETE FROM comercial.pedido_item WHERE pedido_id = ANY($1::uuid[])', [
+        ids,
+      ]);
+      await admin.query(
         'DELETE FROM comercial.documento_operativo WHERE pedido_id = ANY($1::uuid[])',
         [ids],
       );
@@ -184,6 +195,12 @@ run('documentos operativos (base de datos real)', () => {
         [ids],
       );
       await admin.query('DELETE FROM comercial.pedido WHERE id = ANY($1::uuid[])', [ids]);
+    }
+    if (listaCambio) {
+      await admin.query('DELETE FROM comercial.lista_precios_item WHERE lista_precios_id = $1', [
+        listaCambio,
+      ]);
+      await admin.query('DELETE FROM comercial.lista_precios WHERE id = $1', [listaCambio]);
     }
     await quitarMaestros(admin, MAESTROS);
     await admin.end();
@@ -650,6 +667,195 @@ run('documentos operativos (base de datos real)', () => {
       const anulado = await pedido('pumping', 'anulado');
       await expect(reporteDiario.consumir(reporteCompletado(anulado))).resolves.toBeUndefined();
       expect(await docs(anulado)).toHaveLength(0);
+    });
+  });
+
+  describe('cambio de ítems del pedido que aprueba el Supervisor de Pumping (evento de Operaciones)', () => {
+    const itemA = uuidv7();
+    const itemB = uuidv7();
+    const itemC = uuidv7();
+    const cambiaItems = () => bearer([P.PUMPING_CAMBIOS_SOLICITAR]);
+
+    beforeAll(async () => {
+      listaCambio = uuidv7();
+      await prisma.listaPrecios.create({
+        data: {
+          id: listaCambio,
+          clienteId: CLIENTE,
+          numeroContrato: `CI-${n}`,
+          vigenteDesde: new Date('2026-01-01T00:00:00Z'),
+        },
+      });
+      await prisma.listaPreciosItem.createMany({
+        data: [
+          {
+            id: itemA,
+            listaPreciosId: listaCambio,
+            codigo: `SUP-${n}`,
+            descripcion: 'Supervisor de campo',
+            unidad: 'día',
+            precio: 437.23,
+            tipo: 'Servicio',
+          },
+          {
+            id: itemB,
+            listaPreciosId: listaCambio,
+            codigo: `QUI-${n}`,
+            descripcion: 'Químico de prueba',
+            unidad: 'gal',
+            precio: 12.5,
+            tipo: 'Material',
+          },
+          {
+            id: itemC,
+            listaPreciosId: listaCambio,
+            codigo: `MOV-${n}`,
+            descripcion: 'Movilización',
+            unidad: 'Unidad',
+            precio: 200,
+            tipo: 'Servicio',
+          },
+        ],
+      });
+    });
+
+    const pedidoConItem = async (estado = 'en_operacion') => {
+      const id = await pedido('pumping', estado);
+      await prisma.pedidoItem.create({
+        data: {
+          id: uuidv7(),
+          pedidoId: id,
+          orden: 1,
+          codigo: `SUP-${n}`,
+          descripcion: 'Supervisor de campo',
+          unidad: 'día',
+          cantidad: 3,
+          valorUnitario: 437.23,
+          listaPreciosItemId: itemA,
+          tipoLinea: 'servicio',
+        },
+      });
+      return id;
+    };
+    const cambio = (pedidoId: string, items: object[]): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'operaciones.pumping.cambio_items_aprobado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'supervisor' },
+        data: { solicitudId: uuidv7(), pedidoId, motivo: 'Se usó más químico', items },
+      } as EventEnvelope;
+    };
+    const resultados = async (pedidoId: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_comercial.outbox WHERE tipo = 'comercial.cambio_items.resultado' AND datos->'data'->>'pedidoId' = $1",
+          [pedidoId],
+        )
+      ).rows.map((r) => r.d);
+    const itemsDe = async (pedidoId: string) =>
+      (await prisma.pedidoItem.findMany({ where: { pedidoId }, orderBy: { orden: 'asc' } })).map(
+        (i) => ({
+          codigo: i.codigo,
+          cantidad: Number(i.cantidad),
+          tipoLinea: i.tipoLinea,
+          precio: Number(i.valorUnitario),
+        }),
+      );
+
+    it('muestra los ítems actuales y, al buscar, los elegibles de la lista del cliente (sin precios), solo con el permiso de Pumping', async () => {
+      const id = await pedidoConItem();
+      const r = await http()
+        .get(`/api/comercial/pedidos/${id}/items-para-cambio`)
+        .query({ q: `QUI-${n}` })
+        .set(cambiaItems());
+      expect(r.status).toBe(200);
+      expect(r.body.actuales).toEqual([
+        expect.objectContaining({
+          codigo: `SUP-${n}`,
+          cantidad: 3,
+          listaPreciosItemId: itemA,
+          tipoLinea: 'servicio',
+        }),
+      ]);
+      expect(r.body.opciones).toEqual([
+        expect.objectContaining({ listaPreciosItemId: itemB, descripcion: 'Químico de prueba' }),
+      ]);
+      expect(JSON.stringify(r.body)).not.toContain('precio');
+      // sin texto no trae opciones
+      expect(
+        (await http().get(`/api/comercial/pedidos/${id}/items-para-cambio`).set(cambiaItems())).body
+          .opciones,
+      ).toEqual([]);
+      expect(
+        (await http().get(`/api/comercial/pedidos/${id}/items-para-cambio`).set(ve())).status,
+      ).toBe(403);
+    });
+
+    it('aplica el cambio aprobado: reemplaza los ítems con los precios de la lista del cliente y avisa el resultado', async () => {
+      const id = await pedidoConItem();
+      const e = cambio(id, [
+        { listaPreciosItemId: itemA, cantidad: 5 },
+        { listaPreciosItemId: itemB, cantidad: 40, tipoLinea: 'material', descuentoPct: 10 },
+      ]);
+      await cambioItems.consumir(e);
+      await cambioItems.consumir(e); // mismo evento: lo ignora el inbox
+      expect(await itemsDe(id)).toEqual([
+        { codigo: `SUP-${n}`, cantidad: 5, tipoLinea: 'servicio', precio: 437.23 },
+        { codigo: `QUI-${n}`, cantidad: 40, tipoLinea: 'material', precio: 12.5 },
+      ]);
+      const r = await resultados(id);
+      expect(r).toHaveLength(1);
+      expect(r[0]).toMatchObject({ aplicado: true, motivo: null });
+    });
+
+    it('los ítems que no vienen de la lista (los de AS2) se conservan al final', async () => {
+      const id = await pedidoConItem();
+      await prisma.pedidoItem.create({
+        data: {
+          id: uuidv7(),
+          pedidoId: id,
+          orden: 2,
+          codigo: 'AS2-1',
+          descripcion: 'Línea de AS2',
+          unidad: 'Unidad',
+          cantidad: 1,
+          valorUnitario: 50,
+          origenItem: 'as2',
+          tipoLinea: 'servicio',
+        },
+      });
+      await cambioItems.consumir(
+        cambio(id, [{ listaPreciosItemId: itemB, cantidad: 7, tipoLinea: 'material' }]),
+      );
+      expect((await itemsDe(id)).map((i) => i.codigo)).toEqual([`QUI-${n}`, 'AS2-1']);
+      expect((await resultados(id))[0].aplicado).toBe(true);
+    });
+
+    it('si el pedido ya salió al cliente, no cambia nada y el resultado dice por qué', async () => {
+      const id = await pedidoConItem('enviado_para_firmas');
+      await cambioItems.consumir(cambio(id, [{ listaPreciosItemId: itemC, cantidad: 1 }]));
+      expect(await itemsDe(id)).toEqual([
+        { codigo: `SUP-${n}`, cantidad: 3, tipoLinea: 'servicio', precio: 437.23 },
+      ]);
+      const [r] = await resultados(id);
+      expect(r.aplicado).toBe(false);
+      expect(r.motivo).toContain('ya no admite cambios');
+    });
+
+    it('un ítem que no es de la lista del cliente, o un cambio vacío, se rechaza sin tocar el pedido', async () => {
+      const id = await pedidoConItem();
+      await cambioItems.consumir(cambio(id, [{ listaPreciosItemId: uuidv7(), cantidad: 1 }]));
+      await cambioItems.consumir(cambio(id, []));
+      expect(await itemsDe(id)).toHaveLength(1);
+      const r = await resultados(id);
+      expect(r).toHaveLength(2);
+      expect(r.every((x) => x.aplicado === false)).toBe(true);
     });
   });
 });

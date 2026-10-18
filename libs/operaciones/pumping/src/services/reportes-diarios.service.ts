@@ -276,7 +276,8 @@ export class ReportesDiariosService {
   }
 
   private exigirFecha(fecha: string): void {
-    if (!FECHA.test(fecha) || Number.isNaN(Date.parse(`${fecha}T00:00:00Z`))) {
+    const d = new Date(`${fecha}T00:00:00.000Z`);
+    if (!FECHA.test(fecha) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== fecha) {
       throw new BadRequestException('La fecha del reporte no es válida');
     }
   }

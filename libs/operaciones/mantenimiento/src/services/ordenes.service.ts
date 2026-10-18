@@ -225,6 +225,26 @@ export class OrdenesService {
     return filtros.estado ? vistas.filter((v) => v.estado === filtros.estado) : vistas;
   }
 
+  /**
+   * Las órdenes de mantenimiento de las unidades que lleva un ticket de Pumping (no solo las que el ticket originó): alimenta la
+   * tarjeta «Mantenimientos» del ticket. La unidad del ticket es un vehículo del catálogo; la de Mantenimiento, su unidad de Flota
+   * (enlazada por `flota.unidad.vehiculo_id`, decisión D2).
+   */
+  async ordenesDeTicket(ticketId: string) {
+    const unidades = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT u.id FROM flota.unidad u
+        JOIN pumping.ticket_unidad tu ON tu.vehiculo_id = u.vehiculo_id
+       WHERE tu.ticket_id = ${ticketId}::uuid`;
+    if (!unidades.length) return [];
+    const ordenes = await this.prisma.orden.findMany({
+      where: { reporte: { unidadId: { in: unidades.map((u) => u.id) } } },
+      include: INCLUIR_ORDEN,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    return ordenes.map((o) => this.vista(o));
+  }
+
   async obtener(id: string) {
     const o = await this.prisma.orden.findUnique({ where: { id }, include: INCLUIR_ORDEN });
     if (!o) throw new NotFoundException('La orden no existe');

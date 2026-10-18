@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
+import { CambioItemsController } from './controllers/cambio-items.controller';
 import { OrdenesTrabajoController } from './controllers/ordenes-trabajo.controller';
+import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
+import { CambioItemsService } from './services/cambio-items.service';
 import { CierrePedidoService } from './services/cierre-pedido.service';
 import { OrdenesTrabajoService } from './services/ordenes-trabajo.service';
 import { GuiasController } from './controllers/guias.controller';
@@ -39,6 +42,7 @@ import { WorkflowService } from './workflow/workflow.service';
     GuiasController,
     OrdenesTrabajoController,
     ListasPreciosController,
+    CambioItemsController,
   ],
   providers: [
     PrismaService,
@@ -55,6 +59,8 @@ import { WorkflowService } from './workflow/workflow.service';
     CierrePedidoService,
     TicketCerradoConsumer,
     ReporteDiarioConsumer,
+    CambioItemsService,
+    CambioItemsConsumer,
   ],
   exports: [SecuenciasService, WorkflowService, PedidosService],
 })
