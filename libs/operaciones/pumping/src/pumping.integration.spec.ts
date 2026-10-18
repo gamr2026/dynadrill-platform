@@ -18,8 +18,9 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
+import { EventBus, MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { DespachosConsumer } from '@dyn/inventario';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { PumpingModule } from './pumping.module';
@@ -66,6 +67,7 @@ const POZO_BANDEJA = {
 };
 const VEHICULO = { id: uuidv7(), placa: `IT${String(n).slice(-5)}P` };
 const VEHICULO_2 = { id: uuidv7(), placa: `IT${String(n).slice(-5)}Q` };
+const BODEGA = { id: uuidv7(), nombre: `BODEGA-PU ${n}` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { id: JEFE, nombre: 'Jaime Jefe de Base', rol: 'jefe_base' },
@@ -80,6 +82,7 @@ const MAESTROS: MaestrosDePrueba = {
   bloques: [BLOQUE],
   pozos: [POZO, POZO_BANDEJA],
   vehiculos: [VEHICULO, VEHICULO_2],
+  bodegas: [BODEGA],
 };
 
 run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
@@ -178,6 +181,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     jest
       .spyOn(RequisitosExternosConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
+    jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(PedidosAbiertosConsumer);
@@ -185,8 +189,36 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   });
 
   afterAll(async () => {
+    // lo que los tickets movieron en Inventario (el kardex referencia al ticket) y lo que la prueba creó allí
+    const deTickets = '(SELECT id FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[]))';
+    await admin.query(
+      `DELETE FROM inventario.consumo_ticket WHERE ticket_pumping_id IN ${deTickets}`,
+      [pedidos],
+    );
+    await admin.query(`DELETE FROM inventario.movimiento WHERE ticket_pumping_id IN ${deTickets}`, [
+      pedidos,
+    ]);
     if (pedidos.length)
       await admin.query('DELETE FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
+    await admin.query(
+      "DELETE FROM inventario.movimiento WHERE articulo_id IN (SELECT id FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1)",
+      [String(n)],
+    );
+    await admin.query("DELETE FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1", [
+      String(n),
+    ]);
+    await admin.query(
+      "DELETE FROM inventario.categoria_articulo WHERE nombre LIKE 'CAT-%-PU ' || $1",
+      [String(n)],
+    );
+    await admin.query(
+      "DELETE FROM archivos.archivo WHERE blob_key LIKE 'prueba/%' AND nombre_original = 'mezcla.pdf' AND subido_por = $1",
+      [JEFE],
+    );
+    await admin.query(
+      "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'articuloCodigo' LIKE '%-PU-' || $1",
+      [String(n)],
+    );
     if (eventos.length) {
       await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [eventos]);
       await admin.query(
@@ -1207,5 +1239,214 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .set(supervisora())
       .send({ hacia: 'revision_final' })
       .expect(409);
+  });
+
+  describe('químicos del ticket: salida de bodega al asignar, consumo y devolución (P1 y P4)', () => {
+    const QUIMICO = { id: uuidv7(), codigo: `QUI-PU-${n}` };
+    const NO_QUIMICO = { id: uuidv7(), codigo: `NOQ-PU-${n}` };
+    const CATEGORIA_Q = uuidv7();
+    const CATEGORIA_N = uuidv7();
+    const MEZCLA = uuidv7();
+    let preparado = false;
+
+    /** Existencia del químico en la bodega de prueba, del último movimiento del kardex. */
+    const stock = async () =>
+      Number(
+        (
+          await admin.query(
+            'SELECT saldo_resultante FROM inventario.movimiento WHERE articulo_id = $1 AND bodega_id = $2 ORDER BY secuencia DESC LIMIT 1',
+            [QUIMICO.id, BODEGA.id],
+          )
+        ).rows[0].saldo_resultante,
+      );
+
+    const preparar = async () => {
+      if (preparado) return;
+      preparado = true;
+      for (const [id, nombre, quimica] of [
+        [CATEGORIA_Q, `CAT-QUI-PU ${n}`, true],
+        [CATEGORIA_N, `CAT-NOQ-PU ${n}`, false],
+      ] as const) {
+        await admin.query(
+          'INSERT INTO inventario.categoria_articulo (id, nombre, es_quimica) VALUES ($1, $2, $3)',
+          [id, nombre, quimica],
+        );
+      }
+      for (const [a, categoria] of [
+        [QUIMICO, CATEGORIA_Q],
+        [NO_QUIMICO, CATEGORIA_N],
+      ] as const) {
+        await admin.query(
+          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
+           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+          [a.id, a.codigo, categoria],
+        );
+      }
+      await admin.query(
+        `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+         SELECT $1::uuid, mo.id, 'mezcla.pdf', 'application/pdf', 10, repeat('b', 64), 'prueba/' || $1::text, 'omitido', $2::uuid
+           FROM archivos.modulo_archivo mo WHERE mo.codigo = 'pedido_documento'`,
+        [MEZCLA, JEFE],
+      );
+      const compra = (
+        await admin.query("SELECT id FROM inventario.motivo_movimiento WHERE origen = 'compra'")
+      ).rows[0].id;
+      const bodeguero = token('bodeguero', 'Bruno Bodeguero', [P.ARTICULOS_GESTIONAR], JEFE);
+      for (const a of [QUIMICO, NO_QUIMICO]) {
+        await http()
+          .post('/api/operaciones/inventario/movimientos')
+          .set(bodeguero)
+          .send({ articuloId: a.id, bodegaId: BODEGA.id, motivoId: compra, cantidad: 100 })
+          .expect(201);
+      }
+    };
+
+    const asignar = (t: { url: string }, extra: object) =>
+      http()
+        .post(`${t.url}/asignar`)
+        .set(jefe())
+        .send({ ...cuerpoAsignacion, ...extra });
+    const linea = (cantidad: number, articulo = QUIMICO) => ({
+      articuloId: articulo.id,
+      bodegaId: BODEGA.id,
+      cantidad,
+    });
+    const enPaso = (id: string, paso: string) =>
+      admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [id, paso]);
+
+    it('asignar con químicos exige el documento de mezcla; con él, los químicos salen de bodega a cargo del ticket', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+
+      const sinMezcla = await asignar(t, { quimicos: [linea(10)] });
+      expect(sinMezcla.status).toBe(400);
+      expect(sinMezcla.body.code).toBe('MEZCLA_REQUERIDA');
+      expect(await stock()).toBe(antes);
+
+      const ok = await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA });
+      expect(ok.status).toBe(201);
+      expect(ok.body.pasoCodigo ?? ok.body.paso?.codigo).toBe('traslado_salida');
+      expect(await stock()).toBe(antes - 10);
+
+      const q = await http().get(`${t.url}/quimicos`).set(jefe());
+      expect(q.status).toBe(200);
+      expect(q.body.quimicos).toEqual([
+        expect.objectContaining({
+          articuloId: QUIMICO.id,
+          codigo: QUIMICO.codigo,
+          asignada: 10,
+          usada: 0,
+          devuelta: 0,
+          pendiente: 10,
+        }),
+      ]);
+      expect(q.body.documentos).toEqual([
+        expect.objectContaining({ tipo: 'mezcla_quimica', archivoId: MEZCLA }),
+      ]);
+      // el documento es historia: la aplicación no lo cambia ni lo borra
+      const app = new Pool({ connectionString: APP_DB.replace('?pgbouncer=true', ''), max: 1 });
+      try {
+        await expect(app.query('DELETE FROM pumping.ticket_documento')).rejects.toThrow(
+          /permission denied/,
+        );
+      } finally {
+        await app.end();
+      }
+    });
+
+    it('si los químicos no alcanzan o no son químicos, la asignación no se hace y no sale nada', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+
+      const excede = await asignar(t, { quimicos: [linea(5000)], documentoMezclaId: MEZCLA });
+      expect(excede.status).toBe(409);
+      const noQ = await asignar(t, {
+        quimicos: [linea(1, NO_QUIMICO)],
+        documentoMezclaId: MEZCLA,
+      });
+      expect(noQ.status).toBe(409);
+      expect(noQ.body.code).toBe('ARTICULO_NO_QUIMICO');
+      const sinArchivo = await asignar(t, { quimicos: [linea(1)], documentoMezclaId: uuidv7() });
+      expect(sinArchivo.status).toBe(400);
+
+      expect(await stock()).toBe(antes);
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect(ticket.pasoCodigo).toBe('asignacion'); // sigue por asignar
+      expect(await prisma.ticketDocumento.count({ where: { ticketId: t.id } })).toBe(0);
+    });
+
+    it('si la asignación falla después de la salida, la salida se deshace con una devolución', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+      // se simula una falla al publicar el evento de la asignación, que ocurre DESPUÉS de la salida de bodega
+      const publicar = EventBus.prototype.publish;
+      const espia = jest.spyOn(EventBus.prototype, 'publish').mockImplementation(function (
+        this: EventBus,
+        tx,
+        evento,
+      ) {
+        if (evento.type === 'operaciones.pumping.asignacion_realizada') {
+          throw new Error('falla simulada');
+        }
+        return publicar.call(this, tx, evento);
+      });
+      try {
+        const r = await asignar(t, { quimicos: [linea(7)], documentoMezclaId: MEZCLA });
+        expect(r.status).toBe(500);
+      } finally {
+        espia.mockRestore();
+      }
+      expect(await stock()).toBe(antes); // salió y volvió
+      const movimientos = await admin.query(
+        'SELECT origen FROM inventario.movimiento WHERE ticket_pumping_id = $1 ORDER BY secuencia',
+        [t.id],
+      );
+      expect(movimientos.rows.map((m) => m.origen)).toEqual(['salida_ticket', 'devolucion_ticket']);
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect(ticket.pasoCodigo).toBe('asignacion');
+      expect(await prisma.ticketDocumento.count({ where: { ticketId: t.id } })).toBe(0);
+    });
+
+    it('consumo y devolución: solo en su paso, por el equipo asignado y sin pasar de lo que el ticket tiene a su cargo', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA }).expect(201);
+      const antes = await stock();
+      const consumo = (cantidad: number, h = op1()) =>
+        http().post(`${t.url}/quimicos/consumo`).set(h).send({ articuloId: QUIMICO.id, cantidad });
+      const devolucion = (cantidad: number, h = supervisora()) =>
+        http()
+          .post(`${t.url}/quimicos/devolucion`)
+          .set(h)
+          .send({ lineas: [linea(cantidad)] });
+
+      // fuera de su paso
+      expect((await consumo(1)).status).toBe(409);
+      expect((await devolucion(1)).status).toBe(409);
+
+      await enPaso(t.id, 'ejecucion_operativa');
+      expect((await consumo(4, operador())).status).toBe(403); // no es del equipo
+      expect((await consumo(11)).status).toBe(409); // más de lo asignado
+      const c = await consumo(6);
+      expect(c.status).toBe(201);
+      expect(c.body.quimicos[0]).toMatchObject({ asignada: 10, usada: 6, pendiente: 4 });
+      expect(await stock()).toBe(antes); // el consumo no mueve stock
+
+      await enPaso(t.id, 'control_retorno');
+      expect((await devolucion(2, op1())).status).toBe(403); // el operador no devuelve
+      expect((await devolucion(5)).status).toBe(409); // sobran 4, no 5
+      const d = await devolucion(4);
+      expect(d.status).toBe(201);
+      expect(d.body.quimicos[0]).toMatchObject({
+        asignada: 10,
+        usada: 6,
+        devuelta: 4,
+        pendiente: 0,
+      });
+      expect(await stock()).toBe(antes + 4);
+    });
   });
 });

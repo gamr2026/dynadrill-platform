@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { InventarioModule } from '@dyn/inventario';
 import { TicketsController } from './controllers/tickets.controller';
 import { TrasladoSalidaController } from './controllers/traslado-salida.controller';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
@@ -7,6 +8,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { IngresoService } from './services/ingreso.service';
 import { EjecucionService } from './services/ejecucion.service';
+import { QuimicosService } from './services/quimicos.service';
 import { ReporteUnidadService } from './services/reporte-unidad.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TerminosService } from './services/terminos.service';
@@ -20,6 +22,7 @@ import { TicketsService } from './services/tickets.service';
  * asignación. Los demás pasos (asignación completa, traslados, ejecución, cierre) se agregan por fases.
  */
 @Module({
+  imports: [InventarioModule],
   controllers: [TicketsController, TrasladoSalidaController],
   providers: [
     PrismaService,
@@ -30,6 +33,7 @@ import { TicketsService } from './services/tickets.service';
     IngresoService,
     ReporteUnidadService,
     EjecucionService,
+    QuimicosService,
     PedidosAbiertosConsumer,
     RequisitosExternosConsumer,
   ],

@@ -13,7 +13,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["pumping", "catalogos", "identidad"]
+  schemas  = ["pumping", "catalogos", "identidad", "archivos"]
 }
 
 enum MacroEstado {
@@ -214,10 +214,44 @@ model Ticket {
   aceptaciones  AceptacionTerminos[]
   ingreso       TicketIngreso?
   reportesUnidad ReporteUnidad[]
+  documentos     TicketDocumento[]
 
   @@index([pasoCodigo])
   @@map("ticket")
   @@schema("pumping")
+}
+
+enum TipoDocumentoTicket {
+  mezcla_quimica
+
+  @@map("tipo_documento_ticket")
+  @@schema("pumping")
+}
+
+/// Documento adjunto a un ticket (hoy, el de mezcla de químicos). INMUTABLE: el vigente de cada tipo es el último.
+model TicketDocumento {
+  id        String              @id @db.Uuid
+  ticketId  String              @map("ticket_id") @db.Uuid
+  ticket    Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipo      TipoDocumentoTicket
+  archivoId String              @map("archivo_id") @db.Uuid
+  archivo   ArchivoRef          @relation(fields: [archivoId], references: [id])
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String              @map("created_by") @db.Uuid
+
+  @@unique([ticketId, archivoId])
+  @@index([ticketId, tipo])
+  @@map("ticket_documento")
+  @@schema("pumping")
+}
+
+/// `archivos.archivo`: solo el id, para comprobar que existe antes de guardar una referencia.
+model ArchivoRef {
+  id         String            @id @db.Uuid
+  documentos TicketDocumento[]
+
+  @@map("archivo")
+  @@schema("archivos")
 }
 
 /// Tipos de servicio del pedido (código del catálogo de `comercial`: control_fluidos, nitrogeno...).

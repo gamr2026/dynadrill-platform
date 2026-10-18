@@ -52,6 +52,13 @@ export interface SalidaDeMantenimiento {
   observacion?: string | null;
 }
 
+/** Un renglón de químico que sale de bodega (o vuelve a ella) por un ticket de Pumping. */
+export interface LineaDeTicket {
+  articuloId: string;
+  bodegaId: string;
+  cantidad: number | string;
+}
+
 export interface EntradaManual {
   articuloId: string;
   bodegaId: string;
@@ -300,6 +307,134 @@ export class MovimientosService {
       }
       return movimientos;
     });
+  }
+
+  // --- API de los demás módulos del contenedor con TRANSACCIÓN PROPIA ---------------------------------------
+  // Pumping y Mantenimiento tienen su propio cliente de base de datos: no pueden pasar su `tx` a los métodos de arriba. Estos abren la
+  // transacción de Inventario (todas las líneas o ninguna) y devuelven lo registrado; quien llama guarda lo que necesite de su lado.
+
+  /**
+   * Salida de bodega de los químicos de un ticket de Pumping (la asignación del Jefe de Base). Solo artículos de categorías de
+   * químicos. Stock insuficiente → 409 y no sale nada.
+   */
+  async registrarSalidasDeTicket(
+    ticketPumpingId: string,
+    lineas: LineaDeTicket[],
+    actor: ActorInventario,
+    observacion?: string | null,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.exigirQuimicos(tx, lineas);
+      const registrados = [];
+      for (const l of lineas) {
+        registrados.push(
+          await this.registrarSalida(
+            tx,
+            {
+              ticketPumpingId,
+              articuloId: l.articuloId,
+              bodegaId: l.bodegaId,
+              cantidad: l.cantidad,
+              observacion,
+            },
+            actor,
+          ),
+        );
+      }
+      return registrados.map((m) => ({
+        movimientoId: m.id,
+        articuloId: m.articuloId,
+        cantidad: Number(m.cantidad),
+      }));
+    });
+  }
+
+  /** Lo no usado vuelve a bodega (control de retorno; también deshace una salida si el ticket no pudo asignarse). */
+  async devolverDeTicket(
+    ticketPumpingId: string,
+    lineas: LineaDeTicket[],
+    actor: ActorInventario,
+    observacion?: string | null,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const registrados = [];
+      for (const l of lineas) {
+        registrados.push(
+          await this.registrarDevolucion(
+            tx,
+            {
+              ticketPumpingId,
+              articuloId: l.articuloId,
+              bodegaId: l.bodegaId,
+              cantidad: l.cantidad,
+              observacion,
+            },
+            actor,
+          ),
+        );
+      }
+      return registrados.map((m) => ({
+        movimientoId: m.id,
+        articuloId: m.articuloId,
+        cantidad: Number(m.cantidad),
+      }));
+    });
+  }
+
+  /** Lo usado en la ejecución: no mueve stock; no puede superar lo que el ticket aún tiene a su cargo. */
+  async registrarConsumoDeTicket(
+    ticketPumpingId: string,
+    articuloId: string,
+    cantidad: number | string,
+    actor: ActorInventario,
+    observacion?: string | null,
+  ) {
+    const c = await this.prisma.$transaction((tx) =>
+      this.registrarConsumo(tx, { ticketPumpingId, articuloId, cantidad, observacion }, actor),
+    );
+    return { consumoId: c.id, articuloId: c.articuloId, cantidad: Number(c.cantidad) };
+  }
+
+  /** Los químicos de un ticket con su código, nombre y unidad: asignado, usado, devuelto y lo que sigue a su cargo. */
+  async quimicosDeTicket(ticketPumpingId: string) {
+    const balance = await balanceDeTicket(this.prisma, ticketPumpingId);
+    const articulos = await this.prisma.articulo.findMany({
+      where: { id: { in: balance.map((b) => b.articuloId) } },
+      include: { unidadStock: true },
+    });
+    return balance
+      .map((b) => {
+        const a = articulos.find((x) => x.id === b.articuloId);
+        return {
+          articuloId: b.articuloId,
+          codigo: a?.codigo ?? '',
+          nombre: a?.nombre ?? '',
+          unidad: a?.unidadStock.simbolo ?? '',
+          asignada: Number(b.asignada),
+          usada: Number(b.usada),
+          devuelta: Number(b.devuelta),
+          pendiente: Number(b.pendiente),
+        };
+      })
+      .sort((x, y) => x.codigo.localeCompare(y.codigo));
+  }
+
+  private async exigirQuimicos(tx: Prisma.TransactionClient, lineas: LineaDeTicket[]) {
+    const ids = [...new Set(lineas.map((l) => l.articuloId))];
+    const articulos = await tx.articulo.findMany({
+      where: { id: { in: ids } },
+      include: { categoria: true },
+    });
+    for (const id of ids) {
+      const a = articulos.find((x) => x.id === id);
+      if (!a) throw new NotFoundException('El artículo no existe');
+      if (!a.categoria.esQuimica) {
+        throw new ConflictException({
+          message: `${a.codigo} no es un químico: solo los químicos se asignan a un ticket`,
+          code: 'ARTICULO_NO_QUIMICO',
+        });
+      }
+    }
   }
 
   /** Asignado, usado y devuelto de un ticket, por artículo (todo calculado). */
