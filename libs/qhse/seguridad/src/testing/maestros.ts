@@ -58,6 +58,13 @@ export async function quitarMaestros(admin: Pool, m: MaestrosDePrueba): Promise<
     ids,
   ]);
   for (const id of ids) {
-    await admin.query('DELETE FROM identidad.usuario WHERE id = $1', [id]).catch(() => undefined);
+    // si aún está referenciada no se puede borrar: se desactiva para que no aparezca en las listas de personas del portal
+    await admin
+      .query('DELETE FROM identidad.usuario WHERE id = $1', [id])
+      .catch(() =>
+        admin
+          .query('UPDATE identidad.usuario SET activo = false WHERE id = $1', [id])
+          .catch(() => undefined),
+      );
   }
 }

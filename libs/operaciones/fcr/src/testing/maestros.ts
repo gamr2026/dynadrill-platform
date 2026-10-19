@@ -167,8 +167,15 @@ export async function quitarMaestros(admin: Pool, m: MaestrosDePrueba): Promise<
     'catalogos.cliente',
     m.clientes?.map((x) => x.id),
   );
-  await quitar(
-    'identidad.usuario',
-    m.usuarios?.map((x) => x.id),
-  );
+  // Una cuenta que aún está referenciada no se puede borrar: se desactiva para que no aparezca en las listas de personas del portal
+  // (las pruebas corren contra la base local real y antes dejaban cientos de cuentas @test.local activas).
+  for (const id of m.usuarios?.map((x) => x.id) ?? []) {
+    await admin
+      .query('DELETE FROM identidad.usuario WHERE id = $1', [id])
+      .catch(() =>
+        admin
+          .query('UPDATE identidad.usuario SET activo = false WHERE id = $1', [id])
+          .catch(() => undefined),
+      );
+  }
 }
