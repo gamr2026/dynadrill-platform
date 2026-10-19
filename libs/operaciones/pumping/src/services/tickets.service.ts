@@ -192,6 +192,8 @@ export class TicketsService {
           servicios: [...new Set(d.tiposServicio ?? [])].map(textoServicio).join(', '),
           fechaInicioServicio: d.fechaInicioServicio ?? null,
         },
+        // quien abrió el pedido: QHSE abre a su nombre el PTW del primer día
+        ...(event.actor ? { actor: event.actor } : {}),
         causationId: event.id,
         correlationId: event.correlationId,
         traceparent: currentTraceparent(),

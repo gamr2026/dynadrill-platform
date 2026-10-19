@@ -49,10 +49,10 @@ export class PtwService {
   }
 
   /**
-   * Abre el PTW del primer día de operación cuando Pumping asigna el equipo (como la demo: el PTW nace con el servicio). Lo abre a nombre de
-   * quien asignó. Si ese día ya tiene uno vigente no hace nada. Los días siguientes los abre QHSE desde el ticket.
+   * Abre el PTW del primer día de operación cuando el servicio llega a Pumping o se asigna su equipo (como la demo: el PTW nace con el servicio).
+   * Lo abre a nombre de quien originó el evento. Si ese día ya tiene uno vigente no hace nada. Los días siguientes los abre QHSE desde el ticket.
    */
-  async abrirAlAsignar(
+  async abrirDelPrimerDia(
     tx: Tx,
     ticketId: string,
     diaOperacion: string,

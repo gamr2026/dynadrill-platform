@@ -93,6 +93,28 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
                 data: codigos.map((tipoCodigo) => ({ ticketId, tipoCodigo })),
               });
           }
+          // el PTW del primer día de operación nace con el servicio (como la demo): cuando Ventas pasa el pedido a Pumping, a nombre de quien lo abrió;
+          // si el ticket ya existía, la asignación lo asegura a nombre de quien asignó el equipo. Un PTW vigente del mismo día no se duplica.
+          const inicio = d['fechaInicioServicio'];
+          const dia =
+            typeof inicio === 'string' && /^\d{4}-\d{2}-\d{2}/.test(inicio)
+              ? inicio.slice(0, 10)
+              : null;
+          const quienAbre = event.actor?.userId;
+          if (
+            dia &&
+            quienAbre &&
+            esUuid(quienAbre) &&
+            (await tx.idUsuario.count({ where: { id: quienAbre } }))
+          ) {
+            const id = await this.ptw.abrirDelPrimerDia(tx, ticketId, dia, {
+              id: quienAbre,
+              roleCode: (event.actor?.role ?? 'sistema') as AuthUser['roleCode'],
+            });
+            if (id)
+              this.logger.log(`Ticket ${datos.ticketNumero ?? ticketId}: PTW del ${dia} abierto`);
+          }
+
           if (event.type !== 'operaciones.pumping.asignacion_realizada') return;
 
           // los operadores asignados (cuentas existentes y activas) reemplazan a los anteriores. El EPI ya no se abre solo: lo pide el equipo de
@@ -114,26 +136,6 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
           this.logger.log(
             `Ticket ${datos.ticketNumero ?? ticketId}: ${cuentas.length} operador(es) asignado(s)`,
           );
-          // el PTW del primer día de operación nace con la asignación (como la demo), a nombre de quien asignó el equipo
-          const inicio = d['fechaInicioServicio'];
-          const dia =
-            typeof inicio === 'string' && /^\d{4}-\d{2}-\d{2}/.test(inicio)
-              ? inicio.slice(0, 10)
-              : null;
-          const quienAsigna = event.actor?.userId;
-          if (
-            dia &&
-            quienAsigna &&
-            esUuid(quienAsigna) &&
-            (await tx.idUsuario.count({ where: { id: quienAsigna } }))
-          ) {
-            const id = await this.ptw.abrirAlAsignar(tx, ticketId, dia, {
-              id: quienAsigna,
-              roleCode: (event.actor?.role ?? 'sistema') as AuthUser['roleCode'],
-            });
-            if (id)
-              this.logger.log(`Ticket ${datos.ticketNumero ?? ticketId}: PTW del ${dia} abierto`);
-          }
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });

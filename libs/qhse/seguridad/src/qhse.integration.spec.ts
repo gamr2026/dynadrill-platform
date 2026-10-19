@@ -322,7 +322,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     expect(await prisma.ticketRef.count({ where: { ticketId } })).toBe(1);
   });
 
-  it('al asignar el equipo abre el PTW del primer día de operación (una sola vez, a nombre de quien asignó) y no abre nada sin fecha de inicio', async () => {
+  it('abre el PTW del primer día de operación al crear el ticket o al asignar el equipo (una sola vez) y no abre nada sin fecha de inicio', async () => {
     const ticketId = uuidv7();
     const e = eventoAsignacion(ticketId, [OP1.id], { fechaInicioServicio: '2026-11-02' });
     await consumer.consumir(e);
@@ -339,6 +339,39 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       }),
     );
     expect(await prisma.ptw.count({ where: { ticketId } })).toBe(1);
+
+    // el PTW nace ya con el ticket (cuando Ventas pasa el pedido a Pumping), a nombre de quien abrió el pedido
+    const creado = uuidv7();
+    const pedidoCreado = uuidv7();
+    tickets.push(creado);
+    pedidos.push(pedidoCreado);
+    const evCreado = {
+      id: uuidv7(),
+      type: 'operaciones.pumping.ticket_creado',
+      version: 1,
+      occurredAt: '2026-11-02T10:00:00.000Z',
+      source: 'operaciones',
+      subject: { type: 'pumping_ticket', id: creado },
+      actor: { userId: JEFE.id, role: 'ingenieria_ventas' },
+      data: {
+        ticketId: creado,
+        ticketNumero: numeroTicket++,
+        pedidoId: pedidoCreado,
+        pedidoCodigo: `PED-QH${n}`,
+        fechaInicioServicio: '2026-11-03',
+      },
+    } as EventEnvelope;
+    eventos.push(evCreado.id);
+    await consumer.consumir(evCreado);
+    expect(await prisma.ptw.count({ where: { ticketId: creado } })).toBe(1);
+    // la asignación posterior (mismo pedido y día) no lo duplica
+    await consumer.consumir(
+      eventoAsignacion(creado, [OP1.id], {
+        pedidoId: pedidoCreado,
+        fechaInicioServicio: '2026-11-03',
+      }),
+    );
+    expect(await prisma.ptw.count({ where: { ticketId: creado } })).toBe(1);
 
     const sinFecha = uuidv7();
     await consumer.consumir(eventoAsignacion(sinFecha, [OP1.id]));
