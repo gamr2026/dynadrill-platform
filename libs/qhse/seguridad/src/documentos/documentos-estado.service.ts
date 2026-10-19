@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { TipoDocumentoPedido } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -18,10 +18,33 @@ const aDia = (d: Date): string => d.toISOString().slice(0, 10);
 export class DocumentosEstadoService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async pedidos(filtro: { q?: string; limite?: number } = {}) {
+  private async pedidoDe(ticketId: string): Promise<string | null> {
+    return (
+      (await this.prisma.ticketRef.findUnique({ where: { ticketId }, select: { pedidoId: true } }))
+        ?.pedidoId ?? null
+    );
+  }
+
+  /** El estado de los documentos del pedido de un ticket (lo consulta el equipo de Pumping desde el ticket). */
+  async deTicket(ticketId: string) {
+    const fila = (await this.pedidos({ ticketId }))[0];
+    if (!fila)
+      throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+    return fila;
+  }
+
+  async pedidos(filtro: { q?: string; limite?: number; ticketId?: string } = {}) {
     const q = filtro.q?.trim();
     const tickets = await this.prisma.ticketRef.findMany({
-      where: q ? { pedidoCodigo: { contains: q, mode: 'insensitive' } } : {},
+      where: {
+        ...(q ? { pedidoCodigo: { contains: q, mode: 'insensitive' as const } } : {}),
+        ...(filtro.ticketId
+          ? {
+              pedidoId:
+                (await this.pedidoDe(filtro.ticketId)) ?? '00000000-0000-0000-0000-000000000000',
+            }
+          : {}),
+      },
       orderBy: { createdAt: 'desc' },
     });
     // los documentos son del pedido (el ticket es opcional): se buscan por `pedido_id`, no por la relación del ticket

@@ -64,6 +64,13 @@ export class DocumentosController {
     return this.estado.pedidos({ q });
   }
 
+  /** El equipo de Pumping ve qué documentos tiene el pedido de su ticket (solo el estado; la bandeja y las descargas siguen siendo de QHSE). */
+  @RequirePermission(P.DOCUMENTOS_VER, P.DOCUMENTOS_VER_TICKET)
+  @Get('documentos/ticket/:ticketId')
+  deTicket(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
+    return this.estado.deTicket(ticketId);
+  }
+
   @RequirePermission(P.DOCUMENTOS_VER)
   @Get('documentos')
   listar(@Query() q: ListarDocumentosDto) {

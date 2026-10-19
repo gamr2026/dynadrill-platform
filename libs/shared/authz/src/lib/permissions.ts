@@ -507,6 +507,12 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Ver los documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
     ModuleRoles.qhse,
   ),
+  // El equipo de Pumping consulta el estado de los documentos del pedido de SU ticket (qué está cargado y qué falta); no ve la bandeja ni descarga.
+  nuevo(
+    'qhse.documentos.ver_ticket',
+    'Ver qué documentos de seguridad tiene cargados y cuáles faltan en el pedido de un ticket',
+    ModuleRoles.pumping,
+  ),
   nuevo(
     'qhse.documentos.gestionar',
     'Cargar y anular los documentos de seguridad de un pedido y anular el Acta de Entrega',
@@ -677,6 +683,7 @@ export const Permission = {
   EPI_APROBAR: 'qhse.epi.aprobar',
   EPI_DESPACHAR: 'qhse.epi.despachar',
   DOCUMENTOS_VER: 'qhse.documentos.ver',
+  DOCUMENTOS_VER_TICKET: 'qhse.documentos.ver_ticket',
   DOCUMENTOS_GESTIONAR: 'qhse.documentos.gestionar',
   ACTA_ENTREGA_CARGAR: 'qhse.acta_entrega.cargar',
   ACTA_ENTREGA_VER: 'qhse.acta_entrega.ver',

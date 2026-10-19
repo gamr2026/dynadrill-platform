@@ -454,6 +454,31 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
     expect((await t.http().get('/api/qhse/documentos/pedidos').set(supervisor())).status).toBe(403);
   });
 
+  it('el equipo de Pumping ve el estado de los documentos del pedido de su ticket, sin la bandeja ni poder cargar', async () => {
+    const { ticketId, pedidoId } = await ticketNuevo();
+    expect((await cargar(pedidoId, { tipo: 'sfi' })).status).toBe(201);
+    const equipo = () =>
+      t.token('operador', OPERADOR.nombre, [P.DOCUMENTOS_VER_TICKET], OPERADOR.id);
+    const r = await t.http().get(`/api/qhse/documentos/ticket/${ticketId}`).set(equipo());
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      pedidoId,
+      sfi: { id: expect.any(String) },
+      formatoRecepcion: null,
+      art: null,
+      ptHoy: null,
+      actaEntrega: null,
+    });
+    // un ticket que QHSE no conoce responde 404; quien no tiene el permiso no entra; el permiso no abre la bandeja
+    expect(
+      (await t.http().get(`/api/qhse/documentos/ticket/${uuidv7()}`).set(equipo())).status,
+    ).toBe(404);
+    expect(
+      (await t.http().get(`/api/qhse/documentos/ticket/${ticketId}`).set(operador())).status,
+    ).toBe(403);
+    expect((await t.http().get('/api/qhse/documentos/pedidos').set(equipo())).status).toBe(403);
+  });
+
   it('rechaza un pedido que QHSE no conoce y un ticket de otro pedido', async () => {
     const { ticketId } = await ticketNuevo();
     const otro = await ticketNuevo();
