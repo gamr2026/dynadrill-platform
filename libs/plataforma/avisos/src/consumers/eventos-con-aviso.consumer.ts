@@ -29,7 +29,25 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.fcr.inspeccion_rechazada',
     ],
   },
-  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas', 'qhse.ptw.cerrado'] },
+  {
+    source: 'flota',
+    patterns: [
+      'flota.gerenciamiento_viaje.por_autorizar_supervisor',
+      'flota.gerenciamiento_viaje.por_autorizar_gerente',
+      'flota.gerenciamiento_viaje.decidido',
+      'flota.inspeccion_vehiculo.rechazada',
+    ],
+  },
+  {
+    source: 'qhse',
+    patterns: [
+      'qhse.epi.solicitudes_abiertas',
+      'qhse.ptw.cerrado',
+      'qhse.swa.activado',
+      'qhse.stop.con_hallazgos',
+      'qhse.inspeccion.rechazada',
+    ],
+  },
 ];
 
 /** Recibe los eventos y los entrega al servicio de avisos; el inbox evita avisar dos veces por el mismo evento. */

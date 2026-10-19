@@ -94,6 +94,22 @@ export const MODULOS_ARCHIVO = [
     tamanoMaxMb: 25,
   },
   {
+    codigo: 'qhse_iperc_documento',
+    nombre: 'Procedimiento y ATS base de una matriz IPERC',
+    permisoSubir: 'qhse.iperc.gestionar',
+    permisoVer: 'qhse.iperc.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_stop_foto',
+    nombre: 'Foto de una tarjeta STOP',
+    permisoSubir: 'qhse.eventos.reportar',
+    permisoVer: 'qhse.stop.ver',
+    tiposMime: ['image/png', 'image/jpeg'],
+    tamanoMaxMb: 10,
+  },
+  {
     codigo: 'qhse_documento_pedido',
     nombre: 'Documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
     permisoSubir: 'qhse.documentos.gestionar',
