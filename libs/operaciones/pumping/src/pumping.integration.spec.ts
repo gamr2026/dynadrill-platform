@@ -862,6 +862,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(
       req.find((x) => x.codigo === 'inspeccion_vehiculo_realizada' && x.para === VEHICULO.placa),
     ).toMatchObject({ estado: 'cumplido', origen: 'evento' });
+    // al quedar realizada la inspección se avisa al Supervisor asignado (una sola vez, aunque el evento se repita)
+    const avisos = await admin.query(
+      "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.inspeccion_realizada' AND datos->'data'->>'ticketId' = $1",
+      [t.id],
+    );
+    expect(avisos.rows).toHaveLength(1);
+    expect(avisos.rows[0].d).toMatchObject({ unidad: VEHICULO.placa, cliente: CLIENTE.nombre });
+    expect(avisos.rows[0].d.asignados).toEqual([
+      { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
+    ]);
     // gerenciamiento de viaje (lo aprueba su dueño): uno de salida y otro de retorno por ticket
     await externos.consumir(
       externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'salida' }, 'flota'),

@@ -125,4 +125,34 @@ export const PLANTILLAS_PUMPING: PlantillaDef[] = [
     evento: 'operaciones.pumping.salida_reportada',
     rol: 'supervisor',
   },
+  {
+    codigo: 'pumping_inspeccion_realizada_supervisor',
+    descripcion:
+      'El operador realizó la inspección del vehículo: el Supervisor asignado debe aprobarla (solo a su cuenta).',
+    asunto:
+      'Inspección de vehículo realizada, pendiente de su aprobación: {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{realizadaPor}} realizó la <strong>inspección del vehículo</strong> de la unidad <strong>{{unidad}}</strong> del siguiente servicio de Pumping. Queda pendiente de su aprobación:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Campo', 'campo') +
+      FILA('Pozo', 'pozo') +
+      FILA('Taladro', 'taladro') +
+      FILA('Unidad', 'unidad') +
+      '</table>' +
+      '<p>Revise y apruebe la inspección desde el ticket; el servicio no puede pasar a la ejecución sin una inspección aprobada.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{realizadaPor}} realizó la inspección del vehículo de la unidad {{unidad}} del siguiente servicio de Pumping. Queda pendiente de su aprobación:\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nCampo: {{campo}}\nPozo: {{pozo}}\nTaladro: {{taladro}}\nUnidad: {{unidad}}\n\n' +
+      'Revise y apruebe la inspección desde el ticket; el servicio no puede pasar a la ejecución sin una inspección aprobada.',
+    tituloAviso: 'Inspección por aprobar: {{unidad}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} — {{realizadaPor}} realizó la inspección',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'info',
+    evento: 'operaciones.pumping.inspeccion_realizada',
+    rol: 'supervisor',
+  },
 ];

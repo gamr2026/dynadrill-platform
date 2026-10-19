@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { runInEventSpan } from '@dyn/common';
+import { currentTraceparent, runInEventSpan } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from '../services/requisitos.service';
+import { nombreDe } from '../services/tickets.service';
 
 interface Regla {
   /** Código del requisito; si depende de los datos del evento (p. ej. el viaje de salida o de retorno), una función que lo calcula (`null` = ignorar). */
@@ -119,6 +120,58 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     }
   }
 
+  /**
+   * Un aviso al Supervisor asignado al ticket: «la inspección de la unidad X quedó realizada y espera su aprobación». Sale como hecho de
+   * Pumping (con la cuenta del supervisor en `asignados`), igual que el aviso de salida reportada.
+   */
+  private async avisarSupervisor(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    ticketId: string,
+    vehiculoId: string,
+    causa: EventEnvelope,
+  ): Promise<void> {
+    const t = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        cliente: true,
+        campo: true,
+        pozo: true,
+        taladro: true,
+        personas: true,
+        unidades: { include: { vehiculo: true } },
+      },
+    });
+    const supervisor = t?.personas.find((p) => p.rol === 'supervisor');
+    if (!t || !supervisor) return;
+    const actorId = causa.actor?.userId;
+    const quien = actorId
+      ? await tx.idUsuario.findUnique({ where: { id: actorId }, select: { nombre: true } })
+      : null;
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.pumping.inspeccion_realizada',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: {
+          ticketId,
+          ticketNumero: t.ticketNumero,
+          pedidoId: t.pedidoId,
+          pedidoCodigo: t.pedidoCodigo,
+          cliente: nombreDe(t.cliente),
+          campo: t.campo?.nombre ?? null,
+          pozo: t.pozo?.nombreCompleto ?? null,
+          taladro: t.rigless ? 'RIGLESS' : (t.taladro?.nombre ?? null),
+          unidad: t.unidades.find((u) => u.vehiculoId === vehiculoId)?.vehiculo.placa ?? null,
+          realizadaPor: quien?.nombre ?? null,
+          asignados: [{ usuarioId: supervisor.usuarioId, rolCodigo: 'supervisor' }],
+        },
+        causationId: causa.id,
+        correlationId: causa.correlationId,
+        traceparent: currentTraceparent(),
+      }),
+    );
+  }
+
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
     const regla = REGLAS_EXTERNAS[event.type];
@@ -151,6 +204,9 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
           this.logger.log(
             `${event.type}: ${n} requisito(s) ${regla.accion === 'cumplir' ? 'cumplido(s)' : 'reabierto(s)'}`,
           );
+          // la inspección del vehículo la hace el operador y la aprueba el Supervisor: al quedar realizada se le avisa
+          if (event.type === 'flota.inspeccion_vehiculo.realizada' && n > 0)
+            await this.avisarSupervisor(tx, ticketId, quien, event);
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });
