@@ -1,5 +1,7 @@
 import { uuidv7 } from '@dyn/utils';
 import type { PrismaClient, TipoServicioPreventivo, TipoUnidad } from '../generated/client';
+import { sembrarInspeccion } from './sembrar-inspeccion';
+import { sembrarViaje } from './sembrar-viaje';
 
 /**
  * Catálogos y unidades iniciales de Flota (idempotente). Las reglas son las del Plan de Mantenimiento 2026 (MAN-002). Las unidades
@@ -273,5 +275,15 @@ export async function sembrarFlota(prisma: PrismaClient) {
     });
     unidades++;
   }
-  return { reglas: reglas.count, proveedores, unidades };
+  const insp = await sembrarInspeccion(prisma);
+  const viaje = await sembrarViaje(prisma);
+  return {
+    reglas: reglas.count,
+    proveedores,
+    unidades,
+    tiposPermiso: insp.tipos,
+    itemsInspeccion: insp.items,
+    preguntasViaje: viaje.preguntas,
+    umbralesViaje: viaje.umbrales,
+  };
 }

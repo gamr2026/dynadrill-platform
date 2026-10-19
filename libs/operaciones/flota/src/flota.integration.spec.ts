@@ -20,6 +20,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { AsignacionPumpingConsumer } from './consumers/asignacion-pumping.consumer';
 import { FlotaModule } from './flota.module';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 
@@ -113,6 +114,8 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
   };
 
   beforeAll(async () => {
+    // Sin RabbitMQ: el consumidor de la asignación de Pumping no se suscribe (se prueba en inspecciones.integration.spec.ts).
+    jest.spyOn(AsignacionPumpingConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue();
     await sembrarMaestros(admin, MAESTROS);
     Object.assign(process.env, {
       SERVICE_NAME: 'operaciones-test',
@@ -803,7 +806,8 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
           await rechaza(pool.query(sql), '42501');
         }
         await rechaza(
-          pool.query('SELECT transportista_id FROM catalogos.vehiculo LIMIT 1'),
+          // (la lectura de `catalogos.vehiculo` ya no se puede probar por columnas: FCR la concedió completa al mismo usuario)
+          pool.query('SELECT password_hash FROM identidad.usuario LIMIT 1'),
           '42501',
         );
         await pool.query('SELECT id, placa, anio FROM catalogos.vehiculo LIMIT 1');

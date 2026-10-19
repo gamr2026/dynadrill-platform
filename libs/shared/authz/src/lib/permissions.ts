@@ -440,11 +440,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y anular los documentos de un conductor',
     ModuleRoles.maintenance,
   ),
-  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza el riesgo BAJO; MEDIO y ALTO exigen además este permiso
-  // (qué permiso exige cada nivel lo dice la tabla `umbral_riesgo_viaje`, no el código).
+  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza los niveles que la tabla `umbral_riesgo_viaje` le asigna
+  // (BAJO y MEDIO); el ALTO exige este permiso, que además autoriza cualquier nivel.
   nuevo(
     'flota.viajes.autorizar_mayor',
-    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo MEDIO o ALTO',
+    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo ALTO (y cualquier otro nivel)',
     [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
   ),
   // mantenimiento

@@ -1,0 +1,191 @@
+-- Flota, tramo F4: Gerenciamiento de Viaje (DYN-SGI-RE-049).
+-- Lo solicita el Conductor (uno de salida y otro de retorno por ticket), con un cuestionario de 12 preguntas con puntaje; el nivel de
+-- riesgo sale de una tabla de umbrales (no del frontend) y esa misma tabla dice qué permiso autoriza cada nivel. Es un documento
+-- firmado: no se edita; solo se le marca la decisión (autorizado o rechazado), una vez. Un rechazado se rehace como solicitud nueva.
+-- Depende de `pumping.ticket` (FK real, mismo contenedor): se aplica después de `db:migrate:pumping`.
+
+CREATE TYPE "tipo_gerenciamiento" AS ENUM ('salida', 'retorno');
+CREATE TYPE "nivel_riesgo_viaje" AS ENUM ('bajo', 'medio', 'alto');
+CREATE TYPE "decision_viaje" AS ENUM ('autorizado', 'rechazado');
+
+-- Lectura mínima de los catálogos que nombran el origen y el destino (el nombre sale del JOIN, no se copia).
+GRANT USAGE ON SCHEMA catalogos TO app_operaciones;
+GRANT SELECT ("id", "nombre", "habilitado") ON catalogos.bodega TO app_operaciones;
+GRANT SELECT ("id", "codigo", "nombre_completo", "campo_id", "habilitado") ON catalogos.pozo TO app_operaciones;
+GRANT SELECT ("id", "nombre") ON catalogos.campo TO app_operaciones;
+
+-- ---------------------------------------------------------------- catálogos del cuestionario
+CREATE TABLE "pregunta_riesgo_viaje" (
+    "id" UUID NOT NULL,
+    "codigo" TEXT NOT NULL,
+    "orden" SMALLINT NOT NULL,
+    "texto" TEXT NOT NULL,
+    "activa" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_by" UUID,
+    CONSTRAINT "pregunta_riesgo_viaje_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "pregunta_riesgo_viaje_codigo_key" ON "pregunta_riesgo_viaje"("codigo");
+CREATE UNIQUE INDEX "pregunta_riesgo_viaje_orden_key" ON "pregunta_riesgo_viaje"("orden");
+ALTER TABLE "pregunta_riesgo_viaje"
+  ADD CONSTRAINT "pregunta_riesgo_viaje_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES identidad.usuario ("id"),
+  ADD CONSTRAINT "pregunta_riesgo_viaje_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES identidad.usuario ("id");
+
+-- `impide_conducir` es la respuesta «Deténgase / no conduce» (999 en el formato): no suma, impide el viaje.
+CREATE TABLE "opcion_riesgo_viaje" (
+    "id" UUID NOT NULL,
+    "pregunta_id" UUID NOT NULL,
+    "orden" SMALLINT NOT NULL,
+    "etiqueta" TEXT NOT NULL,
+    "puntos" INTEGER NOT NULL,
+    "impide_conducir" BOOLEAN NOT NULL DEFAULT false,
+    "activa" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_by" UUID,
+    CONSTRAINT "opcion_riesgo_viaje_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "opcion_riesgo_viaje_puntos_check" CHECK ("puntos" >= 0)
+);
+CREATE UNIQUE INDEX "opcion_riesgo_viaje_pregunta_id_orden_key" ON "opcion_riesgo_viaje"("pregunta_id", "orden");
+-- Apoya la FK compuesta de la respuesta: la opción elegida debe ser de la pregunta que se contesta.
+CREATE UNIQUE INDEX "opcion_riesgo_viaje_id_pregunta_id_key" ON "opcion_riesgo_viaje"("id", "pregunta_id");
+ALTER TABLE "opcion_riesgo_viaje"
+  ADD CONSTRAINT "opcion_riesgo_viaje_pregunta_id_fkey" FOREIGN KEY ("pregunta_id") REFERENCES "pregunta_riesgo_viaje" ("id"),
+  ADD CONSTRAINT "opcion_riesgo_viaje_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES identidad.usuario ("id"),
+  ADD CONSTRAINT "opcion_riesgo_viaje_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES identidad.usuario ("id");
+COMMENT ON COLUMN "opcion_riesgo_viaje"."impide_conducir" IS 'Respuesta «Deténgase» / «no conduce» del formato: la solicitud no se acepta.';
+
+-- Umbrales: el nivel es el de mayor `desde_puntos` que no supere el puntaje. `permiso_autoriza` es el permiso que autoriza ese nivel.
+CREATE TABLE "umbral_riesgo_viaje" (
+    "nivel" "nivel_riesgo_viaje" NOT NULL,
+    "desde_puntos" INTEGER NOT NULL,
+    "permiso_autoriza" TEXT NOT NULL,
+    "descripcion" TEXT NOT NULL,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_by" UUID,
+    CONSTRAINT "umbral_riesgo_viaje_pkey" PRIMARY KEY ("nivel"),
+    CONSTRAINT "umbral_riesgo_viaje_desde_check" CHECK ("desde_puntos" >= 0)
+);
+CREATE UNIQUE INDEX "umbral_riesgo_viaje_desde_puntos_key" ON "umbral_riesgo_viaje"("desde_puntos");
+ALTER TABLE "umbral_riesgo_viaje"
+  ADD CONSTRAINT "umbral_riesgo_viaje_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES identidad.usuario ("id"),
+  ADD CONSTRAINT "umbral_riesgo_viaje_updated_by_fkey" FOREIGN KEY ("updated_by") REFERENCES identidad.usuario ("id");
+
+-- ---------------------------------------------------------------- la solicitud
+CREATE TABLE "gerenciamiento_viaje" (
+    "id" UUID NOT NULL,
+    "numero" BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    "tipo" "tipo_gerenciamiento" NOT NULL,
+    "ticket_id" UUID,
+    "conductor_id" UUID NOT NULL,
+    "unidad_id" UUID NOT NULL,
+    "fecha" DATE NOT NULL,
+    "motivo" TEXT NOT NULL,
+    "origen_bodega_id" UUID,
+    "origen_pozo_id" UUID,
+    "destino_bodega_id" UUID,
+    "destino_pozo_id" UUID,
+    "puntaje_total" INTEGER NOT NULL,
+    "nivel" "nivel_riesgo_viaje" NOT NULL,
+    "pasajeros" TEXT,
+    "puede_combinar_viajes" BOOLEAN,
+    "hora_salida" TIME(0),
+    "hora_llegada" TIME(0),
+    "datos_pernocta" TEXT,
+    "aprobacion_telefonica_de" TEXT,
+    "aprobacion_telefonica_hora" TIME(0),
+    "decision" "decision_viaje",
+    "decidido_por" UUID,
+    "decidido_at" TIMESTAMPTZ(6),
+    "motivo_decision" TEXT,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_by" UUID NOT NULL,
+    CONSTRAINT "gerenciamiento_viaje_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "gerenciamiento_viaje_puntaje_check" CHECK ("puntaje_total" >= 0),
+    CONSTRAINT "gerenciamiento_viaje_origen_check" CHECK (num_nonnulls("origen_bodega_id", "origen_pozo_id") = 1),
+    CONSTRAINT "gerenciamiento_viaje_destino_check" CHECK (num_nonnulls("destino_bodega_id", "destino_pozo_id") = 1),
+    CONSTRAINT "gerenciamiento_viaje_telefonica_check" CHECK (("aprobacion_telefonica_de" IS NULL) = ("aprobacion_telefonica_hora" IS NULL)),
+    CONSTRAINT "gerenciamiento_viaje_decision_check" CHECK (
+      ("decision" IS NULL AND "decidido_por" IS NULL AND "decidido_at" IS NULL AND "motivo_decision" IS NULL)
+      OR ("decision" = 'autorizado' AND "decidido_por" IS NOT NULL AND "decidido_at" IS NOT NULL)
+      OR ("decision" = 'rechazado' AND "decidido_por" IS NOT NULL AND "decidido_at" IS NOT NULL AND char_length(btrim("motivo_decision")) >= 5)
+    ),
+    -- Nadie autoriza ni rechaza su propia solicitud.
+    CONSTRAINT "gerenciamiento_viaje_decide_otro_check" CHECK ("decidido_por" IS NULL OR "decidido_por" <> "conductor_id")
+);
+CREATE UNIQUE INDEX "gerenciamiento_viaje_numero_key" ON "gerenciamiento_viaje"("numero");
+-- Un gerenciamiento vigente por ticket y tipo (uno de salida y otro de retorno); el rechazado deja el lugar libre para rehacerlo.
+CREATE UNIQUE INDEX "gerenciamiento_viaje_ticket_tipo_vigente_key"
+  ON "gerenciamiento_viaje"("ticket_id", "tipo") WHERE "ticket_id" IS NOT NULL AND "decision" IS DISTINCT FROM 'rechazado';
+CREATE INDEX "gerenciamiento_viaje_conductor_id_created_at_idx" ON "gerenciamiento_viaje"("conductor_id", "created_at" DESC);
+CREATE INDEX "gerenciamiento_viaje_pendientes_idx" ON "gerenciamiento_viaje"("created_at") WHERE "decision" IS NULL;
+ALTER TABLE "gerenciamiento_viaje"
+  ADD CONSTRAINT "gerenciamiento_viaje_ticket_id_fkey" FOREIGN KEY ("ticket_id") REFERENCES pumping.ticket ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_conductor_id_fkey" FOREIGN KEY ("conductor_id") REFERENCES identidad.usuario ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_unidad_id_fkey" FOREIGN KEY ("unidad_id") REFERENCES "unidad" ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_origen_bodega_id_fkey" FOREIGN KEY ("origen_bodega_id") REFERENCES catalogos.bodega ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_origen_pozo_id_fkey" FOREIGN KEY ("origen_pozo_id") REFERENCES catalogos.pozo ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_destino_bodega_id_fkey" FOREIGN KEY ("destino_bodega_id") REFERENCES catalogos.bodega ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_destino_pozo_id_fkey" FOREIGN KEY ("destino_pozo_id") REFERENCES catalogos.pozo ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_decidido_por_fkey" FOREIGN KEY ("decidido_por") REFERENCES identidad.usuario ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES identidad.usuario ("id");
+COMMENT ON COLUMN "gerenciamiento_viaje"."puntaje_total" IS 'Documento emitido: suma de los puntos de las opciones elegidas en el momento de firmar (los umbrales y puntos del catálogo pueden cambiar después).';
+COMMENT ON COLUMN "gerenciamiento_viaje"."nivel" IS 'Documento emitido: nivel de riesgo que correspondía a ese puntaje según umbral_riesgo_viaje en ese momento.';
+COMMENT ON COLUMN "gerenciamiento_viaje"."motivo" IS 'Texto del formato (motivo del viaje, escrito por el conductor).';
+COMMENT ON COLUMN "gerenciamiento_viaje"."aprobacion_telefonica_de" IS 'Persona externa (p. ej. Dirección General) que dio el visto bueno por teléfono: no es una cuenta del sistema.';
+
+CREATE TABLE "gerenciamiento_viaje_respuesta" (
+    "gerenciamiento_id" UUID NOT NULL,
+    "pregunta_id" UUID NOT NULL,
+    "opcion_id" UUID NOT NULL,
+    CONSTRAINT "gerenciamiento_viaje_respuesta_pkey" PRIMARY KEY ("gerenciamiento_id", "pregunta_id")
+);
+ALTER TABLE "gerenciamiento_viaje_respuesta"
+  ADD CONSTRAINT "gerenciamiento_viaje_respuesta_gerenciamiento_id_fkey" FOREIGN KEY ("gerenciamiento_id") REFERENCES "gerenciamiento_viaje" ("id"),
+  ADD CONSTRAINT "gerenciamiento_viaje_respuesta_opcion_fkey" FOREIGN KEY ("opcion_id", "pregunta_id") REFERENCES "opcion_riesgo_viaje" ("id", "pregunta_id");
+
+-- Plan y ruta (paso 3 del formato): paradas y datos de comunicación en filas, no en JSON.
+CREATE TABLE "gerenciamiento_viaje_parada" (
+    "gerenciamiento_id" UUID NOT NULL,
+    "orden" SMALLINT NOT NULL,
+    "lugar" TEXT NOT NULL,
+    "hora_llegada" TIME(0),
+    "hora_salida" TIME(0),
+    "detalle_pernocta" TEXT,
+    CONSTRAINT "gerenciamiento_viaje_parada_pkey" PRIMARY KEY ("gerenciamiento_id", "orden")
+);
+ALTER TABLE "gerenciamiento_viaje_parada"
+  ADD CONSTRAINT "gerenciamiento_viaje_parada_gerenciamiento_id_fkey" FOREIGN KEY ("gerenciamiento_id") REFERENCES "gerenciamiento_viaje" ("id");
+COMMENT ON COLUMN "gerenciamiento_viaje_parada"."lugar" IS 'Punto intermedio de la ruta, escrito a mano en el formato (no hay catálogo de puntos de ruta).';
+
+CREATE TABLE "gerenciamiento_viaje_comunicacion" (
+    "gerenciamiento_id" UUID NOT NULL,
+    "orden" SMALLINT NOT NULL,
+    "frecuencia" TEXT NOT NULL,
+    "persona_contacto" TEXT NOT NULL,
+    "datos_contacto" TEXT,
+    CONSTRAINT "gerenciamiento_viaje_comunicacion_pkey" PRIMARY KEY ("gerenciamiento_id", "orden")
+);
+ALTER TABLE "gerenciamiento_viaje_comunicacion"
+  ADD CONSTRAINT "gerenciamiento_viaje_comunicacion_gerenciamiento_id_fkey" FOREIGN KEY ("gerenciamiento_id") REFERENCES "gerenciamiento_viaje" ("id");
+COMMENT ON COLUMN "gerenciamiento_viaje_comunicacion"."persona_contacto" IS 'Contacto del plan de comunicación (puede ser externo): texto del formato.';
+
+-- La decisión es definitiva: una vez autorizado o rechazado no cambia.
+CREATE FUNCTION flota."gerenciamiento_viaje_decision_definitiva"() RETURNS trigger LANGUAGE plpgsql SET search_path = flota AS $$
+BEGIN
+  IF OLD."decision" IS NOT NULL THEN
+    RAISE EXCEPTION 'El gerenciamiento de viaje ya tiene una decisión' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER "gerenciamiento_viaje_decision_definitiva_trg" BEFORE UPDATE ON "gerenciamiento_viaje"
+  FOR EACH ROW EXECUTE FUNCTION flota."gerenciamiento_viaje_decision_definitiva"();
+
+-- Historia inmutable: solo se puede marcar la decisión; las respuestas, la ruta y el plan no cambian nunca.
+REVOKE UPDATE, DELETE ON "gerenciamiento_viaje", "gerenciamiento_viaje_respuesta", "gerenciamiento_viaje_parada", "gerenciamiento_viaje_comunicacion" FROM app_operaciones;
+GRANT UPDATE ("decision", "decidido_por", "decidido_at", "motivo_decision") ON "gerenciamiento_viaje" TO app_operaciones;

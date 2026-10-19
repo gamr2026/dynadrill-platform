@@ -13,7 +13,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["flota", "catalogos", "identidad", "archivos"]
+  schemas  = ["flota", "catalogos", "identidad", "archivos", "pumping"]
 }
 
 enum TipoUnidad {
@@ -119,31 +119,34 @@ model ReglaPreventiva {
 
 /// Unidad operativa de Dynadrill. Los datos de matrícula (placa, marca, modelo, año) salen de `catalogos.vehiculo`.
 model Unidad {
-  id                       String         @id @db.Uuid
-  codigo                   String         @unique
+  id                       String                  @id @db.Uuid
+  codigo                   String                  @unique
   nombre                   String
   tipo                     TipoUnidad
-  categoriaPeso            CategoriaPeso? @map("categoria_peso")
-  vehiculoId               String?        @unique @map("vehiculo_id") @db.Uuid
-  vehiculo                 CatVehiculo?   @relation(fields: [vehiculoId], references: [id])
-  proveedorMantenimientoId String?        @map("proveedor_mantenimiento_id") @db.Uuid
+  categoriaPeso            CategoriaPeso?          @map("categoria_peso")
+  vehiculoId               String?                 @unique @map("vehiculo_id") @db.Uuid
+  vehiculo                 CatVehiculo?            @relation(fields: [vehiculoId], references: [id])
+  proveedorMantenimientoId String?                 @map("proveedor_mantenimiento_id") @db.Uuid
   proveedorMantenimiento   ProveedorMantenimiento? @relation(fields: [proveedorMantenimientoId], references: [id])
-  fechaMatricula           DateTime?      @map("fecha_matricula") @db.Date
-  caducidadMatricula       DateTime?      @map("caducidad_matricula") @db.Date
-  caducidadPoliza          DateTime?      @map("caducidad_poliza") @db.Date
-  vigenciaOtroDocumento    DateTime?      @map("vigencia_otro_documento") @db.Date
-  responsablePatrimonialId String?        @map("responsable_patrimonial_id") @db.Uuid
-  responsablePatrimonial   IdUsuario?     @relation("unidadResponsable", fields: [responsablePatrimonialId], references: [id])
-  predeterminada           Boolean        @default(false)
+  fechaMatricula           DateTime?               @map("fecha_matricula") @db.Date
+  caducidadMatricula       DateTime?               @map("caducidad_matricula") @db.Date
+  caducidadPoliza          DateTime?               @map("caducidad_poliza") @db.Date
+  vigenciaOtroDocumento    DateTime?               @map("vigencia_otro_documento") @db.Date
+  responsablePatrimonialId String?                 @map("responsable_patrimonial_id") @db.Uuid
+  responsablePatrimonial   IdUsuario?              @relation("unidadResponsable", fields: [responsablePatrimonialId], references: [id])
+  predeterminada           Boolean                 @default(false)
   nota                     String?
-  activa                   Boolean        @default(true)
-  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy                String?        @map("created_by") @db.Uuid
-  updatedAt                DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
-  updatedBy                String?        @map("updated_by") @db.Uuid
+  activa                   Boolean                 @default(true)
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?                 @map("created_by") @db.Uuid
+  updatedAt                DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?                 @map("updated_by") @db.Uuid
 
-  lecturas    UnidadLectura[]
-  preventivos UnidadPreventivo[]
+  lecturas     UnidadLectura[]
+  preventivos  UnidadPreventivo[]
+  casos        InspeccionCaso[]
+  inspecciones InspeccionVehiculo[]
+  viajes       GerenciamientoViaje[]
 
   @@index([tipo])
   @@map("unidad")
@@ -163,8 +166,10 @@ model UnidadLectura {
   registrador   IdUsuario?    @relation("lecturaRegistrador", fields: [registradaPor], references: [id])
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  preventivos UnidadPreventivo[]
-  anulacion   UnidadLecturaAnulacion?
+  preventivos  UnidadPreventivo[]
+  anulacion    UnidadLecturaAnulacion?
+  inspeccionId String?                 @unique @map("inspeccion_id") @db.Uuid
+  inspeccion   InspeccionVehiculo?     @relation(fields: [inspeccionId], references: [id])
 
   @@index([unidadId, tipo, leidaAt(sort: Desc)])
   @@map("unidad_lectura")
@@ -173,25 +178,25 @@ model UnidadLectura {
 
 /// Mantenimiento preventivo ejecutado. El horómetro o kilometraje de ese momento es una lectura, no una columna.
 model UnidadPreventivo {
-  id                       String                  @id @db.Uuid
-  unidadId                 String                  @map("unidad_id") @db.Uuid
-  unidad                   Unidad                  @relation(fields: [unidadId], references: [id], onDelete: Cascade)
-  tipoServicio             TipoServicioPreventivo? @map("tipo_servicio")
-  fecha                    DateTime                @db.Date
-  lecturaId                String?                 @map("lectura_id") @db.Uuid
-  lectura                  UnidadLectura?          @relation(fields: [lecturaId], references: [id])
-  ejecutadoPor             EjecutadoPor            @map("ejecutado_por")
-  proveedorMantenimientoId String?                 @map("proveedor_mantenimiento_id") @db.Uuid
-  proveedorMantenimiento   ProveedorMantenimiento? @relation(fields: [proveedorMantenimientoId], references: [id])
-  responsableId            String?                 @map("responsable_id") @db.Uuid
-  responsable              IdUsuario?              @relation("preventivoResponsable", fields: [responsableId], references: [id])
+  id                       String                     @id @db.Uuid
+  unidadId                 String                     @map("unidad_id") @db.Uuid
+  unidad                   Unidad                     @relation(fields: [unidadId], references: [id], onDelete: Cascade)
+  tipoServicio             TipoServicioPreventivo?    @map("tipo_servicio")
+  fecha                    DateTime                   @db.Date
+  lecturaId                String?                    @map("lectura_id") @db.Uuid
+  lectura                  UnidadLectura?             @relation(fields: [lecturaId], references: [id])
+  ejecutadoPor             EjecutadoPor               @map("ejecutado_por")
+  proveedorMantenimientoId String?                    @map("proveedor_mantenimiento_id") @db.Uuid
+  proveedorMantenimiento   ProveedorMantenimiento?    @relation(fields: [proveedorMantenimientoId], references: [id])
+  responsableId            String?                    @map("responsable_id") @db.Uuid
+  responsable              IdUsuario?                 @relation("preventivoResponsable", fields: [responsableId], references: [id])
   observaciones            String?
-  checklistArchivoId       String?                 @map("checklist_archivo_id") @db.Uuid
-  checklistArchivo         ArchArchivo?            @relation(fields: [checklistArchivoId], references: [id])
-  origen                   OrigenRegistro          @default(aplicacion)
+  checklistArchivoId       String?                    @map("checklist_archivo_id") @db.Uuid
+  checklistArchivo         ArchArchivo?               @relation(fields: [checklistArchivoId], references: [id])
+  origen                   OrigenRegistro             @default(aplicacion)
   anulacion                UnidadPreventivoAnulacion?
-  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy                String?                 @map("created_by") @db.Uuid
+  createdAt                DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?                    @map("created_by") @db.Uuid
 
   @@index([unidadId, fecha(sort: Desc)])
   @@map("unidad_preventivo")
@@ -220,6 +225,419 @@ model UnidadPreventivoAnulacion {
 
   @@map("unidad_preventivo_anulacion")
   @@schema("flota")
+}
+
+enum MomentoInspeccion {
+  salida
+  llegada
+
+  @@map("momento_inspeccion")
+  @@schema("flota")
+}
+
+enum ResultadoChecklist {
+  cumple
+  no_cumple
+  no_aplica
+
+  @@map("resultado_checklist")
+  @@schema("flota")
+}
+
+enum SeccionInspeccion {
+  vehiculo
+  equipo
+
+  @@map("seccion_inspeccion")
+  @@schema("flota")
+}
+
+enum DecisionRevision {
+  aprobada
+  rechazada
+
+  @@map("decision_revision")
+  @@schema("flota")
+}
+
+/// Documentos que se exigen a un conductor. `conVigencia = false`: solo se tiene o no se tiene (sin fecha de vencimiento).
+model TipoPermisoConductor {
+  id          String   @id @db.Uuid
+  codigo      String   @unique
+  nombre      String
+  conVigencia Boolean  @map("con_vigencia")
+  orden       Int      @db.SmallInt
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by") @db.Uuid
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?  @map("updated_by") @db.Uuid
+
+  permisos ConductorPermiso[]
+
+  @@unique([id, conVigencia])
+  @@map("tipo_permiso_conductor")
+  @@schema("flota")
+}
+
+/// Un documento del conductor (historia inmutable). El vigente de cada tipo es el último no anulado.
+model ConductorPermiso {
+  id            String                     @id @db.Uuid
+  usuarioId     String                     @map("usuario_id") @db.Uuid
+  usuario       IdUsuario                  @relation("permisoConductor", fields: [usuarioId], references: [id])
+  tipoId        String                     @map("tipo_id") @db.Uuid
+  conVigencia   Boolean                    @map("con_vigencia")
+  tipo          TipoPermisoConductor       @relation(fields: [tipoId, conVigencia], references: [id, conVigencia])
+  vigenteHasta  DateTime?                  @map("vigente_hasta") @db.Date
+  archivoId     String?                    @map("archivo_id") @db.Uuid
+  archivo       ArchArchivo?               @relation(fields: [archivoId], references: [id])
+  observaciones String?
+  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String                     @map("created_by") @db.Uuid
+  registrador   IdUsuario                  @relation("permisoRegistrador", fields: [createdBy], references: [id])
+  anulacion     ConductorPermisoAnulacion?
+
+  @@index([usuarioId, tipoId, createdAt(sort: Desc)])
+  @@map("conductor_permiso")
+  @@schema("flota")
+}
+
+model ConductorPermisoAnulacion {
+  permisoId  String           @id @map("permiso_id") @db.Uuid
+  permiso    ConductorPermiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+  anuladaAt  DateTime         @default(now()) @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor String           @map("anulada_por") @db.Uuid
+  motivo     String
+
+  @@map("conductor_permiso_anulacion")
+  @@schema("flota")
+}
+
+/// Los 24 ítems del vehículo y los 6 del equipo del formato DYN-SGI-RE-068.
+model ItemInspeccionVehiculo {
+  id                String            @id @db.Uuid
+  codigo            String            @unique
+  seccion           SeccionInspeccion
+  orden             Int               @db.SmallInt
+  etiqueta          String
+  /// Nota 1 del formato: con este ítem en «No cumple» el vehículo no puede usarse (la inspección no se aprueba).
+  bloqueaSiNoCumple Boolean           @default(false) @map("bloquea_si_no_cumple")
+  activo            Boolean           @default(true)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String?           @map("created_by") @db.Uuid
+  updatedAt         DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String?           @map("updated_by") @db.Uuid
+
+  resultados InspeccionVehiculoResultado[]
+
+  @@unique([seccion, orden])
+  @@map("item_inspeccion_vehiculo")
+  @@schema("flota")
+}
+
+/// Una unidad de transporte asignada a un ticket de Pumping. Su estado se calcula con las inspecciones y revisiones.
+model InspeccionCaso {
+  id         String    @id @db.Uuid
+  ticketId   String    @map("ticket_id") @db.Uuid
+  ticket     PumTicket @relation(fields: [ticketId], references: [id])
+  unidadId   String    @map("unidad_id") @db.Uuid
+  unidad     Unidad    @relation(fields: [unidadId], references: [id])
+  operadorId String    @map("operador_id") @db.Uuid
+  operador   IdUsuario @relation("casoOperador", fields: [operadorId], references: [id])
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?   @map("created_by") @db.Uuid
+  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?   @map("updated_by") @db.Uuid
+
+  inspecciones InspeccionVehiculo[]
+
+  @@unique([ticketId, unidadId])
+  @@unique([id, unidadId])
+  @@index([operadorId])
+  @@map("inspeccion_caso")
+  @@schema("flota")
+}
+
+/// Inspección firmada (DYN-SGI-RE-068). Solo admite que se le marque la anulación.
+model InspeccionVehiculo {
+  id              String            @id @db.Uuid
+  casoId          String?           @map("caso_id") @db.Uuid
+  unidadId        String            @map("unidad_id") @db.Uuid
+  caso            InspeccionCaso?   @relation(fields: [casoId, unidadId], references: [id, unidadId])
+  unidad          Unidad            @relation(fields: [unidadId], references: [id])
+  momento         MomentoInspeccion @default(salida)
+  fecha           DateTime          @db.Timestamptz(6)
+  puntoPartida    String            @map("punto_partida")
+  destino         String?
+  conductorId     String            @map("conductor_id") @db.Uuid
+  conductor       IdUsuario         @relation("inspeccionConductor", fields: [conductorId], references: [id])
+  observaciones   String?
+  anuladaAt       DateTime?         @map("anulada_at") @db.Timestamptz(6)
+  anuladaPor      String?           @map("anulada_por") @db.Uuid
+  anulador        IdUsuario?        @relation("inspeccionAnulador", fields: [anuladaPor], references: [id])
+  anulacionMotivo String?           @map("anulacion_motivo")
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String            @map("created_by") @db.Uuid
+  registrador     IdUsuario         @relation("inspeccionRegistrador", fields: [createdBy], references: [id])
+
+  resultados InspeccionVehiculoResultado[]
+  revisiones InspeccionVehiculoRevision[]
+  lectura    UnidadLectura?
+
+  @@unique([id, unidadId])
+  @@index([unidadId, fecha(sort: Desc)])
+  @@index([conductorId])
+  @@map("inspeccion_vehiculo")
+  @@schema("flota")
+}
+
+model InspeccionVehiculoResultado {
+  inspeccionId String                 @map("inspeccion_id") @db.Uuid
+  inspeccion   InspeccionVehiculo     @relation(fields: [inspeccionId], references: [id])
+  itemId       String                 @map("item_id") @db.Uuid
+  item         ItemInspeccionVehiculo @relation(fields: [itemId], references: [id])
+  resultado    ResultadoChecklist
+
+  @@id([inspeccionId, itemId])
+  @@map("inspeccion_vehiculo_resultado")
+  @@schema("flota")
+}
+
+/// Revisión del Supervisor. Se agrega, nunca se cambia: vale la última de cada inspección.
+model InspeccionVehiculoRevision {
+  id           String             @id @db.Uuid
+  inspeccionId String             @map("inspeccion_id") @db.Uuid
+  inspeccion   InspeccionVehiculo @relation(fields: [inspeccionId], references: [id])
+  decision     DecisionRevision
+  motivo       String?
+  revisadaPor  String             @map("revisada_por") @db.Uuid
+  revisor      IdUsuario          @relation("revisionRevisor", fields: [revisadaPor], references: [id])
+  revisadaAt   DateTime           @default(now()) @map("revisada_at") @db.Timestamptz(6)
+
+  @@index([inspeccionId, revisadaAt(sort: Desc)])
+  @@map("inspeccion_vehiculo_revision")
+  @@schema("flota")
+}
+
+/// `pumping.ticket`: solo el id (espejo de solo lectura, para la FK del caso de inspección).
+model PumTicket {
+  id           String                @id @db.Uuid
+  /// Número del ticket (el de la prefactura): solo para mostrarlo en los formatos; Flota nunca lo escribe.
+  ticketNumero Int?                  @unique @map("ticket_numero")
+  casos        InspeccionCaso[]
+  viajes       GerenciamientoViaje[]
+
+  @@map("ticket")
+  @@schema("pumping")
+}
+
+enum TipoGerenciamiento {
+  salida
+  retorno
+
+  @@map("tipo_gerenciamiento")
+  @@schema("flota")
+}
+
+enum NivelRiesgoViaje {
+  bajo
+  medio
+  alto
+
+  @@map("nivel_riesgo_viaje")
+  @@schema("flota")
+}
+
+enum DecisionViaje {
+  autorizado
+  rechazado
+
+  @@map("decision_viaje")
+  @@schema("flota")
+}
+
+/// Las 12 preguntas del cuestionario de riesgo del viaje (DYN-SGI-RE-049).
+model PreguntaRiesgoViaje {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  orden     Int      @unique @db.SmallInt
+  texto     String
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  opciones   OpcionRiesgoViaje[]
+  respuestas GerenciamientoViajeRespuesta[]
+
+  @@map("pregunta_riesgo_viaje")
+  @@schema("flota")
+}
+
+model OpcionRiesgoViaje {
+  id             String              @id @db.Uuid
+  preguntaId     String              @map("pregunta_id") @db.Uuid
+  pregunta       PreguntaRiesgoViaje @relation(fields: [preguntaId], references: [id])
+  orden          Int                 @db.SmallInt
+  etiqueta       String
+  puntos         Int
+  /// Respuesta «Deténgase» / «no conduce»: la solicitud no se acepta.
+  impideConducir Boolean             @default(false) @map("impide_conducir")
+  activa         Boolean             @default(true)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?             @map("created_by") @db.Uuid
+  updatedAt      DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?             @map("updated_by") @db.Uuid
+
+  respuestas GerenciamientoViajeRespuesta[]
+
+  @@unique([preguntaId, orden])
+  @@unique([id, preguntaId])
+  @@map("opcion_riesgo_viaje")
+  @@schema("flota")
+}
+
+/// El nivel es el de mayor `desdePuntos` que no supere el puntaje; `permisoAutoriza` autoriza ese nivel.
+model UmbralRiesgoViaje {
+  nivel           NivelRiesgoViaje @id
+  desdePuntos     Int              @unique @map("desde_puntos")
+  permisoAutoriza String           @map("permiso_autoriza")
+  descripcion     String
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String?          @map("created_by") @db.Uuid
+  updatedAt       DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?          @map("updated_by") @db.Uuid
+
+  @@map("umbral_riesgo_viaje")
+  @@schema("flota")
+}
+
+/// Gerenciamiento de Viaje firmado por el Conductor. Solo admite que se le marque la decisión, una vez.
+model GerenciamientoViaje {
+  id                       String             @id @db.Uuid
+  numero                   BigInt             @unique @default(autoincrement())
+  tipo                     TipoGerenciamiento
+  ticketId                 String?            @map("ticket_id") @db.Uuid
+  ticket                   PumTicket?         @relation(fields: [ticketId], references: [id])
+  conductorId              String             @map("conductor_id") @db.Uuid
+  conductor                IdUsuario          @relation("viajeConductor", fields: [conductorId], references: [id])
+  unidadId                 String             @map("unidad_id") @db.Uuid
+  unidad                   Unidad             @relation(fields: [unidadId], references: [id])
+  fecha                    DateTime           @db.Date
+  motivo                   String
+  origenBodegaId           String?            @map("origen_bodega_id") @db.Uuid
+  origenBodega             CatBodega?         @relation("viajeOrigenBodega", fields: [origenBodegaId], references: [id])
+  origenPozoId             String?            @map("origen_pozo_id") @db.Uuid
+  origenPozo               CatPozo?           @relation("viajeOrigenPozo", fields: [origenPozoId], references: [id])
+  destinoBodegaId          String?            @map("destino_bodega_id") @db.Uuid
+  destinoBodega            CatBodega?         @relation("viajeDestinoBodega", fields: [destinoBodegaId], references: [id])
+  destinoPozoId            String?            @map("destino_pozo_id") @db.Uuid
+  destinoPozo              CatPozo?           @relation("viajeDestinoPozo", fields: [destinoPozoId], references: [id])
+  puntajeTotal             Int                @map("puntaje_total")
+  nivel                    NivelRiesgoViaje
+  pasajeros                String?
+  puedeCombinarViajes      Boolean?           @map("puede_combinar_viajes")
+  horaSalida               DateTime?          @map("hora_salida") @db.Time(0)
+  horaLlegada              DateTime?          @map("hora_llegada") @db.Time(0)
+  datosPernocta            String?            @map("datos_pernocta")
+  aprobacionTelefonicaDe   String?            @map("aprobacion_telefonica_de")
+  aprobacionTelefonicaHora DateTime?          @map("aprobacion_telefonica_hora") @db.Time(0)
+  decision                 DecisionViaje?
+  decididoPor              String?            @map("decidido_por") @db.Uuid
+  decisor                  IdUsuario?         @relation("viajeDecisor", fields: [decididoPor], references: [id])
+  decididoAt               DateTime?          @map("decidido_at") @db.Timestamptz(6)
+  motivoDecision           String?            @map("motivo_decision")
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String             @map("created_by") @db.Uuid
+  registrador              IdUsuario          @relation("viajeRegistrador", fields: [createdBy], references: [id])
+
+  respuestas     GerenciamientoViajeRespuesta[]
+  paradas        GerenciamientoViajeParada[]
+  comunicaciones GerenciamientoViajeComunicacion[]
+
+  @@index([conductorId, createdAt(sort: Desc)])
+  @@map("gerenciamiento_viaje")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeRespuesta {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  preguntaId       String              @map("pregunta_id") @db.Uuid
+  pregunta         PreguntaRiesgoViaje @relation(fields: [preguntaId], references: [id])
+  opcionId         String              @map("opcion_id") @db.Uuid
+  opcion           OpcionRiesgoViaje   @relation(fields: [opcionId, preguntaId], references: [id, preguntaId])
+
+  @@id([gerenciamientoId, preguntaId])
+  @@map("gerenciamiento_viaje_respuesta")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeParada {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  orden            Int                 @db.SmallInt
+  lugar            String
+  horaLlegada      DateTime?           @map("hora_llegada") @db.Time(0)
+  horaSalida       DateTime?           @map("hora_salida") @db.Time(0)
+  detallePernocta  String?             @map("detalle_pernocta")
+
+  @@id([gerenciamientoId, orden])
+  @@map("gerenciamiento_viaje_parada")
+  @@schema("flota")
+}
+
+model GerenciamientoViajeComunicacion {
+  gerenciamientoId String              @map("gerenciamiento_id") @db.Uuid
+  gerenciamiento   GerenciamientoViaje @relation(fields: [gerenciamientoId], references: [id])
+  orden            Int                 @db.SmallInt
+  frecuencia       String
+  personaContacto  String              @map("persona_contacto")
+  datosContacto    String?             @map("datos_contacto")
+
+  @@id([gerenciamientoId, orden])
+  @@map("gerenciamiento_viaje_comunicacion")
+  @@schema("flota")
+}
+
+/// `catalogos.bodega`: solo id, nombre y habilitado.
+model CatBodega {
+  id         String  @id @db.Uuid
+  nombre     String
+  habilitado Boolean @default(true)
+
+  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenBodega")
+  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoBodega")
+
+  @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// `catalogos.campo`: solo id y nombre.
+model CatCampo {
+  id     String    @id @db.Uuid
+  nombre String
+  pozos  CatPozo[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+/// `catalogos.pozo`: lo necesario para nombrar el origen o el destino de un viaje.
+model CatPozo {
+  id             String    @id @db.Uuid
+  codigo         String?
+  nombreCompleto String    @map("nombre_completo")
+  campoId        String?   @map("campo_id") @db.Uuid
+  campo          CatCampo? @relation(fields: [campoId], references: [id])
+  habilitado     Boolean   @default(true)
+
+  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenPozo")
+  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoPozo")
+
+  @@map("pozo")
+  @@schema("catalogos")
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -272,9 +690,19 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  unidadesResponsable Unidad[]           @relation("unidadResponsable")
-  lecturas            UnidadLectura[]    @relation("lecturaRegistrador")
-  preventivos         UnidadPreventivo[] @relation("preventivoResponsable")
+  unidadesResponsable     Unidad[]                     @relation("unidadResponsable")
+  lecturas                UnidadLectura[]              @relation("lecturaRegistrador")
+  preventivos             UnidadPreventivo[]           @relation("preventivoResponsable")
+  permisosConductor       ConductorPermiso[]           @relation("permisoConductor")
+  permisosRegistrados     ConductorPermiso[]           @relation("permisoRegistrador")
+  casosOperador           InspeccionCaso[]             @relation("casoOperador")
+  inspeccionesConductor   InspeccionVehiculo[]         @relation("inspeccionConductor")
+  inspeccionesAnuladas    InspeccionVehiculo[]         @relation("inspeccionAnulador")
+  inspeccionesRegistradas InspeccionVehiculo[]         @relation("inspeccionRegistrador")
+  revisiones              InspeccionVehiculoRevision[] @relation("revisionRevisor")
+  viajesConductor         GerenciamientoViaje[]        @relation("viajeConductor")
+  viajesDecididos         GerenciamientoViaje[]        @relation("viajeDecisor")
+  viajesRegistrados       GerenciamientoViaje[]        @relation("viajeRegistrador")
 
   @@map("usuario")
   @@schema("identidad")
@@ -282,13 +710,14 @@ model IdUsuario {
 
 /// `archivos.archivo`: solo los datos descriptivos (nunca la clave del blob).
 model ArchArchivo {
-  id             String  @id @db.Uuid
-  nombreOriginal String  @map("nombre_original")
-  mimeType       String  @map("mime_type")
-  tamanoBytes    BigInt  @map("tamano_bytes")
-  subidoPor      String  @map("subido_por") @db.Uuid
+  id             String @id @db.Uuid
+  nombreOriginal String @map("nombre_original")
+  mimeType       String @map("mime_type")
+  tamanoBytes    BigInt @map("tamano_bytes")
+  subidoPor      String @map("subido_por") @db.Uuid
 
   preventivos UnidadPreventivo[]
+  permisos    ConductorPermiso[]
 
   @@map("archivo")
   @@schema("archivos")

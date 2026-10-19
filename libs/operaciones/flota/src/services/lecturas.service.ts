@@ -29,6 +29,8 @@ export interface LecturaEntrada {
   /** Momento de la lectura; por omisión, ahora. */
   leidaAt?: Date;
   fuente: FuenteLectura;
+  /** La inspección que origina la lectura (obligatoria con fuente `inspeccion`, y solo con ella: lo exige un CHECK de la base). */
+  inspeccionId?: string;
 }
 
 /** Tolerancia al reloj de quien envía la lectura. */
@@ -131,6 +133,7 @@ export class LecturasService {
         valor: entrada.valor,
         leidaAt,
         fuente: entrada.fuente,
+        inspeccionId: entrada.inspeccionId ?? null,
         registradaPor: actor?.id ?? null,
       },
     });
