@@ -1,0 +1,1086 @@
+// Módulo `fcr` (contenedor operaciones). Schema PostgreSQL: fcr. FCR = Fishing, Completion & Remedial.
+// El ticket de FCR nace cuando Ventas abre un pedido de la línea FCR (evento `comercial.pedido.abierto`). Hay DOS entradas según el tipo de
+// OT del pedido (venta: revisión inicial; servicios: tipo de operador, inspección y aprobación del Supervisor de Operaciones FCR) que
+// confluyen en el mismo tronco: preparación de herramientas, asignación, reunión operativa, ejecución, revisión de reportes, control de
+// retorno y cierre. Plan: documentacion/modulos/plan-fcr.md.
+// Los ids son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie más lo importa.
+// Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["fcr", "catalogos", "identidad", "inventario", "archivos"]
+}
+
+enum MacroEstado {
+  pendiente
+  en_proceso
+  esperando_aprobacion
+  aprobado
+  rechazado
+
+  @@map("macro_estado")
+  @@schema("fcr")
+}
+
+enum OrigenCambio {
+  manual
+  sistema
+
+  @@map("origen_cambio")
+  @@schema("fcr")
+}
+
+/// Tipo de orden de trabajo del pedido: lo decide Ventas (pedido.tipo_ot) y FCR lo hereda. Fijo del sistema: define por dónde entra el ticket.
+enum TipoOt {
+  venta
+  servicio
+
+  @@map("tipo_ot")
+  @@schema("fcr")
+}
+
+enum EstadoRequisito {
+  pendiente
+  cumplido
+
+  @@map("estado_requisito")
+  @@schema("fcr")
+}
+
+enum OrigenCumplimiento {
+  sistema
+  evento
+  manual_temporal
+
+  @@map("origen_cumplimiento")
+  @@schema("fcr")
+}
+
+enum AmbitoRequisito {
+  ticket
+  unidad
+  operador
+
+  @@map("ambito_requisito")
+  @@schema("fcr")
+}
+
+/// Módulo que es dueño del dato que cumple un requisito.
+enum ModuloDueno {
+  fcr
+  qhse
+  flota
+
+  @@map("modulo_dueno")
+  @@schema("fcr")
+}
+
+/// Rol con el que una persona queda asignada a un ticket (no es el rol de su cuenta). El operador que inspecciona en SERVICIOS no va
+/// aquí: es `ticket.inspector_id`.
+enum RolAsignado {
+  supervisor
+  operador
+
+  @@map("rol_asignado")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pasos, transiciones y requisitos (catálogos del proceso)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Pasos del servicio de FCR (catálogo): los de la entrada VENTA, los de la entrada SERVICIOS y los del tronco común.
+model Paso {
+  codigo         String      @id
+  nombre         String
+  macro          MacroEstado
+  orden          Int         @unique
+  terminal       Boolean     @default(false)
+  /// Verdadero: solo el equipo asignado al ticket (o quien coordina) actúa en el paso. Falso: cualquier cuenta del rol (pasos de arranque y de bodega).
+  requiereEquipo Boolean     @default(true) @map("requiere_equipo")
+  activo         Boolean     @default(true)
+
+  roles      PasoRol[]
+  requisitos PasoRequisito[]
+  salidas    Transicion[]    @relation("origen")
+  entradas   Transicion[]    @relation("destino")
+  inicios    EntradaOt[]
+  tickets    Ticket[]
+
+  @@map("paso")
+  @@schema("fcr")
+}
+
+/// Roles de cuenta (`identidad.rol.codigo`) que pueden actuar en cada paso.
+model PasoRol {
+  pasoCodigo String @map("paso_codigo")
+  paso       Paso   @relation(fields: [pasoCodigo], references: [codigo])
+  rolCodigo  String @map("rol_codigo")
+  rol        IdRol  @relation(fields: [rolCodigo], references: [codigo])
+
+  @@id([pasoCodigo, rolCodigo])
+  @@map("paso_rol")
+  @@schema("fcr")
+}
+
+/// Paso en el que nace el ticket según el tipo de OT: es lo que separa los dos recorridos.
+model EntradaOt {
+  tipoOt     TipoOt @id @map("tipo_ot")
+  pasoCodigo String @map("paso_codigo")
+  paso       Paso   @relation(fields: [pasoCodigo], references: [codigo])
+
+  @@map("entrada_ot")
+  @@schema("fcr")
+}
+
+/// Pasos válidos entre dos pasos.
+model Transicion {
+  id              String  @id @db.Uuid
+  origenCodigo    String  @map("origen_codigo")
+  origen          Paso    @relation("origen", fields: [origenCodigo], references: [codigo])
+  destinoCodigo   String  @map("destino_codigo")
+  destino         Paso    @relation("destino", fields: [destinoCodigo], references: [codigo])
+  requiereMotivo  Boolean @default(false) @map("requiere_motivo")
+  /// Falso en los rechazos (vuelven a un paso anterior): no se exige que el paso de origen esté completo.
+  exigeRequisitos Boolean @default(true) @map("exige_requisitos")
+  activa          Boolean @default(true)
+  /// Verdadero: el cambio de paso lo hace una acción propia (asignar, aprobar o rechazar la inspección); el avance genérico no la ofrece.
+  soloPorAccion   Boolean @default(false) @map("solo_por_accion")
+
+  @@unique([origenCodigo, destinoCodigo])
+  @@map("transicion")
+  @@schema("fcr")
+}
+
+/// Condiciones que el proceso exige (catálogo): de qué ámbito son, qué módulo es dueño del dato que las cumple y, si aplica a un solo
+/// tipo de OT, cuál.
+model Requisito {
+  codigo      String          @id
+  nombre      String
+  descripcion String?
+  ambito      AmbitoRequisito
+  modulo      ModuloDueno
+  tipoOt      TipoOt?         @map("tipo_ot")
+  activo      Boolean         @default(true)
+
+  pasos   PasoRequisito[]
+  tickets TicketRequisito[]
+
+  @@map("requisito")
+  @@schema("fcr")
+}
+
+/// Requisitos que deben estar cumplidos para SALIR de un paso.
+model PasoRequisito {
+  pasoCodigo      String    @map("paso_codigo")
+  paso            Paso      @relation(fields: [pasoCodigo], references: [codigo])
+  requisitoCodigo String    @map("requisito_codigo")
+  requisito       Requisito @relation(fields: [requisitoCodigo], references: [codigo])
+
+  @@id([pasoCodigo, requisitoCodigo])
+  @@map("paso_requisito")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Catálogos fijos del negocio (listas cerradas que se amplían con una fila)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Quién repara e inspecciona en la entrada SERVICIOS: mecánico o soldador.
+model TipoOperador {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  tickets Ticket[]
+
+  @@map("tipo_operador")
+  @@schema("fcr")
+}
+
+/// Tipo de completación (OT de venta): selectiva, inyección, power oil.
+model TipoCompletacion {
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
+
+  @@map("tipo_completacion")
+  @@schema("fcr")
+}
+
+/// Tipo de trabajo (OT de servicios): fractura, estimulación, evaluación, cemento, picking.
+model TipoTrabajo {
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
+
+  @@map("tipo_trabajo")
+  @@schema("fcr")
+}
+
+/// Medida del picker: 7/8", 9.5/8", 5.5/8", 5/8".
+model TipoPicker {
+  id                 String              @id @db.Uuid
+  codigo             String              @unique
+  nombre             String
+  orden              Int
+  activo             Boolean             @default(true)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?             @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?             @map("updated_by") @db.Uuid
+  usoHerramientaDias UsoHerramientaDia[]
+
+  @@map("tipo_picker")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ticket
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Ticket de servicio de FCR: uno por pedido. NO tiene numeración propia: el «ticket» de Dynadrill es la prefactura, así que lleva el
+/// número que `comercial` le reservó al pedido (el de la prefactura que vendrá).
+model Ticket {
+  id           String @id @db.Uuid
+  /// Pedido de `comercial` (otro contenedor, D1): uuid sin FK.
+  pedidoId     String @unique @map("pedido_id") @db.Uuid
+  /// Copia del código del pedido (PED-...) de otro contenedor: la usan la bandeja y los avisos; el código no cambia.
+  pedidoCodigo String @map("pedido_codigo")
+  ticketNumero Int?   @unique @map("ticket_numero")
+  pasoCodigo   String @map("paso_codigo")
+  paso         Paso   @relation(fields: [pasoCodigo], references: [codigo])
+  version      Int    @default(1)
+  tipoOt       TipoOt @map("tipo_ot")
+
+  /// Mecánico o soldador (solo SERVICIOS), elegido por el Supervisor en el paso «Tipo de operador».
+  tipoOperadorId String?       @map("tipo_operador_id") @db.Uuid
+  tipoOperador   TipoOperador? @relation(fields: [tipoOperadorId], references: [id])
+  /// Operador FCR que repara e inspecciona las herramientas (solo SERVICIOS).
+  inspectorId    String?       @map("inspector_id") @db.Uuid
+  inspector      IdUsuario?    @relation("ticketInspector", fields: [inspectorId], references: [id])
+
+  // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
+  clienteId           String?     @map("cliente_id") @db.Uuid
+  cliente             CatCliente? @relation(fields: [clienteId], references: [id])
+  campoId             String?     @map("campo_id") @db.Uuid
+  campo               CatCampo?   @relation(fields: [campoId], references: [id])
+  bloqueId            String?     @map("bloque_id") @db.Uuid
+  bloque              CatBloque?  @relation(fields: [bloqueId], references: [id])
+  pozoId              String?     @map("pozo_id") @db.Uuid
+  pozo                CatPozo?    @relation(fields: [pozoId], references: [id])
+  taladroId           String?     @map("taladro_id") @db.Uuid
+  taladro             CatTaladro? @relation(fields: [taladroId], references: [id])
+  rigless             Boolean     @default(false)
+  numeroContrato      String?     @map("numero_contrato")
+  as2Numero           String?     @map("as2_numero")
+  fechaInicioServicio DateTime?   @map("fecha_inicio_servicio") @db.Date
+  fechaFinServicio    DateTime?   @map("fecha_fin_servicio") @db.Date
+
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?    @map("created_by") @db.Uuid
+  creador   IdUsuario? @relation("ticketCreador", fields: [createdBy], references: [id])
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?    @map("updated_by") @db.Uuid
+  editor    IdUsuario? @relation("ticketEditor", fields: [updatedBy], references: [id])
+
+  tiposServicio  TicketTipoServicio[]
+  historial      TicketHistorial[]
+  personas       TicketPersona[]
+  unidades       TicketUnidad[]
+  requisitos     TicketRequisito[]
+  llegadas       ReporteUnidadLlegada[]
+  lineas         TicketLinea[]
+  herramientas   TicketHerramienta[]
+  avisosPrecarga TicketAvisoPrecarga[]
+  documentos     TicketDocumento[]
+  reunion        ReunionOperativa?
+  bitacora       BitacoraDia[]
+
+  @@index([pasoCodigo])
+  @@map("ticket")
+  @@schema("fcr")
+}
+
+/// Tipos de servicio del pedido (código del catálogo de `comercial`: otro contenedor, sin FK).
+model TicketTipoServicio {
+  ticketId   String @map("ticket_id") @db.Uuid
+  ticket     Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipoCodigo String @map("tipo_codigo")
+
+  @@id([ticketId, tipoCodigo])
+  @@map("ticket_tipo_servicio")
+  @@schema("fcr")
+}
+
+/// Seguimiento: cada cambio de paso con quién lo hizo. INMUTABLE (sin UPDATE ni DELETE para la aplicación).
+model TicketHistorial {
+  id           String       @id @db.Uuid
+  ticketId     String       @map("ticket_id") @db.Uuid
+  ticket       Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  pasoAnterior String?      @map("paso_anterior")
+  pasoNuevo    String       @map("paso_nuevo")
+  motivo       String?
+  actorId      String?      @map("actor_id") @db.Uuid
+  actor        IdUsuario?   @relation("historialActor", fields: [actorId], references: [id])
+  /// Rol con el que actuó (dato histórico: la cuenta puede cambiar de rol después).
+  actorRol     String?      @map("actor_rol")
+  origen       OrigenCambio @default(manual)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_historial")
+  @@schema("fcr")
+}
+
+/// Personas del equipo: un supervisor y uno o más operadores (cada uno con su unidad, si el servicio lleva).
+model TicketPersona {
+  ticketId    String       @map("ticket_id") @db.Uuid
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  usuarioId   String       @map("usuario_id") @db.Uuid
+  usuario     IdUsuario    @relation("personaAsignada", fields: [usuarioId], references: [id])
+  rol         RolAsignado
+  /// Unidad que lleva este operador (solo operadores; FK compuesta a `ticket_unidad` en la base de datos).
+  vehiculoId  String?      @map("vehiculo_id") @db.Uuid
+  vehiculo    CatVehiculo? @relation("operadorUnidad", fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor String?      @map("asignado_por") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, usuarioId])
+  @@index([usuarioId])
+  @@map("ticket_persona")
+  @@schema("fcr")
+}
+
+/// Unidades (vehículos del catálogo) asignadas al ticket: la placa y la descripción salen del JOIN.
+model TicketUnidad {
+  ticketId    String      @map("ticket_id") @db.Uuid
+  ticket      Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId  String      @map("vehiculo_id") @db.Uuid
+  vehiculo    CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  asignadoPor String?     @map("asignado_por") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, vehiculoId])
+  @@map("ticket_unidad")
+  @@schema("fcr")
+}
+
+/// Un requisito de un ticket, de una de sus unidades o de uno de sus operadores. Un índice único (en la base de datos) impide duplicados.
+/// Se cumple desde FCR (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con el puente temporal
+/// (`manual_temporal`, con motivo).
+model TicketRequisito {
+  id              String              @id @db.Uuid
+  ticketId        String              @map("ticket_id") @db.Uuid
+  ticket          Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  requisitoCodigo String              @map("requisito_codigo")
+  requisito       Requisito           @relation(fields: [requisitoCodigo], references: [codigo])
+  vehiculoId      String?             @map("vehiculo_id") @db.Uuid
+  vehiculo        CatVehiculo?        @relation(fields: [vehiculoId], references: [id])
+  usuarioId       String?             @map("usuario_id") @db.Uuid
+  usuario         IdUsuario?          @relation("requisitoOperador", fields: [usuarioId], references: [id])
+  estado          EstadoRequisito     @default(pendiente)
+  cumplidoAt      DateTime?           @map("cumplido_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  cumplidoPor     String?             @map("cumplido_por") @db.Uuid
+  origen          OrigenCumplimiento?
+  motivo          String?
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([ticketId, estado])
+  @@map("ticket_requisito")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Herramientas: configuración por cliente y código, líneas del pedido y herramientas del ticket
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Tipo de una línea cotizada del pedido (copia del enum de `comercial`).
+enum TipoLinea {
+  servicio
+  material
+  herramienta
+  movilizacion
+
+  @@map("tipo_linea")
+  @@schema("fcr")
+}
+
+enum ClasificacionCodigo {
+  herramienta
+  servicio
+
+  @@map("clasificacion_codigo")
+  @@schema("fcr")
+}
+
+enum OrigenHerramienta {
+  pedido
+  manual
+
+  @@map("origen_herramienta")
+  @@schema("fcr")
+}
+
+enum MotivoAvisoPrecarga {
+  pedido_sin_cliente
+  sin_configurar
+  kit_vacio
+  articulo_inactivo
+
+  @@map("motivo_aviso_precarga")
+  @@schema("fcr")
+}
+
+enum TipoEventoHerramienta {
+  solicitada
+  preparada
+  preparada_con_novedad
+  enviada
+  recibida
+  recibida_con_novedad
+  preparacion_corregida
+  recepcion_corregida
+  devuelta
+  faltante
+
+  @@map("tipo_evento_herramienta")
+  @@schema("fcr")
+}
+
+/// Unidades de cotización: si es de tiempo (día, hora, mes, semana) se pide un solo juego del kit.
+model UnidadCotizacion {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  esTiempo  Boolean  @default(false) @map("es_tiempo")
+  orden     Int
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("unidad_cotizacion")
+  @@schema("fcr")
+}
+
+/// Qué hace FCR con un código de la lista de precios de un cliente.
+model ConfiguracionCodigo {
+  id            String              @id @db.Uuid
+  clienteId     String              @map("cliente_id") @db.Uuid
+  cliente       CatCliente          @relation(fields: [clienteId], references: [id])
+  /// Código de la lista de precios (de `comercial`, otro contenedor): sin FK.
+  codigo        String
+  clasificacion ClasificacionCodigo
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String              @map("created_by") @db.Uuid
+  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy     String              @map("updated_by") @db.Uuid
+
+  kit ConfiguracionCodigoKit[]
+
+  @@unique([clienteId, codigo])
+  @@map("configuracion_codigo")
+  @@schema("fcr")
+}
+
+/// Artículo (con partes) que forma parte del kit de un código y cuántos de cada uno forman un juego.
+model ConfiguracionCodigoKit {
+  configuracionId String              @map("configuracion_id") @db.Uuid
+  configuracion   ConfiguracionCodigo @relation(fields: [configuracionId], references: [id], onDelete: Cascade)
+  articuloId      String              @map("articulo_id") @db.Uuid
+  articulo        InvArticulo         @relation(fields: [articuloId], references: [id])
+  cantidad        Int
+  /// Siempre `herramienta` (FK compuesta con la configuración: solo esas llevan kit).
+  clasificacion   ClasificacionCodigo @default(herramienta)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String              @map("created_by") @db.Uuid
+
+  @@id([configuracionId, articuloId])
+  @@map("configuracion_codigo_kit")
+  @@schema("fcr")
+}
+
+/// Línea cotizada del pedido (código, descripción, unidad, cantidad y tipo).
+model TicketLinea {
+  id          String    @id @db.Uuid
+  ticketId    String    @map("ticket_id") @db.Uuid
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden       Int       @db.SmallInt
+  codigo      String
+  descripcion String
+  unidad      String
+  cantidad    Decimal   @db.Decimal(12, 3)
+  tipoLinea   TipoLinea @map("tipo_linea")
+
+  @@unique([ticketId, orden])
+  @@map("ticket_linea")
+  @@schema("fcr")
+}
+
+/// Una herramienta física del ticket. El estado se deduce de las marcas; el detalle de cada marca está en `TicketHerramientaEvento`.
+model TicketHerramienta {
+  id               String            @id @db.Uuid
+  ticketId         String            @map("ticket_id") @db.Uuid
+  ticket           Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  articuloId       String            @map("articulo_id") @db.Uuid
+  articulo         InvArticulo       @relation(fields: [articuloId], references: [id])
+  origen           OrigenHerramienta
+  /// Línea del pedido (de `comercial`) de cuyo kit salió: solo las de origen pedido.
+  codigoPedido     String?           @map("codigo_pedido")
+  agregadaTarde    Boolean           @default(false) @map("agregada_tarde")
+  numeroSerie      String?           @map("numero_serie")
+  solicitadaAt     DateTime?         @map("solicitada_at") @db.Timestamptz(6)
+  solicitadaPor    String?           @map("solicitada_por") @db.Uuid
+  preparadaAt      DateTime?         @map("preparada_at") @db.Timestamptz(6)
+  preparadaPor     String?           @map("preparada_por") @db.Uuid
+  bodegaNovedad    String?           @map("bodega_novedad")
+  enviadaAt        DateTime?         @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor       String?           @map("enviada_por") @db.Uuid
+  recibidaAt       DateTime?         @map("recibida_at") @db.Timestamptz(6)
+  recibidaPor      String?           @map("recibida_por") @db.Uuid
+  recepcionNovedad String?           @map("recepcion_novedad")
+  devueltaAt       DateTime?         @map("devuelta_at") @db.Timestamptz(6)
+  devueltaPor      String?           @map("devuelta_por") @db.Uuid
+  faltanteAt       DateTime?         @map("faltante_at") @db.Timestamptz(6)
+  faltantePor      String?           @map("faltante_por") @db.Uuid
+  faltanteMotivo   String?           @map("faltante_motivo")
+  faltanteCausa    CausaFaltante?    @map("faltante_causa")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String?           @map("created_by") @db.Uuid
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy        String?           @map("updated_by") @db.Uuid
+
+  eventos      TicketHerramientaEvento[]
+  inspecciones InspeccionHerramienta[]
+  usos         UsoHerramientaDia[]
+
+  @@index([ticketId])
+  @@map("ticket_herramienta")
+  @@schema("fcr")
+}
+
+/// Historia INMUTABLE de cada herramienta (sin UPDATE ni DELETE para la aplicación).
+model TicketHerramientaEvento {
+  id            String                @id @db.Uuid
+  herramientaId String                @map("herramienta_id") @db.Uuid
+  herramienta   TicketHerramienta     @relation(fields: [herramientaId], references: [id], onDelete: Restrict)
+  tipo          TipoEventoHerramienta
+  detalle       String?
+  actorId       String                @map("actor_id") @db.Uuid
+  actor         IdUsuario             @relation("herramientaEventoActor", fields: [actorId], references: [id])
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([herramientaId, createdAt])
+  @@map("ticket_herramienta_evento")
+  @@schema("fcr")
+}
+
+/// Lo que la precarga no pudo resolver, para avisarle al Supervisor.
+model TicketAvisoPrecarga {
+  id          String              @id @db.Uuid
+  ticketId    String              @map("ticket_id") @db.Uuid
+  ticket      Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  motivo      MotivoAvisoPrecarga
+  /// Código de la línea del pedido (de `comercial`, otro contenedor): sin FK.
+  codigo      String?
+  descripcion String?
+  articuloId  String?             @map("articulo_id") @db.Uuid
+  articulo    InvArticulo?        @relation(fields: [articuloId], references: [id])
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId])
+  @@map("ticket_aviso_precarga")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Inspección y reparación de herramientas (entrada SERVICIOS) y documentos del ticket
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoInspeccion {
+  borrador
+  enviada
+  aprobada
+  rechazada
+
+  @@map("estado_inspeccion")
+  @@schema("fcr")
+}
+
+/// Quién inspeccionó o reparó: Dynadrill o un proveedor externo.
+enum ResponsableTrabajo {
+  dynadrill
+  proveedor_externo
+
+  @@map("responsable_trabajo")
+  @@schema("fcr")
+}
+
+enum ResultadoParte {
+  ok
+  defectuoso
+
+  @@map("resultado_parte")
+  @@schema("fcr")
+}
+
+enum RolFirmaInspeccion {
+  reparado_por
+  revisado_por
+  liberado_qhse
+
+  @@map("rol_firma_inspeccion")
+  @@schema("fcr")
+}
+
+enum CampoDocumentoFcr {
+  formulario_inspeccion_externo
+  formato_dimensionamiento_servicio
+  formato_dureza_servicio
+  documento_inspeccion
+  registro_dureza
+  registro_qaqc
+
+  @@map("campo_documento_fcr")
+  @@schema("fcr")
+}
+
+/// Roles de cuenta (`identidad.rol.codigo`) que pueden dejar cada firma; la base lo exige al firmar.
+model FirmaRolPermitido {
+  rolFirma  RolFirmaInspeccion @map("rol_firma")
+  rolCodigo String             @map("rol_codigo")
+  rol       IdRol              @relation(fields: [rolCodigo], references: [codigo])
+
+  @@id([rolFirma, rolCodigo])
+  @@map("firma_rol_permitido")
+  @@schema("fcr")
+}
+
+/// Checklist de inspección de una herramienta. La cabecera (cliente, pozo, descripción) sale del ticket y del artículo con JOIN.
+model InspeccionHerramienta {
+  id                String                  @id @db.Uuid
+  herramientaId     String                  @map("herramienta_id") @db.Uuid
+  herramienta       TicketHerramienta       @relation(fields: [herramientaId], references: [id])
+  version           Int                     @default(1)
+  estado            EstadoInspeccion        @default(borrador)
+  fechaInspeccion   DateTime?               @map("fecha_inspeccion") @db.Date
+  fechaReparacion   DateTime?               @map("fecha_reparacion") @db.Date
+  fechaEnvio        DateTime?               @map("fecha_envio") @db.Date
+  inspeccionadoPor  ResponsableTrabajo?     @map("inspeccionado_por")
+  reparadoPor       ResponsableTrabajo?     @map("reparado_por")
+  observaciones     String?
+  versionAnteriorId String?                 @map("version_anterior_id") @db.Uuid
+  versionAnterior   InspeccionHerramienta?  @relation("versiones", fields: [versionAnteriorId], references: [id])
+  siguientes        InspeccionHerramienta[] @relation("versiones")
+  enviadaAt         DateTime?               @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor        String?                 @map("enviada_por") @db.Uuid
+  enviador          IdUsuario?              @relation("inspeccionEnviador", fields: [enviadaPor], references: [id])
+  decididaAt        DateTime?               @map("decidida_at") @db.Timestamptz(6)
+  decididaPor       String?                 @map("decidida_por") @db.Uuid
+  decisor           IdUsuario?              @relation("inspeccionDecisor", fields: [decididaPor], references: [id])
+  motivoRechazo     String?                 @map("motivo_rechazo")
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String                  @map("created_by") @db.Uuid
+  updatedAt         DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String                  @map("updated_by") @db.Uuid
+
+  partes InspeccionParte[]
+  firmas InspeccionFirma[]
+
+  @@unique([herramientaId, version])
+  @@index([estado])
+  @@map("inspeccion_herramienta")
+  @@schema("fcr")
+}
+
+/// Parte de una inspección: copia fija de la parte del artículo al iniciar (o agregada a mano).
+model InspeccionParte {
+  id               String                @id @db.Uuid
+  inspeccionId     String                @map("inspeccion_id") @db.Uuid
+  inspeccion       InspeccionHerramienta @relation(fields: [inspeccionId], references: [id])
+  orden            Int
+  articuloParteId  String?               @map("articulo_parte_id") @db.Uuid
+  articuloParte    InvArticuloParte?     @relation(fields: [articuloParteId], references: [id], onDelete: SetNull)
+  manual           Boolean               @default(false)
+  item             String
+  codigo           String?
+  descripcion      String
+  cantidadEsperada Int                   @default(1) @map("cantidad_esperada")
+  visual           ResultadoParte?
+  endResultado     ResultadoParte?       @map("end_resultado")
+  cambioCantidad   Int?                  @map("cambio_cantidad")
+  accion           String?
+
+  @@unique([inspeccionId, orden])
+  @@map("inspeccion_parte")
+  @@schema("fcr")
+}
+
+/// Firma de la inspección (INMUTABLE): la cuenta y la hora del servidor.
+model InspeccionFirma {
+  inspeccionId String                @map("inspeccion_id") @db.Uuid
+  inspeccion   InspeccionHerramienta @relation(fields: [inspeccionId], references: [id])
+  rol          RolFirmaInspeccion
+  usuarioId    String                @map("usuario_id") @db.Uuid
+  usuario      IdUsuario             @relation("inspeccionFirmante", fields: [usuarioId], references: [id])
+  firmadaAt    DateTime              @default(now()) @map("firmada_at") @db.Timestamptz(6)
+
+  @@id([inspeccionId, rol])
+  @@map("inspeccion_firma")
+  @@schema("fcr")
+}
+
+/// Documento adjunto del ticket (INMUTABLE): el vigente de cada campo es el último.
+model TicketDocumento {
+  id        String            @id @db.Uuid
+  ticketId  String            @map("ticket_id") @db.Uuid
+  ticket    Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  campo     CampoDocumentoFcr
+  archivoId String            @map("archivo_id") @db.Uuid
+  archivo   ArchivoRef        @relation(fields: [archivoId], references: [id])
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String            @map("created_by") @db.Uuid
+  autor     IdUsuario         @relation("documentoAutor", fields: [createdBy], references: [id])
+
+  @@unique([ticketId, archivoId])
+  @@index([ticketId, campo, createdAt])
+  @@map("ticket_documento")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Reunión operativa, bitácora diaria y uso diario de las herramientas
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Estado de cobro de una herramienta en un día (el mismo que recibe Comercial en el Reporte de Herramientas).
+enum EstadoUsoHerramienta {
+  operacion
+  stand_by
+  daily_charge
+  venta
+
+  @@map("estado_uso_herramienta")
+  @@schema("fcr")
+}
+
+/// Acta de la reunión operativa (una por ticket).
+model ReunionOperativa {
+  ticketId   String    @id @map("ticket_id") @db.Uuid
+  ticket     Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha      DateTime  @db.Date
+  firmadaAt  DateTime  @default(now()) @map("firmada_at") @db.Timestamptz(6)
+  firmadaPor String    @map("firmada_por") @db.Uuid
+  firmante   IdUsuario @relation("reunionFirmante", fields: [firmadaPor], references: [id])
+
+  @@map("reunion_operativa")
+  @@schema("fcr")
+}
+
+/// Bitácora de un día del ticket: fuente del Reporte Job de ese día.
+model BitacoraDia {
+  id          String     @id @db.Uuid
+  ticketId    String     @map("ticket_id") @db.Uuid
+  ticket      Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha       DateTime   @db.Date
+  enviadaAt   DateTime?  @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor  String?    @map("enviada_por") @db.Uuid
+  enviador    IdUsuario? @relation("bitacoraEnviador", fields: [enviadaPor], references: [id])
+  /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
+  corregidaAt DateTime?  @map("corregida_at") @db.Timestamptz(6)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String     @map("created_by") @db.Uuid
+  updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String     @map("updated_by") @db.Uuid
+
+  actividades BitacoraActividad[]
+
+  @@unique([ticketId, fecha])
+  @@map("bitacora_dia")
+  @@schema("fcr")
+}
+
+model BitacoraActividad {
+  id            String      @id @db.Uuid
+  bitacoraDiaId String      @map("bitacora_dia_id") @db.Uuid
+  dia           BitacoraDia @relation(fields: [bitacoraDiaId], references: [id], onDelete: Cascade)
+  orden         Int
+  horaInicio    DateTime    @map("hora_inicio") @db.Time(0)
+  horaFin       DateTime    @map("hora_fin") @db.Time(0)
+  detalle       String
+  autorId       String      @map("autor_id") @db.Uuid
+  autor         IdUsuario   @relation("bitacoraAutor", fields: [autorId], references: [id])
+
+  @@unique([bitacoraDiaId, orden])
+  @@map("bitacora_actividad")
+  @@schema("fcr")
+}
+
+/// Uso de una herramienta en un día, con su registro de completación o trabajo y picker.
+model UsoHerramientaDia {
+  id                 String               @id @db.Uuid
+  herramientaId      String               @map("herramienta_id") @db.Uuid
+  herramienta        TicketHerramienta    @relation(fields: [herramientaId], references: [id], onDelete: Cascade)
+  fecha              DateTime             @db.Date
+  estado             EstadoUsoHerramienta
+  tipoCompletacionId String?              @map("tipo_completacion_id") @db.Uuid
+  tipoCompletacion   TipoCompletacion?    @relation(fields: [tipoCompletacionId], references: [id])
+  tipoTrabajoId      String?              @map("tipo_trabajo_id") @db.Uuid
+  tipoTrabajo        TipoTrabajo?         @relation(fields: [tipoTrabajoId], references: [id])
+  tipoPickerId       String?              @map("tipo_picker_id") @db.Uuid
+  tipoPicker         TipoPicker?          @relation(fields: [tipoPickerId], references: [id])
+  presion            Decimal?             @db.Decimal(10, 2)
+  peso               Decimal?             @db.Decimal(10, 2)
+  observacion        String?
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String               @map("created_by") @db.Uuid
+  updatedAt          DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String               @map("updated_by") @db.Uuid
+
+  @@unique([herramientaId, fecha])
+  @@map("uso_herramienta_dia")
+  @@schema("fcr")
+}
+
+/// Causa de que una herramienta falte al retorno.
+enum CausaFaltante {
+  venta_complementaria
+  perdida
+  dano
+  otro
+
+  @@map("causa_faltante")
+  @@schema("fcr")
+}
+
+/// Reporte de unidad de llegada de un ticket (INMUTABLE): lo firma el operador de la unidad.
+model ReporteUnidadLlegada {
+  id                       String      @id @db.Uuid
+  ticketId                 String      @map("ticket_id") @db.Uuid
+  ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  vehiculoId               String      @map("vehiculo_id") @db.Uuid
+  vehiculo                 CatVehiculo @relation(fields: [vehiculoId], references: [id])
+  llegadaFecha             DateTime    @map("llegada_fecha") @db.Date
+  combustible              Decimal     @db.Decimal(8, 2)
+  novedadesMecanica        String?     @map("novedades_mecanica")
+  novedadesInstrumentacion String?     @map("novedades_instrumentacion")
+  novedadesOperaciones     String?     @map("novedades_operaciones")
+  unidadLista              Boolean     @map("unidad_lista")
+  operacionInterrumpida    Boolean     @map("operacion_interrumpida")
+  detalleInterrupcion      String?     @map("detalle_interrupcion")
+  firmadaPor               String      @map("firmada_por") @db.Uuid
+  firmante                 IdUsuario   @relation("llegadaFirmante", fields: [firmadaPor], references: [id])
+  firmadaAt                DateTime    @default(now()) @map("firmada_at") @db.Timestamptz(6)
+
+  @@unique([ticketId, vehiculoId])
+  @@map("reporte_unidad_llegada")
+  @@schema("fcr")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
+// Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
+// ---------------------------------------------------------------------------------------------------------------
+
+model CatCliente {
+  id              String  @id @db.Uuid
+  identificacion  String
+  nombreComercial String  @map("nombre_comercial")
+  nombreFiscal    String? @map("nombre_fiscal")
+
+  tickets         Ticket[]
+  configuraciones ConfiguracionCodigo[]
+
+  @@map("cliente")
+  @@schema("catalogos")
+}
+
+model CatCampo {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+model CatBloque {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("bloque")
+  @@schema("catalogos")
+}
+
+model CatPozo {
+  id             String   @id @db.Uuid
+  codigo         String
+  nombreCompleto String   @map("nombre_completo")
+  tickets        Ticket[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+model CatTaladro {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("taladro")
+  @@schema("catalogos")
+}
+
+model CatTipoVehiculo {
+  id        String        @id @db.Uuid
+  nombre    String
+  vehiculos CatVehiculo[]
+
+  @@map("tipo_vehiculo")
+  @@schema("catalogos")
+}
+
+model CatVehiculo {
+  id             String                 @id @db.Uuid
+  placa          String
+  marca          String?
+  modelo         String?
+  tipoVehiculoId String?                @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo   CatTipoVehiculo?       @relation(fields: [tipoVehiculoId], references: [id])
+  habilitado     Boolean                @default(true)
+  unidades       TicketUnidad[]
+  operadores     TicketPersona[]        @relation("operadorUnidad")
+  requisitos     TicketRequisito[]
+  llegadas       ReporteUnidadLlegada[]
+
+  @@map("vehiculo")
+  @@schema("catalogos")
+}
+
+/// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde y para ligar los pasos a sus roles.
+model IdRol {
+  id       String              @id @db.Uuid
+  codigo   String              @unique
+  nombre   String
+  usuarios IdUsuario[]
+  pasos    PasoRol[]
+  firmas   FirmaRolPermitido[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
+model IdUsuario {
+  id     String  @id @db.Uuid
+  nombre String
+  email  String
+  activo Boolean
+  rolId  String  @map("rol_id") @db.Uuid
+  rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  asignaciones          TicketPersona[]           @relation("personaAsignada")
+  historial             TicketHistorial[]         @relation("historialActor")
+  requisitos            TicketRequisito[]         @relation("requisitoOperador")
+  inspecciones          Ticket[]                  @relation("ticketInspector")
+  creados               Ticket[]                  @relation("ticketCreador")
+  editados              Ticket[]                  @relation("ticketEditor")
+  herramientaEventos    TicketHerramientaEvento[] @relation("herramientaEventoActor")
+  inspeccionesEnviadas  InspeccionHerramienta[]   @relation("inspeccionEnviador")
+  inspeccionesDecididas InspeccionHerramienta[]   @relation("inspeccionDecisor")
+  firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
+  documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
+  reuniones             ReunionOperativa[]        @relation("reunionFirmante")
+  llegadasFirmadas      ReporteUnidadLlegada[]    @relation("llegadaFirmante")
+  bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
+  actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// `inventario.categoria_articulo`: las que llevan partes son las de herramientas.
+model InvCategoria {
+  id          String        @id @db.Uuid
+  nombre      String
+  llevaPartes Boolean       @map("lleva_partes")
+  articulos   InvArticulo[]
+
+  @@map("categoria_articulo")
+  @@schema("inventario")
+}
+
+/// `inventario.articulo` (mismo contenedor: FK reales). Solo lectura; lo administra Inventario.
+model InvArticulo {
+  id          String       @id @db.Uuid
+  codigo      String
+  nombre      String
+  categoriaId String       @map("categoria_id") @db.Uuid
+  categoria   InvCategoria @relation(fields: [categoriaId], references: [id])
+  activo      Boolean
+
+  kits         ConfiguracionCodigoKit[]
+  herramientas TicketHerramienta[]
+  avisos       TicketAvisoPrecarga[]
+
+  @@map("articulo")
+  @@schema("inventario")
+}
+
+/// `inventario.articulo_parte`: de aquí se copian las partes al iniciar la inspección de una herramienta.
+model InvArticuloParte {
+  id               String @id @db.Uuid
+  articuloId       String @map("articulo_id") @db.Uuid
+  orden            Int
+  item             String
+  codigo           String
+  descripcion      String
+  cantidadEsperada Int    @map("cantidad_esperada")
+
+  inspecciones InspeccionParte[]
+
+  @@map("articulo_parte")
+  @@schema("inventario")
+}
+
+/// `archivos.archivo`: el id y el módulo que lo subió, para comprobar el documento antes de enlazarlo.
+model ArchivoRef {
+  id         String            @id @db.Uuid
+  documentos TicketDocumento[]
+
+  @@map("archivo")
+  @@schema("archivos")
+}

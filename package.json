@@ -43,6 +43,8 @@
     "db:migrate:avisos": "cd libs/plataforma/avisos && prisma migrate deploy",
     "db:seed:avisos": "tsx --tsconfig tsconfig.base.json libs/plataforma/avisos/prisma/seed.ts",
     "db:seed:pumping": "tsx --tsconfig tsconfig.base.json libs/operaciones/pumping/prisma/seed.ts",
+    "db:migrate:fcr": "cd libs/operaciones/fcr && prisma migrate deploy",
+    "db:seed:fcr": "tsx --tsconfig tsconfig.base.json libs/operaciones/fcr/prisma/seed.ts",
     "db:seed:comercial": "tsx --tsconfig tsconfig.base.json libs/comercial/pedidos/prisma/seed.ts",
     "db:migrate:archivos": "cd libs/plataforma/archivos && prisma migrate deploy",
     "db:seed:archivos": "tsx --tsconfig tsconfig.base.json libs/plataforma/archivos/prisma/seed.ts",

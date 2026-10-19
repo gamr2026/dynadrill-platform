@@ -896,6 +896,51 @@ run('pedidos (base de datos real)', () => {
         .expect(400);
     });
 
+    it('al cambiar un pedido abierto, el evento lleva las fechas y las líneas vigentes para Operaciones (FCR)', async () => {
+      const b = (await crear(completo({ abrir: true }))).body;
+      const r = await http()
+        .put(`/api/comercial/pedidos/${b.id}`)
+        .set(ventas())
+        .send({
+          version: b.version,
+          fechaFinServicio: '2031-12-31',
+          items: [
+            { listaPreciosItemId: li['IT-SCR5001'], cantidad: 3 },
+            { listaPreciosItemId: li['IT-MOV01'], cantidad: 1 },
+          ],
+        })
+        .expect(200);
+      expect(r.body.items).toHaveLength(2);
+      const e = await admin.query(
+        `SELECT datos->'data' AS d FROM msg_comercial.outbox WHERE datos->'subject'->>'id' = $1 AND tipo = 'comercial.pedido.actualizado'`,
+        [b.id],
+      );
+      expect(e.rows).toHaveLength(1);
+      expect(e.rows[0].d).toMatchObject({
+        itemsModificados: true,
+        fechaFinServicio: '2031-12-31',
+        lineas: [
+          { codigo: 'IT-SCR5001', cantidad: 3, tipoLinea: 'servicio' },
+          { codigo: 'IT-MOV01', cantidad: 1, tipoLinea: 'movilizacion' },
+        ],
+      });
+      // un cambio sin ítems no trae líneas (las fechas sí)
+      await http()
+        .put(`/api/comercial/pedidos/${b.id}`)
+        .set(ventas())
+        .send({ version: r.body.version, fechaFinServicio: '2032-01-15' })
+        .expect(200);
+      const ultimo = await admin.query(
+        `SELECT datos->'data' AS d FROM msg_comercial.outbox WHERE datos->'subject'->>'id' = $1 AND tipo = 'comercial.pedido.actualizado' ORDER BY ocurrido_at DESC, id DESC LIMIT 1`,
+        [b.id],
+      );
+      expect(ultimo.rows[0].d).toMatchObject({
+        itemsModificados: false,
+        fechaFinServicio: '2032-01-15',
+      });
+      expect(ultimo.rows[0].d.lineas).toBeUndefined();
+    });
+
     it('un pedido anulado ya no se edita', async () => {
       const b = (await crear(completo({ abrir: true }))).body;
       const an = await http()

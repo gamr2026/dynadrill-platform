@@ -670,6 +670,126 @@ run('documentos operativos (base de datos real)', () => {
     });
   });
 
+  describe('documentos de FCR por evento (bitácora diaria y Reporte de Herramientas)', () => {
+    const docs = async (id: string) =>
+      (await http().get(`/api/comercial/pedidos/${id}/documentos-operativos`).set(ve()).expect(200))
+        .body;
+    const deFcr = (
+      tipo: string,
+      pedidoId: string,
+      data: Record<string, unknown>,
+    ): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: tipo,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'fcr_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'operador_fcr' },
+        data: {
+          ticketId: uuidv7(),
+          ticketNumero: 702345,
+          pedidoId,
+          firmadoPor: 'Olga Operadora',
+          firmadoAt: '2026-11-01T22:00:00.000Z',
+          ...data,
+        },
+      } as EventEnvelope;
+    };
+    const dia = (fecha: string, detalle: string) =>
+      deFcr('operaciones.fcr.bitacora_enviada', fcrPedido, {
+        fecha,
+        actividades: [
+          {
+            fecha,
+            horaInicio: '08:00',
+            horaFin: '10:00',
+            duracionHoras: 2,
+            detalle,
+            autor: 'Olga Operadora',
+            tablas: [],
+          },
+        ],
+      });
+    let fcrPedido = '';
+
+    it('cada día de la bitácora llega como un Reporte Job de origen FCR; reenviar un día lo reemplaza y no pisa lo que Facturación corrigió', async () => {
+      fcrPedido = await pedido('fcr');
+      await reporteDiario.consumir(dia('2026-11-01', 'Pesca con arpón'));
+      await reporteDiario.consumir(dia('2026-11-02', 'Segundo día'));
+      await reporteDiario.consumir(dia('2026-11-01', 'Corregido por el operador'));
+      const lista = await docs(fcrPedido);
+      expect(lista).toHaveLength(2);
+      expect(
+        lista.every(
+          (d: { origen: string; tipo: string }) => d.origen === 'fcr' && d.tipo === 'reporte_job',
+        ),
+      ).toBe(true);
+      expect(
+        lista.find((d: { fecha: string }) => d.fecha === '2026-11-01').actividades[0].detalle,
+      ).toBe('Corregido por el operador');
+      await http()
+        .put(`/api/comercial/pedidos/${fcrPedido}/documentos-operativos/dia`)
+        .set(bearer([P.DOCUMENTOS_OPERATIVOS_VER, P.DOCUMENTOS_OPERATIVOS_CORREGIR]))
+        .send({
+          origen: 'fcr',
+          fecha: '2026-11-02',
+          actividades: [
+            { ...job(1).actividades[0], fecha: '2026-11-02', detalle: 'Corregido por Facturación' },
+          ],
+        })
+        .expect(200);
+      await expect(
+        reporteDiario.consumir(dia('2026-11-02', 'Intento de pisar')),
+      ).resolves.toBeUndefined();
+      const tras = await docs(fcrPedido);
+      expect(
+        tras.find((d: { fecha: string }) => d.fecha === '2026-11-02').actividades[0].detalle,
+      ).toBe('Corregido por Facturación');
+    });
+
+    it('el Reporte de Herramientas llega con las herramientas y su uso diario, de origen FCR, y un reenvío lo reemplaza', async () => {
+      const id = await pedido('fcr');
+      const herramientas = (estado: string) => [
+        {
+          nombre: 'Sarta de limpieza',
+          serie: 'SN-1',
+          codigo: 'SH1101',
+          usos: [
+            { fecha: '2026-11-01', estado },
+            { fecha: '2026-11-02', estado: 'stand_by' },
+          ],
+        },
+      ];
+      await reporteDiario.consumir(
+        deFcr('operaciones.fcr.reporte_herramientas_completado', id, {
+          herramientas: herramientas('operacion'),
+        }),
+      );
+      await reporteDiario.consumir(
+        deFcr('operaciones.fcr.reporte_herramientas_completado', id, {
+          herramientas: herramientas('daily_charge'),
+        }),
+      );
+      const lista = await docs(id);
+      const h = lista.filter((d: { tipo: string }) => d.tipo === 'reporte_herramientas');
+      expect(h).toHaveLength(1);
+      expect(h[0]).toMatchObject({ origen: 'fcr', firmadoPor: 'Olga Operadora' });
+      expect(h[0].herramientas[0]).toMatchObject({
+        nombre: 'Sarta de limpieza',
+        serie: 'SN-1',
+        codigo: 'SH1101',
+      });
+      expect(h[0].herramientas[0].usos).toEqual([
+        expect.objectContaining({ estado: 'daily_charge' }),
+        expect.objectContaining({ estado: 'stand_by' }),
+      ]);
+    });
+  });
+
   describe('cambio de ítems del pedido que aprueba el Supervisor de Pumping (evento de Operaciones)', () => {
     const itemA = uuidv7();
     const itemB = uuidv7();

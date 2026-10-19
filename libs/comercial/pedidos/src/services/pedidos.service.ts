@@ -330,6 +330,7 @@ export class PedidosService {
           codigo: actual.codigo,
           campos: Object.keys(resuelto.data).sort(),
           itemsModificados: items !== undefined,
+          ...(await this.datosParaOperaciones(tx, id, items !== undefined)),
         });
       }
     });
@@ -383,6 +384,7 @@ export class PedidosService {
         campos: [],
         itemsModificados: true,
         origenCambio: 'operaciones',
+        ...(await this.datosParaOperaciones(tx, pedidoId, true)),
       });
     });
   }
@@ -1310,6 +1312,39 @@ export class PedidosService {
       await tx.pedidoItem.deleteMany({ where: { pedidoId } });
       if (items.length) await tx.pedidoItem.createMany({ data: items });
     }
+  }
+
+  /**
+   * Lo que Operaciones (FCR) necesita saber cuando un pedido abierto cambia (campos compatibles del evento `comercial.pedido.actualizado`):
+   * las fechas del servicio y, si cambiaron los ítems, las líneas cotizadas vigentes (mismo formato que `comercial.pedido.abierto`).
+   */
+  private async datosParaOperaciones(
+    tx: Prisma.TransactionClient,
+    pedidoId: string,
+    conLineas: boolean,
+  ) {
+    const p = await tx.pedido.findUniqueOrThrow({
+      where: { id: pedidoId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    const items = conLineas
+      ? await tx.pedidoItem.findMany({ where: { pedidoId }, orderBy: { orden: 'asc' } })
+      : null;
+    return {
+      fechaInicioServicio: p.fechaInicioServicio?.toISOString().slice(0, 10) ?? null,
+      fechaFinServicio: p.fechaFinServicio?.toISOString().slice(0, 10) ?? null,
+      ...(items
+        ? {
+            lineas: items.map((it) => ({
+              codigo: it.codigo,
+              descripcion: it.descripcion,
+              unidad: it.unidad,
+              cantidad: Number(it.cantidad),
+              tipoLinea: it.tipoLinea,
+            })),
+          }
+        : {}),
+    };
   }
 
   private publicar(

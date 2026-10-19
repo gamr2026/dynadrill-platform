@@ -13,6 +13,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { DocumentosOperativosService } from '../services/documentos-operativos.service';
 
 export const EVENTO_REPORTE_DIARIO = 'operaciones.pumping.reporte_diario_completado';
+/** FCR: cada día de la bitácora que el operador envía (Reporte Job) y el Reporte de Herramientas al finalizar la ejecución. */
+export const EVENTO_BITACORA_FCR = 'operaciones.fcr.bitacora_enviada';
+export const EVENTO_HERRAMIENTAS_FCR = 'operaciones.fcr.reporte_herramientas_completado';
+const EVENTOS = [EVENTO_REPORTE_DIARIO, EVENTO_BITACORA_FCR, EVENTO_HERRAMIENTAS_FCR];
 
 /**
  * El Reporte Diario (Reporte Job) de un día que el operador de Pumping completa llega al pedido como documento operativo
@@ -34,7 +38,7 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.bus.subscribe({
       source: 'operaciones',
-      patterns: [EVENTO_REPORTE_DIARIO],
+      patterns: EVENTOS,
       // su propia cola: el consumidor del cierre del ticket lee otros eventos del mismo origen
       group: 'reportes-diarios',
       handler: (e) => this.consumir(e),
@@ -43,7 +47,7 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
 
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
-    if (event.type !== EVENTO_REPORTE_DIARIO) return;
+    if (!EVENTOS.includes(event.type)) return;
     await runInEventSpan(`consume ${event.type}`, event.traceparent, async () => {
       await this.prisma.$transaction(async (tx) => {
         const nuevo = await this.bus.handleOnce(tx, event, async () => this.recibir(event));
@@ -56,7 +60,8 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
     const d = event.data;
     const pedidoId = String(d['pedidoId'] ?? '');
     const userId = event.actor?.userId;
-    if (!pedidoId || !userId || !d['fecha']) {
+    const esHerramientas = event.type === EVENTO_HERRAMIENTAS_FCR;
+    if (!pedidoId || !userId || (!esHerramientas && !d['fecha'])) {
       this.logger.warn(`${event.type}: falta el pedido, el día o quién lo completó; se ignora`);
       return;
     }
@@ -72,19 +77,25 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
       mustChangePassword: false,
     } as unknown as AuthUser;
     const dto = {
-      tipo: 'reporte_job',
-      origen: 'pumping',
+      tipo: esHerramientas ? 'reporte_herramientas' : 'reporte_job',
+      origen: event.type === EVENTO_REPORTE_DIARIO ? 'pumping' : 'fcr',
       ticketRef: d['ticketNumero'] == null ? undefined : String(d['ticketNumero']),
-      fecha: String(d['fecha']),
+      fecha: esHerramientas ? undefined : String(d['fecha']),
       firmadoPor: d['firmadoPor'] ? String(d['firmadoPor']) : undefined,
       firmadoAt: d['firmadoAt'] ? String(d['firmadoAt']) : undefined,
       supervisorId: d['supervisorId'] ? String(d['supervisorId']) : undefined,
       operadorId: d['operadorId'] ? String(d['operadorId']) : undefined,
-      actividades: (d['actividades'] ?? []) as RecibirDocumentoOperativoDto['actividades'],
+      ...(esHerramientas
+        ? {
+            herramientas: (d['herramientas'] ?? []) as RecibirDocumentoOperativoDto['herramientas'],
+          }
+        : { actividades: (d['actividades'] ?? []) as RecibirDocumentoOperativoDto['actividades'] }),
     } as RecibirDocumentoOperativoDto;
     try {
       await this.documentos.recibir(pedidoId, dto, actor);
-      this.logger.log(`Pedido ${pedidoId}: Reporte Job del ${dto.fecha} recibido`);
+      this.logger.log(
+        `Pedido ${pedidoId}: documento operativo ${dto.tipo} (${dto.origen}) ${dto.fecha ?? ''} recibido`,
+      );
     } catch (e) {
       if (
         e instanceof ConflictException ||
@@ -92,7 +103,7 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
         e instanceof BadRequestException
       ) {
         this.logger.warn(
-          `Pedido ${pedidoId}: Reporte Job del ${dto.fecha} no se recibió (${e.message})`,
+          `Pedido ${pedidoId}: documento operativo ${dto.tipo} (${dto.origen}) ${dto.fecha ?? ''} no se recibió (${e.message})`,
         );
         return;
       }
