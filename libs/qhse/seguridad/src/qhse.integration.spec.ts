@@ -135,6 +135,9 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
 
   const entregasDe = (ticketId: string) =>
     prisma.epiEntrega.findMany({ where: { ticketId }, orderBy: { createdAt: 'asc' } });
+  /** QHSE registra a mano la entrega de un operador de un ticket (la asignación ya no la abre sola: la pide Pumping o la registra QHSE). */
+  const solicitarAMano = (ticketId: string, trabajadorId: string) =>
+    http().post('/api/qhse/epi').set(tecnico()).send({ trabajadorId, ticketId }).expect(201);
   const salida = async (entregaId: string) =>
     (
       await admin.query(
@@ -277,65 +280,43 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
 
   // ------------------------------------------------------------------------------------------------ consumidor
 
-  it('abre una solicitud de EPI por cada operador asignado (no por el supervisor) y recuerda el ticket', async () => {
+  it('guarda el ticket y sus operadores asignados (no el supervisor) y ya no abre solicitudes de EPI por su cuenta', async () => {
     const ticketId = uuidv7();
     const e = eventoAsignacion(ticketId, [OP1.id, OP2.id]);
     await consumer.consumir(e);
 
     const ref = await prisma.ticketRef.findUniqueOrThrow({ where: { ticketId } });
     expect(ref).toMatchObject({ pedidoCodigo: `PED-QH${n}`, ticketNumero: e.data['ticketNumero'] });
-    const entregas = await entregasDe(ticketId);
-    expect(entregas.map((x) => x.trabajadorId).sort()).toEqual([OP1.id, OP2.id].sort());
-    expect(entregas.every((x) => x.estado === 'solicitado')).toBe(true);
-    expect(entregas.every((x) => x.createdBy === JEFE.id)).toBe(true);
-    const hist = await prisma.epiEntregaHistorial.findMany({
-      where: { entregaId: entregas[0].id },
-    });
-    expect(hist).toHaveLength(1);
-    expect(hist[0]).toMatchObject({ estadoAnterior: null, estadoNuevo: 'solicitado' });
-    // avisa a QHSE con un evento propio (source = qhse)
-    const pub = await salida(entregas[0].id);
-    expect(pub.map((p) => p.tipo)).toEqual(['qhse.epi.solicitada']);
-    expect(pub[0].datos.source).toBe('qhse');
-    // y un solo aviso por asignación (no uno por operador) para el equipo de QHSE, con el texto que necesita la plantilla
-    const avisos = await salidaDeTicket(ticketId, 'qhse.epi.solicitudes_abiertas');
-    expect(avisos).toHaveLength(1);
-    expect(avisos[0].datos.data).toMatchObject({
-      ticketId,
-      pedidoCodigo: `PED-QH${n}`,
-      cliente: 'Cliente de prueba',
-      cantidad: 2,
-    });
-    expect(String(avisos[0].datos.data['trabajadores']).split(', ').sort()).toEqual(
-      [OP1.nombre, OP2.nombre].sort(),
-    );
+    const operadores = await prisma.ticketOperador.findMany({ where: { ticketId } });
+    expect(operadores.map((x) => x.usuarioId).sort()).toEqual([OP1.id, OP2.id].sort());
+    // el EPI lo pide el equipo de Pumping desde el ticket: la asignación no crea nada ni avisa a QHSE
+    expect(await entregasDe(ticketId)).toHaveLength(0);
+    expect(await salidaDeTicket(ticketId, 'qhse.epi.solicitudes_abiertas')).toHaveLength(0);
   });
 
-  it('es idempotente: el mismo evento, o una reasignación con los mismos operadores, no duplica las solicitudes', async () => {
+  it('es idempotente y una reasignación reemplaza a los operadores anteriores', async () => {
     const ticketId = uuidv7();
     const e = eventoAsignacion(ticketId, [OP1.id]);
     await consumer.consumir(e);
     await consumer.consumir(e);
-    await consumer.consumir(
-      eventoAsignacion(ticketId, [OP1.id, OP2.id], { pedidoId: e.data['pedidoId'] }),
-    );
-    const entregas = await entregasDe(ticketId);
-    expect(entregas.map((x) => x.trabajadorId).sort()).toEqual([OP1.id, OP2.id].sort());
-    // un aviso por asignación que abrió algo: el evento repetido no avisa de nuevo, y la reasignación avisa solo de quien faltaba
-    const avisos = await salidaDeTicket(ticketId, 'qhse.epi.solicitudes_abiertas');
-    expect(avisos.map((a) => a.datos.data['cantidad'])).toEqual([1, 1]);
-    expect(avisos[1].datos.data['trabajadores']).toBe(OP2.nombre);
+    const operadoresDe = async () =>
+      (await prisma.ticketOperador.findMany({ where: { ticketId } }))
+        .map((x) => x.usuarioId)
+        .sort();
+    expect(await operadoresDe()).toEqual([OP1.id]);
+    await consumer.consumir(eventoAsignacion(ticketId, [OP2.id], { pedidoId: e.data['pedidoId'] }));
+    expect(await operadoresDe()).toEqual([OP2.id]);
   });
 
-  it('ignora sin error un evento sin ticket o sin pedido, y a los operadores que no existen o están inactivos', async () => {
+  it('ignora sin error un evento sin ticket o sin pedido, y no guarda a los operadores que no existen o están inactivos', async () => {
     const sinTicket = eventoAsignacion(uuidv7(), [OP1.id]);
     delete sinTicket.data['ticketId'];
     await expect(consumer.consumir(sinTicket)).resolves.toBeUndefined();
 
     const ticketId = uuidv7();
     await consumer.consumir(eventoAsignacion(ticketId, [uuidv7(), OP_INACTIVO.id]));
-    expect(await entregasDe(ticketId)).toHaveLength(0);
-    // el ticket sí quedó referenciado: se conoce aunque nadie reciba EPI
+    expect(await prisma.ticketOperador.count({ where: { ticketId } })).toBe(0);
+    // el ticket sí quedó referenciado: se conoce aunque nadie tenga operadores válidos
     expect(await prisma.ticketRef.count({ where: { ticketId } })).toBe(1);
   });
 
@@ -367,6 +348,89 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     expect(refs[0].ticketNumero).toBe(222);
   });
 
+  // ------------------------------------------------------------------------------------------------ solicitud desde el ticket
+
+  describe('solicitud de EPI desde el ticket (equipo de Pumping)', () => {
+    /** Una cuenta del equipo de Pumping: solo trae el permiso de solicitar EPI (no entra al resto de QHSE). */
+    const operativo = () => token('operador', SUPERVISOR.nombre, [P.EPI_SOLICITAR], SUPERVISOR.id);
+    let ticketId: string;
+
+    beforeAll(async () => {
+      ticketId = uuidv7();
+      await consumer.consumir(eventoAsignacion(ticketId, [OP1.id, OP2.id]));
+    });
+
+    it('el equipo ve a los operadores del ticket y los catálogos, pero no la bandeja de QHSE', async () => {
+      const r = await http().get(`/api/qhse/epi/ticket/${ticketId}`).set(operativo()).expect(200);
+      expect(r.body.map((o: { usuarioId: string }) => o.usuarioId).sort()).toEqual(
+        [OP1.id, OP2.id].sort(),
+      );
+      expect(r.body.every((o: { entrega: unknown }) => o.entrega === null)).toBe(true);
+      expect(r.body[0]).toMatchObject({ nombre: expect.any(String) });
+      await http().get('/api/qhse/epi/elementos').set(operativo()).expect(200);
+      await http().get('/api/qhse/epi/lugares').set(operativo()).expect(200);
+      await http().get('/api/qhse/epi').set(operativo()).expect(403);
+      // quien no tiene el permiso (un supervisor sin él) no ve nada de esto
+      await http().get(`/api/qhse/epi/ticket/${ticketId}`).set(supervisor()).expect(403);
+    });
+
+    it('pide el EPI de un operador del ticket con sus elementos: queda solicitado y avisa a QHSE', async () => {
+      const r = await http()
+        .post(`/api/qhse/epi/ticket/${ticketId}`)
+        .set(operativo())
+        .send({
+          trabajadorId: OP1.id,
+          lugarBodegaId: BODEGA.id,
+          renglones: [renglon(false), renglon(true)],
+        })
+        .expect(201);
+      expect(r.body).toMatchObject({
+        estado: 'solicitado',
+        trabajador: { id: OP1.id },
+        ticket: { id: ticketId },
+      });
+      expect(r.body.renglones).toHaveLength(2);
+
+      const avisos = await salidaDeTicket(ticketId, 'qhse.epi.solicitudes_abiertas');
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0].datos.data).toMatchObject({
+        ticketId,
+        pedidoCodigo: `PED-QH${n}`,
+        cantidad: 1,
+        trabajadores: OP1.nombre,
+      });
+      expect((await salida(r.body.id)).map((p) => p.tipo)).toEqual(['qhse.epi.solicitada']);
+
+      // el equipo ve el estado de cada uno
+      const estado = await http()
+        .get(`/api/qhse/epi/ticket/${ticketId}`)
+        .set(operativo())
+        .expect(200);
+      const por = (id: string) =>
+        estado.body.find((o: { usuarioId: string }) => o.usuarioId === id);
+      expect(por(OP1.id).entrega).toMatchObject({ estado: 'solicitado', id: r.body.id });
+      expect(por(OP2.id).entrega).toBeNull();
+    });
+
+    it('no deja pedirlo dos veces, ni para quien no es operador del ticket, ni sin elementos, ni sin el permiso', async () => {
+      const pedir = (cuerpo: Record<string, unknown>, quien = operativo()) =>
+        http().post(`/api/qhse/epi/ticket/${ticketId}`).set(quien).send(cuerpo);
+      const dos = await pedir({ trabajadorId: OP1.id, renglones: [renglon(false)] }).expect(409);
+      expect(dos.body.detail).toMatch(/ya tiene la entrega/);
+      const ajeno = await pedir({ trabajadorId: JEFE.id, renglones: [renglon(false)] }).expect(400);
+      expect(ajeno.body.detail).toMatch(/no es un operador asignado/);
+      const vacia = await pedir({ trabajadorId: OP2.id, renglones: [] }).expect(400);
+      expect(vacia.body.detail).toMatch(/al menos un elemento/);
+      await pedir({ trabajadorId: OP2.id, renglones: [renglon(false)] }, soloVer()).expect(403);
+      // un ticket que QHSE no conoce
+      await http()
+        .post(`/api/qhse/epi/ticket/${uuidv7()}`)
+        .set(operativo())
+        .send({ trabajadorId: OP2.id, renglones: [renglon(false)] })
+        .expect(404);
+    });
+  });
+
   // ------------------------------------------------------------------------------------------------ ciclo de vida
 
   describe('ciclo de vida de una entrega', () => {
@@ -376,7 +440,14 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     beforeAll(async () => {
       ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
-      entregaId = (await entregasDe(ticketId))[0].id;
+      // QHSE registra la entrega a mano (el equipo de Pumping la pide por su endpoint; ver el bloque anterior)
+      entregaId = (
+        await http()
+          .post('/api/qhse/epi')
+          .set(tecnico())
+          .send({ trabajadorId: OP1.id, ticketId })
+          .expect(201)
+      ).body.id;
     });
 
     it('la bandeja y el detalle traen al trabajador con su cédula y cargo, que salen de su perfil (JOIN, no capturados)', async () => {
@@ -556,6 +627,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('exige motivo, no se despacha, y permite abrir una nueva solicitud para el mismo trabajador y ticket', async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      await solicitarAMano(ticketId, OP2.id);
       const [primera] = await entregasDe(ticketId);
 
       await http().post(`/api/qhse/epi/${primera.id}/rechazar`).set(tecnico()).send({}).expect(400);
@@ -758,6 +830,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     beforeAll(async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      await solicitarAMano(ticketId, OP1.id);
       entregaId = (await entregasDe(ticketId))[0].id;
     });
 
@@ -796,6 +869,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('la base impide un estado incoherente aunque la aplicación se equivoque', async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      await solicitarAMano(ticketId, OP2.id);
       const [e] = await entregasDe(ticketId);
       await expect(
         admin.query("UPDATE qhse.epi_entrega SET estado = 'despachado' WHERE id = $1", [e.id]),
@@ -828,6 +902,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('un trabajador no puede tener dos solicitudes vigentes del mismo ticket (índice único parcial)', async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      await solicitarAMano(ticketId, OP1.id);
       await expect(
         prisma.epiEntrega.create({ data: { id: uuidv7(), trabajadorId: OP1.id, ticketId } }),
       ).rejects.toThrow();
@@ -837,6 +912,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     const despachada = async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      await solicitarAMano(ticketId, OP1.id);
       const [e] = await entregasDe(ticketId);
       await http().post(`/api/qhse/epi/${e.id}/aprobar`).set(tecnico()).expect(201);
       await http()
@@ -880,6 +956,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       // y una entrega rechazada tampoco admite renglones
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      await solicitarAMano(ticketId, OP2.id);
       const [r] = await entregasDe(ticketId);
       await http()
         .post(`/api/qhse/epi/${r.id}/rechazar`)
@@ -902,6 +979,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('la talla debe ser del tipo que lleva el elemento (la base lo exige aunque el servicio no lo revise)', async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+      await solicitarAMano(ticketId, OP1.id);
       const [e] = await entregasDe(ticketId);
       const base = { entregaId: e.id, cantidad: 1, recibioCapacitacion: false };
       const nuevoItem = (elementoId: string, tallaId?: string) =>
@@ -940,6 +1018,7 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     it('el lugar y la talla son catálogos con FK, y el historial no admite borrar', async () => {
       const ticketId = uuidv7();
       await consumer.consumir(eventoAsignacion(ticketId, [OP2.id]));
+      await solicitarAMano(ticketId, OP2.id);
       const [e] = await entregasDe(ticketId);
       await expect(
         prisma.epiEntrega.update({ where: { id: e.id }, data: { lugarBodegaId: uuidv7() } }),

@@ -490,6 +490,12 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Aprobar o rechazar (con motivo) una solicitud de EPI',
     ModuleRoles.qhse,
   ),
+  // El equipo operativo de Pumping (el que asigna y atiende el ticket) pide el EPI de los operadores del ticket y ve su estado; no ve el resto de QHSE.
+  nuevo(
+    'qhse.epi.solicitar',
+    'Solicitar la entrega de EPI de un operador asignado a un ticket y ver el estado de esas solicitudes',
+    ModuleRoles.pumping,
+  ),
   nuevo(
     'qhse.epi.despachar',
     'Despachar la entrega de EPI, revertirla y registrar la firma de Talento Humano',
@@ -667,6 +673,7 @@ export const Permission = {
   QHSE_REPORTAR: 'qhse.eventos.reportar',
   EPI_VER: 'qhse.epi.ver',
   EPI_CREAR: 'qhse.epi.crear',
+  EPI_SOLICITAR: 'qhse.epi.solicitar',
   EPI_APROBAR: 'qhse.epi.aprobar',
   EPI_DESPACHAR: 'qhse.epi.despachar',
   DOCUMENTOS_VER: 'qhse.documentos.ver',

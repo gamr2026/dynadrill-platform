@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { currentTraceparent, runInEventSpan } from '@dyn/common';
+import { runInEventSpan } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
-import { EpiService } from '../epi/epi.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const esUuid = (v: unknown): v is string =>
@@ -11,8 +10,8 @@ const esUuid = (v: unknown): v is string =>
 /**
  * Recibe de Pumping (contenedor operaciones) los hechos que abren casos de QHSE (contratos 4.6 y 3):
  *  - `ticket_creado`: QHSE conoce el ticket (para preparar el PTW y referenciarlo);
- *  - `asignacion_realizada`: abre una solicitud de EPI por cada operador asignado.
- * Un evento al que le faltan datos se ignora sin error. El inbox evita abrir dos veces la misma solicitud.
+ *  - `asignacion_realizada`: guarda los operadores asignados (la solicitud de EPI la hace el equipo de Pumping desde el ticket).
+ * Un evento al que le faltan datos se ignora sin error.
  */
 @Injectable()
 export class PumpingEventosConsumer implements OnApplicationBootstrap {
@@ -21,7 +20,6 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
   constructor(
     private readonly bus: EventBus,
     private readonly prisma: PrismaService,
-    private readonly epi: EpiService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -95,78 +93,28 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
           }
           if (event.type !== 'operaciones.pumping.asignacion_realizada') return;
 
-          // los operadores asignados: cada uno con su unidad; las cuentas deben existir y estar activas
+          // los operadores asignados (cuentas existentes y activas) reemplazan a los anteriores. El EPI ya no se abre solo: lo pide el equipo de
+          // Pumping desde el ticket y QHSE lo atiende (EpiService.solicitarParaTicket); aquí solo se guarda quién es operador del ticket.
           const operadores = Array.isArray(d['operadoresUnidades'])
             ? (d['operadoresUnidades'] as Array<Record<string, unknown>>)
                 .map((o) => o['usuarioId'])
                 .filter(esUuid)
             : [];
           const cuentas = await tx.idUsuario.findMany({
-            where: { id: { in: operadores }, activo: true },
-            select: { id: true, nombre: true },
+            where: { id: { in: [...new Set(operadores)] }, activo: true },
+            select: { id: true },
           });
-          const existentes = new Map(cuentas.map((u) => [u.id, u.nombre]));
-          const actorId = event.actor?.userId;
-          const actor = {
-            role: event.actor?.role,
-            userId:
-              actorId && esUuid(actorId) && (await tx.idUsuario.count({ where: { id: actorId } }))
-                ? actorId
-                : null,
-          };
-          const abiertas: string[] = [];
-          for (const usuarioId of [...new Set(operadores)]) {
-            if (!existentes.has(usuarioId)) {
-              this.logger.warn(
-                `Operador ${usuarioId} no existe o está inactivo; no se abre su EPI`,
-              );
-              continue;
-            }
-            if (await this.epi.abrirParaOperador(tx, ticketId, usuarioId, actor, event))
-              abiertas.push(existentes.get(usuarioId) as string);
-          }
+          await tx.ticketOperador.deleteMany({ where: { ticketId } });
+          if (cuentas.length)
+            await tx.ticketOperador.createMany({
+              data: cuentas.map((c) => ({ ticketId, usuarioId: c.id })),
+            });
           this.logger.log(
-            `Ticket ${datos.ticketNumero ?? ticketId}: ${abiertas.length} solicitud(es) de EPI abiertas`,
+            `Ticket ${datos.ticketNumero ?? ticketId}: ${cuentas.length} operador(es) asignado(s)`,
           );
-          if (abiertas.length) await this.avisarSolicitudes(tx, event, ticketId, datos, abiertas);
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });
     });
-  }
-
-  /**
-   * Un solo aviso por asignación (no uno por operador) para el equipo de QHSE: «hay N solicitudes de EPI por revisar». Lleva el texto que
-   * necesita el aviso (cliente, pozo, nombres), copiado del evento de Pumping, porque QHSE no puede obtenerlo con un JOIN.
-   */
-  private async avisarSolicitudes(
-    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
-    causa: EventEnvelope,
-    ticketId: string,
-    ticket: { ticketNumero: number | null; pedidoCodigo: string },
-    trabajadores: string[],
-  ): Promise<void> {
-    const d = causa.data;
-    const texto = (k: string) => (typeof d[k] === 'string' ? (d[k] as string) : null);
-    await this.bus.publish(
-      tx,
-      this.bus.create({
-        type: 'qhse.epi.solicitudes_abiertas',
-        subject: { type: 'pumping_ticket', id: ticketId },
-        data: {
-          ticketId,
-          ticketNumero: ticket.ticketNumero,
-          pedidoCodigo: ticket.pedidoCodigo,
-          cliente: texto('cliente'),
-          campo: texto('campo'),
-          pozo: texto('pozo'),
-          cantidad: trabajadores.length,
-          trabajadores: trabajadores.join(', '),
-        },
-        causationId: causa.id,
-        correlationId: causa.correlationId,
-        traceparent: currentTraceparent(),
-      }),
-    );
   }
 }

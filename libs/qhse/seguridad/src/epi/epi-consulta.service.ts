@@ -55,6 +55,37 @@ export class EpiConsultaService {
     });
   }
 
+  /**
+   * Los operadores asignados a un ticket y la solicitud de EPI más reciente de cada uno (sin los datos de la entrega: solo estado y número).
+   */
+  async deTicket(ticketId: string) {
+    const [operadores, entregas] = await Promise.all([
+      this.prisma.ticketOperador.findMany({
+        where: { ticketId },
+        include: { usuario: { include: { perfil: true } } },
+        orderBy: { usuario: { nombre: 'asc' } },
+      }),
+      this.prisma.epiEntrega.findMany({ where: { ticketId }, orderBy: { createdAt: 'asc' } }),
+    ]);
+    return operadores.map((o) => {
+      const e = [...entregas].reverse().find((x) => x.trabajadorId === o.usuarioId);
+      return {
+        usuarioId: o.usuarioId,
+        nombre: o.usuario.nombre,
+        cargo: o.usuario.perfil?.cargo ?? null,
+        entrega: e
+          ? {
+              id: e.id,
+              numero: e.numero,
+              codigo: codigoDe(e.numero),
+              estado: e.estado,
+              motivoRechazo: e.motivoRechazo,
+            }
+          : null,
+      };
+    });
+  }
+
   /** Bases y bodegas donde se puede entregar el EPI (catálogo `catalogos.bodega`). */
   lugares() {
     return this.prisma.catBodega.findMany({

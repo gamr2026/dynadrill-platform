@@ -172,6 +172,7 @@ model TicketRef {
   ptws           Ptw[]
   swas           Swa[]
   servicios      TicketServicio[]
+  operadores     TicketOperador[]
   matricesOrigen IpercMatriz[]
 
   stops        StopTarjeta[]
@@ -571,6 +572,21 @@ model TicketServicio {
 
   @@id([ticketId, tipoCodigo])
   @@map("ticket_servicio")
+  @@schema("qhse")
+}
+
+/// Operadores asignados al ticket (cuenta de identidad, FK real). Los fija el evento `asignacion_realizada` y reemplazan a los anteriores;
+/// sirven para validar que una solicitud de EPI del ticket sea de uno de sus operadores.
+model TicketOperador {
+  ticketId  String    @map("ticket_id") @db.Uuid
+  ticket    TicketRef @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  usuarioId String    @map("usuario_id") @db.Uuid
+  usuario   IdUsuario @relation("ticketOperador", fields: [usuarioId], references: [id])
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([ticketId, usuarioId])
+  @@index([usuarioId])
+  @@map("ticket_operador")
   @@schema("qhse")
 }
 
@@ -1099,6 +1115,7 @@ model IdUsuario {
   documentosEditados       DocumentoPedido[]      @relation("documentoEditor")
   documentosAnulados       DocumentoPedido[]      @relation("documentoAnulador")
   ticketsSupervisados      TicketRef[]            @relation("ticketSupervisor")
+  ticketsComoOperador      TicketOperador[]       @relation("ticketOperador")
   ptwCreados               Ptw[]                  @relation("ptwCreador")
   ptwEditados              Ptw[]                  @relation("ptwEditor")
   ptwAnulados              Ptw[]                  @relation("ptwAnulador")

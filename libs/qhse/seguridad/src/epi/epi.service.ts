@@ -27,8 +27,8 @@ export interface CrearEntregaEntrada {
 }
 
 /**
- * Entrega de EPI y ropa de trabajo (DYN-SGI-RE-032). Ciclo: solicitado → aprobado → despachado (o rechazado). QHSE abre una solicitud
- * por cada operador cuando Pumping asigna el servicio; despachar publica `qhse.epi.despachada`, que cumple el requisito del
+ * Entrega de EPI y ropa de trabajo (DYN-SGI-RE-032). Ciclo: solicitado → aprobado → despachado (o rechazado). Se abre una solicitud
+ * por cada operador cuando el equipo de Pumping la pide desde el ticket (solicitarParaTicket); despachar publica `qhse.epi.despachada`, que cumple el requisito del
  * ticket (contrato 3 de documentacion/modulos/02-CONTRATOS-ENTRE-MODULOS.md), y revertir publica `qhse.epi.revertida`.
  */
 @Injectable()
@@ -44,7 +44,63 @@ export class EpiService {
 
   /** Registro manual (también para entregas sin ticket, p. ej. de oficina). Nace `solicitado`. */
   async crear(entrada: CrearEntregaEntrada, actor: AuthUser) {
+    const id = await this.prisma.$transaction((tx) => this.crearEn(tx, entrada, actor));
+    return this.consulta.detalle(id);
+  }
+
+  /**
+   * Solicitud de EPI de un operador asignado a un ticket, hecha por el equipo operativo (Pumping): el operador debe estar asignado al
+   * ticket y la solicitud lleva al menos un elemento. QHSE la aprueba, la rechaza o la despacha. Avisa a QHSE (una solicitud por revisar).
+   */
+  async solicitarParaTicket(
+    ticketId: string,
+    entrada: { trabajadorId: string; lugarBodegaId?: string | null; renglones: RenglonEntrada[] },
+    actor: AuthUser,
+  ) {
     const id = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.ticketRef.findUnique({ where: { ticketId } });
+      if (!ticket)
+        throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+      const asignado = await tx.ticketOperador.count({
+        where: { ticketId, usuarioId: entrada.trabajadorId },
+      });
+      if (!asignado)
+        throw new BadRequestException('El trabajador no es un operador asignado a este ticket');
+      if (entrada.renglones.length === 0)
+        throw new BadRequestException(
+          'Indique al menos un elemento de protección para la solicitud',
+        );
+      const nuevoId = await this.crearEn(tx, { ...entrada, ticketId }, actor);
+      const trabajador = await tx.idUsuario.findUniqueOrThrow({
+        where: { id: entrada.trabajadorId },
+        select: { nombre: true },
+      });
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'qhse.epi.solicitudes_abiertas',
+          subject: { type: 'pumping_ticket', id: ticketId },
+          data: {
+            ticketId,
+            ticketNumero: ticket.ticketNumero,
+            pedidoCodigo: ticket.pedidoCodigo,
+            cliente: ticket.cliente,
+            campo: ticket.campo,
+            pozo: ticket.pozo,
+            cantidad: 1,
+            trabajadores: trabajador.nombre,
+          },
+          actor: enActor(actor),
+          traceparent: currentTraceparent(),
+        }),
+      );
+      return nuevoId;
+    });
+    return this.consulta.detalle(id);
+  }
+
+  private async crearEn(tx: Tx, entrada: CrearEntregaEntrada, actor: AuthUser): Promise<string> {
+    {
       await this.exigirTrabajador(tx, entrada.trabajadorId);
       const ticketId = entrada.ticketId ?? null;
       if (ticketId) {
@@ -73,8 +129,7 @@ export class EpiService {
       await this.registrarCambio(tx, nuevoId, null, EstadoEpi.solicitado, null, actor.id);
       await this.publicar(tx, 'qhse.epi.solicitada', nuevoId, enActor(actor));
       return nuevoId;
-    });
-    return this.consulta.detalle(id);
+    }
   }
 
   /** Reemplaza los renglones y el lugar mientras la entrega no se haya despachado. */
@@ -186,34 +241,6 @@ export class EpiService {
   }
 
   // ----------------------------------------------------------------------------------------------- uso desde consumidores
-
-  /** Abre la solicitud de un operador asignado a un ticket. Devuelve `null` si ya tenía una vigente. Público para el consumidor. */
-  async abrirParaOperador(
-    tx: Tx,
-    ticketId: string,
-    trabajadorId: string,
-    actor: { userId: string | null; role?: string },
-    evento?: EventEnvelope,
-  ): Promise<string | null> {
-    const vigente = await tx.epiEntrega.findFirst({
-      where: { ticketId, trabajadorId, estado: { not: EstadoEpi.rechazado } },
-      select: { id: true },
-    });
-    if (vigente) return null;
-    const id = uuidv7();
-    await tx.epiEntrega.create({
-      data: { id, trabajadorId, ticketId, createdBy: actor.userId, updatedBy: actor.userId },
-    });
-    await this.registrarCambio(tx, id, null, EstadoEpi.solicitado, null, actor.userId);
-    await this.publicar(
-      tx,
-      'qhse.epi.solicitada',
-      id,
-      actor.userId ? { userId: actor.userId, role: actor.role ?? 'sistema' } : null,
-      evento,
-    );
-    return id;
-  }
 
   // ------------------------------------------------------------------------------------------------------ internos
 

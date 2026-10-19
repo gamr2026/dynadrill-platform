@@ -65,6 +65,17 @@ export class GuardarContenidoDto {
   renglones!: RenglonDto[];
 }
 
+export class SolicitarEpiTicketDto {
+  /** Operador asignado al ticket que recibirá el EPI. */
+  @IsUUID() trabajadorId!: string;
+  @IsOptional() @IsUUID() lugarBodegaId?: string;
+  @IsArray()
+  @ArrayMaxSize(60)
+  @ValidateNested({ each: true })
+  @Type(() => RenglonDto)
+  renglones!: RenglonDto[];
+}
+
 export class MotivoDto {
   @IsString() @MaxLength(500) motivo!: string;
 }
@@ -80,19 +91,19 @@ export class EpiController {
     private readonly consulta: EpiConsultaService,
   ) {}
 
-  @RequirePermission(P.EPI_VER)
+  @RequirePermission(P.EPI_VER, P.EPI_SOLICITAR)
   @Get('elementos')
   elementos() {
     return this.consulta.elementos();
   }
 
-  @RequirePermission(P.EPI_VER)
+  @RequirePermission(P.EPI_VER, P.EPI_SOLICITAR)
   @Get('tallas')
   tallas() {
     return this.consulta.tallas();
   }
 
-  @RequirePermission(P.EPI_VER)
+  @RequirePermission(P.EPI_VER, P.EPI_SOLICITAR)
   @Get('lugares')
   lugares() {
     return this.consulta.lugares();
@@ -108,6 +119,24 @@ export class EpiController {
   @Get(':id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
     return this.consulta.detalle(id);
+  }
+
+  /** Los operadores del ticket y el estado de la solicitud de EPI de cada uno (lo que necesita el equipo de Pumping). */
+  @RequirePermission(P.EPI_VER, P.EPI_SOLICITAR)
+  @Get('ticket/:ticketId')
+  deTicket(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
+    return this.consulta.deTicket(ticketId);
+  }
+
+  /** Pumping pide el EPI de un operador asignado al ticket (en la demo lo hacía el operativo; QHSE aprueba, rechaza y despacha). */
+  @RequirePermission(P.EPI_SOLICITAR)
+  @Post('ticket/:ticketId')
+  solicitarDeTicket(
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
+    @Body() dto: SolicitarEpiTicketDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.epi.solicitarParaTicket(ticketId, dto, actor);
   }
 
   @RequirePermission(P.EPI_CREAR)
