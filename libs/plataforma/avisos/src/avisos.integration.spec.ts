@@ -325,6 +325,26 @@ run('avisos: campanita y correo (base de datos real)', () => {
     ]);
   });
 
+  it('Mantenimiento: la unidad devuelta avisa al Jefe de Base con la unidad y el estado final, sin nombres de personas', async () => {
+    const e = ticketCreado(
+      {
+        ordenCodigo: 'RU-000123',
+        unidad: 'GSI6538',
+        estadoFinal: 'con_restricciones',
+        estadoFinalNombre: 'Con restricciones',
+      },
+      'operaciones.mantenimiento.orden.retornada',
+    );
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId).sort()).toEqual([CESAR.id, OTRO.id].sort());
+    expect(avisos[0].titulo).toBe('Unidad devuelta: GSI6538');
+    expect(avisos[0].detalle).toBe('Con restricciones · orden RU-000123');
+    expect(
+      salida.enviados.every((c) => c.asunto.includes('GSI6538') && !c.html.includes('{{')),
+    ).toBe(true);
+  });
+
   it('al terminar el traslado de salida se avisa solo al supervisor asignado', async () => {
     const e = ticketCreado(
       {

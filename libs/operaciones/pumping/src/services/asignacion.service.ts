@@ -3,9 +3,11 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { currentTraceparent, type AuthUser } from '@dyn/common';
+import { MovimientosService, type LineaDeTicket } from '@dyn/inventario';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,10 +15,16 @@ import { IngresoService } from './ingreso.service';
 import { RequisitosService } from './requisitos.service';
 import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
 
-/** Lo que el Jefe de Base elige: solo ids. Cada operador lleva su unidad (como en la demo); las unidades del servicio son las de sus operadores. */
+/**
+ * Lo que el Jefe de Base elige: solo ids. Cada operador lleva su unidad (como en la demo); las unidades del servicio son las de sus
+ * operadores. Los químicos (artículo, bodega y cantidad) salen de bodega al asignar y exigen el documento de mezcla.
+ */
 export interface AsignacionEntrada {
   supervisorId: string;
   operadores: Array<{ usuarioId: string; vehiculoId: string }>;
+  quimicos?: LineaDeTicket[];
+  /** Archivo (de `archivos`) con el documento de mezcla: obligatorio si hay químicos. */
+  documentoMezclaId?: string | null;
 }
 
 /** Paso en el que el Jefe de Base asigna, y paso al que pasa el ticket cuando la asignación queda completa. */
@@ -33,23 +41,81 @@ const ROLES_OPERADOR = ['operador'];
  */
 @Injectable()
 export class AsignacionService {
+  private readonly logger = new Logger(AsignacionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
     private readonly ingreso: IngresoService,
+    private readonly inventario: MovimientosService,
   ) {}
 
   async asignar(id: string, entrada: AsignacionEntrada, actor: AuthUser) {
-    const { supervisorId, operadores } = entrada;
+    const { supervisorId, operadores, quimicos = [], documentoMezclaId = null } = entrada;
     const operadorIds = operadores.map((o) => o.usuarioId);
     const personasIds = [supervisorId, ...operadorIds];
     if (!operadores.length) throw new BadRequestException('Indique al menos un operador');
     if (new Set(personasIds).size !== personasIds.length)
       throw new BadRequestException('Una misma persona no puede asignarse dos veces');
     const unidadIds = [...new Set(operadores.map((o) => o.vehiculoId))];
+    if (quimicos.length && !documentoMezclaId) {
+      throw new BadRequestException({
+        message: 'Adjunte el documento de mezcla: es obligatorio cuando se asignan químicos',
+        code: 'MEZCLA_REQUERIDA',
+      });
+    }
 
+    // Los químicos salen de bodega en la transacción de Inventario (Pumping no puede compartir la suya). Si algo falla después de la
+    // salida, se deshace con una devolución: el kardex no se borra.
+    let salidas: Array<{ articuloId: string; cantidad: number }> = [];
+    try {
+      await this.asignarEnTransaccion(
+        id,
+        supervisorId,
+        operadores,
+        unidadIds,
+        personasIds,
+        quimicos,
+        documentoMezclaId,
+        actor,
+        (s) => (salidas = s),
+      );
+    } catch (e) {
+      if (salidas.length) await this.deshacerSalida(id, quimicos, actor);
+      throw e;
+    }
+    return this.tickets.detalle(id, actor);
+  }
+
+  private async deshacerSalida(ticketId: string, quimicos: LineaDeTicket[], actor: AuthUser) {
+    try {
+      await this.inventario.devolverDeTicket(
+        ticketId,
+        quimicos,
+        actor,
+        'Se deshace la salida: la asignación no se completó',
+      );
+    } catch (e) {
+      // lo que queda a cargo del ticket se ve en su balance y se devuelve desde el control de retorno
+      this.logger.error(
+        `No se pudo deshacer la salida de químicos del ticket ${ticketId}: ${String(e)}`,
+      );
+    }
+  }
+
+  private async asignarEnTransaccion(
+    id: string,
+    supervisorId: string,
+    operadores: AsignacionEntrada['operadores'],
+    unidadIds: string[],
+    personasIds: string[],
+    quimicos: LineaDeTicket[],
+    documentoMezclaId: string | null,
+    actor: AuthUser,
+    alSalir: (s: Array<{ articuloId: string; cantidad: number }>) => void,
+  ) {
     await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({
         where: { id },
@@ -92,6 +158,11 @@ export class AsignacionService {
         throw new BadRequestException(
           'Alguna de las unidades indicadas no existe o no está habilitada',
         );
+      }
+
+      if (documentoMezclaId) {
+        const archivo = await tx.archivoRef.findUnique({ where: { id: documentoMezclaId } });
+        if (!archivo) throw new BadRequestException('El documento de mezcla no existe');
       }
 
       // se reemplaza lo anterior: primero las personas (apuntan a la unidad) y después las unidades
@@ -141,6 +212,27 @@ export class AsignacionService {
       await this.requisitos.generar(tx, id);
       await this.ingreso.crear(tx, id);
 
+      // químicos: salen de bodega a cargo del ticket (todos o ninguno); el documento de mezcla queda adjunto al ticket
+      if (quimicos.length) {
+        alSalir(
+          await this.inventario.registrarSalidasDeTicket(
+            id,
+            quimicos,
+            actor,
+            `Asignación del ticket ${t.ticketNumero ?? t.pedidoCodigo}`,
+          ),
+        );
+        await tx.ticketDocumento.create({
+          data: {
+            id: uuidv7(),
+            ticketId: id,
+            tipo: 'mezcla_quimica',
+            archivoId: documentoMezclaId as string,
+            createdBy: actor.id,
+          },
+        });
+      }
+
       const placaDe = (vid: string) => unidades.find((u) => u.id === vid)?.placa ?? '';
       await this.bus.publish(
         tx,
@@ -175,12 +267,12 @@ export class AsignacionService {
               usuarioId: o.persona.id,
               vehiculoId: o.vehiculoId,
             })),
+            conQuimicos: quimicos.length > 0,
           },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),
         }),
       );
     });
-    return this.tickets.detalle(id, actor);
   }
 }

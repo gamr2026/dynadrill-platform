@@ -76,14 +76,10 @@ const coincideFirma = (mime: string, contenido: Buffer): boolean => {
 };
 
 /** Sin rutas ni caracteres de control; el nombre es solo una etiqueta, el contenido se guarda con una clave propia. */
+// eslint-disable-next-line no-control-regex
+const CARACTERES_DE_CONTROL = /[\u0000-\u001f]/g;
 const limpiarNombre = (n: string): string => {
-  // eslint-disable-next-line no-control-regex
-  const base =
-    n
-      .split(/[\\/]/)
-      .pop()
-      ?.replace(/[\u0000-\u001f]/g, '')
-      .trim() ?? '';
+  const base = n.split(/[\\/]/).pop()?.replace(CARACTERES_DE_CONTROL, '').trim() ?? '';
   return (base || 'archivo').slice(0, 200);
 };
 

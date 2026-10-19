@@ -13,7 +13,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["pumping", "catalogos", "identidad"]
+  schemas  = ["pumping", "catalogos", "identidad", "archivos"]
 }
 
 enum MacroEstado {
@@ -214,10 +214,222 @@ model Ticket {
   aceptaciones  AceptacionTerminos[]
   ingreso       TicketIngreso?
   reportesUnidad ReporteUnidad[]
+  documentos     TicketDocumento[]
+  reportesDiarios ReporteDiario[]
+  solicitudesCambioItems SolicitudCambioItems[]
 
   @@index([pasoCodigo])
   @@map("ticket")
   @@schema("pumping")
+}
+
+enum TipoDocumentoTicket {
+  mezcla_quimica
+  monitoreo
+
+  @@map("tipo_documento_ticket")
+  @@schema("pumping")
+}
+
+/// Documento adjunto a un ticket (hoy, el de mezcla de químicos). INMUTABLE: el vigente de cada tipo es el último.
+model TicketDocumento {
+  id        String              @id @db.Uuid
+  ticketId  String              @map("ticket_id") @db.Uuid
+  ticket    Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipo      TipoDocumentoTicket
+  /// Día de operación (solo en el monitoreo).
+  fecha     DateTime?           @db.Date
+  archivoId String              @map("archivo_id") @db.Uuid
+  archivo   ArchivoRef          @relation(fields: [archivoId], references: [id])
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String              @map("created_by") @db.Uuid
+
+  @@unique([ticketId, archivoId])
+  @@index([ticketId, tipo])
+  @@map("ticket_documento")
+  @@schema("pumping")
+}
+
+enum EstadoSolicitudItems {
+  pendiente
+  aprobada
+  rechazada
+
+  @@map("estado_solicitud_items")
+  @@schema("pumping")
+}
+
+enum AplicacionCambioItems {
+  pendiente
+  aplicada
+  no_aplicada
+
+  @@map("aplicacion_cambio_items")
+  @@schema("pumping")
+}
+
+enum TipoLineaItem {
+  servicio
+  material
+  herramienta
+  movilizacion
+
+  @@map("tipo_linea_item")
+  @@schema("pumping")
+}
+
+/// Solicitud de cambio de ítems del pedido: la propone el Operador del equipo y la aprueba o rechaza el Supervisor del ticket.
+/// `aplicacion` es la respuesta de Comercial (otro contenedor) al aprobarse.
+model SolicitudCambioItems {
+  id               String                 @id @db.Uuid
+  ticketId         String                 @map("ticket_id") @db.Uuid
+  ticket           Ticket                 @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  estado           EstadoSolicitudItems   @default(pendiente)
+  motivo           String
+  solicitadoPor    String                 @map("solicitado_por") @db.Uuid
+  solicitante      IdUsuario              @relation("solicitanteCambio", fields: [solicitadoPor], references: [id])
+  solicitadoAt     DateTime               @default(now()) @map("solicitado_at") @db.Timestamptz(6)
+  revisadoPor      String?                @map("revisado_por") @db.Uuid
+  revisor          IdUsuario?             @relation("revisorCambio", fields: [revisadoPor], references: [id])
+  revisadoAt       DateTime?              @map("revisado_at") @db.Timestamptz(6)
+  motivoRechazo    String?                @map("motivo_rechazo")
+  aplicacion       AplicacionCambioItems?
+  aplicacionMotivo String?                @map("aplicacion_motivo")
+  aplicadaAt       DateTime?              @map("aplicada_at") @db.Timestamptz(6)
+
+  items SolicitudCambioItem[]
+
+  @@index([ticketId, solicitadoAt])
+  @@map("solicitud_cambio_items")
+  @@schema("pumping")
+}
+
+/// Ítem de la lista que debe quedar en el pedido. `listaPreciosItemId` es de `comercial` (otro contenedor): uuid sin FK. INMUTABLE.
+model SolicitudCambioItem {
+  id                 String               @id @db.Uuid
+  solicitudId        String               @map("solicitud_id") @db.Uuid
+  solicitud          SolicitudCambioItems @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  orden              Int
+  listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
+  codigo             String
+  descripcion        String
+  unidad             String
+  cantidad           Decimal              @db.Decimal(12, 3)
+  descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
+  tipoLinea          TipoLineaItem        @map("tipo_linea")
+
+  @@unique([solicitudId, orden])
+  @@unique([solicitudId, listaPreciosItemId])
+  @@map("solicitud_cambio_item")
+  @@schema("pumping")
+}
+
+/// Reporte Diario de Actividades (DYN-SGI-RE-047) de un ticket: uno por día. Borrador hasta completarlo; se puede reabrir editándolo.
+model ReporteDiario {
+  id                   String    @id @db.Uuid
+  ticketId             String    @map("ticket_id") @db.Uuid
+  ticket               Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha                DateTime  @db.Date
+  /// Persona externa (Company Man del cliente): texto, no una cuenta.
+  representanteCliente String?   @map("representante_cliente")
+  cargoRepresentante   String?   @map("cargo_representante")
+  tiempoProductivo     Decimal?  @map("tiempo_productivo") @db.Decimal(5, 2)
+  tiempoNoProductivo   Decimal?  @map("tiempo_no_productivo") @db.Decimal(5, 2)
+  observaciones        String?
+  completadoAt         DateTime? @map("completado_at") @db.Timestamptz(6)
+  completadoPor        String?   @map("completado_por") @db.Uuid
+  /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
+  corregidoAt          DateTime? @map("corregido_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String    @map("created_by") @db.Uuid
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String    @map("updated_by") @db.Uuid
+
+  actividades ReporteDiarioActividad[]
+
+  @@unique([ticketId, fecha])
+  @@map("reporte_diario")
+  @@schema("pumping")
+}
+
+model ReporteDiarioActividad {
+  id         String        @id @db.Uuid
+  reporteId  String        @map("reporte_id") @db.Uuid
+  reporte    ReporteDiario @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  orden      Int
+  horaInicio DateTime      @map("hora_inicio") @db.Time(0)
+  horaFin    DateTime      @map("hora_fin") @db.Time(0)
+  detalle    String
+  autorId    String        @map("autor_id") @db.Uuid
+  autor      IdUsuario     @relation("actividadAutor", fields: [autorId], references: [id])
+
+  tablas ReporteDiarioTabla[]
+
+  @@unique([reporteId, orden])
+  @@map("reporte_diario_actividad")
+  @@schema("pumping")
+}
+
+/// Tabla dentro de una actividad: encabezados, filas y celdas, sin JSON.
+model ReporteDiarioTabla {
+  id          String                 @id @db.Uuid
+  actividadId String                 @map("actividad_id") @db.Uuid
+  actividad   ReporteDiarioActividad @relation(fields: [actividadId], references: [id], onDelete: Cascade)
+  orden       Int
+  titulo      String?
+
+  columnas ReporteDiarioTablaColumna[]
+  filas    ReporteDiarioTablaFila[]
+
+  @@unique([actividadId, orden])
+  @@map("reporte_diario_tabla")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaColumna {
+  id         String                    @id @db.Uuid
+  tablaId    String                    @map("tabla_id") @db.Uuid
+  tabla      ReporteDiarioTabla        @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden      Int
+  encabezado String
+  celdas     ReporteDiarioTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("reporte_diario_tabla_columna")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaFila {
+  id      String                    @id @db.Uuid
+  tablaId String                    @map("tabla_id") @db.Uuid
+  tabla   ReporteDiarioTabla        @relation(fields: [tablaId], references: [id], onDelete: Cascade)
+  orden   Int
+  celdas  ReporteDiarioTablaCelda[]
+
+  @@unique([tablaId, orden])
+  @@map("reporte_diario_tabla_fila")
+  @@schema("pumping")
+}
+
+model ReporteDiarioTablaCelda {
+  filaId    String                    @map("fila_id") @db.Uuid
+  fila      ReporteDiarioTablaFila    @relation(fields: [filaId], references: [id], onDelete: Cascade)
+  columnaId String                    @map("columna_id") @db.Uuid
+  columna   ReporteDiarioTablaColumna @relation(fields: [columnaId], references: [id], onDelete: Cascade)
+  valor     String
+
+  @@id([filaId, columnaId])
+  @@map("reporte_diario_tabla_celda")
+  @@schema("pumping")
+}
+
+/// `archivos.archivo`: solo el id, para comprobar que existe antes de guardar una referencia.
+model ArchivoRef {
+  id         String            @id @db.Uuid
+  documentos TicketDocumento[]
+
+  @@map("archivo")
+  @@schema("archivos")
 }
 
 /// Tipos de servicio del pedido (código del catálogo de `comercial`: control_fluidos, nitrogeno...).
@@ -670,6 +882,9 @@ model IdUsuario {
   historial    TicketHistorial[] @relation("historialActor")
   requisitos   TicketRequisito[] @relation("requisitoOperador")
   aceptaciones AceptacionTerminos[] @relation("aceptacionTerminos")
+  actividadesDiarias ReporteDiarioActividad[] @relation("actividadAutor")
+  cambiosSolicitados SolicitudCambioItems[] @relation("solicitanteCambio")
+  cambiosRevisados SolicitudCambioItems[] @relation("revisorCambio")
 
   @@map("usuario")
   @@schema("identidad")

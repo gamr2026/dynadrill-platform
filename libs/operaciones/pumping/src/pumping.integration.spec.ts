@@ -18,8 +18,11 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
+import { EventBus, MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { DespachosConsumer } from '@dyn/inventario';
+import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
+import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { PumpingModule } from './pumping.module';
@@ -66,6 +69,7 @@ const POZO_BANDEJA = {
 };
 const VEHICULO = { id: uuidv7(), placa: `IT${String(n).slice(-5)}P` };
 const VEHICULO_2 = { id: uuidv7(), placa: `IT${String(n).slice(-5)}Q` };
+const BODEGA = { id: uuidv7(), nombre: `BODEGA-PU ${n}` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { id: JEFE, nombre: 'Jaime Jefe de Base', rol: 'jefe_base' },
@@ -80,6 +84,7 @@ const MAESTROS: MaestrosDePrueba = {
   bloques: [BLOQUE],
   pozos: [POZO, POZO_BANDEJA],
   vehiculos: [VEHICULO, VEHICULO_2],
+  bodegas: [BODEGA],
 };
 
 run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
@@ -88,6 +93,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   let prisma: PrismaService;
   let consumer: PedidosAbiertosConsumer;
   let externos: RequisitosExternosConsumer;
+  let diaCorregido: DiaCorregidoConsumer;
+  let resultadoCambio: ResultadoCambioItemsConsumer;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -178,15 +185,52 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     jest
       .spyOn(RequisitosExternosConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
+    jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
+    jest
+      .spyOn(DiaCorregidoConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(ResultadoCambioItemsConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(PedidosAbiertosConsumer);
     externos = app.get(RequisitosExternosConsumer);
+    diaCorregido = app.get(DiaCorregidoConsumer);
+    resultadoCambio = app.get(ResultadoCambioItemsConsumer);
   });
 
   afterAll(async () => {
+    // lo que los tickets movieron en Inventario (el kardex referencia al ticket) y lo que la prueba creó allí
+    const deTickets = '(SELECT id FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[]))';
+    await admin.query(
+      `DELETE FROM inventario.consumo_ticket WHERE ticket_pumping_id IN ${deTickets}`,
+      [pedidos],
+    );
+    await admin.query(`DELETE FROM inventario.movimiento WHERE ticket_pumping_id IN ${deTickets}`, [
+      pedidos,
+    ]);
     if (pedidos.length)
       await admin.query('DELETE FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
+    await admin.query(
+      "DELETE FROM inventario.movimiento WHERE articulo_id IN (SELECT id FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1)",
+      [String(n)],
+    );
+    await admin.query("DELETE FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1", [
+      String(n),
+    ]);
+    await admin.query(
+      "DELETE FROM inventario.categoria_articulo WHERE nombre LIKE 'CAT-%-PU ' || $1",
+      [String(n)],
+    );
+    await admin.query(
+      "DELETE FROM archivos.archivo WHERE blob_key LIKE 'prueba/%' AND nombre_original = 'mezcla.pdf' AND subido_por = $1",
+      [JEFE],
+    );
+    await admin.query(
+      "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'articuloCodigo' LIKE '%-PU-' || $1",
+      [String(n)],
+    );
     if (eventos.length) {
       await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [eventos]);
       await admin.query(
@@ -606,6 +650,45 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect((await http().get(t.url).set(operador()).expect(200)).body).toMatchObject({
       puedeActuar: false,
     });
+  });
+
+  it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta es operador asignado, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
+    const t = await ticketEnTraslado();
+    const permiso = [P.PUMPING_CONTEXTO_CONDUCTOR];
+    const lista = async (h: Record<string, string>) =>
+      (await http().get(`${base}/tickets/mis-viajes`).set(h).expect(200)).body as {
+        ticketId: string;
+        ticketNumero: number;
+        supervisor: { id: string; nombre: string } | null;
+        destino: { pozo: { id: string } | null };
+        serviciosPrincipales: { codigo: string; nombre: string }[];
+      }[];
+    const mios = await lista(como('operador', OP1.id, OP1.nombre, permiso));
+    const v = mios.find((x) => x.ticketId === t.id)!;
+    expect(v).toBeDefined();
+    expect(v.supervisor).toEqual({ id: SUPERVISORA.id, nombre: SUPERVISORA.nombre });
+    expect(Object.keys(v).sort()).toEqual(
+      [
+        'cliente',
+        'destino',
+        'pedidoCodigo',
+        'serviciosPrincipales',
+        'supervisor',
+        'ticketId',
+        'ticketNumero',
+      ].sort(),
+    );
+    // otro operador (no asignado) no ve el ticket; el supervisor tampoco (no es operador del ticket)
+    expect(
+      (await lista(como('operador', uuidv7(), 'Otro', permiso))).map((x) => x.ticketId),
+    ).not.toContain(t.id);
+    expect(
+      (await lista(como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, permiso))).map(
+        (x) => x.ticketId,
+      ),
+    ).not.toContain(t.id);
+    // sin el permiso propio no se entra, aunque pueda operar tickets
+    await http().get(`${base}/tickets/mis-viajes`).set(op1()).expect(403);
   });
 
   it('salir de Traslado de salida exige todos los requisitos del paso y dice exactamente cuáles faltan', async () => {
@@ -1207,5 +1290,819 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .set(supervisora())
       .send({ hacia: 'revision_final' })
       .expect(409);
+  });
+
+  describe('químicos del ticket: salida de bodega al asignar, consumo y devolución (P1 y P4)', () => {
+    const QUIMICO = { id: uuidv7(), codigo: `QUI-PU-${n}` };
+    const NO_QUIMICO = { id: uuidv7(), codigo: `NOQ-PU-${n}` };
+    const CATEGORIA_Q = uuidv7();
+    const CATEGORIA_N = uuidv7();
+    const MEZCLA = uuidv7();
+    let preparado = false;
+
+    /** Existencia del químico en la bodega de prueba, del último movimiento del kardex. */
+    const stock = async () =>
+      Number(
+        (
+          await admin.query(
+            'SELECT saldo_resultante FROM inventario.movimiento WHERE articulo_id = $1 AND bodega_id = $2 ORDER BY secuencia DESC LIMIT 1',
+            [QUIMICO.id, BODEGA.id],
+          )
+        ).rows[0].saldo_resultante,
+      );
+
+    const preparar = async () => {
+      if (preparado) return;
+      preparado = true;
+      for (const [id, nombre, quimica] of [
+        [CATEGORIA_Q, `CAT-QUI-PU ${n}`, true],
+        [CATEGORIA_N, `CAT-NOQ-PU ${n}`, false],
+      ] as const) {
+        await admin.query(
+          'INSERT INTO inventario.categoria_articulo (id, nombre, es_quimica) VALUES ($1, $2, $3)',
+          [id, nombre, quimica],
+        );
+      }
+      for (const [a, categoria] of [
+        [QUIMICO, CATEGORIA_Q],
+        [NO_QUIMICO, CATEGORIA_N],
+      ] as const) {
+        await admin.query(
+          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
+           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+          [a.id, a.codigo, categoria],
+        );
+      }
+      await admin.query(
+        `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+         SELECT $1::uuid, mo.id, 'mezcla.pdf', 'application/pdf', 10, repeat('b', 64), 'prueba/' || $1::text, 'omitido', $2::uuid
+           FROM archivos.modulo_archivo mo WHERE mo.codigo = 'pedido_documento'`,
+        [MEZCLA, JEFE],
+      );
+      const compra = (
+        await admin.query("SELECT id FROM inventario.motivo_movimiento WHERE origen = 'compra'")
+      ).rows[0].id;
+      const bodeguero = token('bodeguero', 'Bruno Bodeguero', [P.ARTICULOS_GESTIONAR], JEFE);
+      for (const a of [QUIMICO, NO_QUIMICO]) {
+        await http()
+          .post('/api/operaciones/inventario/movimientos')
+          .set(bodeguero)
+          .send({ articuloId: a.id, bodegaId: BODEGA.id, motivoId: compra, cantidad: 100 })
+          .expect(201);
+      }
+    };
+
+    const asignar = (t: { url: string }, extra: object) =>
+      http()
+        .post(`${t.url}/asignar`)
+        .set(jefe())
+        .send({ ...cuerpoAsignacion, ...extra });
+    const linea = (cantidad: number, articulo = QUIMICO) => ({
+      articuloId: articulo.id,
+      bodegaId: BODEGA.id,
+      cantidad,
+    });
+    const enPaso = (id: string, paso: string) =>
+      admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [id, paso]);
+
+    it('el selector de químicos de la asignación trae solo químicos con existencia, por bodega', async () => {
+      await preparar();
+      const r = await http()
+        .get('/api/operaciones/inventario/articulos/quimicos')
+        .query({ q: '-PU-' + n })
+        .set(jefe());
+      expect(r.status).toBe(200);
+      expect(r.body.map((a: { codigo: string }) => a.codigo)).toEqual([QUIMICO.codigo]); // el no químico no aparece
+      expect(r.body[0].porBodega).toEqual([
+        expect.objectContaining({ bodegaId: BODEGA.id, stock: expect.any(Number) }),
+      ]);
+      expect(
+        (await http().get('/api/operaciones/inventario/articulos/quimicos').set(sinPermiso()))
+          .status,
+      ).toBe(403);
+    });
+
+    it('asignar con químicos exige el documento de mezcla; con él, los químicos salen de bodega a cargo del ticket', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+
+      const sinMezcla = await asignar(t, { quimicos: [linea(10)] });
+      expect(sinMezcla.status).toBe(400);
+      expect(sinMezcla.body.code).toBe('MEZCLA_REQUERIDA');
+      expect(await stock()).toBe(antes);
+
+      const ok = await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA });
+      expect(ok.status).toBe(201);
+      expect(ok.body.pasoCodigo ?? ok.body.paso?.codigo).toBe('traslado_salida');
+      expect(await stock()).toBe(antes - 10);
+
+      const q = await http().get(`${t.url}/quimicos`).set(jefe());
+      expect(q.status).toBe(200);
+      expect(q.body.quimicos).toEqual([
+        expect.objectContaining({
+          articuloId: QUIMICO.id,
+          codigo: QUIMICO.codigo,
+          asignada: 10,
+          usada: 0,
+          devuelta: 0,
+          pendiente: 10,
+          bodegas: [{ bodegaId: BODEGA.id, bodega: BODEGA.nombre }],
+        }),
+      ]);
+      expect(q.body.documentos).toEqual([
+        expect.objectContaining({ tipo: 'mezcla_quimica', archivoId: MEZCLA }),
+      ]);
+      // el documento es historia: la aplicación no lo cambia ni lo borra
+      const app = new Pool({ connectionString: APP_DB.replace('?pgbouncer=true', ''), max: 1 });
+      try {
+        await expect(app.query('DELETE FROM pumping.ticket_documento')).rejects.toThrow(
+          /permission denied/,
+        );
+      } finally {
+        await app.end();
+      }
+    });
+
+    it('si los químicos no alcanzan o no son químicos, la asignación no se hace y no sale nada', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+
+      const excede = await asignar(t, { quimicos: [linea(5000)], documentoMezclaId: MEZCLA });
+      expect(excede.status).toBe(409);
+      const noQ = await asignar(t, {
+        quimicos: [linea(1, NO_QUIMICO)],
+        documentoMezclaId: MEZCLA,
+      });
+      expect(noQ.status).toBe(409);
+      expect(noQ.body.code).toBe('ARTICULO_NO_QUIMICO');
+      const sinArchivo = await asignar(t, { quimicos: [linea(1)], documentoMezclaId: uuidv7() });
+      expect(sinArchivo.status).toBe(400);
+
+      expect(await stock()).toBe(antes);
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect(ticket.pasoCodigo).toBe('asignacion'); // sigue por asignar
+      expect(await prisma.ticketDocumento.count({ where: { ticketId: t.id } })).toBe(0);
+    });
+
+    it('si la asignación falla después de la salida, la salida se deshace con una devolución', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+      // se simula una falla al publicar el evento de la asignación, que ocurre DESPUÉS de la salida de bodega
+      const publicar = EventBus.prototype.publish;
+      const espia = jest.spyOn(EventBus.prototype, 'publish').mockImplementation(function (
+        this: EventBus,
+        tx,
+        evento,
+      ) {
+        if (evento.type === 'operaciones.pumping.asignacion_realizada') {
+          throw new Error('falla simulada');
+        }
+        return publicar.call(this, tx, evento);
+      });
+      try {
+        const r = await asignar(t, { quimicos: [linea(7)], documentoMezclaId: MEZCLA });
+        expect(r.status).toBe(500);
+      } finally {
+        espia.mockRestore();
+      }
+      expect(await stock()).toBe(antes); // salió y volvió
+      const movimientos = await admin.query(
+        'SELECT origen FROM inventario.movimiento WHERE ticket_pumping_id = $1 ORDER BY secuencia',
+        [t.id],
+      );
+      expect(movimientos.rows.map((m) => m.origen)).toEqual(['salida_ticket', 'devolucion_ticket']);
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } });
+      expect(ticket.pasoCodigo).toBe('asignacion');
+      expect(await prisma.ticketDocumento.count({ where: { ticketId: t.id } })).toBe(0);
+    });
+
+    it('consumo y devolución: solo en su paso, por el equipo asignado y sin pasar de lo que el ticket tiene a su cargo', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA }).expect(201);
+      const antes = await stock();
+      const consumo = (cantidad: number, h = op1()) =>
+        http().post(`${t.url}/quimicos/consumo`).set(h).send({ articuloId: QUIMICO.id, cantidad });
+      const devolucion = (cantidad: number, h = supervisora()) =>
+        http()
+          .post(`${t.url}/quimicos/devolucion`)
+          .set(h)
+          .send({ lineas: [linea(cantidad)] });
+
+      // fuera de su paso
+      expect((await consumo(1)).status).toBe(409);
+      expect((await devolucion(1)).status).toBe(409);
+
+      await enPaso(t.id, 'ejecucion_operativa');
+      expect((await consumo(4, operador())).status).toBe(403); // no es del equipo
+      expect((await consumo(11)).status).toBe(409); // más de lo asignado
+      const c = await consumo(6);
+      expect(c.status).toBe(201);
+      expect(c.body.quimicos[0]).toMatchObject({ asignada: 10, usada: 6, pendiente: 4 });
+      expect(await stock()).toBe(antes); // el consumo no mueve stock
+
+      await enPaso(t.id, 'control_retorno');
+      expect((await devolucion(2, op1())).status).toBe(403); // el operador no devuelve
+      expect((await devolucion(5)).status).toBe(409); // sobran 4, no 5
+      const d = await devolucion(4);
+      expect(d.status).toBe(201);
+      expect(d.body.quimicos[0]).toMatchObject({
+        asignada: 10,
+        usada: 6,
+        devuelta: 4,
+        pendiente: 0,
+      });
+      expect(await stock()).toBe(antes + 4);
+    });
+  });
+
+  describe('revisión de reportes de salida: el Supervisor aprueba la inspección de cada unidad (P2)', () => {
+    const aprobar = (t: { url: string }, vehiculoId: string, h = supervisora()) =>
+      http().post(`${t.url}/revision-salida/inspecciones/${vehiculoId}/aprobar`).set(h);
+    const inspeccion = async (id: string, vehiculoId: string) =>
+      (
+        await admin.query(
+          "SELECT estado, origen, motivo, cumplido_por FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND vehiculo_id = $2",
+          [id, vehiculoId],
+        )
+      ).rows[0];
+
+    it('solo en su paso, por el Supervisor del equipo, una sola vez por unidad y dejando constancia', async () => {
+      const t = await ticketEnTraslado();
+      // fuera de su paso
+      expect((await aprobar(t, VEHICULO.id)).status).toBe(409);
+
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'revision_reportes_salida',
+      ]);
+      expect((await aprobar(t, VEHICULO.id, op1())).status).toBe(403); // el operador no aprueba
+      expect((await aprobar(t, uuidv7())).status).toBe(404); // una unidad que no es del ticket
+
+      const ok = await aprobar(t, VEHICULO.id);
+      expect(ok.status).toBe(201);
+      expect(await inspeccion(t.id, VEHICULO.id)).toMatchObject({
+        estado: 'cumplido',
+        origen: 'manual_temporal',
+        cumplido_por: SUPERVISORA.id,
+      });
+      expect((await inspeccion(t.id, VEHICULO.id)).motivo).toContain('Supervisor');
+      // la otra unidad sigue pendiente
+      expect((await inspeccion(t.id, VEHICULO_2.id)).estado).toBe('pendiente');
+      expect((await aprobar(t, VEHICULO.id)).status).toBe(409); // ya aprobada
+
+      // el evento de Flota, cuando exista, no choca con la aprobación ya hecha
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.aprobada',
+          { ticketId: t.id, vehiculoId: VEHICULO.id },
+          'flota',
+        ),
+      );
+      expect((await inspeccion(t.id, VEHICULO.id)).origen).toBe('manual_temporal');
+    });
+  });
+
+  describe('Reporte Diario de Actividades (DYN-SGI-RE-047): borrador, completar, reabrir y día corregido por Facturación', () => {
+    const FECHA = '2026-11-06';
+    const actividad = (extra: object = {}) => ({
+      horaInicio: '06:00',
+      horaFin: '09:30',
+      detalle: 'Armado de líneas y prueba de presión',
+      ...extra,
+    });
+    const url = (t: { url: string }, fecha = FECHA) => `${t.url}/reportes-diarios/${fecha}`;
+    const guardar = (t: { url: string }, cuerpo: object, h = op1(), fecha = FECHA) =>
+      http().put(url(t, fecha)).set(h).send(cuerpo);
+    const completar = (t: { url: string }, h = op1(), fecha = FECHA) =>
+      http()
+        .post(`${url(t, fecha)}/completar`)
+        .set(h);
+    const enEjecucion = async () => {
+      const t = await ticketEnTraslado();
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'ejecucion_operativa',
+      ]);
+      return t;
+    };
+    const eventosDe = async (ticketId: string) =>
+      (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_diario_completado' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+          [ticketId],
+        )
+      ).rows.map((r) => r.datos.data);
+    const corregido = (pedidoId: string, extra: Record<string, unknown> = {}): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'comercial.documento_operativo.corregido',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: pedidoId },
+        data: { pedidoId, documentoId: null, origen: 'pumping', fecha: FECHA, ...extra },
+      } as EventEnvelope;
+    };
+
+    it('guarda el día como borrador, con la duración y las tablas de cada actividad calculadas y leídas del servidor', async () => {
+      const t = await enEjecucion();
+      const r = await guardar(t, {
+        representanteCliente: 'Carlos Companyman',
+        cargoRepresentante: 'Representante de Campo',
+        tiempoProductivo: 7.5,
+        tiempoNoProductivo: 1,
+        observaciones: 'Sin novedades',
+        actividades: [
+          actividad({
+            tablas: [
+              {
+                titulo: 'Volúmenes',
+                columnas: ['Etapa', 'Bbl'],
+                filas: [
+                  ['1', '120'],
+                  ['2', '135.5'],
+                ],
+              },
+            ],
+          }),
+          actividad({ horaInicio: '22:00', horaFin: '02:00', detalle: 'Bombeo nocturno' }), // cruza la medianoche
+        ],
+      });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({
+        fecha: FECHA,
+        estado: 'borrador',
+        representanteCliente: 'Carlos Companyman',
+        tiempoProductivo: 7.5,
+        totalHoras: 7.5, // 3,5 + 4
+      });
+      expect(r.body.actividades.map((a: { duracionHoras: number }) => a.duracionHoras)).toEqual([
+        3.5, 4,
+      ]);
+      expect(r.body.actividades[0].tablas).toEqual([
+        {
+          titulo: 'Volúmenes',
+          columnas: ['Etapa', 'Bbl'],
+          filas: [
+            ['1', '120'],
+            ['2', '135.5'],
+          ],
+        },
+      ]);
+      expect(r.body.actividades[0].autor.id).toBe(OP1.id);
+
+      // volver a guardar reemplaza el día
+      const otra = await guardar(t, { actividades: [actividad({ detalle: 'Solo esta' })] });
+      expect(otra.body.actividades).toHaveLength(1);
+      const lista = await http().get(`${t.url}/reportes-diarios`).set(supervisora());
+      expect(lista.body).toEqual([
+        { fecha: FECHA, estado: 'borrador', actividades: 1, totalHoras: 3.5 },
+      ]);
+    });
+
+    it('rechaza lo mal armado, a quien no es el Operador del equipo y fuera de su paso', async () => {
+      const t = await enEjecucion();
+      const malos: Array<[string, object]> = [
+        ['hora mal escrita', { actividades: [actividad({ horaInicio: '6:00' })] }],
+        ['mismas horas', { actividades: [actividad({ horaInicio: '08:00', horaFin: '08:00' })] }],
+        ['detalle vacío', { actividades: [actividad({ detalle: '   ' })] }],
+        [
+          'fila con otra cantidad de celdas',
+          { actividades: [actividad({ tablas: [{ columnas: ['A', 'B'], filas: [['1']] }] })] },
+        ],
+        [
+          'tabla sin columnas',
+          { actividades: [actividad({ tablas: [{ columnas: [], filas: [] }] })] },
+        ],
+        ['tiempo de más de 24 h', { actividades: [actividad()], tiempoProductivo: 25 }],
+      ];
+      for (const [caso, cuerpo] of malos) {
+        const r = await guardar(t, cuerpo);
+        expect({ caso, status: r.status }).toEqual({ caso, status: 400 });
+      }
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-13-45')).status).toBe(
+        400,
+      );
+      expect((await guardar(t, { actividades: [actividad()] }, operador())).status).toBe(403); // no es del equipo
+      expect((await guardar(t, { actividades: [actividad()] }, supervisora())).status).toBe(403); // el paso es del Operador
+      expect((await guardar(t, { actividades: [actividad()] })).status).toBe(200); // el operador del equipo sí
+
+      // fuera de la Ejecución operativa
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'control_retorno',
+      ]);
+      expect((await guardar(t, { actividades: [actividad()] })).status).toBe(409);
+    });
+
+    it('completar exige actividades y publica el día para Comercial; editarlo lo reabre y se completa de nuevo', async () => {
+      const t = await enEjecucion();
+      expect((await completar(t)).status).toBe(404); // sin reporte guardado
+      await guardar(t, { actividades: [] });
+      const vacio = await completar(t);
+      expect(vacio.status).toBe(400);
+      expect(vacio.body.code).toBe('SIN_ACTIVIDADES');
+
+      await guardar(t, {
+        actividades: [
+          actividad({ tablas: [{ titulo: 'Resumen', columnas: ['Dato'], filas: [['x']] }] }),
+        ],
+      });
+      const ok = await completar(t);
+      expect(ok.status).toBe(201);
+      expect(ok.body.estado).toBe('completado');
+
+      const [e1] = await eventosDe(t.id);
+      expect(e1).toMatchObject({
+        ticketId: t.id,
+        pedidoId: t.pedidoId,
+        fecha: FECHA,
+        supervisorId: SUPERVISORA.id,
+        operadorId: OP1.id,
+        actividades: [
+          {
+            fecha: FECHA,
+            horaInicio: '06:00',
+            horaFin: '09:30',
+            duracionHoras: 3.5,
+            tablas: [{ titulo: 'Resumen', columnas: ['Dato'], filas: [['x']] }],
+          },
+        ],
+      });
+
+      // se puede reabrir aunque figure completado: guardar lo deja en borrador, y al completar se reenvía el día
+      const reabierto = await guardar(t, {
+        actividades: [actividad({ detalle: 'Corregido por el operador' })],
+      });
+      expect(reabierto.body.estado).toBe('borrador');
+      await completar(t).expect(201);
+      const eventos2 = await eventosDe(t.id);
+      expect(eventos2).toHaveLength(2);
+      expect(eventos2[1].actividades[0].detalle).toBe('Corregido por el operador');
+    });
+
+    it('si Facturación corrige el día (evento de Comercial), el ticket ya no lo edita ni lo reenvía; el evento es idempotente y solo cuenta el de Pumping', async () => {
+      const t = await enEjecucion();
+      await guardar(t, { actividades: [actividad()] });
+      await completar(t).expect(201);
+
+      const e = corregido(t.pedidoId);
+      await diaCorregido.consumir(e);
+      await diaCorregido.consumir(e); // mismo evento: lo ignora el inbox
+      const r = await http().get(url(t)).set(op1());
+      expect(r.body.estado).toBe('corregido');
+
+      const editar = await guardar(t, { actividades: [actividad()] });
+      expect(editar.status).toBe(409);
+      expect(editar.body.code).toBe('DIA_CORREGIDO');
+      expect((await completar(t)).status).toBe(409);
+      expect((await eventosDe(t.id)).length).toBe(1); // no se reenvió
+
+      // un día corregido por Facturación sin reporte en el ticket también queda bloqueado
+      await diaCorregido.consumir(corregido(t.pedidoId, { fecha: '2026-11-07' }));
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-11-07')).status).toBe(
+        409,
+      );
+      // lo de FCR no es de este módulo
+      await diaCorregido.consumir(corregido(t.pedidoId, { origen: 'fcr', fecha: '2026-11-08' }));
+      expect((await guardar(t, { actividades: [actividad()] }, op1(), '2026-11-08')).status).toBe(
+        200,
+      );
+    });
+
+    it('la base impide una actividad sin duración, un completado sin quién y tiempos fuera de 0 a 24 h', async () => {
+      const t = await enEjecucion();
+      await guardar(t, { actividades: [actividad()] });
+      const rep = (
+        await admin.query('SELECT id FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id])
+      ).rows[0].id;
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.reporte_diario_actividad (id, reporte_id, orden, hora_inicio, hora_fin, detalle, autor_id) VALUES ($1, $2, 9, '08:00', '08:00', 'x', $3)",
+          [uuidv7(), rep, OP1.id],
+        ),
+      ).rejects.toThrow(/reporte_diario_actividad_horas_check/);
+      await expect(
+        admin.query('UPDATE pumping.reporte_diario SET completado_at = now() WHERE id = $1', [rep]),
+      ).rejects.toThrow(/reporte_diario_completado_check/);
+      await expect(
+        admin.query('UPDATE pumping.reporte_diario SET tiempo_productivo = 30 WHERE id = $1', [
+          rep,
+        ]),
+      ).rejects.toThrow(/reporte_diario_tiempos_check/);
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.reporte_diario_actividad (id, reporte_id, orden, hora_inicio, hora_fin, detalle, autor_id) VALUES ($1, $2, 0, '10:00', '11:00', 'x', $3)",
+          [uuidv7(), rep, OP1.id],
+        ),
+      ).rejects.toThrow(/reporte_diario_actividad_orden_key/);
+    });
+  });
+
+  describe('cambio de ítems del pedido: propone el Operador, aprueba el Supervisor y Comercial aplica (P7)', () => {
+    const LISTA_A = uuidv7();
+    const LISTA_B = uuidv7();
+    const item = (listaPreciosItemId: string, extra: object = {}) => ({
+      listaPreciosItemId,
+      codigo: `COD-${listaPreciosItemId.slice(-4)}`,
+      descripcion: 'Ítem de la lista del cliente',
+      unidad: 'día',
+      cantidad: 2,
+      tipoLinea: 'servicio',
+      ...extra,
+    });
+    const supervisoraAprueba = () =>
+      como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [
+        P.PUMPING_OPERAR,
+        P.PUMPING_CAMBIOS_APROBAR,
+      ]);
+    const op1Propone = () =>
+      como('operador', OP1.id, OP1.nombre, [P.PUMPING_OPERAR, P.PUMPING_CAMBIOS_SOLICITAR]);
+    const propone = (t: { url: string }, cuerpo: object, h = op1Propone()) =>
+      http().post(`${t.url}/cambios-items`).set(h).send(cuerpo);
+    const valido = () => ({
+      motivo: 'Se usó más material del cotizado',
+      items: [
+        item(LISTA_A),
+        item(LISTA_B, { tipoLinea: 'material', cantidad: 40.5, descuentoPct: 10 }),
+      ],
+    });
+    const resultado = (
+      solicitudId: string,
+      aplicado: boolean,
+      motivo: string | null = null,
+    ): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'comercial.cambio_items.resultado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: uuidv7() },
+        data: { solicitudId, pedidoId: uuidv7(), aplicado, motivo },
+      } as EventEnvelope;
+    };
+    const eventosAprobados = async (ticketId: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.cambio_items_aprobado' AND datos->'data'->>'ticketId' = $1",
+          [ticketId],
+        )
+      ).rows.map((r) => r.d);
+
+    it('el equipo propone la lista de ítems, solo una pendiente por ticket y solo con lo que corresponde', async () => {
+      const t = await ticketEnTraslado();
+      const ok = await propone(t, valido());
+      expect(ok.status).toBe(201);
+      expect(ok.body).toMatchObject({
+        estado: 'pendiente',
+        motivo: 'Se usó más material del cotizado',
+        aplicacion: null,
+      });
+      expect(ok.body.items).toHaveLength(2);
+      expect(ok.body.items[1]).toMatchObject({
+        cantidad: 40.5,
+        descuentoPct: 10,
+        tipoLinea: 'material',
+      });
+
+      const otra = await propone(t, valido());
+      expect(otra.status).toBe(409);
+      expect(otra.body.code).toBe('SOLICITUD_PENDIENTE');
+
+      const n = await ticketEnTraslado();
+      const malos: Array<[string, object]> = [
+        ['sin motivo', { ...valido(), motivo: '  ' }],
+        ['sin ítems', { ...valido(), items: [] }],
+        ['ítem repetido', { ...valido(), items: [item(LISTA_A), item(LISTA_A)] }],
+        ['cantidad cero', { ...valido(), items: [item(LISTA_A, { cantidad: 0 })] }],
+        ['descuento de más', { ...valido(), items: [item(LISTA_A, { descuentoPct: 120 })] }],
+        [
+          'tipo de línea que no existe',
+          { ...valido(), items: [item(LISTA_A, { tipoLinea: 'otro' })] },
+        ],
+      ];
+      for (const [caso, cuerpo] of malos) {
+        const r = await propone(n, cuerpo);
+        expect({ caso, status: r.status }).toEqual({ caso, status: 400 });
+      }
+      // quien no es del equipo no propone; sin equipo asignado tampoco
+      const ajeno = como('operador', OPERADOR_QUE_ACTUA, 'Oscar Operador', [
+        P.PUMPING_OPERAR,
+        P.PUMPING_CAMBIOS_SOLICITAR,
+      ]);
+      expect((await propone(n, valido(), ajeno)).status).toBe(403);
+      const sinEquipo = await ticketEnAsignacion();
+      expect((await propone(sinEquipo, valido())).status).toBe(409);
+      expect((await propone(n, valido(), op1())).status).toBe(403); // sin el permiso de proponer
+    });
+
+    it('el Supervisor del ticket aprueba: la solicitud queda por aplicar y Comercial recibe el cambio; otro supervisor no puede', async () => {
+      const t = await ticketEnTraslado();
+      const sol = (await propone(t, valido())).body;
+      const pend = await http().get(`${base}/cambios-items/pendientes`).set(supervisoraAprueba());
+      expect(pend.body.map((x: { id: string }) => x.id)).toContain(sol.id);
+      expect(pend.body.find((x: { id: string }) => x.id === sol.id).ticket).toMatchObject({
+        id: t.id,
+      });
+
+      const otroSup = como('supervisor_pumping', SUPERVISOR_PUMPING.id, SUPERVISOR_PUMPING.nombre, [
+        P.PUMPING_OPERAR,
+        P.PUMPING_CAMBIOS_APROBAR,
+      ]);
+      expect(
+        (await http().post(`${base}/cambios-items/${sol.id}/aprobar`).set(otroSup)).status,
+      ).toBe(403);
+      expect(
+        (await http().post(`${base}/cambios-items/${sol.id}/aprobar`).set(op1Propone())).status,
+      ).toBe(403);
+
+      const ok = await http()
+        .post(`${base}/cambios-items/${sol.id}/aprobar`)
+        .set(supervisoraAprueba());
+      expect(ok.status).toBe(201);
+      expect(ok.body).toMatchObject({
+        estado: 'aprobada',
+        aplicacion: 'pendiente',
+        revisadoPor: { id: SUPERVISORA.id },
+      });
+      const [e] = await eventosAprobados(t.id);
+      expect(e).toMatchObject({ solicitudId: sol.id, pedidoId: t.pedidoId });
+      expect(e.items).toEqual([
+        { listaPreciosItemId: LISTA_A, cantidad: 2, tipoLinea: 'servicio' },
+        { listaPreciosItemId: LISTA_B, cantidad: 40.5, descuentoPct: 10, tipoLinea: 'material' },
+      ]);
+      // ya revisada
+      expect(
+        (await http().post(`${base}/cambios-items/${sol.id}/aprobar`).set(supervisoraAprueba()))
+          .status,
+      ).toBe(409);
+      expect(
+        (
+          await http()
+            .post(`${base}/cambios-items/${sol.id}/rechazar`)
+            .set(supervisoraAprueba())
+            .send({})
+        ).status,
+      ).toBe(409);
+
+      // la respuesta de Comercial queda en la solicitud (idempotente); el motivo solo cuando no se pudo aplicar
+      const r1 = resultado(sol.id, true);
+      await resultadoCambio.consumir(r1);
+      await resultadoCambio.consumir(r1);
+      await resultadoCambio.consumir(resultado(sol.id, false, 'otra respuesta tardía')); // ya cerrada: no cambia
+      const lista = await http().get(`${t.url}/cambios-items`).set(supervisoraAprueba());
+      expect(lista.body[0]).toMatchObject({
+        estado: 'aprobada',
+        aplicacion: 'aplicada',
+        aplicacionMotivo: null,
+      });
+    });
+
+    it('si Comercial no pudo aplicarlo, la solicitud dice por qué; rechazar deja el motivo y libera para proponer otra', async () => {
+      const t = await ticketEnTraslado();
+      const a = (await propone(t, valido())).body;
+      await http()
+        .post(`${base}/cambios-items/${a.id}/aprobar`)
+        .set(supervisoraAprueba())
+        .expect(201);
+      await resultadoCambio.consumir(
+        resultado(a.id, false, 'El pedido ya salió al cliente para firmas'),
+      );
+      const tras = (await http().get(`${t.url}/cambios-items`).set(supervisoraAprueba())).body[0];
+      expect(tras).toMatchObject({
+        aplicacion: 'no_aplicada',
+        aplicacionMotivo: 'El pedido ya salió al cliente para firmas',
+      });
+
+      const b = (await propone(t, valido())).body; // la anterior ya no está pendiente
+      const rech = await http()
+        .post(`${base}/cambios-items/${b.id}/rechazar`)
+        .set(supervisoraAprueba())
+        .send({ motivo: 'No coincide con el reporte' });
+      expect(rech.status).toBe(201);
+      expect(rech.body).toMatchObject({
+        estado: 'rechazada',
+        motivoRechazo: 'No coincide con el reporte',
+        aplicacion: null,
+      });
+      expect((await eventosAprobados(t.id)).length).toBe(1); // rechazar no publica nada hacia Comercial
+    });
+
+    it('la base mantiene la coherencia: aprobada con resultado, una pendiente por ticket y lo propuesto no se cambia', async () => {
+      const t = await ticketEnTraslado();
+      const sol = (await propone(t, valido())).body;
+      await expect(
+        admin.query(
+          "UPDATE pumping.solicitud_cambio_items SET estado = 'aprobada', revisado_por = $2, revisado_at = now() WHERE id = $1",
+          [sol.id, SUPERVISORA.id],
+        ),
+      ).rejects.toThrow(/solicitud_cambio_items_aplicacion_check/);
+      await expect(
+        admin.query(
+          "UPDATE pumping.solicitud_cambio_items SET motivo_rechazo = 'x' WHERE id = $1",
+          [sol.id],
+        ),
+      ).rejects.toThrow(/solicitud_cambio_items_rechazo_check/);
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.solicitud_cambio_items (id, ticket_id, motivo, solicitado_por) VALUES ($1, $2, 'otra', $3)",
+          [uuidv7(), t.id, OP1.id],
+        ),
+      ).rejects.toThrow(/solicitud_cambio_items_pendiente_key/);
+      const app = new Pool({ connectionString: APP_DB.replace('?pgbouncer=true', ''), max: 1 });
+      try {
+        await expect(
+          app.query('UPDATE pumping.solicitud_cambio_item SET cantidad = 99'),
+        ).rejects.toThrow(/permission denied/);
+        await expect(app.query('DELETE FROM pumping.solicitud_cambio_item')).rejects.toThrow(
+          /permission denied/,
+        );
+      } finally {
+        await app.end();
+      }
+    });
+  });
+
+  describe('documentos del ticket: el monitoreo de cada día de operación', () => {
+    const subirArchivo = async () => {
+      const id = uuidv7();
+      await admin.query(
+        `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+         SELECT $1::uuid, mo.id, 'mezcla.pdf', 'application/pdf', 10, repeat('c', 64), 'prueba/' || $1::text, 'omitido', $2::uuid
+           FROM archivos.modulo_archivo mo WHERE mo.codigo = 'pedido_documento'`,
+        [id, JEFE],
+      );
+      return id;
+    };
+    const adjuntar = (t: { url: string }, cuerpo: object, h = op1()) =>
+      http().post(`${t.url}/documentos/monitoreo`).set(h).send(cuerpo);
+    const enEjecucion = async () => {
+      const t = await ticketEnTraslado();
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'ejecucion_operativa',
+      ]);
+      return t;
+    };
+
+    it('el Operador del equipo adjunta el monitoreo de un día; hay varios por día y todos quedan como historia', async () => {
+      const t = await enEjecucion();
+      const a = await subirArchivo();
+      const b = await subirArchivo();
+      const r1 = await adjuntar(t, { fecha: '2026-11-06', archivoId: a });
+      expect(r1.status).toBe(201);
+      expect(r1.body).toEqual([
+        expect.objectContaining({ tipo: 'monitoreo', fecha: '2026-11-06', archivoId: a }),
+      ]);
+      const r2 = await adjuntar(t, { fecha: '2026-11-06', archivoId: b });
+      expect(r2.body.map((d: { archivoId: string }) => d.archivoId)).toEqual([a, b]);
+      const lista = await http().get(`${t.url}/documentos`).set(supervisora());
+      expect(lista.status).toBe(200);
+      expect(lista.body).toHaveLength(2);
+    });
+
+    it('solo en su paso, por el Operador del equipo, con un archivo que existe y una fecha válida', async () => {
+      const t = await ticketEnTraslado();
+      const a = await subirArchivo();
+      expect((await adjuntar(t, { fecha: '2026-11-06', archivoId: a })).status).toBe(409); // aún no está en ejecución
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'ejecucion_operativa',
+      ]);
+      expect((await adjuntar(t, { fecha: '2026-11-06', archivoId: a }, operador())).status).toBe(
+        403,
+      ); // no es del equipo
+      expect((await adjuntar(t, { fecha: '2026-11-06', archivoId: a }, supervisora())).status).toBe(
+        403,
+      ); // el paso es del Operador
+      expect((await adjuntar(t, { fecha: '2026-11-06', archivoId: uuidv7() })).status).toBe(400);
+      expect((await adjuntar(t, { fecha: '06/11/2026', archivoId: a })).status).toBe(400);
+      expect((await adjuntar(t, { fecha: '2026-02-31', archivoId: a })).status).toBe(400);
+      expect((await http().get(`${t.url}/documentos`).set(sinPermiso())).status).toBe(403);
+    });
+
+    it('la base exige la fecha en el monitoreo y la prohíbe en los demás documentos', async () => {
+      const t = await enEjecucion();
+      const a = await subirArchivo();
+      const insertar = (tipo: string, fecha: string | null) =>
+        admin.query(
+          'INSERT INTO pumping.ticket_documento (id, ticket_id, tipo, fecha, archivo_id, created_by) VALUES ($1, $2, $3::pumping.tipo_documento_ticket, $4, $5, $6)',
+          [uuidv7(), t.id, tipo, fecha, a, JEFE],
+        );
+      await expect(insertar('monitoreo', null)).rejects.toThrow(/ticket_documento_fecha_check/);
+      await expect(insertar('mezcla_quimica', '2026-11-06')).rejects.toThrow(
+        /ticket_documento_fecha_check/,
+      );
+      await insertar('monitoreo', '2026-11-06');
+    });
   });
 });

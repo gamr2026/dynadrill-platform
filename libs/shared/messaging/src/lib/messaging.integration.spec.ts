@@ -9,7 +9,7 @@ import { Pool, PoolClient } from 'pg';
 import { createEvent, EventEnvelope } from './envelope';
 import { OutboxRelay } from './outbox-relay';
 import { runOnce, SqlExecutor, writeOutbox } from './outbox';
-import { dlqOf, MAX_DELIVERIES, RabbitMqTransport } from './rabbitmq.transport';
+import { dlqOf, MAX_DELIVERIES, queueOf, RabbitMqTransport } from './rabbitmq.transport';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 
@@ -183,5 +183,52 @@ run('outbox → RabbitMQ → inbox (infraestructura real)', () => {
       await ch.deleteQueue(dlqOf(`${consumer}c`, 'comercial')).catch(() => undefined);
       await conn.close();
     }
+  });
+
+  it('dos consumidores del mismo origen con grupos distintos no se reparten ni pierden mensajes; sin grupo comparten la cola', async () => {
+    const mio = `${consumer}g`;
+    const pedidos: string[] = [];
+    const despachos: string[] = [];
+    await transport.subscribe({
+      consumer: mio,
+      source: 'comercial',
+      patterns: ['comercial.pedido.abierto'],
+      handler: async (ev) => void pedidos.push(ev.id),
+    });
+    await transport.subscribe({
+      consumer: mio,
+      source: 'comercial',
+      group: 'inventario',
+      patterns: ['comercial.despacho.solicitado'],
+      handler: async (ev) => void despachos.push(ev.id),
+    });
+    const enviados: { pedido: string[]; despacho: string[] } = { pedido: [], despacho: [] };
+    for (let i = 0; i < 10; i++) {
+      const p = evento('comercial.pedido.abierto');
+      const d = evento('comercial.despacho.solicitado');
+      enviados.pedido.push(p.id);
+      enviados.despacho.push(d.id);
+      await guardarEnTx(p, true);
+      await guardarEnTx(d, true);
+    }
+    await relay.tick();
+    await waitFor(() => pedidos.length >= 10 && despachos.length >= 10);
+    // cada consumidor recibe exactamente los suyos
+    expect(pedidos.sort()).toEqual(enviados.pedido.sort());
+    expect(despachos.sort()).toEqual(enviados.despacho.sort());
+    expect(queueOf(mio, 'comercial')).toBe(`${mio}.comercial`);
+    expect(queueOf(mio, 'comercial', 'inventario')).toBe(`${mio}.comercial.inventario`);
+
+    const conn = await amqp.connect(RABBIT_URL);
+    const ch = await conn.createChannel();
+    for (const q of [
+      `${mio}.comercial`,
+      dlqOf(mio, 'comercial'),
+      `${mio}.comercial.inventario`,
+      dlqOf(mio, 'comercial', 'inventario'),
+    ]) {
+      await ch.deleteQueue(q).catch(() => undefined);
+    }
+    await conn.close();
   });
 });

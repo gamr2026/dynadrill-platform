@@ -4,16 +4,21 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AsignacionService } from '../services/asignacion.service';
+import { QuimicosService } from '../services/quimicos.service';
+import { RevisionSalidaService } from '../services/revision-salida.service';
 import { TicketsService } from '../services/tickets.service';
 
 const P = Permission;
@@ -37,6 +42,27 @@ export class OperadorUnidadDto {
   @IsUUID() vehiculoId!: string;
 }
 
+/** Un químico: de qué bodega sale (o a cuál vuelve) y cuánto. */
+export class QuimicoDto {
+  @IsUUID() articuloId!: string;
+  @IsUUID() bodegaId!: string;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(99999999) cantidad!: number;
+}
+
+export class ConsumoQuimicoDto {
+  @IsUUID() articuloId!: string;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(99999999) cantidad!: number;
+}
+
+export class DevolucionQuimicosDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => QuimicoDto)
+  lineas!: QuimicoDto[];
+}
+
 export class AsignarTicketDto {
   /** Cuenta del supervisor (rol supervisor o supervisor_pumping). */
   @IsUUID() supervisorId!: string;
@@ -47,6 +73,15 @@ export class AsignarTicketDto {
   @ValidateNested({ each: true })
   @Type(() => OperadorUnidadDto)
   operadores!: OperadorUnidadDto[];
+  /** Químicos que salen de bodega a cargo del ticket (opcional). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => QuimicoDto)
+  quimicos?: QuimicoDto[];
+  /** Archivo del documento de mezcla: obligatorio si hay químicos. */
+  @IsOptional() @IsUUID() documentoMezclaId?: string;
 }
 
 /** Tickets de servicio de Pumping: la bandeja del Jefe de Base, el Supervisor y el Operador. */
@@ -55,6 +90,8 @@ export class TicketsController {
   constructor(
     private readonly tickets: TicketsService,
     private readonly asignacion: AsignacionService,
+    private readonly quimicos: QuimicosService,
+    private readonly revisionSalida: RevisionSalidaService,
   ) {}
 
   @RequirePermission(P.PUMPING_OPERAR)
@@ -65,6 +102,13 @@ export class TicketsController {
       q: q.q,
       ...(q.mios === 'true' ? { rol: actor.roleCode, usuarioId: actor.id } : {}),
     });
+  }
+
+  /** Tickets del operador que consulta, con los datos mínimos del viaje (los consume el portal del Conductor de Flota). */
+  @RequirePermission(P.PUMPING_CONTEXTO_CONDUCTOR)
+  @Get('tickets/mis-viajes')
+  misViajes(@CurrentUser() actor: AuthUser) {
+    return this.tickets.misViajes(actor.id);
   }
 
   @RequirePermission(P.PUMPING_OPERAR)
@@ -92,5 +136,45 @@ export class TicketsController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.asignacion.asignar(id, dto, actor);
+  }
+
+  /** El Supervisor del equipo aprueba la inspección de una unidad al revisar los reportes de salida. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/revision-salida/inspecciones/:vehiculoId/aprobar')
+  aprobarInspeccion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.revisionSalida.aprobarInspeccion(id, vehiculoId, actor);
+  }
+
+  /** Químicos del ticket (asignado, usado, devuelto y pendiente) y su documento de mezcla. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('tickets/:id/quimicos')
+  quimicosDelTicket(@Param('id', ParseUUIDPipe) id: string) {
+    return this.quimicos.detalle(id);
+  }
+
+  /** El Operador registra lo usado de un químico en la ejecución. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/quimicos/consumo')
+  consumirQuimico(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConsumoQuimicoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.quimicos.consumir(id, dto.articuloId, dto.cantidad, actor);
+  }
+
+  /** El Supervisor devuelve a bodega lo que sobró, en el control de retorno. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/quimicos/devolucion')
+  devolverQuimicos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: DevolucionQuimicosDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.quimicos.devolver(id, dto.lineas, actor);
   }
 }

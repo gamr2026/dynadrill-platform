@@ -1,0 +1,664 @@
+{
+  "fuente": "Reporte «Atributos por Producto» de AS2 (INVENTARIO PRODUCTO ATRIBUTO AS2.xlsx), categoría EQUIPO PROTECCION PERSONAL (EPP)",
+  "productosEnAs2": 74,
+  "excluidos": [],
+  "fusionados": [
+    {
+      "base": "EPP-0005",
+      "motivo": "duplicado",
+      "desde": ["EPP-0006"]
+    },
+    {
+      "base": "EPP-0038",
+      "motivo": "tallas como productos",
+      "desde": ["EPP-0039", "EPP-0040", "EPP-0041", "EPP-0042"]
+    },
+    {
+      "base": "EPP-0049",
+      "motivo": "tallas como productos",
+      "desde": ["EPP-0050", "EPP-0051"]
+    },
+    {
+      "base": "EPP-0048",
+      "motivo": "error de digitación (PATALON)",
+      "desde": ["EPP-0047"]
+    },
+    {
+      "base": "EPP-0073",
+      "motivo": "tallas como productos",
+      "desde": ["EPP-0065", "EPP-0066", "EPP-0067"]
+    }
+  ],
+  "articulos": [
+    {
+      "codigo": "EPP-0001",
+      "nombre": "GUANTES DE PUPO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0002",
+      "nombre": "GUANTES CONTRA IMPACTO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0003",
+      "nombre": "GUANTES DE PRECISIÓN",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0004",
+      "nombre": "GUANTES DE NITRILO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0005",
+      "nombre": "PARES GUANTES DE MANEJO QUIRURGICO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": ["EPP-0006"]
+    },
+    {
+      "codigo": "EPP-0007",
+      "nombre": "GUANTES PARA ALTA TEMPERATURTA RADIANS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0008",
+      "nombre": "GUANTES DE CUERO PARA SOLDADORES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0009",
+      "nombre": "TAPONES AUDITIVOS DESECHABLES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0010",
+      "nombre": "TAPONES AUDITIVOS REUTILIZABLES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0011",
+      "nombre": "GAFAS TRANSPARENTES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0012",
+      "nombre": "GAFAS OSCURAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0013",
+      "nombre": "MÁSCARA MEDIO ROSTRO 602 TALLA M ARMOR",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0014",
+      "nombre": "CARTUCHO CONTRA VAPORES ORGANICOS, 3M",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0015",
+      "nombre": "CARTUCHOS 703 ARMOR",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0016",
+      "nombre": "RETENEDOR PARA PREFILTROS FILTROS 3M 501",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0017",
+      "nombre": "RESPIRADOR PARA PARTICULAS 3M 8511 - N95 CON VÁLVULAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0018",
+      "nombre": "FILTROS PARA PARTICULAS 3M 2097",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0019",
+      "nombre": "PREFILTRO ARMOR 7N11 PARA PARTICULAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0020",
+      "nombre": "MASCARAS FULL FACE",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0021",
+      "nombre": "MANGAS EN CUERO PARA SOLDAR",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0022",
+      "nombre": "MANDIL DE CUERO PARA SOLDADORES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0023",
+      "nombre": "PAQUETE X 10 FUNDAS INDUSTRIALES ROJAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0024",
+      "nombre": "PAQUETE X 10 FUNDAS INDUSTRIALES VERDES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0025",
+      "nombre": "PAQUETE X 10 FUNDAS INDUSTRIALES NEGRAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0026",
+      "nombre": "PAQUETE X 10 FUNDAS INDUSTRIALES AZULES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0027",
+      "nombre": "ABSORBENTES",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0028",
+      "nombre": "TRAJE TYVEX",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0029",
+      "nombre": "CASCO SAFARI BLANCO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0030",
+      "nombre": "GAFAS PROTECTORAS CONTRA SALPICADURAS QUIMICAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0031",
+      "nombre": "ABSORBENTES PARA QUIMICOS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0032",
+      "nombre": "RATCHET SUSPENSION, FAS-TRAC III",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0033",
+      "nombre": "CADENA PLASTICA AMARILLA",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0034",
+      "nombre": "CINTA DOLBE FAZ, ABRO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0035",
+      "nombre": "RODILLERA DE SEGURIDAD",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0036",
+      "nombre": "ACERRIN",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0037",
+      "nombre": "BARBIQUEJOS DE 2 PUNTOS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0038",
+      "nombre": "BOTAS DE SEGURIDAD",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "calzado",
+      "codigosAlternos": ["EPP-0039", "EPP-0040", "EPP-0041", "EPP-0042"]
+    },
+    {
+      "codigo": "EPP-0043",
+      "nombre": "GUANTES RESISTENTES AL CALOR",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0044",
+      "nombre": "BARRETA DE PUNTA",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0045",
+      "nombre": "GUANTES DE CUERO TIPO BAQUETA",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "guante",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0046",
+      "nombre": "TALACHO- PICO CON MANGO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0048",
+      "nombre": "PANTALON JEANS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": ["EPP-0047"]
+    },
+    {
+      "codigo": "EPP-0049",
+      "nombre": "BOTAS DE CAUCHO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "calzado",
+      "codigosAlternos": ["EPP-0050", "EPP-0051"]
+    },
+    {
+      "codigo": "EPP-0052",
+      "nombre": "IMPERMEABLE AMARILLO, 2 PIEZAS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0053",
+      "nombre": "ARNES DE CUERPO COMPLETO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0054",
+      "nombre": "CHALECO SALVA VIDA",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0055",
+      "nombre": "PUENTE PARA BATERIA DE AUTO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0056",
+      "nombre": "BOTIQUIN DE PRIMEROS AUXILIOS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0057",
+      "nombre": "BARRERAS ABSORVENTES PARA HIDROCARBUROS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0058",
+      "nombre": "LAVA OJOS",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0059",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC",
+      "nombreComercial": "DYN-EXT-BA-016",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0060",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC",
+      "nombreComercial": "NA",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0061",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC 14695",
+      "nombreComercial": "14695",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0062",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC 2601988",
+      "nombreComercial": "2601988",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0063",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC 2601986",
+      "nombreComercial": "2601986",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0064",
+      "nombre": "EXTINTOR POLVO QUIMICO SECO ABC 120",
+      "nombreComercial": "120",
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": false,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0068",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0069",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0070",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0071",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0072",
+      "nombre": "OVEROL BORDADO",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": []
+    },
+    {
+      "codigo": "EPP-0073",
+      "nombre": "OVEROL",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": "ropa",
+      "codigosAlternos": ["EPP-0065", "EPP-0066", "EPP-0067"]
+    },
+    {
+      "codigo": "EPP-0074",
+      "nombre": "CHALECO SALVA VIDA DE ESPUMA",
+      "nombreComercial": null,
+      "categoria": "EQUIPO PROTECCION PERSONAL (EPP)",
+      "subcategoria": "INV EPP",
+      "entregaPersonal": true,
+      "tipoTalla": null,
+      "codigosAlternos": []
+    }
+  ]
+}
