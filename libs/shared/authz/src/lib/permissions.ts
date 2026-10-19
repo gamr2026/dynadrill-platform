@@ -440,6 +440,13 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y anular los documentos de un conductor',
     ModuleRoles.maintenance,
   ),
+  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza el riesgo BAJO; MEDIO y ALTO exigen además este permiso
+  // (qué permiso exige cada nivel lo dice la tabla `umbral_riesgo_viaje`, no el código).
+  nuevo(
+    'flota.viajes.autorizar_mayor',
+    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo MEDIO o ALTO',
+    [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  ),
   // mantenimiento
   def(
     'maintenance',
@@ -512,6 +519,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   nuevo(
     'qhse.swa.gestionar',
     'Gestionar una SWA: notificar a la cadena, evaluar el riesgo, confirmar el reinicio y reanudar',
+    ModuleRoles.qhse,
+  ),
+  // ---- qhse: Matriz IPERC maestra (DYN-SGI-RE-087). Aprobarla usa `qhse.iperc.aprobar` (solo el Gerente HSE).
+  nuevo(
+    'qhse.iperc.ver',
+    'Ver la matriz IPERC maestra, sus versiones y la cobertura por tipo de servicio',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.iperc.gestionar',
+    'Preparar la matriz IPERC: actividades, tareas, peligros, controles, adjuntos, cobertura y revisiones',
     ModuleRoles.qhse,
   ),
   // El Supervisor entra SOLO a estos dos (el Acta la sube al finalizar el ticket); no ve el resto de QHSE.
@@ -615,6 +633,7 @@ export const Permission = {
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
+  VIAJES_AUTORIZAR_MAYOR: 'flota.viajes.autorizar_mayor',
   UNIDADES_VER: 'flota.unidades.ver',
   UNIDADES_CREAR: 'flota.unidades.crear',
   UNIDADES_EDITAR: 'flota.unidades.editar',
@@ -649,6 +668,8 @@ export const Permission = {
   PTW_VER: 'qhse.ptw.ver',
   PTW_GESTIONAR: 'qhse.ptw.gestionar',
   PTW_APROBAR: 'qhse.ptw.aprobar',
+  IPERC_VER: 'qhse.iperc.ver',
+  IPERC_GESTIONAR: 'qhse.iperc.gestionar',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
 } as const;

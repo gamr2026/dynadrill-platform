@@ -3,6 +3,8 @@ import type { Prisma } from '../generated/client';
 import { FasePtw } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { aDia, codigoPtw, requisitosDeGabinete } from './ptw-documentos';
+import { requisitosIperc, type RequisitoIperc } from './ptw-iperc';
+import { codigoIperc } from '../iperc/iperc-consulta.service';
 
 export interface FiltroPtw {
   fase?: FasePtw;
@@ -81,6 +83,18 @@ export class PtwConsultaService {
         documentoArt: { select: { id: true, archivoId: true, vigenteHasta: true } },
         documentoPt: { select: { id: true, archivoId: true } },
         documentoSfi: { select: { id: true, archivoId: true } },
+        matrices: {
+          include: {
+            matriz: {
+              select: {
+                id: true,
+                numero: true,
+                vigenteHasta: true,
+                actividad: { select: { id: true, nombre: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!p) throw new NotFoundException('El PTW no existe');
@@ -105,6 +119,19 @@ export class PtwConsultaService {
             };
           });
 
+    // Matrices IPERC: en gabinete se calcula cuáles servirían hoy; después quedan fijadas las que respaldan el PTW.
+    const matrices: RequisitoIperc[] =
+      p.fase === FasePtw.gabinete && !p.anuladoAt
+        ? await requisitosIperc(this.prisma, p.ticketId, p.diaOperacion)
+        : p.matrices.map((pm) => ({
+            actividadId: pm.matriz.actividad.id,
+            actividad: pm.matriz.actividad.nombre,
+            matrizId: pm.matriz.id,
+            codigo: codigoIperc(pm.matriz.numero),
+            vigenteHasta: pm.matriz.vigenteHasta ? aDia(pm.matriz.vigenteHasta) : null,
+            falta: null,
+          }));
+
     return {
       id: p.id,
       numero: p.numero,
@@ -120,7 +147,10 @@ export class PtwConsultaService {
       diaOperacion: aDia(p.diaOperacion),
       fase: p.fase,
       requisitos,
-      gabineteCompleta: requisitos.every((r) => r.documentoId !== null),
+      matricesIperc: matrices,
+      gabineteCompleta:
+        requisitos.every((r) => r.documentoId !== null) &&
+        matrices.every((m) => m.matrizId !== null),
       firmas: p.firmas.map((f) => ({
         tipo: f.tipo,
         nombre: f.usuario.nombre,

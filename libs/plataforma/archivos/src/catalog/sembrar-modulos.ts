@@ -78,11 +78,27 @@ export const MODULOS_ARCHIVO = [
     tamanoMaxMb: 25,
   },
   {
+    codigo: 'ticket_fcr_documento',
+    nombre: 'Documento adjunto de un ticket de FCR (inspección, dimensionamiento, dureza y QAQC)',
+    permisoSubir: 'fcr.tickets.operar',
+    permisoVer: 'fcr.tickets.operar',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
     codigo: 'qhse_acta_entrega',
     nombre: 'Acta de Entrega de Locación (DYN-PMP-RE-027) de un pedido',
     permisoSubir: 'qhse.acta_entrega.cargar',
     permisoVer: 'qhse.acta_entrega.ver',
     tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
+  {
+    codigo: 'qhse_iperc_documento',
+    nombre: 'Procedimiento y ATS base de una matriz IPERC',
+    permisoSubir: 'qhse.iperc.gestionar',
+    permisoVer: 'qhse.iperc.ver',
+    tiposMime: DOCUMENTOS,
     tamanoMaxMb: 25,
   },
   {

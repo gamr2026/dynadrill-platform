@@ -76,6 +76,37 @@ enum EstadoSwa {
   @@schema("qhse")
 }
 
+enum EstadoIperc {
+  borrador
+  en_evaluacion
+  en_revision
+  aprobada
+  rechazada
+  reemplazada
+
+  @@map("estado_iperc")
+  @@schema("qhse")
+}
+
+enum MomentoControlIperc {
+  propuesto
+  residual
+
+  @@map("momento_control_iperc")
+  @@schema("qhse")
+}
+
+enum TipoControlIperc {
+  eliminacion
+  sustitucion
+  ingenieria
+  administrativo
+  epp
+
+  @@map("tipo_control_iperc")
+  @@schema("qhse")
+}
+
 enum TipoTalla {
   ropa
   calzado
@@ -101,10 +132,12 @@ model TicketRef {
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  entregasEpi EpiEntrega[]
-  documentos  DocumentoPedido[]
-  ptws        Ptw[]
-  swas        Swa[]
+  entregasEpi    EpiEntrega[]
+  documentos     DocumentoPedido[]
+  ptws           Ptw[]
+  swas           Swa[]
+  servicios      TicketServicio[]
+  matricesOrigen IpercMatriz[]
 
   @@unique([ticketId, pedidoId])
   @@index([pedidoId])
@@ -310,6 +343,7 @@ model Ptw {
 
   firmas    PtwFirma[]
   historial PtwHistorial[]
+  matrices  PtwMatriz[]
 
   @@index([ticketId])
   @@index([pedidoId, diaOperacion])
@@ -491,6 +525,299 @@ model SwaHistorial {
   @@schema("qhse")
 }
 
+/// Tipos de servicio del ticket (códigos de comercial, sin FK: otro contenedor, D1).
+model TicketServicio {
+  ticketId   String    @map("ticket_id") @db.Uuid
+  ticket     TicketRef @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  tipoCodigo String    @map("tipo_codigo")
+
+  @@id([ticketId, tipoCodigo])
+  @@map("ticket_servicio")
+  @@schema("qhse")
+}
+
+/// Catálogos de la matriz IPERC.
+model IpercProceso {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  actividades IpercActividad[]
+
+  @@map("iperc_proceso")
+  @@schema("qhse")
+}
+
+model IpercZona {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  actividades IpercActividad[]
+
+  @@map("iperc_zona")
+  @@schema("qhse")
+}
+
+model IpercClasificacionPeligro {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  peligros IpercPeligro[]
+
+  @@map("iperc_clasificacion_peligro")
+  @@schema("qhse")
+}
+
+model IpercGeneradoEn {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  peligros IpercPeligro[]
+
+  @@map("iperc_generado_en")
+  @@schema("qhse")
+}
+
+model IpercCargo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  tareas IpercTareaCargo[]
+
+  @@map("iperc_cargo")
+  @@schema("qhse")
+}
+
+/// Actividad de la matriz maestra: una por proceso, zona y nombre. Su matriz se versiona y se aprueba cada año.
+model IpercActividad {
+  id        String       @id @db.Uuid
+  procesoId String       @map("proceso_id") @db.Uuid
+  proceso   IpercProceso @relation(fields: [procesoId], references: [id])
+  zonaId    String       @map("zona_id") @db.Uuid
+  zona      IpercZona    @relation(fields: [zonaId], references: [id])
+  nombre    String
+  activo    Boolean      @default(true)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String       @map("created_by") @db.Uuid
+  creador   IdUsuario    @relation("ipercActividadCreador", fields: [createdBy], references: [id])
+  updatedAt DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?      @map("updated_by") @db.Uuid
+  editor    IdUsuario?   @relation("ipercActividadEditor", fields: [updatedBy], references: [id])
+
+  matrices  IpercMatriz[]
+  cobertura IpercCobertura[]
+
+  @@map("iperc_actividad")
+  @@schema("qhse")
+}
+
+/// Versión de la matriz IPERC de una actividad (DYN-SGI-RE-087, GTC 45). Las reglas las garantiza el trigger `iperc_matriz_validar`.
+model IpercMatriz {
+  id                     String         @id @db.Uuid
+  numero                 Int            @unique @default(autoincrement())
+  actividadId            String         @map("actividad_id") @db.Uuid
+  actividad              IpercActividad @relation(fields: [actividadId], references: [id])
+  version                Int
+  estado                 EstadoIperc    @default(borrador)
+  origenTicketId         String?        @map("origen_ticket_id") @db.Uuid
+  origenTicket           TicketRef?     @relation(fields: [origenTicketId], references: [ticketId])
+  procedimientoArchivoId String?        @map("procedimiento_archivo_id") @db.Uuid
+  procedimiento          ArchivoRef?    @relation("ipercProcedimiento", fields: [procedimientoArchivoId], references: [id])
+  atsArchivoId           String?        @map("ats_archivo_id") @db.Uuid
+  ats                    ArchivoRef?    @relation("ipercAts", fields: [atsArchivoId], references: [id])
+  aprobadaPor            String?        @map("aprobada_por") @db.Uuid
+  aprobador              IdUsuario?     @relation("ipercAprobador", fields: [aprobadaPor], references: [id])
+  aprobadaAt             DateTime?      @map("aprobada_at") @db.Timestamptz(6)
+  aprobadaEl             DateTime?      @map("aprobada_el") @db.Date
+  vigenteHasta           DateTime?      @map("vigente_hasta") @db.Date
+  rechazadaPor           String?        @map("rechazada_por") @db.Uuid
+  rechazador             IdUsuario?     @relation("ipercRechazador", fields: [rechazadaPor], references: [id])
+  rechazadaAt            DateTime?      @map("rechazada_at") @db.Timestamptz(6)
+  motivoRechazo          String?        @map("motivo_rechazo")
+  reemplazadaAt          DateTime?      @map("reemplazada_at") @db.Timestamptz(6)
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy              String         @map("created_by") @db.Uuid
+  creador                IdUsuario      @relation("ipercMatrizCreador", fields: [createdBy], references: [id])
+  updatedAt              DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy              String?        @map("updated_by") @db.Uuid
+  editor                 IdUsuario?     @relation("ipercMatrizEditor", fields: [updatedBy], references: [id])
+
+  evaluadores IpercMatrizEvaluador[]
+  tareas      IpercTarea[]
+  historial   IpercHistorial[]
+  ptws        PtwMatriz[]
+
+  @@unique([actividadId, version])
+  @@index([estado])
+  @@map("iperc_matriz")
+  @@schema("qhse")
+}
+
+model IpercMatrizEvaluador {
+  matrizId  String      @map("matriz_id") @db.Uuid
+  matriz    IpercMatriz @relation(fields: [matrizId], references: [id], onDelete: Cascade)
+  usuarioId String      @map("usuario_id") @db.Uuid
+  usuario   IdUsuario   @relation("ipercEvaluador", fields: [usuarioId], references: [id])
+
+  @@id([matrizId, usuarioId])
+  @@map("iperc_matriz_evaluador")
+  @@schema("qhse")
+}
+
+model IpercTarea {
+  id          String      @id @db.Uuid
+  matrizId    String      @map("matriz_id") @db.Uuid
+  matriz      IpercMatriz @relation(fields: [matrizId], references: [id], onDelete: Cascade)
+  orden       Int
+  descripcion String
+  rutinaria   Boolean     @default(true)
+  areaPuesto  String?     @map("area_puesto")
+
+  cargos   IpercTareaCargo[]
+  peligros IpercPeligro[]
+
+  @@unique([matrizId, orden])
+  @@map("iperc_tarea")
+  @@schema("qhse")
+}
+
+model IpercTareaCargo {
+  tareaId String     @map("tarea_id") @db.Uuid
+  tarea   IpercTarea @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  cargoId String     @map("cargo_id") @db.Uuid
+  cargo   IpercCargo @relation(fields: [cargoId], references: [id])
+
+  @@id([tareaId, cargoId])
+  @@map("iperc_tarea_cargo")
+  @@schema("qhse")
+}
+
+model IpercPeligro {
+  id                        String                    @id @db.Uuid
+  tareaId                   String                    @map("tarea_id") @db.Uuid
+  tarea                     IpercTarea                @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  orden                     Int
+  descripcion               String
+  clasificacionId           String                    @map("clasificacion_id") @db.Uuid
+  clasificacion             IpercClasificacionPeligro @relation(fields: [clasificacionId], references: [id])
+  fuenteRiesgo              String?                   @map("fuente_riesgo")
+  generadoEnId              String?                   @map("generado_en_id") @db.Uuid
+  generadoEn                IpercGeneradoEn?          @relation(fields: [generadoEnId], references: [id])
+  efectosPosibles           String?                   @map("efectos_posibles")
+  controlExistenteFuente    String?                   @map("control_existente_fuente")
+  controlExistenteMedio     String?                   @map("control_existente_medio")
+  controlExistenteIndividuo String?                   @map("control_existente_individuo")
+  numeroExpuestos           Int?                      @map("numero_expuestos")
+  peorConsecuencia          String?                   @map("peor_consecuencia")
+  requisitoLegal            Boolean                   @default(false) @map("requisito_legal")
+  seguimiento               String?
+  seguimientoResidual       String?                   @map("seguimiento_residual")
+  inicialNd                 Int?                      @map("inicial_nd")
+  inicialNe                 Int?                      @map("inicial_ne")
+  inicialNc                 Int?                      @map("inicial_nc")
+  residualNd                Int?                      @map("residual_nd")
+  residualNe                Int?                      @map("residual_ne")
+  residualNc                Int?                      @map("residual_nc")
+
+  controles IpercControl[]
+
+  @@unique([tareaId, orden])
+  @@index([clasificacionId])
+  @@map("iperc_peligro")
+  @@schema("qhse")
+}
+
+model IpercControl {
+  id          String              @id @db.Uuid
+  peligroId   String              @map("peligro_id") @db.Uuid
+  peligro     IpercPeligro        @relation(fields: [peligroId], references: [id], onDelete: Cascade)
+  momento     MomentoControlIperc
+  tipo        TipoControlIperc
+  descripcion String
+
+  @@index([peligroId])
+  @@map("iperc_control")
+  @@schema("qhse")
+}
+
+/// Qué actividades exige cada tipo de servicio (código de comercial, sin FK: otro contenedor, D1).
+model IpercCobertura {
+  tipoServicioCodigo String         @map("tipo_servicio_codigo")
+  actividadId        String         @map("actividad_id") @db.Uuid
+  actividad          IpercActividad @relation(fields: [actividadId], references: [id])
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String         @map("created_by") @db.Uuid
+  creador            IdUsuario      @relation("ipercCoberturaCreador", fields: [createdBy], references: [id])
+
+  @@id([tipoServicioCodigo, actividadId])
+  @@index([actividadId])
+  @@map("iperc_cobertura")
+  @@schema("qhse")
+}
+
+/// Rastro de cada cambio de estado de una matriz (solo se agrega).
+model IpercHistorial {
+  id             String       @id @db.Uuid
+  matrizId       String       @map("matriz_id") @db.Uuid
+  matriz         IpercMatriz  @relation(fields: [matrizId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoIperc? @map("estado_anterior")
+  estadoNuevo    EstadoIperc  @map("estado_nuevo")
+  motivo         String?
+  actorId        String       @map("actor_id") @db.Uuid
+  actor          IdUsuario    @relation("ipercHistorialActor", fields: [actorId], references: [id])
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([matrizId, createdAt])
+  @@map("iperc_historial")
+  @@schema("qhse")
+}
+
+/// Matrices IPERC aprobadas y vigentes que respaldan un PTW. Se fijan al validar la gabinete y no cambian.
+model PtwMatriz {
+  ptwId    String      @map("ptw_id") @db.Uuid
+  ptw      Ptw         @relation(fields: [ptwId], references: [id], onDelete: Cascade)
+  matrizId String      @map("matriz_id") @db.Uuid
+  matriz   IpercMatriz @relation(fields: [matrizId], references: [id])
+
+  @@id([ptwId, matrizId])
+  @@index([matrizId])
+  @@map("ptw_matriz")
+  @@schema("qhse")
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de `identidad`, para obtener el nombre con JOIN a partir de las FK. Este módulo nunca
 // escribe en ellas (`app_qhse` solo tiene SELECT sobre estas columnas). Las administra el módulo de identidad.
@@ -519,32 +846,41 @@ model IdUsuario {
 
   perfil IdUsuarioPerfil?
 
-  entregasComoTrabajador EpiEntrega[]          @relation("epiTrabajador")
-  firmasComoTrabajador   EpiEntrega[]          @relation("epiFirmaTrabajador")
-  firmasTh               EpiEntrega[]          @relation("epiFirmaTh")
-  aprobaciones           EpiEntrega[]          @relation("epiAprobador")
-  rechazos               EpiEntrega[]          @relation("epiRechazador")
-  despachos              EpiEntrega[]          @relation("epiDespachador")
-  entregasCreadas        EpiEntrega[]          @relation("epiCreador")
-  entregasEditadas       EpiEntrega[]          @relation("epiEditor")
-  historialEpi           EpiEntregaHistorial[] @relation("epiHistorialActor")
-  documentosCreados      DocumentoPedido[]     @relation("documentoCreador")
-  documentosEditados     DocumentoPedido[]     @relation("documentoEditor")
-  documentosAnulados     DocumentoPedido[]     @relation("documentoAnulador")
-  ticketsSupervisados    TicketRef[]           @relation("ticketSupervisor")
-  ptwCreados             Ptw[]                 @relation("ptwCreador")
-  ptwEditados            Ptw[]                 @relation("ptwEditor")
-  ptwAnulados            Ptw[]                 @relation("ptwAnulador")
-  ptwFirmas              PtwFirma[]            @relation("ptwFirmante")
-  ptwHistorial           PtwHistorial[]        @relation("ptwHistorialActor")
-  swaActivadas           Swa[]                 @relation("swaActivador")
-  swaEvaluadas           Swa[]                 @relation("swaEvaluador")
-  swaReanudadas          Swa[]                 @relation("swaReanudador")
-  swaCreadas             Swa[]                 @relation("swaCreador")
-  swaEditadas            Swa[]                 @relation("swaEditor")
-  swaNotificaciones      SwaNotificacion[]     @relation("swaNotificador")
-  swaConfirmaciones      SwaReinicio[]         @relation("swaConfirmador")
-  swaHistorial           SwaHistorial[]        @relation("swaHistorialActor")
+  entregasComoTrabajador   EpiEntrega[]           @relation("epiTrabajador")
+  firmasComoTrabajador     EpiEntrega[]           @relation("epiFirmaTrabajador")
+  firmasTh                 EpiEntrega[]           @relation("epiFirmaTh")
+  aprobaciones             EpiEntrega[]           @relation("epiAprobador")
+  rechazos                 EpiEntrega[]           @relation("epiRechazador")
+  despachos                EpiEntrega[]           @relation("epiDespachador")
+  entregasCreadas          EpiEntrega[]           @relation("epiCreador")
+  entregasEditadas         EpiEntrega[]           @relation("epiEditor")
+  historialEpi             EpiEntregaHistorial[]  @relation("epiHistorialActor")
+  documentosCreados        DocumentoPedido[]      @relation("documentoCreador")
+  documentosEditados       DocumentoPedido[]      @relation("documentoEditor")
+  documentosAnulados       DocumentoPedido[]      @relation("documentoAnulador")
+  ticketsSupervisados      TicketRef[]            @relation("ticketSupervisor")
+  ptwCreados               Ptw[]                  @relation("ptwCreador")
+  ptwEditados              Ptw[]                  @relation("ptwEditor")
+  ptwAnulados              Ptw[]                  @relation("ptwAnulador")
+  ptwFirmas                PtwFirma[]             @relation("ptwFirmante")
+  ptwHistorial             PtwHistorial[]         @relation("ptwHistorialActor")
+  swaActivadas             Swa[]                  @relation("swaActivador")
+  swaEvaluadas             Swa[]                  @relation("swaEvaluador")
+  swaReanudadas            Swa[]                  @relation("swaReanudador")
+  swaCreadas               Swa[]                  @relation("swaCreador")
+  swaEditadas              Swa[]                  @relation("swaEditor")
+  swaNotificaciones        SwaNotificacion[]      @relation("swaNotificador")
+  swaConfirmaciones        SwaReinicio[]          @relation("swaConfirmador")
+  swaHistorial             SwaHistorial[]         @relation("swaHistorialActor")
+  ipercActividadesCreadas  IpercActividad[]       @relation("ipercActividadCreador")
+  ipercActividadesEditadas IpercActividad[]       @relation("ipercActividadEditor")
+  ipercMatricesCreadas     IpercMatriz[]          @relation("ipercMatrizCreador")
+  ipercMatricesEditadas    IpercMatriz[]          @relation("ipercMatrizEditor")
+  ipercMatricesAprobadas   IpercMatriz[]          @relation("ipercAprobador")
+  ipercMatricesRechazadas  IpercMatriz[]          @relation("ipercRechazador")
+  ipercEvaluaciones        IpercMatrizEvaluador[] @relation("ipercEvaluador")
+  ipercCoberturas          IpercCobertura[]       @relation("ipercCoberturaCreador")
+  ipercHistorial           IpercHistorial[]       @relation("ipercHistorialActor")
 
   @@map("usuario")
   @@schema("identidad")
@@ -579,6 +915,9 @@ model ArchivoRef {
   modulo      ArchivoModuloRef  @relation(fields: [moduloId], references: [id])
   eliminadoAt DateTime?         @map("eliminado_at") @db.Timestamptz(6)
   documentos  DocumentoPedido[]
+
+  ipercProcedimientos IpercMatriz[] @relation("ipercProcedimiento")
+  ipercAts            IpercMatriz[] @relation("ipercAts")
 
   @@map("archivo")
   @@schema("archivos")

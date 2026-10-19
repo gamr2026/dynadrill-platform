@@ -78,6 +78,21 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
             create: { ticketId, ...datos },
             update: datos,
           });
+          // los tipos de servicio del ticket (códigos de comercial): deciden qué matrices IPERC exige su PTW; se reemplazan con cada evento
+          if (Array.isArray(d['tiposServicio'])) {
+            const codigos = [
+              ...new Set(
+                (d['tiposServicio'] as unknown[]).filter(
+                  (c): c is string => typeof c === 'string' && c.trim() !== '',
+                ),
+              ),
+            ];
+            await tx.ticketServicio.deleteMany({ where: { ticketId } });
+            if (codigos.length)
+              await tx.ticketServicio.createMany({
+                data: codigos.map((tipoCodigo) => ({ ticketId, tipoCodigo })),
+              });
+          }
           if (event.type !== 'operaciones.pumping.asignacion_realizada') return;
 
           // los operadores asignados: cada uno con su unidad; las cuentas deben existir y estar activas

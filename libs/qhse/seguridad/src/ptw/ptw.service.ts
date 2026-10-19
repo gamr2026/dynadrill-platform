@@ -12,6 +12,7 @@ import { AccionPtw, FasePtw, TipoFirmaPtw } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PtwConsultaService } from './ptw-consulta.service';
 import { codigoPtw, requisitosDeGabinete } from './ptw-documentos';
+import { requisitosIperc } from './ptw-iperc';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 /** Las tres confirmaciones de la formalización; al completarse el PTW pasa solo a aprobación y se publica `qhse.ptw.firmado`. */
@@ -79,7 +80,20 @@ export class PtwService {
         throw new ConflictException(
           `No se puede pasar a formalización. ${faltan.map((f) => f.falta).join('. ')}`,
         );
+      // las matrices IPERC aprobadas y vigentes de las actividades que exige el tipo de servicio del ticket (una vencida bloquea)
+      const iperc = await requisitosIperc(tx, p.ticketId, p.diaOperacion);
+      const sinMatriz = iperc.filter((r) => r.matrizId === null);
+      if (sinMatriz.length)
+        throw new ConflictException(
+          `No se puede pasar a formalización. ${sinMatriz.map((f) => f.falta).join('. ')}`,
+        );
       const por = (tipo: string) => requisitos.find((r) => r.tipo === tipo)?.documentoId as string;
+      // se fijan las matrices usadas (la base exige que estén aprobadas, vigentes ese día y sean de una actividad exigida)
+      if (iperc.length)
+        await tx.ptwMatriz.createMany({
+          data: iperc.map((r) => ({ ptwId: id, matrizId: r.matrizId as string })),
+          skipDuplicates: true,
+        });
       const cambio = await tx.ptw.updateMany({
         where: { id, fase: FasePtw.gabinete },
         data: {
