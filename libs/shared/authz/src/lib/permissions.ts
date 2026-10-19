@@ -315,27 +315,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   // fcr
   def('fcr', 'fcr.tickets.operar', 'Operar el flujo de tickets FCR'),
   def('fcrRead', 'fcr.tickets.ver', 'Consultar tickets FCR de solo lectura'),
-  nuevo(
-    'fcr.requisitos.puente',
-    'Confirmar a mano un requisito de FCR cuyo dato es de otro módulo que aún no publica su evento (puente temporal)',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
-  ),
-  nuevo(
-    'fcr.configuracion.gestionar',
-    'Configurar qué hace FCR con cada código de la lista de precios de un cliente (herramienta o servicio) y armar su kit de artículos',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.INGENIERIA_VENTAS],
-  ),
-  nuevo(
-    'fcr.herramientas.preparar',
-    'Bodega: preparar y enviar las herramientas que el Supervisor de FCR solicitó, y recibir su retorno',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.BODEGUERO],
-  ),
   // pumping
-  nuevo(
-    'pumping.tickets.contexto_conductor',
-    'Consultar los tickets en los que la cuenta es operador asignado, con los datos mínimos del viaje (portal del Conductor)',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.OPERADOR, RoleCode.CONDUCTOR],
-  ),
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
   def(
     'pumpingDocumentosRead',
@@ -440,11 +420,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y anular los documentos de un conductor',
     ModuleRoles.maintenance,
   ),
-  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza el riesgo BAJO; MEDIO y ALTO exigen además este permiso
-  // (qué permiso exige cada nivel lo dice la tabla `umbral_riesgo_viaje`, no el código).
+  // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza los niveles que la tabla `umbral_riesgo_viaje` le asigna
+  // (BAJO y MEDIO); el ALTO exige este permiso, que además autoriza cualquier nivel.
   nuevo(
     'flota.viajes.autorizar_mayor',
-    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo MEDIO o ALTO',
+    'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo ALTO (y cualquier otro nivel)',
     [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
   ),
   // mantenimiento
@@ -495,53 +475,6 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Despachar la entrega de EPI, revertirla y registrar la firma de Talento Humano',
     ModuleRoles.qhse,
   ),
-  // ---- qhse: documentos por pedido y Acta de Entrega de Locación (contrato 4.11).
-  nuevo(
-    'qhse.documentos.ver',
-    'Ver los documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
-    ModuleRoles.qhse,
-  ),
-  nuevo(
-    'qhse.documentos.gestionar',
-    'Cargar y anular los documentos de seguridad de un pedido y anular el Acta de Entrega',
-    ModuleRoles.qhse,
-  ),
-  // ---- qhse: Permiso de Trabajo (PTW, HSE-SITIO-001).
-  nuevo('qhse.ptw.ver', 'Ver los permisos de trabajo (PTW) y sus documentos', ModuleRoles.qhse),
-  nuevo(
-    'qhse.ptw.gestionar',
-    'Abrir un PTW, validar su gabinete y registrar las confirmaciones de formalización',
-    ModuleRoles.qhse,
-  ),
-  nuevo('qhse.ptw.aprobar', 'Aprobar un PTW y anularlo (con motivo)', ModuleRoles.qhse),
-  // ---- qhse: Stop Work Authority (SWA). Activarla es de cualquier trabajador (`qhse.eventos.reportar`); la gestión es del equipo HSE.
-  nuevo('qhse.swa.ver', 'Ver las SWA (Stop Work Authority) y su historial', ModuleRoles.qhse),
-  nuevo(
-    'qhse.swa.gestionar',
-    'Gestionar una SWA: notificar a la cadena, evaluar el riesgo, confirmar el reinicio y reanudar',
-    ModuleRoles.qhse,
-  ),
-  // El Supervisor entra SOLO a estos dos (el Acta la sube al finalizar el ticket); no ve el resto de QHSE.
-  nuevo(
-    'qhse.acta_entrega.cargar',
-    'Cargar el Acta de Entrega de Locación (DYN-PMP-RE-027) al finalizar el ticket',
-    [
-      ...ADMIN_ROLE_CODES,
-      RoleCode.SUPERVISOR,
-      RoleCode.SUPERVISOR_PUMPING,
-      RoleCode.SUPERVISOR_OPERACIONES_FCR,
-      RoleCode.TECNICO_HSE,
-      RoleCode.GERENTE_HSE,
-    ],
-  ),
-  nuevo('qhse.acta_entrega.ver', 'Ver y descargar el Acta de Entrega de Locación de un pedido', [
-    ...ADMIN_ROLE_CODES,
-    RoleCode.SUPERVISOR,
-    RoleCode.SUPERVISOR_PUMPING,
-    RoleCode.SUPERVISOR_OPERACIONES_FCR,
-    RoleCode.TECNICO_HSE,
-    RoleCode.GERENTE_HSE,
-  ]),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -609,11 +542,7 @@ export const Permission = {
   INVENTARIO_CONSUMIR: 'inventario.movimientos.consumir',
   FCR_OPERAR: 'fcr.tickets.operar',
   FCR_VER: 'fcr.tickets.ver',
-  FCR_REQUISITOS_PUENTE: 'fcr.requisitos.puente',
-  FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
-  FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
-  PUMPING_CONTEXTO_CONDUCTOR: 'pumping.tickets.contexto_conductor',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
@@ -650,15 +579,6 @@ export const Permission = {
   EPI_CREAR: 'qhse.epi.crear',
   EPI_APROBAR: 'qhse.epi.aprobar',
   EPI_DESPACHAR: 'qhse.epi.despachar',
-  DOCUMENTOS_VER: 'qhse.documentos.ver',
-  DOCUMENTOS_GESTIONAR: 'qhse.documentos.gestionar',
-  ACTA_ENTREGA_CARGAR: 'qhse.acta_entrega.cargar',
-  ACTA_ENTREGA_VER: 'qhse.acta_entrega.ver',
-  PTW_VER: 'qhse.ptw.ver',
-  PTW_GESTIONAR: 'qhse.ptw.gestionar',
-  PTW_APROBAR: 'qhse.ptw.aprobar',
-  SWA_VER: 'qhse.swa.ver',
-  SWA_GESTIONAR: 'qhse.swa.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

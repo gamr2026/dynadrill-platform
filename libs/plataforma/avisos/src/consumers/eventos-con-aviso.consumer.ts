@@ -24,9 +24,6 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.mantenimiento.orden.retornada',
       'operaciones.fcr.ticket_creado',
       'operaciones.fcr.asignacion_realizada',
-      'operaciones.fcr.herramientas_solicitadas',
-      'operaciones.fcr.aprobacion_solicitada',
-      'operaciones.fcr.inspeccion_rechazada',
     ],
   },
   {
@@ -38,10 +35,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'flota.inspeccion_vehiculo.rechazada',
     ],
   },
-  {
-    source: 'qhse',
-    patterns: ['qhse.epi.solicitudes_abiertas', 'qhse.ptw.cerrado', 'qhse.swa.activado'],
-  },
+  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas'] },
 ];
 
 /** Recibe los eventos y los entrega al servicio de avisos; el inbox evita avisar dos veces por el mismo evento. */

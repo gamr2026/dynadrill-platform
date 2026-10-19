@@ -213,7 +213,7 @@ export const ModuleRoles = {
   gerenciamientoViajeApprove: withAdmins(
     RoleCode.SUPERVISOR,
     RoleCode.SUPERVISOR_PUMPING,
-    RoleCode.GERENTE_HSE, // lo autoriza también (MEDIO/ALTO), según la demo `main`
+    RoleCode.GERENTE_HSE, // lo autoriza también (ALTO), según la demo `main`
   ),
 
   /**
