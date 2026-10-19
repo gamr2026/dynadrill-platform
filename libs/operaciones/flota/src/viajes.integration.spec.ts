@@ -266,6 +266,14 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         .set(token('ingenieria_ventas', 'Vera', [], uuidv7()))
         .expect(403);
       await http().get(`${base}/bodegas`).set(conductor()).expect(200);
+      // el Conductor elige la unidad de su viaje sin tener el permiso de ver unidades
+      const us = (await http().get(`${base}/unidades`).set(conductor()).expect(200)).body as Array<{
+        id: string;
+        placa: string | null;
+      }>;
+      expect(us.find((x) => x.id === unidadId)?.placa).toBe(VEHICULO.placa);
+      expect(us.map((x) => x.id)).not.toContain(servicioId);
+      await http().get(`${base}/unidades`).set(supervisor()).expect(403);
     });
 
     it('el Supervisor no solicita; el Conductor no autoriza', async () => {

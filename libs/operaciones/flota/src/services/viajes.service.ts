@@ -132,6 +132,28 @@ export class ViajesService {
     });
   }
 
+  /** Unidades de transporte activas entre las que el Conductor elige la de su viaje (sin abrirle el permiso de ver unidades). */
+  async unidades() {
+    const filas = await this.prisma.unidad.findMany({
+      where: { tipo: 'transporte', activa: true },
+      orderBy: { codigo: 'asc' },
+      select: {
+        id: true,
+        codigo: true,
+        nombre: true,
+        categoriaPeso: true,
+        vehiculo: { select: { placa: true } },
+      },
+    });
+    return filas.map((u) => ({
+      id: u.id,
+      codigo: u.codigo,
+      nombre: u.nombre,
+      categoriaPeso: u.categoriaPeso,
+      placa: u.vehiculo?.placa ?? null,
+    }));
+  }
+
   async solicitar(entrada: SolicitarViajeEntrada, actor: ActorViaje) {
     this.validarExtremo(entrada.origen, 'origen');
     this.validarExtremo(entrada.destino, 'destino');

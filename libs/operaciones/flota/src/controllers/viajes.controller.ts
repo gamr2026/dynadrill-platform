@@ -119,6 +119,12 @@ export class ViajesController {
   }
 
   @RequirePermission(P.VIAJES_SOLICITAR)
+  @Get('unidades')
+  unidades() {
+    return this.viajes.unidades();
+  }
+
+  @RequirePermission(P.VIAJES_SOLICITAR)
   @Get('bodegas')
   bodegas() {
     return this.viajes.bodegas();
