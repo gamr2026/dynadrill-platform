@@ -42,7 +42,13 @@ const MIGRATOR_DB =
 const n = Date.now();
 const P = Permission;
 const dia = (d: Date) => d.toISOString().slice(0, 10);
-const enDias = (k: number) => dia(new Date(Date.now() + k * 86_400_000));
+// Los días se cuentan en hora de Ecuador, como el servicio: de noche la fecha UTC ya es la de mañana.
+const enDias = (k: number) => {
+  const hoyEc = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(
+    new Date(),
+  );
+  return dia(new Date(Date.parse(`${hoyEc}T00:00:00Z`) + k * 86_400_000));
+};
 
 const JEFE = { id: uuidv7(), nombre: 'Mario Jefe Mantenimiento' };
 const SUPERVISOR = { id: uuidv7(), nombre: 'Sara Supervisora' };

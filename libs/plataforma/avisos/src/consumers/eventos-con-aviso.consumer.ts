@@ -15,9 +15,33 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.pumping.ticket_creado',
       'operaciones.pumping.asignacion_realizada',
       'operaciones.pumping.salida_reportada',
+      'operaciones.mantenimiento.reporte.recibido',
+      'operaciones.mantenimiento.suborden.asignada',
+      'operaciones.mantenimiento.suborden.derivada_a_pumping',
+      'operaciones.mantenimiento.suborden.enviada_a_revision',
+      'operaciones.mantenimiento.suborden.correccion_solicitada',
+      'operaciones.mantenimiento.orden.aceptada',
+      'operaciones.mantenimiento.orden.retornada',
+      'operaciones.fcr.ticket_creado',
+      'operaciones.fcr.asignacion_realizada',
+      'operaciones.fcr.herramientas_solicitadas',
+      'operaciones.fcr.aprobacion_solicitada',
+      'operaciones.fcr.inspeccion_rechazada',
     ],
   },
-  { source: 'qhse', patterns: ['qhse.epi.solicitudes_abiertas'] },
+  {
+    source: 'flota',
+    patterns: [
+      'flota.gerenciamiento_viaje.por_autorizar_supervisor',
+      'flota.gerenciamiento_viaje.por_autorizar_gerente',
+      'flota.gerenciamiento_viaje.decidido',
+      'flota.inspeccion_vehiculo.rechazada',
+    ],
+  },
+  {
+    source: 'qhse',
+    patterns: ['qhse.epi.solicitudes_abiertas', 'qhse.ptw.cerrado', 'qhse.swa.activado'],
+  },
 ];
 
 /** Recibe los eventos y los entrega al servicio de avisos; el inbox evita avisar dos veces por el mismo evento. */

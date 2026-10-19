@@ -128,7 +128,7 @@ export const PREGUNTAS_RIESGO: PreguntaSemilla[] = [
   },
 ];
 
-/** Quién autoriza cada nivel: BAJO el Supervisor; MEDIO y ALTO el Jefe de Base o el Gerente HSE (permiso `autorizar_mayor`). */
+/** Quién autoriza cada nivel (indicado por el negocio el 18/10/2026): BAJO y MEDIO el Supervisor; ALTO un gerente (permiso `autorizar_mayor`). */
 export const UMBRALES_RIESGO = [
   {
     nivel: 'bajo',
@@ -140,15 +140,15 @@ export const UMBRALES_RIESGO = [
   {
     nivel: 'medio',
     desdePuntos: 31,
-    permisoAutoriza: 'flota.viajes.autorizar_mayor',
-    descripcion: 'Requiere la autorización del Jefe de Base o del Gerente HSE antes de viajar.',
+    permisoAutoriza: 'flota.viajes.aprobar',
+    descripcion: 'Riesgo medio: requiere la autorización del Supervisor antes de viajar.',
   },
   {
     nivel: 'alto',
     desdePuntos: 76,
     permisoAutoriza: 'flota.viajes.autorizar_mayor',
     descripcion:
-      'Requiere la autorización del Jefe de Base o del Gerente HSE y, además, el visto bueno del Director General (Quito), fuera del alcance del sistema.',
+      'Riesgo alto: requiere la autorización de un gerente (Gerente HSE o Jefe de Base) y, además, el visto bueno del Director General (Quito), fuera del alcance del sistema.',
   },
 ] as const;
 

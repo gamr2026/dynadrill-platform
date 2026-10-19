@@ -317,6 +317,16 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect(r.body.codigo).toMatch(/^GV-\d{4,}$/);
       const ev = await eventos('flota.gerenciamiento_viaje.solicitado', r.body.id);
       expect(ev[0]).toMatchObject({ ticketId: tickets[0], tipo: 'salida', nivel: 'bajo' });
+      // el aviso va al Supervisor (el nivel bajo lo autoriza con `flota.viajes.aprobar`), con los textos ya resueltos
+      const aviso = await eventos('flota.gerenciamiento_viaje.por_autorizar_supervisor', r.body.id);
+      expect(aviso[0]).toMatchObject({
+        nivelTexto: 'BAJO',
+        tipoTexto: 'de salida',
+        conductor: CONDUCTOR.nombre,
+      });
+      expect(
+        await eventos('flota.gerenciamiento_viaje.por_autorizar_gerente', r.body.id),
+      ).toHaveLength(0);
 
       const otra = await solicitar(cuerpo());
       expect([otra.status, otra.body.code]).toEqual([409, 'viaje_ya_solicitado']);
@@ -353,6 +363,13 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       );
       expect(alto.body).toMatchObject({ nivel: 'alto' });
       expect(alto.body.puntajeTotal).toBeGreaterThan(75);
+      // el ALTO se avisa a los gerentes, no al Supervisor
+      expect(
+        await eventos('flota.gerenciamiento_viaje.por_autorizar_gerente', alto.body.id),
+      ).toHaveLength(1);
+      expect(
+        await eventos('flota.gerenciamiento_viaje.por_autorizar_supervisor', alto.body.id),
+      ).toHaveLength(0);
     });
   });
 
@@ -373,19 +390,44 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         [v.id],
       );
       expect(fuente.rows[0].source).toBe('flota');
+      // la decisión se avisa a la cuenta del Conductor
+      const decidido = await eventos('flota.gerenciamiento_viaje.decidido', v.id);
+      expect(decidido[0]).toMatchObject({
+        resultado: 'autorizado',
+        asignados: [{ usuarioId: CONDUCTOR.id, rolCodigo: 'conductor' }],
+      });
       const otra = await http().post(`${base}/${v.id}/autorizar`).set(supervisor());
       expect([otra.status, otra.body.code]).toEqual([409, 'viaje_ya_decidido']);
     });
 
-    it('MEDIO y ALTO no los autoriza el Supervisor sino el Jefe de Base o el Gerente HSE', async () => {
+    it('MEDIO lo autoriza el Supervisor; ALTO solo un gerente', async () => {
       const medio = await porTicket(tickets[1]);
-      expect(medio.puedeDecidir).toBe(true); // el Gerente sí
       const sup = (await http().get(`${base}?ticketId=${tickets[1]}`).set(supervisor()).expect(200))
         .body[0];
-      expect(sup.puedeDecidir).toBe(false);
-      const r = await http().post(`${base}/${medio.id}/autorizar`).set(supervisor());
+      expect(sup.puedeDecidir).toBe(true);
+      await http().post(`${base}/${medio.id}/autorizar`).set(supervisor()).expect(201);
+      // el ALTO (ticket 3): el Supervisor no puede, el gerente sí
+      const alto = await porTicket(tickets[2]);
+      expect(alto.puedeDecidir).toBe(true);
+      const supAlto = (
+        await http().get(`${base}?ticketId=${tickets[2]}`).set(supervisor()).expect(200)
+      ).body[0];
+      expect(supAlto.puedeDecidir).toBe(false);
+      const r = await http().post(`${base}/${alto.id}/autorizar`).set(supervisor());
       expect([r.status, r.body.code]).toEqual([403, 'nivel_requiere_otro_rol']);
-      await http().post(`${base}/${medio.id}/autorizar`).set(gerente()).expect(201);
+      expect(r.body.detail ?? r.body.message).toMatch(/gerente/);
+    });
+
+    it('un gerente con solo el permiso mayor también autoriza los niveles bajos', async () => {
+      const soloGerente = token(
+        'gerente_hse',
+        GERENTE.nombre,
+        [P.VIAJES_AUTORIZAR_MAYOR],
+        GERENTE.id,
+      );
+      const nuevo = await solicitar(cuerpo({ ticketId: null, tipo: 'salida' }), conductor2());
+      expect(nuevo.status).toBe(201);
+      await http().post(`${base}/${nuevo.body.id}/autorizar`).set(soloGerente).expect(201);
     });
 
     it('rechazar exige motivo, publica «rechazado» y deja rehacer la solicitud', async () => {

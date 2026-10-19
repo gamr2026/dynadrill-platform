@@ -421,9 +421,11 @@ model InspeccionVehiculoRevision {
 
 /// `pumping.ticket`: solo el id (espejo de solo lectura, para la FK del caso de inspección).
 model PumTicket {
-  id     String                @id @db.Uuid
-  casos  InspeccionCaso[]
-  viajes GerenciamientoViaje[]
+  id           String                @id @db.Uuid
+  /// Número del ticket (el de la prefactura): solo para mostrarlo en los formatos; Flota nunca lo escribe.
+  ticketNumero Int?                  @unique @map("ticket_numero")
+  casos        InspeccionCaso[]
+  viajes       GerenciamientoViaje[]
 
   @@map("ticket")
   @@schema("pumping")

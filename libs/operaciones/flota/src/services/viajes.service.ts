@@ -163,7 +163,7 @@ export class ViajesService {
     return this.prisma.$transaction(async (tx) => {
       const unidad = await tx.unidad.findUnique({
         where: { id: entrada.unidadId },
-        select: { id: true, tipo: true, activa: true },
+        select: { id: true, codigo: true, tipo: true, activa: true },
       });
       if (!unidad) throw new NotFoundException('La unidad no existe');
       if (unidad.tipo !== 'transporte' || !unidad.activa) {
@@ -258,6 +258,30 @@ export class ViajesService {
         nivel,
         puntaje: puntos,
       });
+      // Aviso al que debe autorizarlo: el permiso del umbral dice si es el Supervisor o un gerente; los textos ya van resueltos.
+      const umbral = await tx.umbralRiesgoViaje.findUnique({ where: { nivel } });
+      const quien = await tx.idUsuario.findUnique({
+        where: { id: actor.id },
+        select: { nombre: true },
+      });
+      await this.publicar(
+        tx,
+        umbral?.permisoAutoriza === P.VIAJES_AUTORIZAR_MAYOR
+          ? 'por_autorizar_gerente'
+          : 'por_autorizar_supervisor',
+        id,
+        actor,
+        {
+          gerenciamientoId: id,
+          codigo: codigoDeViaje(viaje.numero),
+          tipoTexto: entrada.tipo === 'salida' ? 'de salida' : 'de retorno',
+          nivelTexto: nivel.toUpperCase(),
+          puntaje: puntos,
+          conductor: quien?.nombre ?? '',
+          unidad: unidad.codigo,
+          fecha: entrada.fecha,
+        },
+      );
       return {
         id,
         codigo: codigoDeViaje(viaje.numero),
@@ -338,6 +362,7 @@ export class ViajesService {
             vehiculo: { select: { placa: true } },
           },
         },
+        ticket: { select: { ticketNumero: true } },
         origenBodega: { select: { id: true, nombre: true } },
         origenPozo: {
           select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
@@ -372,6 +397,7 @@ export class ViajesService {
       codigo: codigoDeViaje(v.numero),
       tipo: v.tipo,
       ticketId: v.ticketId,
+      ticketNumero: v.ticket?.ticketNumero ?? null,
       fecha: verDia(v.fecha),
       motivo: v.motivo,
       conductor: v.conductor,
@@ -438,8 +464,19 @@ export class ViajesService {
     actor: ActorViaje,
   ): boolean {
     if (v.decision !== null || v.conductorId === actor.id) return false;
-    const requerido = umbrales.find((u) => u.nivel === v.nivel)?.permisoAutoriza;
-    return !!requerido && actor.permissions.includes(requerido);
+    return this.tienePermisoDelNivel(
+      umbrales.find((u) => u.nivel === v.nivel)?.permisoAutoriza,
+      actor,
+    );
+  }
+
+  /** Quien tiene el permiso del nivel, o el de un gerente (que autoriza cualquier nivel). */
+  private tienePermisoDelNivel(requerido: string | undefined, actor: ActorViaje): boolean {
+    return (
+      !!requerido &&
+      (actor.permissions.includes(requerido) ||
+        actor.permissions.includes(P.VIAJES_AUTORIZAR_MAYOR))
+    );
   }
 
   private async decidir(
@@ -476,12 +513,12 @@ export class ViajesService {
         });
       }
       const umbral = await tx.umbralRiesgoViaje.findUnique({ where: { nivel: v.nivel } });
-      if (!umbral || !actor.permissions.includes(umbral.permisoAutoriza)) {
+      if (!umbral || !this.tienePermisoDelNivel(umbral.permisoAutoriza, actor)) {
         throw new ForbiddenException({
           message:
-            v.nivel === 'bajo'
-              ? 'Este viaje lo autoriza el Supervisor'
-              : `Este viaje es de riesgo ${v.nivel.toUpperCase()}: lo autoriza el Jefe de Base o el Gerente HSE`,
+            umbral?.permisoAutoriza === P.VIAJES_AUTORIZAR_MAYOR
+              ? `Este viaje es de riesgo ${v.nivel.toUpperCase()}: lo autoriza un gerente (Gerente HSE o Jefe de Base)`
+              : `Este viaje es de riesgo ${v.nivel.toUpperCase()}: lo autoriza el Supervisor`,
           code: 'nivel_requiere_otro_rol',
         });
       }
@@ -507,6 +544,15 @@ export class ViajesService {
           ...(motivo ? { motivo } : {}),
         });
       }
+      // Aviso al Conductor con la decisión (a su cuenta, vaya o no ligado a un ticket).
+      await this.publicar(tx, 'decidido', id, actor, {
+        gerenciamientoId: id,
+        codigo: codigoDeViaje(v.numero),
+        tipoTexto: v.tipo === 'salida' ? 'de salida' : 'de retorno',
+        resultado: decision === 'autorizado' ? 'autorizado' : 'rechazado',
+        motivoTexto: motivo ? ` Motivo: ${motivo}.` : '',
+        asignados: [{ usuarioId: v.conductorId, rolCodigo: 'conductor' }],
+      });
       return { id, estado: decision };
     });
   }
@@ -565,7 +611,13 @@ export class ViajesService {
 
   private publicar(
     tx: Prisma.TransactionClient,
-    hecho: 'solicitado' | 'aprobado' | 'rechazado',
+    hecho:
+      | 'solicitado'
+      | 'aprobado'
+      | 'rechazado'
+      | 'por_autorizar_supervisor'
+      | 'por_autorizar_gerente'
+      | 'decidido',
     id: string,
     actor: ActorViaje,
     data: Record<string, unknown>,

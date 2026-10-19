@@ -108,7 +108,8 @@ export class ConductoresService {
     const filas = await this.prisma.conductorPermiso.findMany({
       where: { usuarioId },
       include: { tipo: true, anulacion: true, registrador: { select: { id: true, nombre: true } } },
-      orderBy: { createdAt: 'desc' },
+      // el id (UUIDv7) sigue el orden del tiempo: desempata dos registros del mismo instante
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 200,
     });
     return filas.map((f) => ({
@@ -256,7 +257,8 @@ export class ConductoresService {
     const permisos = usuarios.length
       ? await db.conductorPermiso.findMany({
           where: { usuarioId: { in: usuarios.map((u) => u.id) }, anulacion: { is: null } },
-          orderBy: { createdAt: 'desc' },
+          // el id (UUIDv7) sigue el orden del tiempo: desempata dos registros del mismo instante
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           select: { id: true, usuarioId: true, tipoId: true, vigenteHasta: true },
         })
       : [];

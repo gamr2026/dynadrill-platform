@@ -265,7 +265,13 @@ export class InspeccionesService {
         },
       });
       // Dos hechos: el Supervisor la rechazó (reabre «aprobada») y quedó anulada (reabre «realizada»).
-      await this.publicar(tx, 'rechazada', inspeccionId, actor, this.base(i));
+      // El aviso al conductor viaja en el mismo evento (Pumping ignora los campos que no usa).
+      await this.publicar(tx, 'rechazada', inspeccionId, actor, {
+        ...this.base(i),
+        unidadCodigo: i.unidad.codigo,
+        motivoTexto: motivo.trim(),
+        asignados: [{ usuarioId: i.conductorId, rolCodigo: 'conductor' }],
+      });
       if (i.momento === 'salida')
         await this.publicar(tx, 'anulada', inspeccionId, actor, this.base(i));
       return { id: inspeccionId, estado: 'rechazada' as const };
@@ -471,7 +477,7 @@ export class InspeccionesService {
       where: { id },
       include: {
         caso: { select: { ticketId: true } },
-        unidad: { select: { vehiculoId: true } },
+        unidad: { select: { vehiculoId: true, codigo: true } },
         resultados: { include: { item: { select: { etiqueta: true, bloqueaSiNoCumple: true } } } },
         revisiones: { orderBy: { revisadaAt: 'desc' }, take: 1 },
       },
