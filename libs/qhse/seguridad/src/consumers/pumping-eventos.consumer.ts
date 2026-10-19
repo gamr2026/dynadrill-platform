@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { runInEventSpan } from '@dyn/common';
+import { runInEventSpan, type AuthUser } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
+import { PtwService } from '../ptw/ptw.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const esUuid = (v: unknown): v is string =>
@@ -20,6 +21,7 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
   constructor(
     private readonly bus: EventBus,
     private readonly prisma: PrismaService,
+    private readonly ptw: PtwService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -112,6 +114,26 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
           this.logger.log(
             `Ticket ${datos.ticketNumero ?? ticketId}: ${cuentas.length} operador(es) asignado(s)`,
           );
+          // el PTW del primer día de operación nace con la asignación (como la demo), a nombre de quien asignó el equipo
+          const inicio = d['fechaInicioServicio'];
+          const dia =
+            typeof inicio === 'string' && /^\d{4}-\d{2}-\d{2}/.test(inicio)
+              ? inicio.slice(0, 10)
+              : null;
+          const quienAsigna = event.actor?.userId;
+          if (
+            dia &&
+            quienAsigna &&
+            esUuid(quienAsigna) &&
+            (await tx.idUsuario.count({ where: { id: quienAsigna } }))
+          ) {
+            const id = await this.ptw.abrirAlAsignar(tx, ticketId, dia, {
+              id: quienAsigna,
+              roleCode: (event.actor?.role ?? 'sistema') as AuthUser['roleCode'],
+            });
+            if (id)
+              this.logger.log(`Ticket ${datos.ticketNumero ?? ticketId}: PTW del ${dia} abierto`);
+          }
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });

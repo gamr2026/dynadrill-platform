@@ -22,7 +22,9 @@ const FORMALIZACION: TipoFirmaPtw[] = [
   TipoFirmaPtw.barricadas,
 ];
 
-const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
+/** Quien actúa sobre el PTW: una cuenta autenticada o, cuando lo abre un evento, la cuenta que lo originó. */
+type ActorPtw = Pick<AuthUser, 'id' | 'roleCode'>;
+const enActor = (a: ActorPtw) => ({ userId: a.id, role: a.roleCode });
 
 /**
  * Permiso de Trabajo (HSE-SITIO-001): uno vigente por pedido y día de operación. Ciclo: gabinete → formalización → aprobación →
@@ -40,32 +42,59 @@ export class PtwService {
   /** Abre el PTW de un día de operación de un ticket. Nace en gabinete. */
   async abrir(entrada: { ticketId: string; diaOperacion: string }, actor: AuthUser) {
     const dia = this.dia(entrada.diaOperacion);
-    const id = uuidv7();
-    await this.prisma.$transaction(async (tx) => {
-      const t = await tx.ticketRef.findUnique({ where: { ticketId: entrada.ticketId } });
-      if (!t)
-        throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
-      const existente = await tx.ptw.findFirst({
-        where: { pedidoId: t.pedidoId, diaOperacion: dia, anuladoAt: null },
-        select: { numero: true },
-      });
-      if (existente)
-        throw new ConflictException(
-          `Ya hay un PTW vigente (${codigoPtw(existente.numero)}) de este pedido para ese día; solo se permite uno por pedido y día`,
-        );
-      await tx.ptw.create({
-        data: {
-          id,
-          ticketId: t.ticketId,
-          pedidoId: t.pedidoId,
-          diaOperacion: dia,
-          createdBy: actor.id,
-        },
-      });
-      await this.historia(tx, id, AccionPtw.abierto, actor);
-      await this.publicar(tx, 'qhse.ptw.abierto', id, actor);
-    });
+    const id = (await this.prisma.$transaction((tx) =>
+      this.abrirEn(tx, entrada.ticketId, dia, actor, true),
+    )) as string;
     return this.consulta.detalle(id);
+  }
+
+  /**
+   * Abre el PTW del primer día de operación cuando Pumping asigna el equipo (como la demo: el PTW nace con el servicio). Lo abre a nombre de
+   * quien asignó. Si ese día ya tiene uno vigente no hace nada. Los días siguientes los abre QHSE desde el ticket.
+   */
+  async abrirAlAsignar(
+    tx: Tx,
+    ticketId: string,
+    diaOperacion: string,
+    actor: ActorPtw,
+  ): Promise<string | null> {
+    return this.abrirEn(tx, ticketId, this.dia(diaOperacion), actor, false);
+  }
+
+  /** Abre el PTW del día; `rechazarSiExiste` decide si un PTW vigente del mismo día es un error (API) o se ignora (evento). */
+  private async abrirEn(
+    tx: Tx,
+    ticketId: string,
+    dia: Date,
+    actor: ActorPtw,
+    rechazarSiExiste: boolean,
+  ): Promise<string | null> {
+    const t = await tx.ticketRef.findUnique({ where: { ticketId } });
+    if (!t)
+      throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+    const existente = await tx.ptw.findFirst({
+      where: { pedidoId: t.pedidoId, diaOperacion: dia, anuladoAt: null },
+      select: { numero: true },
+    });
+    if (existente) {
+      if (!rechazarSiExiste) return null;
+      throw new ConflictException(
+        `Ya hay un PTW vigente (${codigoPtw(existente.numero)}) de este pedido para ese día; solo se permite uno por pedido y día`,
+      );
+    }
+    const id = uuidv7();
+    await tx.ptw.create({
+      data: {
+        id,
+        ticketId: t.ticketId,
+        pedidoId: t.pedidoId,
+        diaOperacion: dia,
+        createdBy: actor.id,
+      },
+    });
+    await this.historia(tx, id, AccionPtw.abierto, actor);
+    await this.publicar(tx, 'qhse.ptw.abierto', id, actor);
+    return id;
   }
 
   /** Pasa de gabinete a formalización: fija los cuatro documentos que sirven para ese día (el ART vencido bloquea). */
@@ -199,7 +228,7 @@ export class PtwService {
     tx: Tx,
     ptwId: string,
     accion: AccionPtw,
-    actor: AuthUser,
+    actor: ActorPtw,
     motivo?: string,
   ) {
     await tx.ptwHistorial.create({
@@ -207,7 +236,7 @@ export class PtwService {
     });
   }
 
-  private async publicar(tx: Tx, tipo: string, ptwId: string, actor: AuthUser, motivo?: string) {
+  private async publicar(tx: Tx, tipo: string, ptwId: string, actor: ActorPtw, motivo?: string) {
     const p = await tx.ptw.findUniqueOrThrow({
       where: { id: ptwId },
       include: {

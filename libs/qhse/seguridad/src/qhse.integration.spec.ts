@@ -257,6 +257,8 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
   afterAll(async () => {
     if (tickets.length) {
       // las entregas (y sus renglones e historial) caen en cascada; `app_qhse` no borra cabeceras, por eso va dyn_migrator
+      // los PTW abiertos al asignar (y su historia) caen antes que el ticket al que pertenecen
+      await admin.query('DELETE FROM qhse.ptw WHERE ticket_id = ANY($1::uuid[])', [tickets]);
       await admin.query('DELETE FROM qhse.epi_entrega WHERE ticket_id = ANY($1::uuid[])', [
         tickets,
       ]);
@@ -318,6 +320,29 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     expect(await prisma.ticketOperador.count({ where: { ticketId } })).toBe(0);
     // el ticket sí quedó referenciado: se conoce aunque nadie tenga operadores válidos
     expect(await prisma.ticketRef.count({ where: { ticketId } })).toBe(1);
+  });
+
+  it('al asignar el equipo abre el PTW del primer día de operación (una sola vez, a nombre de quien asignó) y no abre nada sin fecha de inicio', async () => {
+    const ticketId = uuidv7();
+    const e = eventoAsignacion(ticketId, [OP1.id], { fechaInicioServicio: '2026-11-02' });
+    await consumer.consumir(e);
+    const ptws = await prisma.ptw.findMany({ where: { ticketId } });
+    expect(ptws).toHaveLength(1);
+    expect(ptws[0]).toMatchObject({ createdBy: JEFE.id, fase: 'gabinete' });
+    expect(ptws[0].diaOperacion.toISOString().slice(0, 10)).toBe('2026-11-02');
+    expect(await salidaDeTicket(ticketId, 'qhse.ptw.abierto')).toHaveLength(1);
+    // una reasignación del mismo servicio no duplica el PTW del día
+    await consumer.consumir(
+      eventoAsignacion(ticketId, [OP2.id], {
+        pedidoId: e.data['pedidoId'],
+        fechaInicioServicio: '2026-11-02',
+      }),
+    );
+    expect(await prisma.ptw.count({ where: { ticketId } })).toBe(1);
+
+    const sinFecha = uuidv7();
+    await consumer.consumir(eventoAsignacion(sinFecha, [OP1.id]));
+    expect(await prisma.ptw.count({ where: { ticketId: sinFecha } })).toBe(0);
   });
 
   it('guarda la referencia del ticket cuando Pumping lo crea (ticket_creado) y la actualiza sin duplicarla', async () => {
