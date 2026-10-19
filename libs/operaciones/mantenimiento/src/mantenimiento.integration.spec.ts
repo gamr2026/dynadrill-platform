@@ -21,7 +21,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import { PreventivosService } from '@dyn/flota';
+import { AsignacionPumpingConsumer, PreventivosService } from '@dyn/flota';
 import { DespachosConsumer, MovimientosService } from '@dyn/inventario';
 import { ReporteUnidadLlegadaConsumer } from './consumers/reporte-unidad-llegada.consumer';
 import { MantenimientoModule } from './mantenimiento.module';
@@ -231,6 +231,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       .spyOn(ReporteUnidadLlegadaConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
     jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
+    jest.spyOn(AsignacionPumpingConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue();
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(ReporteUnidadLlegadaConsumer);

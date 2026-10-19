@@ -579,7 +579,7 @@ run('identidad (base de datos real)', () => {
     it('roles: cualquier autenticado los lista; usuarios por rol solo trae id, nombre y especialidad', async () => {
       await http().get('/api/roles').expect(401);
       const roleList = (await http().get('/api/roles').set(bearer(adminToken)).expect(200)).body;
-      expect(roleList).toHaveLength(15);
+      expect(roleList).toHaveLength(16);
       expect(roleList[0]).toEqual(
         expect.objectContaining({
           id: expect.any(String),

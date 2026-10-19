@@ -1,6 +1,7 @@
 // Única puerta pública del módulo: lo demás (Prisma, DTOs, controllers) es interno. Mantenimiento y el resto de los módulos de
 // operaciones usan estos servicios; nadie escribe las tablas de `flota`.
 export { FlotaModule } from './flota.module';
+export { AsignacionPumpingConsumer } from './consumers/asignacion-pumping.consumer';
 export { UnidadesService } from './services/unidades.service';
 export {
   LecturasService,
