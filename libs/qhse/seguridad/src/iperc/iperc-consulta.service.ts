@@ -3,20 +3,13 @@ import type { AuthUser } from '@dyn/common';
 import type { Tx } from '../epi/epi-tipos';
 import { EstadoIperc } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { aDia, diasHasta } from '../comun/fechas';
 import { valorar } from './gtc45';
 
 /** Consecutivo visible de la matriz: IPERC-000001. */
 export const codigoIperc = (numero: number): string => `IPERC-${String(numero).padStart(6, '0')}`;
 
-const dia = (d: Date | null): string | null => (d ? d.toISOString().slice(0, 10) : null);
-const DIA_MS = 86_400_000;
-const hoyEc = (): string =>
-  new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
-
-/** Días que faltan para una fecha (negativo si ya pasó), contados por día de calendario. */
-function diasHasta(fecha: string, desde: string = hoyEc()): number {
-  return Math.round((Date.parse(`${fecha}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS);
-}
+const dia = (d: Date | null): string | null => (d ? aDia(d) : null);
 
 /** Avisa 30 días antes de que venza la vigencia de 12 meses. */
 export const AVISO_VENCIMIENTO_DIAS = 30;

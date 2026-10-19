@@ -11,26 +11,13 @@ import { texto, type Tx } from '../epi/epi-tipos';
 import { EstadoIperc } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ContenidoMatrizDto } from './iperc.dto';
+import { aFecha, hoyEcuador, masMeses } from '../comun/fechas';
 import { insertarContenido } from './iperc-contenido';
 import { IpercConsultaService, codigoIperc } from './iperc-consulta.service';
 
 const MODULO_ARCHIVO_IPERC = 'qhse_iperc_documento';
 const EDITABLES: EstadoIperc[] = [EstadoIperc.borrador, EstadoIperc.en_evaluacion];
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
-
-/** Hoy en Ecuador (AAAA-MM-DD): la vigencia se cuenta por día de calendario local. */
-export const hoyEcuador = (): string =>
-  new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
-
-/** Un año después, igual que `fecha + INTERVAL '1 year'` en PostgreSQL (el 29 de febrero pasa al 28). */
-export function masUnAnio(dia: string): string {
-  const [a, m, d] = dia.split('-').map(Number);
-  const f = new Date(Date.UTC(a + 1, m - 1, d));
-  if (f.getUTCMonth() !== m - 1) f.setUTCDate(0);
-  return f.toISOString().slice(0, 10);
-}
-
-const aFecha = (dia: string): Date => new Date(`${dia}T00:00:00.000Z`);
 
 /**
  * Matriz IPERC maestra (DYN-SGI-RE-087, GTC 45). Ciclo de una versión: borrador → en evaluación → en revisión → aprobada (o rechazada, que
@@ -207,7 +194,7 @@ export class IpercService {
           aprobadaPor: actor.id,
           aprobadaAt: new Date(),
           aprobadaEl: aFecha(hoy),
-          vigenteHasta: aFecha(masUnAnio(hoy)),
+          vigenteHasta: aFecha(masMeses(hoy, 12)),
           updatedBy: actor.id,
         },
       });

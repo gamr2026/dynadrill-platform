@@ -30,8 +30,23 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
     ],
   },
   {
+    source: 'flota',
+    patterns: [
+      'flota.gerenciamiento_viaje.por_autorizar_supervisor',
+      'flota.gerenciamiento_viaje.por_autorizar_gerente',
+      'flota.gerenciamiento_viaje.decidido',
+      'flota.inspeccion_vehiculo.rechazada',
+    ],
+  },
+  {
     source: 'qhse',
-    patterns: ['qhse.epi.solicitudes_abiertas', 'qhse.ptw.cerrado', 'qhse.swa.activado'],
+    patterns: [
+      'qhse.epi.solicitudes_abiertas',
+      'qhse.ptw.cerrado',
+      'qhse.swa.activado',
+      'qhse.stop.con_hallazgos',
+      'qhse.inspeccion.rechazada',
+    ],
   },
 ];
 

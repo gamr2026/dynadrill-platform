@@ -8,6 +8,9 @@ import { EpiConsultaService } from './epi/epi-consulta.service';
 import { EpiController } from './epi/epi.controller';
 import { EpiRenglonesService } from './epi/epi-renglones.service';
 import { EpiService } from './epi/epi.service';
+import { InspeccionesConsultaService } from './inspecciones/inspecciones-consulta.service';
+import { InspeccionesController } from './inspecciones/inspecciones.controller';
+import { InspeccionesService } from './inspecciones/inspecciones.service';
 import { IpercCatalogosService } from './iperc/iperc-catalogos.service';
 import { IpercConsultaService } from './iperc/iperc-consulta.service';
 import { IpercController } from './iperc/iperc.controller';
@@ -16,6 +19,9 @@ import { PrismaService } from './prisma/prisma.service';
 import { SwaConsultaService } from './swa/swa-consulta.service';
 import { SwaController } from './swa/swa.controller';
 import { SwaService } from './swa/swa.service';
+import { StopConsultaService } from './stop/stop-consulta.service';
+import { StopController } from './stop/stop.controller';
+import { StopService } from './stop/stop.service';
 import { PtwConsultaService } from './ptw/ptw-consulta.service';
 import { PtwController } from './ptw/ptw.controller';
 import { PtwService } from './ptw/ptw.service';
@@ -25,11 +31,19 @@ import { PtwService } from './ptw/ptw.service';
  * `CommonModule` y `MessagingModule`.
  *
  * Tramo Q1: entrega de EPI (solicitar, aprobar o rechazar, despachar) y la referencia de los tickets que la originan. Documentos por
- * pedido y Acta de Entrega de Locación (contrato 4.11); Permiso de Trabajo (PTW) por día y pedido; Stop Work Authority (SWA); matriz IPERC maestra. Los demás
+ * pedido y Acta de Entrega de Locación (contrato 4.11); Permiso de Trabajo (PTW) por día y pedido; Stop Work Authority (SWA); matriz IPERC maestra; tarjeta STOP e inspecciones de campo. Los demás
  * subdominios (SWA, STOP, inspecciones, IPERC, PTW, ambiental, emergencias, investigaciones) se agregan por tramos.
  */
 @Module({
-  controllers: [EpiController, DocumentosController, PtwController, SwaController, IpercController],
+  controllers: [
+    EpiController,
+    DocumentosController,
+    PtwController,
+    SwaController,
+    IpercController,
+    StopController,
+    InspeccionesController,
+  ],
   providers: [
     PrismaService,
     EpiService,
@@ -44,9 +58,21 @@ import { PtwService } from './ptw/ptw.service';
     IpercService,
     IpercConsultaService,
     IpercCatalogosService,
+    StopService,
+    StopConsultaService,
+    InspeccionesService,
+    InspeccionesConsultaService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
-  exports: [EpiService, DocumentosPedidoService, PtwService, SwaService, IpercService],
+  exports: [
+    EpiService,
+    DocumentosPedidoService,
+    PtwService,
+    SwaService,
+    IpercService,
+    StopService,
+    InspeccionesService,
+  ],
 })
 export class QhseModule {}

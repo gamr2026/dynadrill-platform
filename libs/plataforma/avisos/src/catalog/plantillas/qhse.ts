@@ -88,6 +88,53 @@ const swaActivada = (rol: 'supervisor' | 'tecnico_hse' | 'gerente_hse'): Plantil
   rol,
 });
 
+/** Una tarjeta STOP con hallazgos inseguros: el Técnico HSE debe derivarla o resolverla. */
+const stopConHallazgos: PlantillaDef = {
+  codigo: 'qhse_stop_con_hallazgos_tecnico_hse',
+  descripcion:
+    'Se registró una tarjeta STOP con ítems inseguros: el Técnico HSE debe derivarla o resolverla.',
+  asunto: 'Tarjeta STOP por atender: {{codigo}} ({{inseguros}} hallazgo(s))',
+  cuerpoHtml:
+    '<p>Hola {{nombre}},</p>' +
+    '<p>Se registró la tarjeta <strong>{{codigo}}</strong> con <strong>{{inseguros}}</strong> ítem(s) inseguro(s). Derívela a Mantenimiento o a otro departamento, o resuélvala.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+    FILA('Observador', 'observador') +
+    FILA('Campo', 'campo') +
+    FILA('Lugar', 'lugar') +
+    FILA('Fecha', 'fecha') +
+    '</table>',
+  cuerpoTexto:
+    'Hola {{nombre}},\n\nSe registró la tarjeta {{codigo}} con {{inseguros}} ítem(s) inseguro(s). Derívela a Mantenimiento o a otro departamento, o resuélvala.\n\nObservador: {{observador}}\nCampo: {{campo}}\nLugar: {{lugar}}\nFecha: {{fecha}}',
+  tituloAviso: 'STOP por atender: {{codigo}}',
+  detalleAviso: '{{inseguros}} hallazgo(s) · {{observador}}',
+  enlaceAviso: '/dashboard/qhse/stop',
+  tono: 'warning',
+  evento: 'qhse.stop.con_hallazgos',
+  rol: 'tecnico_hse',
+};
+
+/** Una inspección rechazada deja el equipo en cuarentena: el equipo HSE debe enterarse. */
+const inspeccionRechazada = (rol: 'tecnico_hse' | 'gerente_hse'): PlantillaDef => ({
+  codigo: `qhse_inspeccion_rechazada_${rol}`,
+  descripcion: 'Una inspección de campo quedó rechazada: el equipo está en cuarentena.',
+  asunto: 'Inspección {{resultado}}: {{tipoNombre}} {{equipoCodigo}} ({{codigo}})',
+  cuerpoHtml:
+    '<p>Hola {{nombre}},</p>' +
+    '<p>La inspección <strong>{{codigo}}</strong> del equipo <strong>{{equipoCodigo}}</strong> ({{tipoNombre}}) quedó <strong>{{resultado}}</strong>: el equipo está en cuarentena hasta una inspección nueva aprobada.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+    FILA('Inspector', 'inspector') +
+    FILA('Fecha', 'fecha') +
+    '</table>',
+  cuerpoTexto:
+    'Hola {{nombre}},\n\nLa inspección {{codigo}} del equipo {{equipoCodigo}} ({{tipoNombre}}) quedó {{resultado}}: el equipo está en cuarentena hasta una inspección nueva aprobada.\n\nInspector: {{inspector}}\nFecha: {{fecha}}',
+  tituloAviso: 'Equipo en cuarentena: {{equipoCodigo}}',
+  detalleAviso: '{{tipoNombre}} · {{inspector}}',
+  enlaceAviso: '/dashboard/qhse/inspecciones',
+  tono: 'error',
+  evento: 'qhse.inspeccion.rechazada',
+  rol,
+});
+
 /**
  * Plantillas del módulo QHSE. Cada regla liga un evento y un rol con el texto que ese cargo debe leer; los demás subdominios de QHSE
  * agregan aquí las suyas (SWA, PTW, documentos por vencer...).
@@ -99,4 +146,7 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   swaActivada('supervisor'),
   swaActivada('tecnico_hse'),
   swaActivada('gerente_hse'),
+  stopConHallazgos,
+  inspeccionRechazada('tecnico_hse'),
+  inspeccionRechazada('gerente_hse'),
 ];

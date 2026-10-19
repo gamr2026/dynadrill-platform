@@ -532,6 +532,14 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Preparar la matriz IPERC: actividades, tareas, peligros, controles, adjuntos, cobertura y revisiones',
     ModuleRoles.qhse,
   ),
+  // ---- qhse: tarjeta STOP e inspecciones de campo. Registrarlas es de cualquier trabajador (`qhse.eventos.reportar`); verlas y gestionarlas, del equipo HSE.
+  nuevo('qhse.stop.ver', 'Ver las tarjetas STOP y sus tendencias (Pareto)', ModuleRoles.qhse),
+  nuevo('qhse.stop.gestionar', 'Derivar, resolver y cerrar una tarjeta STOP', ModuleRoles.qhse),
+  nuevo(
+    'qhse.inspecciones.ver',
+    'Ver las inspecciones de campo y el estado (cuarentena y vigencia) de cada equipo',
+    ModuleRoles.qhse,
+  ),
   // El Supervisor entra SOLO a estos dos (el Acta la sube al finalizar el ticket); no ve el resto de QHSE.
   nuevo(
     'qhse.acta_entrega.cargar',
@@ -670,6 +678,9 @@ export const Permission = {
   PTW_APROBAR: 'qhse.ptw.aprobar',
   IPERC_VER: 'qhse.iperc.ver',
   IPERC_GESTIONAR: 'qhse.iperc.gestionar',
+  STOP_VER: 'qhse.stop.ver',
+  STOP_GESTIONAR: 'qhse.stop.gestionar',
+  QHSE_INSPECCIONES_VER: 'qhse.inspecciones.ver',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
 } as const;

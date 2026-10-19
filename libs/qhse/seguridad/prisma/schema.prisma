@@ -107,6 +107,41 @@ enum TipoControlIperc {
   @@schema("qhse")
 }
 
+enum BloqueStop {
+  acciones
+  condiciones
+
+  @@map("bloque_stop")
+  @@schema("qhse")
+}
+
+enum EstadoItemStop {
+  seguro
+  inseguro
+
+  @@map("estado_item_stop")
+  @@schema("qhse")
+}
+
+enum EstadoStop {
+  abierto
+  derivado_mantenimiento
+  derivado_otro
+  resuelto_qhse
+  cerrado
+
+  @@map("estado_stop")
+  @@schema("qhse")
+}
+
+enum ResultadoInspeccion {
+  aprobado
+  rechazado
+
+  @@map("resultado_inspeccion")
+  @@schema("qhse")
+}
+
 enum TipoTalla {
   ropa
   calzado
@@ -138,6 +173,9 @@ model TicketRef {
   swas           Swa[]
   servicios      TicketServicio[]
   matricesOrigen IpercMatriz[]
+
+  stops        StopTarjeta[]
+  inspecciones Inspeccion[]
 
   @@unique([ticketId, pedidoId])
   @@index([pedidoId])
@@ -818,6 +856,208 @@ model PtwMatriz {
   @@schema("qhse")
 }
 
+/// Subcategoría de la tarjeta STOP (por bloque: acciones o condiciones), del formato DYN-SGI-RE-008.
+model StopSubcategoria {
+  id        String     @id @db.Uuid
+  bloque    BloqueStop
+  codigo    String     @unique
+  nombre    String
+  orden     Int
+  activo    Boolean    @default(true)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?    @map("created_by") @db.Uuid
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?    @map("updated_by") @db.Uuid
+
+  items StopItem[]
+
+  @@unique([bloque, orden])
+  @@map("stop_subcategoria")
+  @@schema("qhse")
+}
+
+model StopItem {
+  id             String           @id @db.Uuid
+  subcategoriaId String           @map("subcategoria_id") @db.Uuid
+  subcategoria   StopSubcategoria @relation(fields: [subcategoriaId], references: [id])
+  nombre         String
+  orden          Int
+  activo         Boolean          @default(true)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?          @map("created_by") @db.Uuid
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy      String?          @map("updated_by") @db.Uuid
+
+  marcados StopTarjetaItem[]
+
+  @@unique([subcategoriaId, orden])
+  @@unique([subcategoriaId, nombre])
+  @@map("stop_item")
+  @@schema("qhse")
+}
+
+/// Tarjeta de observación STOP (DYN-SGI-RE-008). Cualquier trabajador la registra; QHSE la deriva o resuelve y la cierra.
+model StopTarjeta {
+  id                    String      @id @db.Uuid
+  numero                Int         @unique @default(autoincrement())
+  observadorId          String      @map("observador_id") @db.Uuid
+  observador            IdUsuario   @relation("stopObservador", fields: [observadorId], references: [id])
+  observadoId           String?     @map("observado_id") @db.Uuid
+  observado             IdUsuario?  @relation("stopObservado", fields: [observadoId], references: [id])
+  fecha                 DateTime    @db.Date
+  campoId               String?     @map("campo_id") @db.Uuid
+  campo                 CatCampo?   @relation(fields: [campoId], references: [id])
+  operadoraId           String?     @map("operadora_id") @db.Uuid
+  operadora             CatCliente? @relation(fields: [operadoraId], references: [id])
+  lugar                 String?
+  contacto              String?
+  ticketId              String?     @map("ticket_id") @db.Uuid
+  ticket                TicketRef?  @relation(fields: [ticketId], references: [ticketId])
+  fotoArchivoId         String?     @map("foto_archivo_id") @db.Uuid
+  foto                  ArchivoRef? @relation("stopFoto", fields: [fotoArchivoId], references: [id])
+  accionesQueObserva    String?     @map("acciones_que_observa")
+  accionesAccion        String?     @map("acciones_accion")
+  condicionesQueObserva String?     @map("condiciones_que_observa")
+  condicionesAccion     String?     @map("condiciones_accion")
+  estado                EstadoStop  @default(abierto)
+  atendidoPor           String?     @map("atendido_por") @db.Uuid
+  atendedor             IdUsuario?  @relation("stopAtendedor", fields: [atendidoPor], references: [id])
+  atendidoAt            DateTime?   @map("atendido_at") @db.Timestamptz(6)
+  atendidoObservacion   String?     @map("atendido_observacion")
+  cerradoPor            String?     @map("cerrado_por") @db.Uuid
+  cerrador              IdUsuario?  @relation("stopCerrador", fields: [cerradoPor], references: [id])
+  cerradoAt             DateTime?   @map("cerrado_at") @db.Timestamptz(6)
+  createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String      @map("created_by") @db.Uuid
+  creador               IdUsuario   @relation("stopCreador", fields: [createdBy], references: [id])
+  updatedAt             DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?     @map("updated_by") @db.Uuid
+  editor                IdUsuario?  @relation("stopEditor", fields: [updatedBy], references: [id])
+
+  items     StopTarjetaItem[]
+  historial StopHistorial[]
+
+  @@index([estado])
+  @@index([fecha])
+  @@index([observadorId])
+  @@map("stop_tarjeta")
+  @@schema("qhse")
+}
+
+model StopTarjetaItem {
+  tarjetaId String         @map("tarjeta_id") @db.Uuid
+  tarjeta   StopTarjeta    @relation(fields: [tarjetaId], references: [id], onDelete: Cascade)
+  itemId    String         @map("item_id") @db.Uuid
+  item      StopItem       @relation(fields: [itemId], references: [id])
+  estado    EstadoItemStop
+
+  @@id([tarjetaId, itemId])
+  @@index([itemId])
+  @@map("stop_tarjeta_item")
+  @@schema("qhse")
+}
+
+model StopHistorial {
+  id             String      @id @db.Uuid
+  tarjetaId      String      @map("tarjeta_id") @db.Uuid
+  tarjeta        StopTarjeta @relation(fields: [tarjetaId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoStop? @map("estado_anterior")
+  estadoNuevo    EstadoStop  @map("estado_nuevo")
+  observacion    String?
+  actorId        String      @map("actor_id") @db.Uuid
+  actor          IdUsuario   @relation("stopHistorialActor", fields: [actorId], references: [id])
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tarjetaId, createdAt])
+  @@map("stop_historial")
+  @@schema("qhse")
+}
+
+/// Tipo de equipo que se inspecciona. El comportamiento sale de sus columnas, nunca de su nombre.
+model InspeccionTipo {
+  id                      String   @id @db.Uuid
+  codigo                  String   @unique
+  nombre                  String
+  orden                   Int      @unique
+  frecuenciaDias          Int      @map("frecuencia_dias")
+  requiereBumpTest        Boolean  @default(false) @map("requiere_bump_test")
+  requiereUnidad          Boolean  @default(false) @map("requiere_unidad")
+  generaCasoMantenimiento Boolean  @default(false) @map("genera_caso_mantenimiento")
+  activo                  Boolean  @default(true)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy               String?  @map("created_by") @db.Uuid
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy               String?  @map("updated_by") @db.Uuid
+
+  criterios    InspeccionCriterio[]
+  inspecciones Inspeccion[]
+
+  @@map("inspeccion_tipo")
+  @@schema("qhse")
+}
+
+model InspeccionCriterio {
+  id        String         @id @db.Uuid
+  tipoId    String         @map("tipo_id") @db.Uuid
+  tipo      InspeccionTipo @relation(fields: [tipoId], references: [id])
+  nombre    String
+  orden     Int
+  activo    Boolean        @default(true)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?        @map("created_by") @db.Uuid
+  updatedAt DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?        @map("updated_by") @db.Uuid
+
+  resultados InspeccionResultado[]
+
+  @@unique([tipoId, orden])
+  @@map("inspeccion_criterio")
+  @@schema("qhse")
+}
+
+/// Inspección de campo. Inmutable: la cuarentena se levanta con una inspección nueva aprobada del mismo equipo.
+model Inspeccion {
+  id                String              @id @db.Uuid
+  numero            Int                 @unique @default(autoincrement())
+  tipoId            String              @map("tipo_id") @db.Uuid
+  tipo              InspeccionTipo      @relation(fields: [tipoId], references: [id])
+  equipoCodigo      String              @map("equipo_codigo")
+  /// Unidad de Flota (otro contenedor, D1: sin FK).
+  unidadId          String?             @map("unidad_id") @db.Uuid
+  unidadCodigo      String?             @map("unidad_codigo")
+  inspectorId       String              @map("inspector_id") @db.Uuid
+  inspector         IdUsuario           @relation("inspeccionInspector", fields: [inspectorId], references: [id])
+  fecha             DateTime            @db.Date
+  resultado         ResultadoInspeccion
+  bumpTestRealizado Boolean?            @map("bump_test_realizado")
+  vigenteHasta      DateTime            @map("vigente_hasta") @db.Date
+  observaciones     String?
+  ticketId          String?             @map("ticket_id") @db.Uuid
+  ticket            TicketRef?          @relation(fields: [ticketId], references: [ticketId])
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String              @map("created_by") @db.Uuid
+  creador           IdUsuario           @relation("inspeccionCreador", fields: [createdBy], references: [id])
+
+  resultados InspeccionResultado[]
+
+  @@index([tipoId, equipoCodigo, fecha(sort: Desc)])
+  @@index([resultado])
+  @@map("inspeccion")
+  @@schema("qhse")
+}
+
+model InspeccionResultado {
+  inspeccionId String             @map("inspeccion_id") @db.Uuid
+  inspeccion   Inspeccion         @relation(fields: [inspeccionId], references: [id], onDelete: Cascade)
+  criterioId   String             @map("criterio_id") @db.Uuid
+  criterio     InspeccionCriterio @relation(fields: [criterioId], references: [id])
+  cumple       Boolean
+
+  @@id([inspeccionId, criterioId])
+  @@map("inspeccion_resultado")
+  @@schema("qhse")
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de `identidad`, para obtener el nombre con JOIN a partir de las FK. Este módulo nunca
 // escribe en ellas (`app_qhse` solo tiene SELECT sobre estas columnas). Las administra el módulo de identidad.
@@ -882,6 +1122,16 @@ model IdUsuario {
   ipercCoberturas          IpercCobertura[]       @relation("ipercCoberturaCreador")
   ipercHistorial           IpercHistorial[]       @relation("ipercHistorialActor")
 
+  stopsObservador     StopTarjeta[]   @relation("stopObservador")
+  stopsObservado      StopTarjeta[]   @relation("stopObservado")
+  stopsAtendidas      StopTarjeta[]   @relation("stopAtendedor")
+  stopsCerradas       StopTarjeta[]   @relation("stopCerrador")
+  stopsCreadas        StopTarjeta[]   @relation("stopCreador")
+  stopsEditadas       StopTarjeta[]   @relation("stopEditor")
+  stopHistorial       StopHistorial[] @relation("stopHistorialActor")
+  inspeccionesHechas  Inspeccion[]    @relation("inspeccionInspector")
+  inspeccionesCreadas Inspeccion[]    @relation("inspeccionCreador")
+
   @@map("usuario")
   @@schema("identidad")
 }
@@ -919,6 +1169,8 @@ model ArchivoRef {
   ipercProcedimientos IpercMatriz[] @relation("ipercProcedimiento")
   ipercAts            IpercMatriz[] @relation("ipercAts")
 
+  stopFotos StopTarjeta[] @relation("stopFoto")
+
   @@map("archivo")
   @@schema("archivos")
 }
@@ -931,4 +1183,24 @@ model ArchivoModuloRef {
 
   @@map("modulo_archivo")
   @@schema("archivos")
+}
+
+/// `catalogos.campo`: solo id y nombre (el campo donde se observó una tarjeta STOP).
+model CatCampo {
+  id     String        @id @db.Uuid
+  nombre String
+  stops  StopTarjeta[]
+
+  @@map("campo")
+  @@schema("catalogos")
+}
+
+/// `catalogos.cliente`: solo id y nombre comercial (la operadora del lugar de una tarjeta STOP).
+model CatCliente {
+  id              String        @id @db.Uuid
+  nombreComercial String        @map("nombre_comercial")
+  stops           StopTarjeta[]
+
+  @@map("cliente")
+  @@schema("catalogos")
 }
