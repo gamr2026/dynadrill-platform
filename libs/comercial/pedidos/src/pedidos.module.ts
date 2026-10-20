@@ -11,6 +11,7 @@ import { OrdenesTrabajoService } from './services/ordenes-trabajo.service';
 import { GuiasController } from './controllers/guias.controller';
 import { GuiasService } from './services/guias.service';
 import { PrefacturasController } from './controllers/prefacturas.controller';
+import { ReporteriaController } from './controllers/reporteria.controller';
 import { DocumentosOperativosController } from './controllers/documentos-operativos.controller';
 import { ListasPreciosController } from './controllers/listas-precios.controller';
 import { PedidosController } from './controllers/pedidos.controller';
@@ -22,6 +23,7 @@ import { ListasPreciosService } from './services/listas-precios.service';
 import { DocumentosOperativosService } from './services/documentos-operativos.service';
 import { PedidoEstadoService } from './services/pedido-estado.service';
 import { PrefacturasService } from './services/prefacturas.service';
+import { ReporteriaService } from './services/reporteria.service';
 import { PedidosService } from './services/pedidos.service';
 import { SecuenciasService } from './services/secuencias.service';
 import { WorkflowService } from './workflow/workflow.service';
@@ -40,6 +42,7 @@ import { WorkflowService } from './workflow/workflow.service';
     PedidosController,
     DocumentosOperativosController,
     PrefacturasController,
+    ReporteriaController,
     GuiasController,
     OrdenesTrabajoController,
     ListasPreciosController,
@@ -55,6 +58,7 @@ import { WorkflowService } from './workflow/workflow.service';
     DocumentosOperativosService,
     PedidoEstadoService,
     PrefacturasService,
+    ReporteriaService,
     GuiasService,
     OrdenesTrabajoService,
     CierrePedidoService,

@@ -491,6 +491,36 @@ run('prefactura (base de datos real)', () => {
       .expect(403);
   });
 
+  it('la reportería trae una fila por pedido con su prefactura vigente, lo cotizado y las fechas de los hitos', async () => {
+    const id = await pedidoListo();
+    const gen = (await generar(id).expect(201)).body;
+    const filas = (await http().get('/api/comercial/reporteria/pedidos').set(fact()).expect(200))
+      .body;
+    const fila = filas.find((f: { pedidoId: string }) => f.pedidoId === id);
+    expect(fila).toMatchObject({
+      estado: 'prefactura_generada',
+      estadoNombre: 'Prefactura generada',
+      prefactura: {
+        id: gen.id,
+        estado: 'generada',
+        version: 1,
+        subtotal: 1254.46,
+        netoCobrar: 1373.64,
+      },
+      ordenTrabajoNumero: null,
+    });
+    expect(fila.guiaCodigo).toEqual(expect.any(String)); // la guía que deja emitida pedidoListo()
+    expect(fila.cotizado).toBeGreaterThan(0);
+    expect(fila.documentosCompletosAt).toEqual(expect.any(String));
+    expect(fila.enviadoParaFirmasAt).toBeNull();
+    // un borrador no entra en la reportería
+    expect(filas.every((f: { estado: string }) => f.estado !== 'borrador')).toBe(true);
+    await http()
+      .get('/api/comercial/reporteria/pedidos')
+      .set(bearer([P.PEDIDOS_VER]))
+      .expect(403);
+  });
+
   it('no se genera sin la documentación completa ni sin permiso', async () => {
     const id = await pedido();
     const r = await generar(id).expect(422);
