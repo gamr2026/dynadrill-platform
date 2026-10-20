@@ -462,6 +462,35 @@ run('prefactura (base de datos real)', () => {
     await generar(id).expect(409);
   });
 
+  it('el índice lista las prefacturas con su pedido y cliente, y filtra por estado y texto', async () => {
+    const id = await pedidoListo();
+    const gen = (await generar(id).expect(201)).body;
+    const lista = (estado = '', q = '') =>
+      http()
+        .get('/api/comercial/prefacturas')
+        .query({ ...(estado ? { estado } : {}), ...(q ? { q } : {}) })
+        .set(fact());
+    const fila = (await lista('generada').expect(200)).body.find(
+      (f: { id: string }) => f.id === gen.id,
+    );
+    expect(fila).toMatchObject({
+      pedidoId: id,
+      version: 1,
+      estado: 'generada',
+      subtotal: 1254.46,
+      netoCobrar: 1373.64,
+    });
+    expect(fila.pedidoCodigo).toBeTruthy();
+    const porPedido = (await lista('', fila.pedidoCodigo).expect(200)).body;
+    expect(porPedido.map((f: { id: string }) => f.id)).toContain(gen.id);
+    expect((await lista('firmada', fila.pedidoCodigo).expect(200)).body).toEqual([]);
+    await lista('inventado').expect(400);
+    await http()
+      .get('/api/comercial/prefacturas')
+      .set(bearer([P.PEDIDOS_VER]))
+      .expect(403);
+  });
+
   it('no se genera sin la documentación completa ni sin permiso', async () => {
     const id = await pedido();
     const r = await generar(id).expect(422);

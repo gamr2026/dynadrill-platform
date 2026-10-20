@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import {
@@ -6,6 +6,7 @@ import {
   EnviarPrefacturaDto,
   FirmaCompanyManDto,
   FirmarPrefacturaDto,
+  ListarPrefacturasQuery,
   RechazarPrefacturaDto,
   RegistrarTicketDto,
 } from '../dto/prefacturas.dto';
@@ -20,6 +21,13 @@ export class PrefacturasController {
 
   private ctx(actor: AuthUser, auth?: string): ContextoPrefactura {
     return { actor, token: (auth ?? '').replace(/^Bearer\s+/i, '') };
+  }
+
+  /** Índice de prefacturas (estado y texto opcionales). */
+  @RequirePermission(P.PREFACTURAS_VER)
+  @Get('prefacturas')
+  indice(@Query() filtro: ListarPrefacturasQuery) {
+    return this.prefacturas.listar(filtro);
   }
 
   @RequirePermission(P.PREFACTURAS_VER)

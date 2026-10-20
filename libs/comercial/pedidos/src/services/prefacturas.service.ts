@@ -13,6 +13,7 @@ import { DirectorioPort } from '../directorio/directorio.port';
 import {
   AgregarFirmaDto,
   EnviarPrefacturaDto,
+  ListarPrefacturasQuery,
   FirmaCompanyManDto,
   FirmarPrefacturaDto,
   RechazarPrefacturaDto,
@@ -22,6 +23,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { calcularPrefactura, ItemLista, TasasAplicadas } from '../prefacturas/calculo';
 import { filasParaAs2 } from '../prefacturas/exportacion-as2';
 import { DocumentosOperativosService } from './documentos-operativos.service';
+import { nombreCliente } from './pedido-mapper';
 import { PedidoEstadoService } from './pedido-estado.service';
 import { SecuenciasService } from './secuencias.service';
 
@@ -124,6 +126,48 @@ export class PrefacturasService {
     private readonly directorio: DirectorioPort,
     private readonly bus: EventBus,
   ) {}
+
+  /**
+   * Índice de prefacturas de todos los pedidos (la más reciente primero), con el pedido y el cliente a la vista. Solo trae los
+   * totales: el detalle completo se pide por prefactura.
+   */
+  async listar(filtro: ListarPrefacturasQuery) {
+    const q = filtro.q?.trim();
+    const filas = await this.prisma.prefactura.findMany({
+      where: {
+        ...(filtro.estado ? { estado: filtro.estado } : {}),
+        ...(q
+          ? {
+              pedido: {
+                OR: [
+                  { codigo: { contains: q, mode: 'insensitive' } },
+                  { as2EmpresaNombre: { contains: q, mode: 'insensitive' } },
+                  { cliente: { nombreComercial: { contains: q, mode: 'insensitive' } } },
+                  { cliente: { nombreFiscal: { contains: q, mode: 'insensitive' } } },
+                ],
+              },
+            }
+          : {}),
+      },
+      include: { pedido: { select: { codigo: true, cliente: true, as2EmpresaNombre: true } } },
+      orderBy: { generadaAt: 'desc' },
+      take: 500,
+    });
+    return filas.map((p) => ({
+      id: p.id,
+      pedidoId: p.pedidoId,
+      pedidoCodigo: p.pedido.codigo,
+      clienteNombre: nombreCliente(p.pedido),
+      version: p.version,
+      estado: p.estado,
+      ticketNumero: p.ticketNumero,
+      subtotal: num(p.subtotal),
+      netoCobrar: num(p.netoCobrar),
+      generadaAt: p.generadaAt,
+      enviadaAt: p.enviadaAt,
+      firmadaAt: p.firmadaAt,
+    }));
+  }
 
   async listarDePedido(pedidoId: string) {
     await this.pedido(pedidoId);

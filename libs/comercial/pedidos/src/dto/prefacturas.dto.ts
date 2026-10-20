@@ -13,7 +13,20 @@ import {
 
 export const MEDIOS_ENVIO = ['email', 'portal'] as const;
 export const TIPOS_FIRMANTE = ['company_man', 'cliente', 'dynadrill'] as const;
+export const ESTADOS_PREFACTURA = [
+  'generada',
+  'enviada_para_firmas',
+  'firmada',
+  'rechazada',
+  'anulada',
+] as const;
 export const AREAS_DEVOLUCION = ['ventas', 'operaciones', 'facturacion'] as const;
+
+export class ListarPrefacturasQuery {
+  @IsOptional() @IsIn(ESTADOS_PREFACTURA) estado?: (typeof ESTADOS_PREFACTURA)[number];
+  /** Texto libre: código del pedido o nombre del cliente. */
+  @IsOptional() @IsString() @MaxLength(100) q?: string;
+}
 
 export class RegistrarTicketDto {
   /** Número que AS2 asignó a la prefactura (PRC-), sin el prefijo. Es el número de ticket de Dynadrill. */
