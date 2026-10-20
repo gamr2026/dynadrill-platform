@@ -201,3 +201,49 @@ export async function quitarMaestros(admin: Pool, m: MaestrosDePrueba): Promise<
       );
   }
 }
+
+/**
+ * Una guía de remisión emitida para el pedido (con un transportista y un lugar de despacho que ya existan): sin ella la prefactura no se
+ * envía a firmas. Las pruebas que solo necesitan «que haya guía» la usan; quitarlas con `quitarGuiasDePrueba`.
+ */
+export async function emitirGuiaDePrueba(
+  admin: Pool,
+  pedidoId: string,
+  actorId: string,
+): Promise<void> {
+  const t = (
+    await admin.query(
+      'SELECT id, nombre_fiscal AS nombre, identificacion FROM catalogos.transportista ORDER BY nombre_fiscal LIMIT 1',
+    )
+  ).rows[0];
+  let lugar = (await admin.query('SELECT id FROM comercial.lugar_despacho ORDER BY nombre LIMIT 1'))
+    .rows[0]?.id as string | undefined;
+  if (!lugar) {
+    lugar = (
+      await admin.query(
+        "INSERT INTO comercial.lugar_despacho (id, nombre) VALUES (gen_random_uuid(), 'Lugar de prueba') RETURNING id",
+      )
+    ).rows[0].id;
+  }
+  await admin.query(
+    `INSERT INTO comercial.guia_remision (id, pedido_id, numero, codigo, emision_id, fecha, lugar_origen_id, transportista_id,
+                                          transportista_nombre, transportista_identificacion, emitida_por)
+     VALUES (gen_random_uuid(), $1, 1, $2, gen_random_uuid(), current_date, $3, $4, $5, $6, $7)`,
+    [
+      pedidoId,
+      `GIT-${pedidoId.slice(0, 8)}-${Date.now() % 100000}`,
+      lugar,
+      t.id,
+      t.nombre,
+      t.identificacion,
+      actorId,
+    ],
+  );
+}
+
+export async function quitarGuiasDePrueba(admin: Pool, pedidos: string[]): Promise<void> {
+  await admin.query(
+    "DELETE FROM comercial.guia_remision WHERE pedido_id = ANY($1::uuid[]) AND codigo LIKE 'GIT-%'",
+    [pedidos],
+  );
+}

@@ -24,7 +24,13 @@ import { PedidosModule } from './index';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
-import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
+import {
+  emitirGuiaDePrueba,
+  quitarGuiasDePrueba,
+  quitarMaestros,
+  sembrarMaestros,
+  type MaestrosDePrueba,
+} from './testing/maestros';
 import { sinSuscripciones } from './testing/sin-suscripciones';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -173,7 +179,7 @@ run('prefactura (base de datos real)', () => {
   };
 
   /** Pedido FCR abierto de 2 días (1 y 2 de noviembre) con dos ítems estimados de la lista. */
-  const pedido = async () => {
+  const pedido = async (conGuia = true) => {
     const l = await prisma.servicioLinea.findUniqueOrThrow({ where: { codigo: 'fcr' } });
     const t = await prisma.tipoOt.findUniqueOrThrow({ where: { codigo: 'servicio' } });
     const id = uuidv7();
@@ -224,6 +230,7 @@ run('prefactura (base de datos real)', () => {
       ],
     });
     pedidos.push(id);
+    if (conGuia) await emitirGuiaDePrueba(admin, id, ACTOR);
     return id;
   };
   const doc = (cuerpo: object, id: string) =>
@@ -368,6 +375,7 @@ run('prefactura (base de datos real)', () => {
       ]);
     }
     if (pedidos.length) {
+      await quitarGuiasDePrueba(admin, pedidos);
       await admin.query(
         'DELETE FROM comercial.secuencia_emision WHERE documento_ref_id IN (SELECT id FROM comercial.prefactura WHERE pedido_id = ANY($1::uuid[]))',
         [pedidos],
@@ -479,6 +487,11 @@ run('prefactura (base de datos real)', () => {
     // no se firma ni se rechaza antes de enviar
     await http().post(`${url}/firmar`).set(fact()).send({}).expect(409);
     await http().post(`${url}/enviar`).set(fact()).send({ medio: 'whatsapp' }).expect(400);
+    // sin guía de remisión emitida la prefactura no sale a firmas; con ella sí
+    await quitarGuiasDePrueba(admin, [id]);
+    const sinGuia = await http().post(`${url}/enviar`).set(fact()).send({ medio: 'email' });
+    expect([sinGuia.status, sinGuia.body.code]).toEqual([409, 'GUIA_REQUERIDA']);
+    await emitirGuiaDePrueba(admin, id, ACTOR);
     // firma de campo del company man asignado al pedido: se registra ANTES de enviar la prefactura al cliente
     await http()
       .post(`${url}/firmas`)

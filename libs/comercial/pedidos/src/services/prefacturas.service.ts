@@ -415,6 +415,16 @@ export class PrefacturasService {
     const p = await this.cargar(id);
     if (p.estado !== 'generada')
       throw new ConflictException('Solo se envía una prefactura recién generada');
+    // la guía de remisión del pedido debe estar emitida antes de mandar la prefactura a firmas
+    const guias = await this.prisma.guiaRemision.count({
+      where: { pedidoId: p.pedidoId, estado: 'emitida' },
+    });
+    if (guias === 0) {
+      throw new ConflictException({
+        message: 'Emita la guía de remisión del pedido antes de enviar la prefactura a firmas',
+        code: 'GUIA_REQUERIDA',
+      });
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.prefactura.update({
         where: { id },

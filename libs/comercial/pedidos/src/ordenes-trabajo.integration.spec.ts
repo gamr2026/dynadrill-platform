@@ -24,7 +24,13 @@ import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
-import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
+import {
+  emitirGuiaDePrueba,
+  quitarGuiasDePrueba,
+  quitarMaestros,
+  sembrarMaestros,
+  type MaestrosDePrueba,
+} from './testing/maestros';
 import { sinSuscripciones } from './testing/sin-suscripciones';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -228,6 +234,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
       ],
     });
     pedidos.push(id);
+    await emitirGuiaDePrueba(admin, id, ACTOR);
     await http()
       .post(`/api/comercial/pedidos/${id}/documentos-operativos`)
       .set(fact())
@@ -328,6 +335,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
         'DELETE FROM comercial.documento_operativo WHERE pedido_id = ANY($1::uuid[])',
         [pedidos],
       );
+      await quitarGuiasDePrueba(admin, pedidos);
       await admin.query('DELETE FROM comercial.pedido_item WHERE pedido_id = ANY($1::uuid[])', [
         pedidos,
       ]);
