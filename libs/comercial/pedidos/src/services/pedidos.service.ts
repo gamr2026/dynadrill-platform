@@ -62,6 +62,7 @@ const INCLUDE = {
   documentos: { include: { archivo: true } },
   tiposServicio: { include: { tipo: true, subtipos: { include: { catalogo: true } } } },
   estadoRef: true,
+  ticketOperativo: true,
 } as const;
 
 const fechaDia = (iso: string): Date => new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);

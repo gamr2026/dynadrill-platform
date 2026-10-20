@@ -22,6 +22,7 @@ import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
+import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
 import {
@@ -94,6 +95,7 @@ run('prefactura (base de datos real)', () => {
   const soloVer = () => bearer([P.PREFACTURAS_VER]);
   const pedidos: string[] = [];
   let cerrado: TicketCerradoConsumer;
+  let ticketOperativo: TicketOperativoConsumer;
   const eventosCierre: string[] = [];
   let listaId = '';
   /** Valor real del espejo de PRC- antes de la prueba: se restaura al final (la prueba registra números de ejemplo). */
@@ -319,6 +321,7 @@ run('prefactura (base de datos real)', () => {
     await app.init();
     prisma = app.get(PrismaService);
     cerrado = app.get(TicketCerradoConsumer);
+    ticketOperativo = app.get(TicketOperativoConsumer);
 
     const esp = await admin.query(
       `SELECT s.id, s.numero_actual FROM comercial.secuencia s JOIN comercial.documento d ON d.id = s.documento_id WHERE d.codigo = 'prefactura'`,
@@ -376,6 +379,10 @@ run('prefactura (base de datos real)', () => {
     }
     if (pedidos.length) {
       await quitarGuiasDePrueba(admin, pedidos);
+      await admin.query(
+        'DELETE FROM comercial.pedido_ticket_operativo WHERE pedido_id = ANY($1::uuid[])',
+        [pedidos],
+      );
       await admin.query(
         'DELETE FROM comercial.secuencia_emision WHERE documento_ref_id IN (SELECT id FROM comercial.prefactura WHERE pedido_id = ANY($1::uuid[]))',
         [pedidos],
@@ -876,6 +883,65 @@ run('prefactura (base de datos real)', () => {
         .set(soloVer())
         .send(firma)
         .expect(403);
+    });
+  });
+
+  describe('ticket operativo del pedido', () => {
+    const evento = (type: string, pedidoId: string, ticketId: string, data: object = {}) => {
+      const id = uuidv7();
+      eventosCierre.push(id);
+      return {
+        id,
+        type,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: { ticketId, pedidoId, ...data },
+      } as Parameters<TicketOperativoConsumer['consumir']>[0];
+    };
+    const fase = async (id: string) =>
+      (
+        await http()
+          .get(`/api/comercial/pedidos/${id}`)
+          .set(bearer([P.PEDIDOS_VER]))
+          .expect(200)
+      ).body.ticketOperativo;
+
+    it('guarda el ticket de Operaciones y su paso; el detalle del pedido lo muestra', async () => {
+      const id = await pedido();
+      expect(await fase(id)).toBeNull();
+      const ticket = uuidv7();
+      await ticketOperativo.consumir(evento('operaciones.pumping.ticket_creado', id, ticket));
+      expect(await fase(id)).toMatchObject({
+        origen: 'pumping',
+        ticketId: ticket,
+        pasoCodigo: 'revision_inicial',
+      });
+      const mover = evento('operaciones.pumping.paso_cambiado', id, ticket, {
+        desde: 'revision_inicial',
+        hacia: 'asignacion',
+      });
+      await ticketOperativo.consumir(mover);
+      await ticketOperativo.consumir(mover); // repetido: lo ignora el inbox
+      expect(await fase(id)).toMatchObject({ pasoCodigo: 'asignacion' });
+      // un ticket_creado que llega tarde no hace retroceder el paso
+      await ticketOperativo.consumir(evento('operaciones.pumping.ticket_creado', id, ticket));
+      expect(await fase(id)).toMatchObject({ pasoCodigo: 'asignacion' });
+    });
+
+    it('FCR trae su paso en el ticket creado y un pedido inexistente se ignora', async () => {
+      const id = await pedido();
+      const ticket = uuidv7();
+      await ticketOperativo.consumir(
+        evento('operaciones.fcr.ticket_creado', id, ticket, { paso: 'revision_inicial_fcr' }),
+      );
+      expect(await fase(id)).toMatchObject({ origen: 'fcr', pasoCodigo: 'revision_inicial_fcr' });
+      await expect(
+        ticketOperativo.consumir(
+          evento('operaciones.pumping.paso_cambiado', uuidv7(), ticket, { hacia: 'asignacion' }),
+        ),
+      ).resolves.toBeUndefined();
     });
   });
 

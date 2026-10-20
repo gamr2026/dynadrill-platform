@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * Ayuda de las pruebas de integración: las FK a `catalogos` e `identidad` exigen que los ids existan de verdad. Esto inserta
  * (con dyn_migrator) los registros maestros mínimos que usa cada prueba y los quita al final. Solo para pruebas.
@@ -229,15 +230,7 @@ export async function emitirGuiaDePrueba(
     `INSERT INTO comercial.guia_remision (id, pedido_id, numero, codigo, emision_id, fecha, lugar_origen_id, transportista_id,
                                           transportista_nombre, transportista_identificacion, emitida_por)
      VALUES (gen_random_uuid(), $1, 1, $2, gen_random_uuid(), current_date, $3, $4, $5, $6, $7)`,
-    [
-      pedidoId,
-      `GIT-${pedidoId.slice(0, 8)}-${Date.now() % 100000}`,
-      lugar,
-      t.id,
-      t.nombre,
-      t.identificacion,
-      actorId,
-    ],
+    [pedidoId, `GIT-${randomUUID()}`, lugar, t.id, t.nombre, t.identificacion, actorId],
   );
 }
 

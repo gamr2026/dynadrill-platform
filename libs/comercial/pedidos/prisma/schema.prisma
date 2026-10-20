@@ -184,7 +184,22 @@ model ProcesoHistorial {
 // lo que decían al emitirse.
 // ---------------------------------------------------------------------------------------------------------------
 
+/// El ticket de Operaciones del pedido y el paso en que va (solo el código; el nombre es del catálogo de Operaciones).
+model PedidoTicketOperativo {
+  pedidoId      String          @id @map("pedido_id") @db.Uuid
+  pedido        Pedido          @relation(fields: [pedidoId], references: [id])
+  origen        OrigenOperativo
+  ticketId      String          @map("ticket_id") @db.Uuid
+  pasoCodigo    String          @map("paso_codigo")
+  actualizadoAt DateTime        @default(now()) @map("actualizado_at") @db.Timestamptz(6)
+
+  @@map("pedido_ticket_operativo")
+  @@schema("comercial")
+}
+
 model Pedido {
+  /// El ticket de Operaciones que lo atiende (si ya se abrió).
+  ticketOperativo PedidoTicketOperativo?
   id        String   @id @db.Uuid
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy String?  @map("created_by") @db.Uuid

@@ -34,6 +34,7 @@ export type PedidoConHijos = Prisma.PedidoGetPayload<{
     documentos: { include: { archivo: true } };
     tiposServicio: { include: { tipo: true; subtipos: { include: { catalogo: true } } } };
     estadoRef: true;
+    ticketOperativo: true;
   };
 }>;
 
@@ -125,6 +126,15 @@ export function toDetalle(p: PedidoConHijos) {
     id: p.id,
     codigo: p.codigo,
     ticketNumero: p.ticketNumero,
+    /** El ticket de Operaciones que lo atiende y el código de su paso actual (el nombre lo pone el frontend desde el catálogo). */
+    ticketOperativo: p.ticketOperativo
+      ? {
+          origen: p.ticketOperativo.origen,
+          ticketId: p.ticketOperativo.ticketId,
+          pasoCodigo: p.ticketOperativo.pasoCodigo,
+          actualizadoAt: p.ticketOperativo.actualizadoAt,
+        }
+      : null,
     version: p.version,
     origen: p.origen,
     estado: p.estado,
