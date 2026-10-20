@@ -31,6 +31,8 @@ export interface PedidoAbiertoData {
   numeroContrato?: string | null;
   fechaInicioServicio?: string | null;
   fechaFinServicio?: string | null;
+  /** Representante del cliente en campo (Company Man): solo el id. */
+  representanteCampoId?: string | null;
   as2Numero?: string | null;
 }
 
@@ -51,7 +53,14 @@ const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 /** Orden de los pasos desde los que al Conductor le toca su gerenciamiento de viaje (ver `pumping.paso`). */
 const ORDEN_TRASLADO_SALIDA = 30;
 const ORDEN_EJECUCION = 50;
-const NOMBRES = { cliente: true, campo: true, bloque: true, pozo: true, taladro: true } as const;
+const NOMBRES = {
+  cliente: true,
+  campo: true,
+  bloque: true,
+  pozo: true,
+  taladro: true,
+  representanteCampo: true,
+} as const;
 const INCLUDE_LISTA = {
   ...NOMBRES,
   paso: { include: { roles: true } },
@@ -166,6 +175,7 @@ export class TicketsService {
         fechaFinServicio: d.fechaFinServicio
           ? new Date(`${d.fechaFinServicio}T00:00:00.000Z`)
           : null,
+        representanteCampoId: d.representanteCampoId ?? null,
         tiposServicio: {
           create: [...new Set(d.tiposServicio ?? [])].map((tipoCodigo) => ({ tipoCodigo })),
         },
@@ -412,6 +422,9 @@ export class TicketsService {
       as2Numero: t.as2Numero,
       clienteRuc: t.cliente?.identificacion ?? null,
       bloque: t.bloque?.nombre ?? null,
+      representanteCampo: t.representanteCampo
+        ? { id: t.representanteCampo.id, nombre: t.representanteCampo.nombre }
+        : null,
       version: t.version,
       /** ¿Esta persona es de un rol que atiende el paso actual? */
       puedeActuar: actua,

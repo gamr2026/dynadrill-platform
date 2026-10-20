@@ -61,6 +61,7 @@ const CONDUCTORES = [
 ];
 const SUPERVISOR_PUMPING = { id: uuidv7(), nombre: 'Pablo Supervisor Pumping' };
 const SIN_ROL_OPERADOR = { id: uuidv7(), nombre: 'Vera Ventas Real' };
+const COMPANY_MAN = { id: uuidv7(), nombre: `Ing. Company Man IT ${Date.now()}` };
 const CLIENTE = { id: uuidv7(), nombre: `Cliente IT ${n}`, ruc: `88${String(n).slice(-11)}` };
 const CAMPO = { id: uuidv7(), nombre: `SACHA ${n}` };
 const BLOQUE = { id: uuidv7(), nombre: `Bloque 60 ${n}` };
@@ -147,6 +148,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         taladroId: null,
         rigless: true,
         numeroContrato: 'CT-IT',
+        representanteCampoId: COMPANY_MAN.id,
         fechaInicioServicio: '2026-11-05',
         as2Numero: null,
         ...extra.data,
@@ -157,6 +159,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
   beforeAll(async () => {
     await sembrarMaestros(admin, MAESTROS);
+    await admin.query(
+      "INSERT INTO catalogos.persona_contacto (id, tipo, nombre) VALUES ($1, 'representante_campo', $2)",
+      [COMPANY_MAN.id, COMPANY_MAN.nombre],
+    );
     Object.assign(process.env, {
       SERVICE_NAME: 'operaciones-test',
       PORT: '3196',
@@ -218,6 +224,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     ]);
     if (pedidos.length)
       await admin.query('DELETE FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
+    await admin.query('DELETE FROM catalogos.persona_contacto WHERE id = $1', [COMPANY_MAN.id]);
     await admin.query(
       "DELETE FROM inventario.movimiento WHERE articulo_id IN (SELECT id FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1)",
       [String(n)],
@@ -270,6 +277,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       version: 1,
     });
     expect(t.fechaInicioServicio?.toISOString().slice(0, 10)).toBe('2026-11-05');
+    // el Company Man del pedido llega al ticket (solo el id; el nombre sale del catálogo)
+    expect(t.representanteCampoId).toBe(COMPANY_MAN.id);
+    const detalle = await http()
+      .get(`/api/operaciones/pumping/tickets/${t.id}`)
+      .set(jefe())
+      .expect(200);
+    expect(detalle.body.representanteCampo).toEqual({
+      id: COMPANY_MAN.id,
+      nombre: COMPANY_MAN.nombre,
+    });
     expect(t.tiposServicio.map((x) => x.tipoCodigo).sort()).toEqual(['nitrogeno', 'pumping']);
     expect(t.historial).toHaveLength(1);
     expect(t.historial[0]).toMatchObject({

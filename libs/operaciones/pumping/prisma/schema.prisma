@@ -199,6 +199,9 @@ model Ticket {
   pozo           CatPozo?    @relation(fields: [pozoId], references: [id])
   taladroId      String?     @map("taladro_id") @db.Uuid
   taladro        CatTaladro? @relation(fields: [taladroId], references: [id])
+  /// Representante del cliente en campo (Company Man), según el pedido.
+  representanteCampoId String?          @map("representante_campo_id") @db.Uuid
+  representanteCampo   CatPersonaContacto? @relation(fields: [representanteCampoId], references: [id])
   rigless        Boolean @default(false)
   numeroContrato String? @map("numero_contrato")
   as2Numero      String? @map("as2_numero")
@@ -832,6 +835,15 @@ model CatTaladro {
   tickets Ticket[]
 
   @@map("taladro")
+  @@schema("catalogos")
+}
+
+model CatPersonaContacto {
+  id      String   @id @db.Uuid
+  nombre  String
+  tickets Ticket[]
+
+  @@map("persona_contacto")
   @@schema("catalogos")
 }
 

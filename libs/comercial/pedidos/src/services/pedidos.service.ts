@@ -822,6 +822,8 @@ export class PedidosService {
         taladroId: p.taladroId,
         rigless: p.rigless,
         numeroContrato: p.numeroContrato,
+        // el Company Man: Pumping lo muestra en el reporte diario (solo el id; el nombre sale del catálogo)
+        representanteCampoId: p.representanteCampoId,
         fechaInicioServicio: p.fechaInicioServicio?.toISOString().slice(0, 10) ?? null,
         fechaFinServicio: p.fechaFinServicio?.toISOString().slice(0, 10) ?? null,
         as2Numero: p.as2Numero,
