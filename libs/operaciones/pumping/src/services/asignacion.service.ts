@@ -22,6 +22,8 @@ import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
 export interface AsignacionEntrada {
   supervisorId: string;
   operadores: Array<{ usuarioId: string; vehiculoId: string }>;
+  /** El conductor de cada unidad (uno por unidad): es el responsable de su inspección y de su gerenciamiento de viaje. */
+  conductores: Array<{ usuarioId: string; vehiculoId: string }>;
   quimicos?: LineaDeTicket[];
   /** Archivo (de `archivos`) con el documento de mezcla: obligatorio si hay químicos. */
   documentoMezclaId?: string | null;
@@ -33,6 +35,19 @@ const PASO_SIGUIENTE = 'traslado_salida';
 /** Roles de cuenta que pueden ser supervisor / operador de un servicio. */
 const ROLES_SUPERVISOR = ['supervisor', 'supervisor_pumping'];
 const ROLES_OPERADOR = ['operador'];
+const ROLES_CONDUCTOR = ['conductor'];
+
+/** Quien ya está en otro ticket sin cerrar cuyas fechas se cruzan con las de este. */
+export interface PersonaOcupada {
+  usuarioId: string;
+  ticketId: string;
+  ticketNumero: number | null;
+  pedidoCodigo: string;
+  /** Fin del servicio del otro ticket (día en que se libera); nulo si no hay fecha o el servicio ya pasó su fecha sin cerrarse. */
+  liberaEl: string | null;
+}
+
+const dia = (d: Date) => d.toISOString().slice(0, 10);
 
 /**
  * Asignación del Jefe de Base: supervisor y operadores, cada uno con su unidad. Al completarla el ticket pasa a "Traslado de salida",
@@ -53,13 +68,30 @@ export class AsignacionService {
   ) {}
 
   async asignar(id: string, entrada: AsignacionEntrada, actor: AuthUser) {
-    const { supervisorId, operadores, quimicos = [], documentoMezclaId = null } = entrada;
-    const operadorIds = operadores.map((o) => o.usuarioId);
-    const personasIds = [supervisorId, ...operadorIds];
+    const {
+      supervisorId,
+      operadores,
+      conductores,
+      quimicos = [],
+      documentoMezclaId = null,
+    } = entrada;
+    const personasIds = [
+      supervisorId,
+      ...operadores.map((o) => o.usuarioId),
+      ...conductores.map((c) => c.usuarioId),
+    ];
     if (!operadores.length) throw new BadRequestException('Indique al menos un operador');
     if (new Set(personasIds).size !== personasIds.length)
       throw new BadRequestException('Una misma persona no puede asignarse dos veces');
     const unidadIds = [...new Set(operadores.map((o) => o.vehiculoId))];
+    // cada unidad lleva un conductor (y solo uno)
+    const unidadesConductor = conductores.map((c) => c.vehiculoId);
+    if (
+      new Set(unidadesConductor).size !== unidadesConductor.length ||
+      unidadesConductor.length !== unidadIds.length ||
+      unidadIds.some((u) => !unidadesConductor.includes(u))
+    )
+      throw new BadRequestException('Indique un conductor por cada unidad asignada');
     if (quimicos.length && !documentoMezclaId) {
       throw new BadRequestException({
         message: 'Adjunte el documento de mezcla: es obligatorio cuando se asignan químicos',
@@ -75,6 +107,7 @@ export class AsignacionService {
         id,
         supervisorId,
         operadores,
+        conductores,
         unidadIds,
         personasIds,
         quimicos,
@@ -109,6 +142,7 @@ export class AsignacionService {
     id: string,
     supervisorId: string,
     operadores: AsignacionEntrada['operadores'],
+    conductores: AsignacionEntrada['conductores'],
     unidadIds: string[],
     personasIds: string[],
     quimicos: LineaDeTicket[],
@@ -153,6 +187,26 @@ export class AsignacionService {
         ...o,
         persona: persona(o.usuarioId, 'operador', ROLES_OPERADOR),
       }));
+      const equipoConductor = conductores.map((c) => ({
+        ...c,
+        persona: persona(c.usuarioId, 'conductor', ROLES_CONDUCTOR),
+      }));
+      // quien ya está en otro ticket sin cerrar (con fechas que se cruzan) no puede asignarse hasta que se libere
+      const ocupadas = await this.ocupadasPor(tx, id, personasIds);
+      if (ocupadas.length) {
+        const nombres = ocupadas.map((o) => {
+          const u = personas.find((x) => x.id === o.usuarioId);
+          const libera = o.liberaEl
+            ? `se libera el ${o.liberaEl}`
+            : 'se libera al cerrar ese ticket';
+          return `${u?.nombre ?? o.usuarioId} (ticket ${o.ticketNumero ?? o.pedidoCodigo}, ${libera})`;
+        });
+        throw new ConflictException({
+          message: `Ya están asignados a otro ticket: ${nombres.join('; ')}`,
+          code: 'PERSONAL_OCUPADO',
+          ocupados: ocupadas,
+        });
+      }
       const unidades = await tx.catVehiculo.findMany({ where: { id: { in: unidadIds } } });
       if (unidades.length !== unidadIds.length || unidades.some((u) => !u.habilitado)) {
         throw new BadRequestException(
@@ -186,6 +240,13 @@ export class AsignacionService {
             vehiculoId: o.vehiculoId,
             asignadoPor: actor.id,
           })),
+          ...equipoConductor.map((c) => ({
+            ticketId: id,
+            usuarioId: c.persona.id,
+            rol: 'conductor' as const,
+            vehiculoId: c.vehiculoId,
+            asignadoPor: actor.id,
+          })),
         ],
       });
 
@@ -201,7 +262,7 @@ export class AsignacionService {
           ticketId: id,
           pasoAnterior: PASO_ASIGNACION,
           pasoNuevo: PASO_SIGUIENTE,
-          motivo: `Asignado: supervisor ${supervisor.nombre}; ${equipo.length} operador(es); ${unidades.length} unidad(es)`,
+          motivo: `Asignado: supervisor ${supervisor.nombre}; ${equipo.length} operador(es); ${equipoConductor.length} conductor(es); ${unidades.length} unidad(es)`,
           actorId: actor.id,
           actorRol: actor.roleCode,
           origen: 'manual',
@@ -256,16 +317,25 @@ export class AsignacionService {
             operadores: equipo
               .map((o) => `${o.persona.nombre} (${placaDe(o.vehiculoId)})`)
               .join(', '),
+            conductores: equipoConductor
+              .map((c) => `${c.persona.nombre} (${placaDe(c.vehiculoId)})`)
+              .join(', '),
             unidades: unidades.map((u) => u.placa).join(', '),
             // Las cuentas elegidas: a ellas (y solo a ellas) se les avisa, con la plantilla de su rol de asignación. Los demás módulos
             // (QHSE: EPI de cada operador; Mantenimiento: inspección de cada unidad) abren sus casos con `operadores` y `unidadesIds`.
             asignados: [
               { usuarioId: supervisor.id, rolCodigo: 'supervisor' },
               ...equipo.map((o) => ({ usuarioId: o.persona.id, rolCodigo: 'operador' })),
+              ...equipoConductor.map((c) => ({ usuarioId: c.persona.id, rolCodigo: 'conductor' })),
             ],
             operadoresUnidades: equipo.map((o) => ({
               usuarioId: o.persona.id,
               vehiculoId: o.vehiculoId,
+            })),
+            // el conductor de cada unidad es el responsable de su inspección (Flota abre el caso a su nombre)
+            conductoresUnidades: equipoConductor.map((c) => ({
+              usuarioId: c.persona.id,
+              vehiculoId: c.vehiculoId,
             })),
             conQuimicos: quimicos.length > 0,
           },
@@ -274,5 +344,68 @@ export class AsignacionService {
         }),
       );
     });
+  }
+
+  /** Personas no disponibles para asignar a este ticket (para la pantalla de asignación). */
+  personalOcupado(ticketId: string) {
+    return this.ocupadasPor(this.prisma, ticketId);
+  }
+
+  /**
+   * Personas (de las indicadas, o todas las asignadas en tickets abiertos) que están en otro ticket sin cerrar cuyas fechas se cruzan con
+   * las de este. Un ticket libera a su personal el día de fin del servicio (el del pedido); si ese día pasó y el ticket sigue abierto, hasta
+   * que se cierre. Sin fechas se asume lo más estricto: ocupado hasta el cierre.
+   */
+  async ocupadasPor(
+    db: Pick<PrismaService, 'ticket' | 'ticketPersona'>,
+    ticketId: string,
+    usuarioIds?: string[],
+  ): Promise<PersonaOcupada[]> {
+    const mio = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    if (!mio) throw new NotFoundException('El ticket no existe');
+    const hoy = dia(new Date());
+    const miInicio = mio.fechaInicioServicio ? dia(mio.fechaInicioServicio) : hoy;
+    const miFin = mio.fechaFinServicio ? dia(mio.fechaFinServicio) : miInicio;
+    const filas = await db.ticketPersona.findMany({
+      where: {
+        ticketId: { not: ticketId },
+        ...(usuarioIds ? { usuarioId: { in: usuarioIds } } : {}),
+        ticket: { paso: { terminal: false } },
+      },
+      select: {
+        usuarioId: true,
+        ticket: {
+          select: {
+            id: true,
+            ticketNumero: true,
+            pedidoCodigo: true,
+            fechaInicioServicio: true,
+            fechaFinServicio: true,
+          },
+        },
+      },
+    });
+    const ocupadas: PersonaOcupada[] = [];
+    for (const f of filas) {
+      const o = f.ticket;
+      const oInicio = o.fechaInicioServicio ? dia(o.fechaInicioServicio) : null;
+      const oFin = o.fechaFinServicio ? dia(o.fechaFinServicio) : null;
+      // si su servicio ya pasó su fecha de fin y sigue abierto, la persona sigue ocupada hasta que se cierre
+      const liberaEl = oFin && oFin >= hoy ? oFin : null;
+      const seCruza =
+        (oInicio === null || oInicio <= miFin) && (liberaEl === null || liberaEl >= miInicio);
+      if (!seCruza) continue;
+      ocupadas.push({
+        usuarioId: f.usuarioId,
+        ticketId: o.id,
+        ticketNumero: o.ticketNumero,
+        pedidoCodigo: o.pedidoCodigo,
+        liberaEl,
+      });
+    }
+    return ocupadas;
   }
 }

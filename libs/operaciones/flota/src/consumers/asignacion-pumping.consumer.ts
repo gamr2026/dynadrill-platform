@@ -49,9 +49,11 @@ export class AsignacionPumpingConsumer implements OnApplicationBootstrap {
       await this.prisma.$transaction(async (tx) => {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
           const ticketId = String(event.data['ticketId'] ?? '');
-          const pares = Array.isArray(event.data['operadoresUnidades'])
-            ? event.data['operadoresUnidades'].filter(esEmparejamiento)
-            : [];
+          // el responsable de la inspección de cada unidad es su conductor; en asignaciones anteriores (sin conductor) fue el operador
+          const delEvento = (clave: string) =>
+            Array.isArray(event.data[clave]) ? event.data[clave].filter(esEmparejamiento) : [];
+          const conductores = delEvento('conductoresUnidades');
+          const pares = conductores.length ? conductores : delEvento('operadoresUnidades');
           if (!ticketId) {
             this.logger.warn(`${event.type}: falta ticketId; se ignora`);
             return;

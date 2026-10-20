@@ -10,12 +10,13 @@ const DATOS_ASIGNACION =
   FILA('Taladro', 'taladro') +
   FILA('Supervisor', 'supervisor') +
   FILA('Operadores', 'operadores') +
+  FILA('Conductores', 'conductores') +
   FILA('Unidades', 'unidades') +
   FILA('Inicio del servicio', 'fechaInicioServicio') +
   '</table>';
 const TEXTO_ASIGNACION =
   'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nCampo: {{campo}}\nPozo: {{pozo}}\nTaladro: {{taladro}}\n' +
-  'Supervisor: {{supervisor}}\nOperadores: {{operadores}}\nUnidades: {{unidades}}\nInicio del servicio: {{fechaInicioServicio}}';
+  'Supervisor: {{supervisor}}\nOperadores: {{operadores}}\nConductores: {{conductores}}\nUnidades: {{unidades}}\nInicio del servicio: {{fechaInicioServicio}}';
 
 /**
  * Plantillas del módulo Pumping. Cada regla liga un evento y un rol con el texto que ese cargo debe leer; para que otro cargo reciba el
@@ -94,6 +95,27 @@ export const PLANTILLAS_PUMPING: PlantillaDef[] = [
     tono: 'info',
     evento: 'operaciones.pumping.asignacion_realizada',
     rol: 'operador',
+  },
+  {
+    codigo: 'pumping_asignacion_conductor',
+    descripcion:
+      'El Jefe de Base asignó a un Conductor a una unidad de un servicio de Pumping (solo a la cuenta elegida).',
+    asunto: 'Fue asignado como conductor del servicio {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{asignadoPor}} lo asignó como <strong>Conductor</strong> del siguiente servicio de Pumping:</p>' +
+      DATOS_ASIGNACION +
+      '<p>Debe realizar la inspección de su unidad y solicitar su Gerenciamiento de Viaje. Su supervisor es <strong>{{supervisor}}</strong>.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{asignadoPor}} lo asignó como Conductor del siguiente servicio de Pumping:\n\n' +
+      TEXTO_ASIGNACION +
+      '\n\nDebe realizar la inspección de su unidad y solicitar su Gerenciamiento de Viaje. Su supervisor es {{supervisor}}.',
+    tituloAviso: 'Asignado como conductor: {{pedidoCodigo}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} · Unidades {{unidades}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'info',
+    evento: 'operaciones.pumping.asignacion_realizada',
+    rol: 'conductor',
   },
   {
     codigo: 'pumping_salida_reportada_supervisor',

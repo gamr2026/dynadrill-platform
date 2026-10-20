@@ -429,6 +429,30 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       expect(await casos()).toHaveLength(2);
     });
 
+    it('si la asignación trae conductor por unidad, él es el responsable del caso (no el operador)', async () => {
+      const e = createEvent({
+        type: 'operaciones.pumping.asignacion_realizada',
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: {
+          ticketId,
+          operadoresUnidades: [{ usuarioId: OPERADOR.id, vehiculoId: VEHICULO.id }],
+          conductoresUnidades: [{ usuarioId: CONDUCTOR.id, vehiculoId: VEHICULO.id }],
+        },
+        actor: { userId: SUPERVISOR.id, role: 'jefe_base' },
+      });
+      eventosEnviados.push(e.id);
+      await app.get(AsignacionPumpingConsumer).consumir(e);
+      const c = await casos();
+      expect(c).toHaveLength(1);
+      expect(c[0].operador.id).toBe(CONDUCTOR.id);
+      // lo deja como estaba para las pruebas siguientes
+      await asignacion([
+        { usuarioId: OPERADOR.id, vehiculoId: VEHICULO.id },
+        { usuarioId: OPERADOR.id, vehiculoId: VEHICULO_2.id },
+      ]);
+    });
+
     it('un evento de un ticket que no existe se ignora sin error', async () => {
       const e = createEvent({
         type: 'operaciones.pumping.asignacion_realizada',

@@ -73,6 +73,13 @@ export class AsignarTicketDto {
   @ValidateNested({ each: true })
   @Type(() => OperadorUnidadDto)
   operadores!: OperadorUnidadDto[];
+  /** El conductor de cada unidad (uno por unidad; cuenta con rol conductor). */
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => OperadorUnidadDto)
+  conductores!: OperadorUnidadDto[];
   /** Químicos que salen de bodega a cargo del ticket (opcional). */
   @IsOptional()
   @IsArray()
@@ -136,6 +143,13 @@ export class TicketsController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.asignacion.asignar(id, dto, actor);
+  }
+
+  /** Quién ya está en otro ticket sin cerrar (con fechas que se cruzan): la asignación los muestra como no disponibles. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('tickets/:id/personal-ocupado')
+  personalOcupado(@Param('id', ParseUUIDPipe) id: string) {
+    return this.asignacion.personalOcupado(id);
   }
 
   /** El Supervisor del equipo aprueba la inspección de una unidad al revisar los reportes de salida. */

@@ -55,6 +55,10 @@ const OPERADORES = [
   { id: uuidv7(), nombre: 'Oscar Operador' },
   { id: uuidv7(), nombre: 'Olga Operadora' },
 ];
+const CONDUCTORES = [
+  { id: uuidv7(), nombre: 'Carlos Conductor' },
+  { id: uuidv7(), nombre: 'Clara Conductora' },
+];
 const SUPERVISOR_PUMPING = { id: uuidv7(), nombre: 'Pablo Supervisor Pumping' };
 const SIN_ROL_OPERADOR = { id: uuidv7(), nombre: 'Vera Ventas Real' };
 const CLIENTE = { id: uuidv7(), nombre: `Cliente IT ${n}`, ruc: `88${String(n).slice(-11)}` };
@@ -77,6 +81,7 @@ const MAESTROS: MaestrosDePrueba = {
     { id: SUPERVISORA.id, nombre: SUPERVISORA.nombre, rol: 'supervisor' },
     { id: SUPERVISOR_PUMPING.id, nombre: SUPERVISOR_PUMPING.nombre, rol: 'supervisor_pumping' },
     ...OPERADORES.map((o) => ({ id: o.id, nombre: o.nombre, rol: 'operador' })),
+    ...CONDUCTORES.map((c) => ({ id: c.id, nombre: c.nombre, rol: 'conductor' })),
     { id: SIN_ROL_OPERADOR.id, nombre: SIN_ROL_OPERADOR.nombre, rol: 'ingenieria_ventas' },
   ],
   clientes: [CLIENTE],
@@ -113,6 +118,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   const eventos: string[] = [];
   /** Números de ticket de prueba (únicos): en producción los reserva `comercial` del secuencial de la prefactura. */
   let ticketSeq = 800_000 + (n % 100_000) * 10;
+  let diaSeq = 0;
 
   const evento = (
     extra: Partial<EventEnvelope> & { data?: Record<string, unknown> } = {},
@@ -399,6 +405,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   // ------------------------------------------------------------------------------------------------------------------
   const OP1 = OPERADORES[0];
   const OP2 = OPERADORES[1];
+  const CO1 = CONDUCTORES[0];
+  const CO2 = CONDUCTORES[1];
   const como = (
     roleCode: string,
     id: string,
@@ -416,6 +424,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       { usuarioId: OP1.id, vehiculoId: VEHICULO.id },
       { usuarioId: OP2.id, vehiculoId: VEHICULO_2.id },
     ],
+    conductores: [
+      { usuarioId: CO1.id, vehiculoId: VEHICULO.id },
+      { usuarioId: CO2.id, vehiculoId: VEHICULO_2.id },
+    ],
   };
   const base = '/api/operaciones/pumping';
 
@@ -424,6 +436,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const e = evento();
     await consumer.consumir(e);
     const t = await prisma.ticket.findUniqueOrThrow({ where: { pedidoId: e.subject.id } });
+    // cada ticket de prueba tiene su propio día de servicio: el personal no se asigna a dos tickets abiertos que se cruzan
+    const dia = new Date(Date.UTC(2027, 0, 1 + diaSeq++));
+    await prisma.ticket.update({
+      where: { id: t.id },
+      data: { fechaInicioServicio: dia, fechaFinServicio: dia },
+    });
     const url = `${base}/tickets/${t.id}`;
     await http().post(`${url}/avanzar`).set(jefe()).send({ hacia: 'asignacion' }).expect(201);
     return { id: t.id, url, pedidoId: e.subject.id as string };
@@ -550,8 +568,34 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       })
       .expect(400); // un operador no es supervisor
 
+    await http()
+      .post(url)
+      .set(jefe())
+      .send({ ...cuerpoAsignacion, conductores: [] })
+      .expect(400); // sin conductores
+    await http()
+      .post(url)
+      .set(jefe())
+      .send({ ...cuerpoAsignacion, conductores: [cuerpoAsignacion.conductores[0]] })
+      .expect(400); // la segunda unidad no tiene conductor
+    await http()
+      .post(url)
+      .set(jefe())
+      .send({
+        ...cuerpoAsignacion,
+        conductores: [
+          cuerpoAsignacion.conductores[0],
+          { usuarioId: SIN_ROL_OPERADOR.id, vehiculoId: VEHICULO_2.id },
+        ],
+      })
+      .expect(400); // no es conductor
+
     const r = await http().post(url).set(jefe()).send(cuerpoAsignacion).expect(201);
     expect(r.body.paso).toMatchObject({ codigo: 'traslado_salida' });
+    expect(r.body.asignacion.conductores).toEqual([
+      { usuarioId: CO1.id, nombre: CO1.nombre, vehiculoId: VEHICULO.id, placa: VEHICULO.placa },
+      { usuarioId: CO2.id, nombre: CO2.nombre, vehiculoId: VEHICULO_2.id, placa: VEHICULO_2.placa },
+    ]);
     expect(r.body.asignacion.supervisor).toEqual({
       usuarioId: SUPERVISORA.id,
       nombre: SUPERVISORA.nombre,
@@ -594,7 +638,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
         { usuarioId: OP1.id, rolCodigo: 'operador' },
         { usuarioId: OP2.id, rolCodigo: 'operador' },
+        { usuarioId: CO1.id, rolCodigo: 'conductor' },
+        { usuarioId: CO2.id, rolCodigo: 'conductor' },
       ].sort((a, b) => 0 * (a.usuarioId < b.usuarioId ? -1 : 1)),
+    );
+    // el conductor de cada unidad es el responsable de su inspección (Flota abre el caso a su nombre)
+    expect(d.conductoresUnidades).toEqual(
+      expect.arrayContaining([
+        { usuarioId: CO1.id, vehiculoId: VEHICULO.id },
+        { usuarioId: CO2.id, vehiculoId: VEHICULO_2.id },
+      ]),
     );
     expect(d.operadoresUnidades).toEqual(
       expect.arrayContaining([
@@ -615,7 +668,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       usuarioId: SUPERVISOR_PUMPING.id,
       nombre: SUPERVISOR_PUMPING.nombre,
     });
-    expect(await prisma.ticketPersona.count({ where: { ticketId: t.id } })).toBe(3);
+    expect(await prisma.ticketPersona.count({ where: { ticketId: t.id } })).toBe(5); // supervisor, 2 operadores y 2 conductores
   });
 
   it('desde la asignación el ticket es del equipo asignado: lo ve en su bandeja y solo ellos lo mueven', async () => {
@@ -652,7 +705,69 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     });
   });
 
-  it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta es operador asignado, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
+  it('disponibilidad del personal: quien está en otro ticket sin cerrar con fechas que se cruzan no se puede asignar; se libera el día de fin del servicio o al cerrar', async () => {
+    const dia = (n: number) => new Date(Date.UTC(2028, 0, 1 + n));
+    const ventana = (id: string, ini: Date, fin: Date) =>
+      prisma.ticket.update({
+        where: { id },
+        data: { fechaInicioServicio: ini, fechaFinServicio: fin },
+      });
+    // la base trae tickets reales con su propio personal: aquí solo importa el de esta prueba
+    const equipo = [SUPERVISORA.id, OP1.id, OP2.id, CO1.id, CO2.id, SUPERVISOR_PUMPING.id];
+    const ocupados = async (id: string) =>
+      (
+        (await http().get(`${base}/tickets/${id}/personal-ocupado`).set(jefe()).expect(200))
+          .body as { usuarioId: string; ticketNumero: number | null; liberaEl: string | null }[]
+      ).filter((o) => equipo.includes(o.usuarioId));
+
+    const a = await ticketEnAsignacion();
+    await ventana(a.id, dia(0), dia(2));
+    await http().post(`${a.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(201);
+    const numeroA = (await prisma.ticket.findUniqueOrThrow({ where: { id: a.id } })).ticketNumero;
+
+    // otro ticket que se cruza (empieza el último día de A): nadie del equipo está disponible, y la asignación lo rechaza
+    const b = await ticketEnAsignacion();
+    await ventana(b.id, dia(2), dia(4));
+    const lista = await ocupados(b.id);
+    expect(lista.map((o) => o.usuarioId).sort()).toEqual(
+      [SUPERVISORA.id, OP1.id, OP2.id, CO1.id, CO2.id].sort(),
+    );
+    expect(lista[0]).toMatchObject({ ticketNumero: numeroA, liberaEl: '2028-01-03' });
+    const rechazo = await http()
+      .post(`${b.url}/asignar`)
+      .set(jefe())
+      .send(cuerpoAsignacion)
+      .expect(409);
+    expect(rechazo.body.code).toBe('PERSONAL_OCUPADO');
+    // un solo integrante ocupado basta para rechazar
+    await http()
+      .post(`${b.url}/asignar`)
+      .set(jefe())
+      .send({
+        ...cuerpoAsignacion,
+        supervisorId: SUPERVISOR_PUMPING.id,
+        operadores: [{ usuarioId: OP1.id, vehiculoId: VEHICULO.id }],
+        conductores: [{ usuarioId: CO1.id, vehiculoId: VEHICULO.id }],
+      })
+      .expect(409);
+
+    // al día siguiente del fin de A, el equipo ya está libre
+    await ventana(b.id, dia(3), dia(4));
+    expect(await ocupados(b.id)).toEqual([]);
+    await http().post(`${b.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(201);
+
+    // un ticket cerrado libera al personal aunque sus fechas se crucen
+    const c = await ticketEnAsignacion();
+    await ventana(c.id, dia(3), dia(4));
+    expect((await ocupados(c.id)).length).toBe(5); // B los tiene
+    await prisma.ticket.update({ where: { id: b.id }, data: { pasoCodigo: 'cierre' } });
+    expect(await ocupados(c.id)).toEqual([]);
+    await http().post(`${c.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(201);
+    // sin permiso no se consulta
+    await http().get(`${base}/tickets/${c.id}/personal-ocupado`).set(sinPermiso()).expect(403);
+  });
+
+  it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta está asignada como conductor u operador, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
     const t = await ticketEnTraslado();
     const permiso = [P.PUMPING_CONTEXTO_CONDUCTOR];
     const lista = async (h: Record<string, string>) =>
@@ -663,6 +778,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         destino: { pozo: { id: string } | null };
         serviciosPrincipales: { codigo: string; nombre: string }[];
       }[];
+    const delConductor = await lista(como('conductor', CO1.id, CO1.nombre, permiso));
+    expect(delConductor.map((x) => x.ticketId)).toContain(t.id);
     const mios = await lista(como('operador', OP1.id, OP1.nombre, permiso));
     const v = mios.find((x) => x.ticketId === t.id)!;
     expect(v).toBeDefined();

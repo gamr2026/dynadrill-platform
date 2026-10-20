@@ -121,6 +121,7 @@ enum PuntoHubodometro {
 enum RolAsignado {
   supervisor
   operador
+  conductor
 
   @@map("rol_asignado")
   @@schema("pumping")
@@ -202,6 +203,8 @@ model Ticket {
   numeroContrato String? @map("numero_contrato")
   as2Numero      String? @map("as2_numero")
   fechaInicioServicio DateTime? @map("fecha_inicio_servicio") @db.Date
+  /// Fin del servicio según el pedido: de aquí sale cuándo se libera el personal asignado (hasta el cierre del ticket si el servicio se alarga).
+  fechaFinServicio    DateTime? @map("fecha_fin_servicio") @db.Date
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

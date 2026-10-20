@@ -30,6 +30,7 @@ export interface PedidoAbiertoData {
   rigless?: boolean;
   numeroContrato?: string | null;
   fechaInicioServicio?: string | null;
+  fechaFinServicio?: string | null;
   as2Numero?: string | null;
 }
 
@@ -113,6 +114,7 @@ const resumen = (t: TicketLista) => ({
   taladro: t.rigless ? 'RIGLESS' : (t.taladro?.nombre ?? null),
   tiposServicio: t.tiposServicio.map((x) => x.tipoCodigo).sort(),
   fechaInicioServicio: aDia(t.fechaInicioServicio),
+  fechaFinServicio: aDia(t.fechaFinServicio),
   createdAt: t.createdAt,
 });
 
@@ -158,6 +160,9 @@ export class TicketsService {
         fechaInicioServicio: d.fechaInicioServicio
           ? new Date(`${d.fechaInicioServicio}T00:00:00.000Z`)
           : null,
+        fechaFinServicio: d.fechaFinServicio
+          ? new Date(`${d.fechaFinServicio}T00:00:00.000Z`)
+          : null,
         tiposServicio: {
           create: [...new Set(d.tiposServicio ?? [])].map((tipoCodigo) => ({ tipoCodigo })),
         },
@@ -191,6 +196,7 @@ export class TicketsService {
           tiposServicio: [...new Set(d.tiposServicio ?? [])],
           servicios: [...new Set(d.tiposServicio ?? [])].map(textoServicio).join(', '),
           fechaInicioServicio: d.fechaInicioServicio ?? null,
+          fechaFinServicio: d.fechaFinServicio ?? null,
         },
         // quien abrió el pedido: QHSE abre a su nombre el PTW del primer día
         ...(event.actor ? { actor: event.actor } : {}),
@@ -239,13 +245,13 @@ export class TicketsService {
   }
 
   /**
-   * Lectura mínima para el portal del Conductor (Flota, gerenciamiento de viaje): solo los tickets en los que la cuenta es operador
-   * asignado, aún sin cerrar, con lo necesario para autocompletar la solicitud. Los nombres salen de los catálogos (ids incluidos).
+   * Lectura mínima para el portal del Conductor (Flota, gerenciamiento de viaje): solo los tickets en los que la cuenta está asignada
+   * como conductor (o como operador), aún sin cerrar, con lo necesario para autocompletar la solicitud. Los nombres salen de los catálogos (ids incluidos).
    */
   async misViajes(usuarioId: string) {
     const filas = await this.prisma.ticket.findMany({
       where: {
-        personas: { some: { usuarioId, rol: 'operador' } },
+        personas: { some: { usuarioId, rol: { in: ['conductor', 'operador'] } } },
         paso: { terminal: false },
       },
       include: {
@@ -406,6 +412,14 @@ export class TicketsService {
             .map((p) => ({ usuarioId: p.usuarioId, nombre: p.usuario.nombre }))[0] ?? null,
         operadores: t.personas
           .filter((p) => p.rol === 'operador')
+          .map((p) => ({
+            usuarioId: p.usuarioId,
+            nombre: p.usuario.nombre,
+            vehiculoId: p.vehiculoId,
+            placa: p.vehiculo?.placa ?? null,
+          })),
+        conductores: t.personas
+          .filter((p) => p.rol === 'conductor')
           .map((p) => ({
             usuarioId: p.usuarioId,
             nombre: p.usuario.nombre,
