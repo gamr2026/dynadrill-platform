@@ -23,6 +23,12 @@ export class ListasPreciosController {
   }
 
   @RequirePermission(Permission.LISTAS_PRECIOS_VER)
+  @Get(':id')
+  detalle(@Param('id', ParseUUIDPipe) id: string) {
+    return this.listas.detalle(id);
+  }
+
+  @RequirePermission(Permission.LISTAS_PRECIOS_VER)
   @Get(':id/items')
   items(@Param('id', ParseUUIDPipe) id: string, @Query() q: ItemsListaQueryDto) {
     return this.listas.items(id, q);

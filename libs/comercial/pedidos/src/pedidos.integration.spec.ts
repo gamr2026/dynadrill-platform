@@ -1407,6 +1407,21 @@ run('pedidos (base de datos real)', () => {
       expect(pag.body).toMatchObject({ total: 3, page: 2, limit: 2 });
       expect(pag.body.items).toHaveLength(1);
       await http().get(`/api/comercial/listas-precios/${listaId}/items`).set(ventas()).expect(200);
+      // la cabecera trae los totales por tipo (cantidad y suma de precios) sin traer los ítems
+      const cab = await http()
+        .get(`/api/comercial/listas-precios/${listaId}`)
+        .set(ventas())
+        .expect(200);
+      expect(cab.body).toMatchObject({
+        id: listaId,
+        numeroContrato: 'CT-2026-001',
+        activa: true,
+        items: 3,
+      });
+      expect(cab.body.servicios.cantidad + cab.body.materiales.cantidad).toBe(3);
+      expect(cab.body.materiales.suma).toBeGreaterThanOrEqual(12.5);
+      expect(ls.body[0].materiales).toEqual(cab.body.materiales);
+      await http().get(`/api/comercial/listas-precios/${id()}`).set(ventas()).expect(404);
     });
   });
 
