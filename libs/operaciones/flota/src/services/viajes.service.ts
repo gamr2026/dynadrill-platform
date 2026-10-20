@@ -370,6 +370,11 @@ export class ViajesService {
         include: {
           conductor: { select: { id: true, nombre: true } },
           unidad: { select: { id: true, codigo: true, vehiculoId: true } },
+          inspeccion: { select: { puntoPartida: true, destino: true } },
+          origenBodega: { select: { nombre: true } },
+          origenPozo: { select: { nombreCompleto: true } },
+          destinoBodega: { select: { nombre: true } },
+          destinoPozo: { select: { nombreCompleto: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -384,6 +389,17 @@ export class ViajesService {
       fecha: verDia(v.fecha),
       conductor: v.conductor,
       unidad: v.unidad,
+      // el viaje de un ticket toma sus extremos de la inspección de salida (al revés en el retorno)
+      origen:
+        v.origenBodega?.nombre ??
+        v.origenPozo?.nombreCompleto ??
+        (v.tipo === 'salida' ? v.inspeccion?.puntoPartida : v.inspeccion?.destino) ??
+        '—',
+      destino:
+        v.destinoBodega?.nombre ??
+        v.destinoPozo?.nombreCompleto ??
+        (v.tipo === 'salida' ? v.inspeccion?.destino : v.inspeccion?.puntoPartida) ??
+        '—',
       puntajeTotal: v.puntajeTotal,
       nivel: v.nivel,
       estado: v.decision ?? ('pendiente' as const),

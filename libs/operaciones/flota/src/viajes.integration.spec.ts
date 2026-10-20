@@ -637,6 +637,11 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       const salida = (await http().get(`${base}/${ok.body.id}`).set(conductor()).expect(200)).body;
       expect(salida.origen).toEqual({ tipo: 'texto', nombre: 'Base Coca' });
       expect(salida.destino).toEqual({ tipo: 'texto', nombre: 'Pozo Sacha 12' });
+      // la bandeja muestra el origen y el destino de la inspección
+      const fila = (
+        await http().get(`${base}?ticketId=${ticket}`).set(conductor()).expect(200)
+      ).body.find((x: { id: string }) => x.id === ok.body.id);
+      expect([fila.origen, fila.destino]).toEqual(['Base Coca', 'Pozo Sacha 12']);
       // en el retorno el recorrido va al revés
       const retorno = await solicitar(sinOrigen({ tipo: 'retorno' }));
       expect(retorno.status).toBe(201);
