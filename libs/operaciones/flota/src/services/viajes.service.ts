@@ -38,8 +38,9 @@ export interface SolicitarViajeEntrada {
   unidadId: string;
   fecha: string;
   motivo: string;
-  origen: ExtremoViaje;
-  destino: ExtremoViaje;
+  /** Sin ticket: una base o un pozo. Con ticket se omiten: salen de la inspección de salida de la unidad. */
+  origen?: ExtremoViaje;
+  destino?: ExtremoViaje;
   respuestas: Array<{ preguntaId: string; opcionId: string }>;
   pasajeros?: string | null;
   puedeCombinarViajes?: boolean | null;
@@ -158,8 +159,15 @@ export class ViajesService {
   }
 
   async solicitar(entrada: SolicitarViajeEntrada, actor: ActorViaje) {
-    this.validarExtremo(entrada.origen, 'origen');
-    this.validarExtremo(entrada.destino, 'destino');
+    // con ticket, el origen y el destino ya se definieron en la inspección de salida; sin ticket se indican aquí
+    const delTicket = !!entrada.ticketId && !entrada.origen && !entrada.destino;
+    if (!delTicket) {
+      if (!entrada.origen || !entrada.destino) {
+        throw new BadRequestException('Indique el origen y el destino del viaje');
+      }
+      this.validarExtremo(entrada.origen, 'origen');
+      this.validarExtremo(entrada.destino, 'destino');
+    }
     const motivo = entrada.motivo.trim();
     if (!motivo) throw new BadRequestException('Indique el motivo del viaje');
 
@@ -210,6 +218,26 @@ export class ViajesService {
         }
       }
 
+      let inspeccionId: string | null = null;
+      if (delTicket) {
+        const salida = await tx.inspeccionVehiculo.findFirst({
+          where: {
+            anuladaAt: null,
+            momento: 'salida',
+            caso: { ticketId: entrada.ticketId, unidadId: unidad.id },
+          },
+          select: { id: true },
+        });
+        if (!salida) {
+          throw new ConflictException({
+            message:
+              'Primero se debe registrar la inspección de salida de la unidad: de ahí salen el origen y el destino del viaje',
+            code: 'sin_inspeccion_de_salida',
+          });
+        }
+        inspeccionId = salida.id;
+      }
+
       const id = uuidv7();
       const telefonica = entrada.aprobacionTelefonica;
       const viaje = await tx.gerenciamientoViaje.create({
@@ -221,10 +249,11 @@ export class ViajesService {
           unidadId: unidad.id,
           fecha: new Date(`${entrada.fecha}T00:00:00.000Z`),
           motivo,
-          origenBodegaId: entrada.origen.bodegaId ?? null,
-          origenPozoId: entrada.origen.pozoId ?? null,
-          destinoBodegaId: entrada.destino.bodegaId ?? null,
-          destinoPozoId: entrada.destino.pozoId ?? null,
+          inspeccionId,
+          origenBodegaId: entrada.origen?.bodegaId ?? null,
+          origenPozoId: entrada.origen?.pozoId ?? null,
+          destinoBodegaId: entrada.destino?.bodegaId ?? null,
+          destinoPozoId: entrada.destino?.pozoId ?? null,
           puntajeTotal: puntos,
           nivel,
           pasajeros: entrada.pasajeros?.trim() || null,
@@ -380,6 +409,7 @@ export class ViajesService {
           },
         },
         ticket: { select: { ticketNumero: true } },
+        inspeccion: { select: { puntoPartida: true, destino: true } },
         origenBodega: { select: { id: true, nombre: true } },
         origenPozo: {
           select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
@@ -400,15 +430,22 @@ export class ViajesService {
     const extremo = (
       bodega: { id: string; nombre: string } | null,
       pozo: { id: string; nombreCompleto: string; campo: { nombre: string } | null } | null,
+      texto: string | null,
     ) =>
       bodega
         ? { tipo: 'bodega' as const, id: bodega.id, nombre: bodega.nombre }
-        : {
-            tipo: 'pozo' as const,
-            id: pozo!.id,
-            nombre: pozo!.nombreCompleto,
-            campo: pozo!.campo?.nombre ?? null,
-          };
+        : pozo
+          ? {
+              tipo: 'pozo' as const,
+              id: pozo.id,
+              nombre: pozo.nombreCompleto,
+              campo: pozo.campo?.nombre ?? null,
+            }
+          : // el viaje de un ticket toma sus extremos de la inspección de salida: en el retorno van al revés
+            { tipo: 'texto' as const, nombre: texto ?? '—' };
+    const salida = v.tipo === 'salida';
+    const partida = v.inspeccion?.puntoPartida ?? null;
+    const llegada = v.inspeccion?.destino ?? null;
     return {
       id: v.id,
       codigo: codigoDeViaje(v.numero),
@@ -425,8 +462,8 @@ export class ViajesService {
         categoriaPeso: v.unidad.categoriaPeso,
         placa: v.unidad.vehiculo?.placa ?? null,
       },
-      origen: extremo(v.origenBodega, v.origenPozo),
-      destino: extremo(v.destinoBodega, v.destinoPozo),
+      origen: extremo(v.origenBodega, v.origenPozo, salida ? partida : llegada),
+      destino: extremo(v.destinoBodega, v.destinoPozo, salida ? llegada : partida),
       puntajeTotal: v.puntajeTotal,
       nivel: v.nivel,
       descripcionNivel: umbrales.find((u) => u.nivel === v.nivel)?.descripcion ?? null,

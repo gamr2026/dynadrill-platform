@@ -59,8 +59,9 @@ export class SolicitarViajeDto {
   @IsUUID() unidadId!: string;
   @Matches(FECHA) fecha!: string;
   @IsString() @MinLength(3) @MaxLength(500) motivo!: string;
-  @ValidateNested() @Type(() => ExtremoViajeDto) origen!: ExtremoViajeDto;
-  @ValidateNested() @Type(() => ExtremoViajeDto) destino!: ExtremoViajeDto;
+  /** Con ticket se omiten: salen de la inspección de salida de la unidad. */
+  @IsOptional() @ValidateNested() @Type(() => ExtremoViajeDto) origen?: ExtremoViajeDto;
+  @IsOptional() @ValidateNested() @Type(() => ExtremoViajeDto) destino?: ExtremoViajeDto;
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(50)

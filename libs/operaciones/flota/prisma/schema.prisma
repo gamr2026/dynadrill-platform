@@ -382,6 +382,7 @@ model InspeccionVehiculo {
 
   resultados InspeccionVehiculoResultado[]
   revisiones InspeccionVehiculoRevision[]
+  viajes     GerenciamientoViaje[]
   lectura    UnidadLectura?
 
   @@unique([id, unidadId])
@@ -524,6 +525,9 @@ model GerenciamientoViaje {
   conductor                IdUsuario          @relation("viajeConductor", fields: [conductorId], references: [id])
   unidadId                 String             @map("unidad_id") @db.Uuid
   unidad                   Unidad             @relation(fields: [unidadId], references: [id])
+  /// Inspección de salida de la unidad: de ahí salen el origen y el destino cuando el viaje es de un ticket.
+  inspeccionId             String?            @map("inspeccion_id") @db.Uuid
+  inspeccion               InspeccionVehiculo? @relation(fields: [inspeccionId], references: [id])
   fecha                    DateTime           @db.Date
   motivo                   String
   origenBodegaId           String?            @map("origen_bodega_id") @db.Uuid

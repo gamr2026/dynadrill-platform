@@ -239,6 +239,10 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
     await q('DELETE FROM flota.gerenciamiento_viaje WHERE conductor_id = ANY($1::uuid[])', [
       conductores,
     ]);
+    await q(
+      'DELETE FROM flota.inspeccion_vehiculo WHERE caso_id IN (SELECT id FROM flota.inspeccion_caso WHERE ticket_id = ANY($1::uuid[]))',
+      [tickets],
+    );
     await q('DELETE FROM flota.inspeccion_caso WHERE ticket_id = ANY($1::uuid[])', [tickets]);
     await q('DELETE FROM flota.unidad_lectura WHERE unidad_id = ANY($1::uuid[])', [unidades]);
     await q(
@@ -602,6 +606,50 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
          VALUES ($1, 'salida', $2, $3, $4, current_date, 'Prueba', $5, $6, 0, 'bajo', $3)`,
         [uuidv7(), tickets[0], CONDUCTOR_2.id, servicioId, bodegaId, pozoId],
       );
+    });
+
+    it('con ticket, el origen y el destino salen de la inspección de salida de la unidad (sin ella no se solicita)', async () => {
+      const ticket = uuidv7();
+      tickets.push(ticket);
+      await admin.query(
+        "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo) VALUES ($1, $2, $3, 'traslado_salida')",
+        [ticket, uuidv7(), `PED-VJ-${n}-${ticket.slice(-4)}`],
+      );
+      const caso = uuidv7();
+      await admin.query(
+        'INSERT INTO flota.inspeccion_caso (id, ticket_id, unidad_id, operador_id) VALUES ($1, $2, $3, $4)',
+        [caso, ticket, unidadId, CONDUCTOR.id],
+      );
+      const sinOrigen = (extra: Record<string, unknown> = {}) => {
+        const { origen: _o, destino: _d, ...resto } = cuerpo({ ticketId: ticket, ...extra });
+        return resto;
+      };
+      const sin = await solicitar(sinOrigen());
+      expect([sin.status, sin.body.code]).toEqual([409, 'sin_inspeccion_de_salida']);
+
+      await admin.query(
+        `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, punto_partida, destino, conductor_id, created_by)
+         VALUES ($1, $2, $3, 'salida', now(), 'Base Coca', 'Pozo Sacha 12', $4, $4)`,
+        [uuidv7(), caso, unidadId, CONDUCTOR.id],
+      );
+      const ok = await solicitar(sinOrigen());
+      expect(ok.status).toBe(201);
+      const salida = (await http().get(`${base}/${ok.body.id}`).set(conductor()).expect(200)).body;
+      expect(salida.origen).toEqual({ tipo: 'texto', nombre: 'Base Coca' });
+      expect(salida.destino).toEqual({ tipo: 'texto', nombre: 'Pozo Sacha 12' });
+      // en el retorno el recorrido va al revés
+      const retorno = await solicitar(sinOrigen({ tipo: 'retorno' }));
+      expect(retorno.status).toBe(201);
+      const volver = (await http().get(`${base}/${retorno.body.id}`).set(conductor()).expect(200))
+        .body;
+      expect([volver.origen.nombre, volver.destino.nombre]).toEqual(['Pozo Sacha 12', 'Base Coca']);
+      // con un solo extremo indicado hay que indicar los dos
+      const mitad = await solicitar(
+        cuerpo({ ticketId: ticket, tipo: 'retorno', destino: undefined }),
+      );
+      expect(mitad.status).toBe(400);
+      const sinTicket = await solicitar(cuerpo({ ticketId: undefined, origen: undefined }));
+      expect(sinTicket.status).toBe(400);
     });
 
     it('el conductor solo solicita la unidad que se le asignó en el ticket', async () => {
