@@ -2250,9 +2250,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ]);
       const r2 = await adjuntar(t, { fecha: '2026-11-06', archivoId: b });
       expect(r2.body.map((d: { archivoId: string }) => d.archivoId)).toEqual([a, b]);
-      const lista = await http().get(`${t.url}/documentos`).set(supervisora());
+      // los ve quien tiene `pumping.documentos.ver` (el equipo y Facturación), aunque no pueda operar tickets
+      const facturacion = como('facturacion', uuidv7(), 'Fabiola Facturación', [
+        P.PUMPING_DOCUMENTOS_VER,
+      ]);
+      const lista = await http().get(`${t.url}/documentos`).set(facturacion);
       expect(lista.status).toBe(200);
       expect(lista.body).toHaveLength(2);
+      // operar tickets, sin ese permiso, no alcanza
+      expect((await http().get(`${t.url}/documentos`).set(supervisora())).status).toBe(403);
     });
 
     it('solo en su paso, por el Operador del equipo, con un archivo que existe y una fecha válida', async () => {

@@ -17,7 +17,8 @@ export class AdjuntarMonitoreoDto {
 export class DocumentosTicketController {
   constructor(private readonly documentos: DocumentosTicketService) {}
 
-  @RequirePermission(P.PUMPING_OPERAR)
+  /** Los ve quien trabaja el ticket y Facturación (que arma la prefactura con ellos): `pumping.documentos.ver`. */
+  @RequirePermission(P.PUMPING_DOCUMENTOS_VER)
   @Get()
   listar(@Param('id', ParseUUIDPipe) id: string) {
     return this.documentos.listar(id);
