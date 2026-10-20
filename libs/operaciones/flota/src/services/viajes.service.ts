@@ -142,6 +142,7 @@ export class ViajesService {
         codigo: true,
         nombre: true,
         categoriaPeso: true,
+        vehiculoId: true,
         vehiculo: { select: { placa: true } },
       },
     });
@@ -150,6 +151,8 @@ export class ViajesService {
       codigo: u.codigo,
       nombre: u.nombre,
       categoriaPeso: u.categoriaPeso,
+      /** Vehículo del catálogo de Pumping (el ticket asigna unidades por vehículo). */
+      vehiculoId: u.vehiculoId,
       placa: u.vehiculo?.placa ?? null,
     }));
   }
@@ -176,10 +179,24 @@ export class ViajesService {
       const { puntos, nivel } = await this.evaluar(tx, entrada.respuestas);
 
       if (entrada.ticketId) {
+        // el conductor solicita el viaje de la unidad que se le asignó en el ticket (Flota abrió su caso de inspección con esa asignación)
+        if (actor.roleCode === 'conductor') {
+          const asignado = await tx.inspeccionCaso.findFirst({
+            where: { ticketId: entrada.ticketId, unidadId: unidad.id, operadorId: actor.id },
+            select: { id: true },
+          });
+          if (!asignado) {
+            throw new ConflictException({
+              message: 'Usted no es el conductor asignado a esa unidad en este ticket',
+              code: 'conductor_no_asignado',
+            });
+          }
+        }
         const hay = await tx.gerenciamientoViaje.findFirst({
           // pendiente (decisión nula) o autorizado: `not` solo no sirve porque en SQL NULL <> 'rechazado' no es verdadero
           where: {
             ticketId: entrada.ticketId,
+            unidadId: unidad.id,
             tipo: entrada.tipo,
             OR: [{ decision: null }, { decision: 'autorizado' }],
           },
@@ -187,7 +204,7 @@ export class ViajesService {
         });
         if (hay) {
           throw new ConflictException({
-            message: `Este ticket ya tiene un gerenciamiento de viaje de ${entrada.tipo} vigente`,
+            message: `Esta unidad ya tiene un gerenciamiento de viaje de ${entrada.tipo} vigente en este ticket`,
             code: 'viaje_ya_solicitado',
           });
         }
@@ -323,7 +340,7 @@ export class ViajesService {
         },
         include: {
           conductor: { select: { id: true, nombre: true } },
-          unidad: { select: { id: true, codigo: true } },
+          unidad: { select: { id: true, codigo: true, vehiculoId: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -497,6 +514,7 @@ export class ViajesService {
           conductorId: true,
           decision: true,
           unidadId: true,
+          unidad: { select: { vehiculoId: true } },
         },
       });
       if (!v) throw new NotFoundException('El gerenciamiento de viaje no existe');
@@ -541,6 +559,8 @@ export class ViajesService {
           tipo: v.tipo,
           nivel: v.nivel,
           unidadId: v.unidadId,
+          // Pumping ubica el requisito de la unidad por el vehículo del catálogo
+          vehiculoId: v.unidad.vehiculoId,
           ...(motivo ? { motivo } : {}),
         });
       }

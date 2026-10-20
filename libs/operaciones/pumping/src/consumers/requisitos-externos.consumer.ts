@@ -67,12 +67,12 @@ export const REGLAS_EXTERNAS: Record<string, Regla> = {
   'flota.gerenciamiento_viaje.aprobado': {
     codigo: requisitoDeViaje,
     accion: 'cumplir',
-    por: 'ticket',
+    por: 'vehiculoId',
   },
   'flota.gerenciamiento_viaje.rechazado': {
     codigo: requisitoDeViaje,
     accion: 'reabrir',
-    por: 'ticket',
+    por: 'vehiculoId',
   },
 };
 

@@ -93,8 +93,8 @@ export const REQUISITOS: RequisitoDef[] = [
     codigo: REQ.gerenciamientoSalida,
     nombre: 'Gerenciamiento de viaje de salida aprobado',
     descripcion:
-      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de salida que solicitó el Conductor está aprobado.',
-    ambito: 'ticket',
+      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de salida que solicitó el Conductor de la unidad está aprobado.',
+    ambito: 'unidad',
     modulo: 'flota',
     paso: 'revision_reportes_salida',
   },
@@ -102,8 +102,8 @@ export const REQUISITOS: RequisitoDef[] = [
     codigo: REQ.gerenciamientoRetorno,
     nombre: 'Gerenciamiento de viaje de retorno aprobado',
     descripcion:
-      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de retorno que solicitó el Conductor está aprobado.',
-    ambito: 'ticket',
+      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de retorno que solicitó el Conductor de la unidad está aprobado.',
+    ambito: 'unidad',
     modulo: 'flota',
     paso: 'control_retorno',
   },

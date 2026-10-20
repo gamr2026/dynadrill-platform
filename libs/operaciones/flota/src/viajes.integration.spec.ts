@@ -213,6 +213,13 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       unidades.push(r.body.id);
     }
     [unidadId, servicioId] = unidades;
+    // Pumping asignó a CONDUCTOR como conductor de la unidad en cada ticket (Flota abre así el caso de inspección): solo él la solicita
+    for (const t of tickets) {
+      await admin.query(
+        'INSERT INTO flota.inspeccion_caso (id, ticket_id, unidad_id, operador_id) VALUES ($1, $2, $3, $4)',
+        [uuidv7(), t, unidadId, CONDUCTOR.id],
+      );
+    }
     preguntas = (await http().get(`${base}/preguntas`).set(conductor()).expect(200)).body;
   });
 
@@ -232,6 +239,7 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
     await q('DELETE FROM flota.gerenciamiento_viaje WHERE conductor_id = ANY($1::uuid[])', [
       conductores,
     ]);
+    await q('DELETE FROM flota.inspeccion_caso WHERE ticket_id = ANY($1::uuid[])', [tickets]);
     await q('DELETE FROM flota.unidad_lectura WHERE unidad_id = ANY($1::uuid[])', [unidades]);
     await q(
       "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'unidadId' = ANY($1::text[])",
@@ -576,7 +584,7 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       ).toMatch(/respuesta_opcion_fkey|duplicate key/);
     });
 
-    it('un solo gerenciamiento vigente por ticket y tipo (el rechazado deja el lugar libre)', async () => {
+    it('un solo gerenciamiento vigente por ticket, tipo y unidad (el rechazado deja el lugar libre; otra unidad tiene el suyo)', async () => {
       expect(
         await rechazoDeBase(
           admin.query(
@@ -586,7 +594,19 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
             [uuidv7(), tickets[0], CONDUCTOR.id, unidadId, bodegaId, pozoId],
           ),
         ),
-      ).toMatch(/ticket_tipo_vigente_key/);
+      ).toMatch(/ticket_tipo_unidad_vigente_key/);
+      // cada conductor solicita el de su unidad: otra unidad del mismo ticket y tipo sí cabe
+      await admin.query(
+        `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen_bodega_id,
+                                                 destino_pozo_id, puntaje_total, nivel, created_by)
+         VALUES ($1, 'salida', $2, $3, $4, current_date, 'Prueba', $5, $6, 0, 'bajo', $3)`,
+        [uuidv7(), tickets[0], CONDUCTOR_2.id, servicioId, bodegaId, pozoId],
+      );
+    });
+
+    it('el conductor solo solicita la unidad que se le asignó en el ticket', async () => {
+      const ajeno = await solicitar(cuerpo({ ticketId: tickets[3] }), conductor2());
+      expect([ajeno.status, ajeno.body.code]).toEqual([409, 'conductor_no_asignado']);
     });
   });
 });

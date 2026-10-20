@@ -607,9 +607,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa).sort()).toEqual(
       [VEHICULO.placa, VEHICULO_2.placa].sort(),
     );
-    // lo que el proceso exige: del ticket 5 (checklist de ingreso, formalización de la ejecución, gerenciamiento de viaje de salida y de retorno, acta de entrega), 4 por unidad (con el reporte de llegada), 2 por operador
+    // lo que el proceso exige: del ticket 3 (checklist de ingreso, formalización de la ejecución, acta de entrega), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(5 + 4 * 2 + 2 * 2);
+    expect(req).toHaveLength(3 + 6 * 2 + 2 * 2);
     expect(req.every((x) => x.estado === 'pendiente')).toBe(true);
     expect(
       req
@@ -775,6 +775,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ticketId: string;
         ticketNumero: number;
         supervisor: { id: string; nombre: string } | null;
+        paso: { codigo: string };
+        tiposViaje: string[];
+        unidades: { vehiculoId: string; placa: string }[];
         destino: { pozo: { id: string } | null };
         serviciosPrincipales: { codigo: string; nombre: string }[];
       }[];
@@ -788,13 +791,24 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       [
         'cliente',
         'destino',
+        'paso',
         'pedidoCodigo',
         'serviciosPrincipales',
         'supervisor',
         'ticketId',
         'ticketNumero',
+        'tiposViaje',
+        'unidades',
       ].sort(),
     );
+    // el conductor ve solo su unidad y el gerenciamiento de salida que le toca (el ticket está en Traslado de salida)
+    expect(v.paso.codigo).toBe('traslado_salida');
+    expect(v.tiposViaje).toEqual(['salida']);
+    expect(v.unidades).toEqual([{ vehiculoId: VEHICULO.id, placa: VEHICULO.placa }]);
+    const viajeConductor = (await lista(como('conductor', CO1.id, CO1.nombre, permiso))).find(
+      (x) => x.ticketId === t.id,
+    )!;
+    expect(viajeConductor.unidades).toEqual([{ vehiculoId: VEHICULO.id, placa: VEHICULO.placa }]);
     // otro operador (no asignado) no ve el ticket; el supervisor tampoco (no es operador del ticket)
     expect(
       (await lista(como('operador', uuidv7(), 'Otro', permiso))).map((x) => x.ticketId),
@@ -989,27 +1003,42 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(avisos.rows[0].d.asignados).toEqual([
       { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
     ]);
-    // gerenciamiento de viaje (lo aprueba su dueño): uno de salida y otro de retorno por ticket
+    // gerenciamiento de viaje (lo aprueba su dueño): uno de salida y otro de retorno por unidad (cada conductor solicita el de la suya)
+    const viaje =
+      (codigo: string, placa: string) => (rows: Awaited<ReturnType<typeof requisitosDe>>) =>
+        rows.find((x) => x.codigo === codigo && x.para === placa);
+    const salidaDe = (placa: string) => viaje('gerenciamiento_viaje_salida_aprobado', placa);
     await externos.consumir(
-      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'salida' }, 'flota'),
+      externo(
+        'flota.gerenciamiento_viaje.aprobado',
+        { ticketId: t.id, tipo: 'salida', vehiculoId: VEHICULO.id },
+        'flota',
+      ),
     );
     await externos.consumir(
-      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'otro' }, 'flota'),
+      externo(
+        'flota.gerenciamiento_viaje.aprobado',
+        { ticketId: t.id, tipo: 'otro', vehiculoId: VEHICULO.id },
+        'flota',
+      ),
     ); // tipo desconocido: se ignora
     req = await requisitosDe(t.id);
-    expect(req.find((x) => x.codigo === 'gerenciamiento_viaje_salida_aprobado')).toMatchObject({
-      estado: 'cumplido',
-      origen: 'evento',
-    });
-    expect(req.find((x) => x.codigo === 'gerenciamiento_viaje_retorno_aprobado')).toMatchObject({
+    expect(salidaDe(VEHICULO.placa)(req)).toMatchObject({ estado: 'cumplido', origen: 'evento' });
+    // la otra unidad sigue pendiente: su conductor aún no lo tiene aprobado
+    expect(salidaDe(VEHICULO_2.placa)(req)).toMatchObject({ estado: 'pendiente' });
+    expect(
+      req.filter((x) => x.codigo === 'gerenciamiento_viaje_retorno_aprobado').map((x) => x.estado),
+    ).toEqual(['pendiente', 'pendiente']);
+    await externos.consumir(
+      externo(
+        'flota.gerenciamiento_viaje.rechazado',
+        { ticketId: t.id, tipo: 'salida', vehiculoId: VEHICULO.id },
+        'flota',
+      ),
+    );
+    expect(salidaDe(VEHICULO.placa)(await requisitosDe(t.id))).toMatchObject({
       estado: 'pendiente',
     });
-    await externos.consumir(
-      externo('flota.gerenciamiento_viaje.rechazado', { ticketId: t.id, tipo: 'salida' }, 'flota'),
-    );
-    expect(
-      (await requisitosDe(t.id)).find((x) => x.codigo === 'gerenciamiento_viaje_salida_aprobado'),
-    ).toMatchObject({ estado: 'pendiente' });
     // un evento sin ticket o de un tipo desconocido no rompe nada
     await externos.consumir(externo('qhse.epi.despachada', { usuarioId: OP1.id }));
     await externos.consumir(externo('qhse.otra_cosa', { ticketId: t.id }));
@@ -1252,9 +1281,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ),
       );
     }
-    await externos.consumir(
-      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'salida' }, 'flota'),
-    );
+    for (const v of [VEHICULO, VEHICULO_2]) {
+      await externos.consumir(
+        externo(
+          'flota.gerenciamiento_viaje.aprobado',
+          { ticketId: t.id, tipo: 'salida', vehiculoId: v.id },
+          'flota',
+        ),
+      );
+    }
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())
@@ -1291,9 +1326,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'traslado_llegada' })
       .expect(409);
     expect(faltaRetorno.body.detail).toContain('Gerenciamiento de viaje de retorno aprobado');
-    await externos.consumir(
-      externo('flota.gerenciamiento_viaje.aprobado', { ticketId: t.id, tipo: 'retorno' }, 'flota'),
-    );
+    for (const v of [VEHICULO, VEHICULO_2]) {
+      await externos.consumir(
+        externo(
+          'flota.gerenciamiento_viaje.aprobado',
+          { ticketId: t.id, tipo: 'retorno', vehiculoId: v.id },
+          'flota',
+        ),
+      );
+    }
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())

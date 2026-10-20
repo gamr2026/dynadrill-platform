@@ -48,6 +48,9 @@ const ROLES_COORDINA = [ROL_SUPERADMIN, 'jefe_base'];
 const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 
 /** Los nombres salen de las FK (JOIN), no se copian al ticket. */
+/** Orden de los pasos desde los que al Conductor le toca su gerenciamiento de viaje (ver `pumping.paso`). */
+const ORDEN_TRASLADO_SALIDA = 30;
+const ORDEN_EJECUCION = 50;
 const NOMBRES = { cliente: true, campo: true, bloque: true, pozo: true, taladro: true } as const;
 const INCLUDE_LISTA = {
   ...NOMBRES,
@@ -256,8 +259,12 @@ export class TicketsService {
       },
       include: {
         ...NOMBRES,
+        paso: true,
         tiposServicio: true,
-        personas: { where: { rol: 'supervisor' }, include: { usuario: true } },
+        personas: {
+          where: { OR: [{ rol: 'supervisor' }, { usuarioId }] },
+          include: { usuario: true, vehiculo: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -275,9 +282,20 @@ export class TicketsService {
         codigo: s.tipoCodigo,
         nombre: textoServicio(s.tipoCodigo),
       })),
-      supervisor: t.personas[0]
-        ? { id: t.personas[0].usuarioId, nombre: t.personas[0].usuario.nombre }
-        : null,
+      supervisor: (() => {
+        const sup = t.personas.find((p) => p.rol === 'supervisor');
+        return sup ? { id: sup.usuarioId, nombre: sup.usuario.nombre } : null;
+      })(),
+      paso: { codigo: t.pasoCodigo, nombre: t.paso.nombre },
+      /** Las unidades que lleva esta cuenta en el ticket (cada conductor lleva la suya). */
+      unidades: t.personas
+        .filter((p) => p.usuarioId === usuarioId && p.vehiculoId)
+        .map((p) => ({ vehiculoId: p.vehiculoId as string, placa: p.vehiculo?.placa ?? '' })),
+      /** Gerenciamientos de viaje que le tocan en este momento del servicio: el de salida desde el traslado, el de retorno desde la ejecución. */
+      tiposViaje: [
+        ...(t.paso.orden >= ORDEN_TRASLADO_SALIDA ? ['salida'] : []),
+        ...(t.paso.orden >= ORDEN_EJECUCION ? ['retorno'] : []),
+      ],
     }));
   }
 
