@@ -382,6 +382,8 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   nuevo('flota.unidades.ver', 'Consultar las unidades, sus lecturas y alertas preventivas', [
     ...ModuleRoles.maintenanceReadOps,
     RoleCode.BODEGUERO,
+    // el conductor inspecciona su unidad: el formato muestra los datos de la unidad (nombre y último kilometraje)
+    RoleCode.CONDUCTOR,
   ]),
   nuevo('flota.unidades.crear', 'Dar de alta una unidad', ModuleRoles.inventario),
   nuevo(
