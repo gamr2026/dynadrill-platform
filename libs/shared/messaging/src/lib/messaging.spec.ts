@@ -1,7 +1,7 @@
 import { createEvent, routingKeyOf } from './envelope';
 import { InMemoryTransport } from './in-memory.transport';
 import { runOnce, SqlExecutor, writeOutbox } from './outbox';
-import { toPgConnectionString } from './messaging.module';
+import { claveInbox, toPgConnectionString } from './messaging.module';
 import { backoffMs } from './rabbitmq.transport';
 
 const base = {
@@ -96,5 +96,16 @@ describe('backoffMs', () => {
   it('crece al doble en cada intento y respeta el tope', () => {
     expect([1, 2, 3, 4].map((n) => backoffMs(n, 500, 30_000))).toEqual([500, 1000, 2000, 4000]);
     expect(backoffMs(20, 500, 30_000)).toBe(30_000);
+  });
+});
+
+describe('claveInbox', () => {
+  const id = '0192f7a4-5c1e-7b3a-9e21-8d4c6a1f0b77';
+  it('es un uuid estable y distinto por grupo, para que cada cola procese el evento una vez', () => {
+    const a = claveInbox(id, 'fcr');
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(claveInbox(id, 'fcr')).toBe(a);
+    expect(claveInbox(id, 'pumping')).not.toBe(a);
+    expect(claveInbox('0192f7a4-5c1e-7b3a-9e21-8d4c6a1f0b78', 'fcr')).not.toBe(a);
   });
 });

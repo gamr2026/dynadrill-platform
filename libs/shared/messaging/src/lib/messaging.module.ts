@@ -7,6 +7,8 @@ import {
   OnApplicationShutdown,
   Provider,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool } from 'pg';
 import { EventEnvelope, NewEvent, createEvent } from './envelope';
 import { OutboxRelay } from './outbox-relay';
@@ -38,6 +40,22 @@ export function toPgConnectionString(url: string): string {
   return u.toString();
 }
 
+/** Grupo de la suscripción que está procesando el evento (lo fija `subscribe`, lo lee `handleOnce`). */
+const grupoEnCurso = new AsyncLocalStorage<string>();
+
+/**
+ * Clave del inbox de un evento para un grupo: un uuid determinista derivado del id del evento y del grupo. Así cada grupo de
+ * consumidores del contenedor (cada cola) procesa el evento una vez; con la clave solo por id, el primero que lo recibía lo marcaba
+ * y los demás grupos (p. ej. FCR tras Pumping sobre `comercial.pedido.abierto`) lo omitían sin hacer nada.
+ */
+export function claveInbox(eventoId: string, grupo: string): string {
+  const h = createHash('sha1').update(`${grupo}:${eventoId}`).digest();
+  h[6] = (h[6] & 0x0f) | 0x50;
+  h[8] = (h[8] & 0x3f) | 0x80;
+  const x = h.subarray(0, 16).toString('hex');
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`;
+}
+
 /** API que usan los módulos de negocio. */
 @Injectable()
 export class EventBus {
@@ -61,11 +79,18 @@ export class EventBus {
 
   /** Ejecuta `effect` una sola vez por evento (inbox), dentro de la transacción recibida. */
   handleOnce(tx: SqlExecutor, event: EventEnvelope, effect: () => Promise<void>): Promise<boolean> {
-    return runOnce(tx, this.options.schema, event, effect);
+    const grupo = grupoEnCurso.getStore();
+    const clave = grupo ? { id: claveInbox(event.id, grupo), type: event.type } : event;
+    return runOnce(tx, this.options.schema, clave, effect);
   }
 
   subscribe(subscription: Omit<Subscription, 'consumer'>): Promise<void> {
-    return this.transport.subscribe({ ...subscription, consumer: this.options.container });
+    const { group, handler } = subscription;
+    return this.transport.subscribe({
+      ...subscription,
+      consumer: this.options.container,
+      handler: group ? (event) => grupoEnCurso.run(group, () => handler(event)) : handler,
+    });
   }
 }
 
