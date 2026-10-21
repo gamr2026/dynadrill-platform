@@ -75,11 +75,7 @@ const INCLUDE_DETALLE = {
   tipoOperador: true,
   inspector: { select: { id: true, nombre: true } },
   historial: { include: { actor: true }, orderBy: { createdAt: 'asc' } },
-  personas: { include: { usuario: true, vehiculo: true }, orderBy: { usuario: { nombre: 'asc' } } },
-  unidades: {
-    include: { vehiculo: { include: { tipoVehiculo: true } } },
-    orderBy: { vehiculo: { placa: 'asc' } },
-  },
+  personas: { include: { usuario: true }, orderBy: { usuario: { nombre: 'asc' } } },
 } as const;
 type TicketLista = Prisma.TicketGetPayload<{ include: typeof INCLUDE_LISTA }>;
 type TicketDetalle = Prisma.TicketGetPayload<{ include: typeof INCLUDE_DETALLE }>;
@@ -112,13 +108,6 @@ export const puedeActuarEn = (
 /** Nombre del cliente: el fiscal si existe, si no el comercial. */
 export const nombreDe = (c: { nombreFiscal: string | null; nombreComercial: string } | null) =>
   c ? (c.nombreFiscal ?? c.nombreComercial) : null;
-/** Tipo, marca y modelo del vehículo (p. ej. "CAMION JAC HFC1040K2"); `null` si el catálogo no los tiene. */
-export const descripcionVehiculo = (v: {
-  marca: string | null;
-  modelo: string | null;
-  tipoVehiculo: { nombre: string } | null;
-}) => [v.tipoVehiculo?.nombre, v.marca, v.modelo].filter(Boolean).join(' ') || null;
-
 const resumen = (t: TicketLista) => ({
   id: t.id,
   ticketNumero: t.ticketNumero,
@@ -216,7 +205,7 @@ export class TicketsService {
         },
       },
     });
-    // los requisitos del ticket (los de unidad u operador se crean al asignar el equipo)
+    // los requisitos del ticket (los de operador se crean al asignar el equipo)
     await this.requisitos.generar(tx, id);
     // las líneas del pedido y la precarga de herramientas desde su configuración por cliente y código
     await this.precarga.guardarLineas(tx, id, d.lineas ?? []);
@@ -507,14 +496,7 @@ export class TicketsService {
           .map((p) => ({
             usuarioId: p.usuarioId,
             nombre: p.usuario.nombre,
-            vehiculoId: p.vehiculoId,
-            placa: p.vehiculo?.placa ?? null,
           })),
-        unidades: t.unidades.map((u) => ({
-          vehiculoId: u.vehiculoId,
-          placa: u.vehiculo.placa,
-          descripcion: descripcionVehiculo(u.vehiculo),
-        })),
       },
       historial: t.historial.map((h) => ({
         pasoAnterior: h.pasoAnterior,

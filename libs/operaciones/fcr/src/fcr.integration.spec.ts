@@ -61,8 +61,6 @@ const CLIENTE = { id: uuidv7(), nombre: `Cliente FCR ${n}`, ruc: `87${String(n).
 const CAMPO = { id: uuidv7(), nombre: `SACHA FCR ${n}` };
 const BLOQUE = { id: uuidv7(), nombre: `Bloque 60 FCR ${n}` };
 const POZO = { id: uuidv7(), nombre: `FCR-POZO-${n}`, campoId: CAMPO.id, bloqueId: BLOQUE.id };
-const VEHICULO = { id: uuidv7(), placa: `FC${String(n).slice(-5)}A` };
-const VEHICULO_AJENO = { id: uuidv7(), placa: `FC${String(n).slice(-5)}B` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { id: SUPERVISOR.id, nombre: SUPERVISOR.nombre, rol: 'supervisor' },
@@ -80,7 +78,6 @@ const MAESTROS: MaestrosDePrueba = {
   campos: [CAMPO],
   bloques: [BLOQUE],
   pozos: [POZO],
-  vehiculos: [VEHICULO, VEHICULO_AJENO],
 };
 
 run(
@@ -433,7 +430,7 @@ run(
           puedeActuar: true,
           tipoOperador: null,
           inspector: null,
-          asignacion: { supervisor: null, operadores: [], unidades: [] },
+          asignacion: { supervisor: null, operadores: [] },
         });
         expect(d.siguientes.map((s: { codigo: string }) => s.codigo)).toEqual([
           'preparacion_herramientas',
@@ -611,36 +608,26 @@ run(
       const asignar = (id: string, cuerpo: Record<string, unknown>, auth = supervisor()) =>
         http().post(`/api/operaciones/fcr/tickets/${id}/asignar`).set(auth).send(cuerpo);
 
-      it('asigna al operador (y su unidad), pasa a la reunión operativa, crea los requisitos y publica el evento con las cuentas elegidas', async () => {
+      it('asigna a los operadores, pasa a la reunión operativa, crea los requisitos y publica el evento con las cuentas elegidas', async () => {
         const t = await hastaAsignacion();
         const r = await asignar(t.id, {
-          operadores: [
-            { usuarioId: OPERADOR.id, vehiculoId: VEHICULO.id },
-            { usuarioId: INSPECTOR.id },
-          ],
+          operadores: [{ usuarioId: OPERADOR.id }, { usuarioId: INSPECTOR.id }],
         }).expect(201);
         expect(r.body.paso.codigo).toBe('reunion_operativa');
         expect(r.body.asignacion.supervisor.usuarioId).toBe(SUPERVISOR.id);
         expect(r.body.asignacion.operadores).toEqual(
           expect.arrayContaining([
-            expect.objectContaining({
-              usuarioId: OPERADOR.id,
-              vehiculoId: VEHICULO.id,
-              placa: VEHICULO.placa,
-            }),
-            expect.objectContaining({ usuarioId: INSPECTOR.id, vehiculoId: null, placa: null }),
+            expect.objectContaining({ usuarioId: OPERADOR.id }),
+            expect.objectContaining({ usuarioId: INSPECTOR.id }),
           ]),
         );
-        expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa)).toEqual([
-          VEHICULO.placa,
-        ]);
+        expect(r.body.asignacion).not.toHaveProperty('unidades'); // FCR no lleva unidades
         const salida = (await salidas(t.pedidoId)).find(
           (s) => s.tipo === 'operaciones.fcr.asignacion_realizada',
         );
         expect(salida?.datos.data).toMatchObject({
           ticketId: t.id,
           supervisor: SUPERVISOR.nombre,
-          unidades: VEHICULO.placa,
           asignadoPor: SUPERVISOR.nombre,
         });
         expect(salida?.datos.data['asignados']).toEqual(
@@ -651,14 +638,11 @@ run(
           ]),
         );
         expect(salida?.datos.data['operadoresUnidades']).toEqual(
-          expect.arrayContaining([
-            { usuarioId: OPERADOR.id, vehiculoId: VEHICULO.id },
-            { usuarioId: INSPECTOR.id, vehiculoId: null },
-          ]),
+          expect.arrayContaining([{ usuarioId: OPERADOR.id }, { usuarioId: INSPECTOR.id }]),
         );
       });
 
-      it('valida el equipo: al menos un operador, sin repetidos, rol operador FCR, cuentas activas y unidades habilitadas', async () => {
+      it('valida el equipo: al menos un operador, sin repetidos, rol operador FCR y cuentas activas', async () => {
         const t = await hastaAsignacion();
         await asignar(t.id, { operadores: [] }).expect(400);
         await asignar(t.id, {
@@ -668,22 +652,16 @@ run(
         await asignar(t.id, { operadores: [{ usuarioId: SUPERVISOR_PUMPING.id }] }).expect(400);
         await asignar(t.id, { operadores: [{ usuarioId: OPERADOR_PUMPING.id }] }).expect(400);
         await asignar(t.id, { operadores: [{ usuarioId: uuidv7() }] }).expect(400);
-        await asignar(t.id, {
-          operadores: [{ usuarioId: OPERADOR.id, vehiculoId: uuidv7() }],
-        }).expect(400);
         // el supervisor no puede ser además operador
         await asignar(t.id, {
           supervisorId: SUPERVISOR.id,
           operadores: [{ usuarioId: SUPERVISOR.id }],
         }).expect(400);
         expect((await detalle(t.id)).paso.codigo).toBe('asignacion');
-        // una asignación rechazada no deja requisitos de operador ni de unidad
+        // una asignación rechazada no deja requisitos de operador
         expect(
           await prisma.ticketRequisito.count({
-            where: {
-              ticketId: t.id,
-              OR: [{ usuarioId: { not: null } }, { vehiculoId: { not: null } }],
-            },
+            where: { ticketId: t.id, usuarioId: { not: null } },
           }),
         ).toBe(0);
       });
@@ -870,7 +848,7 @@ run(
         );
       });
 
-      it('el equipo: un solo supervisor, la unidad del operador debe ser del ticket y solo los operadores llevan unidad', async () => {
+      it('el equipo: un solo supervisor y cada persona es una cuenta real', async () => {
         const t = await crear();
         await admin.query(
           "INSERT INTO fcr.ticket_persona (ticket_id, usuario_id, rol) VALUES ($1, $2, 'supervisor')",
@@ -881,21 +859,6 @@ run(
           [t.id, OTRO_SUPERVISOR.id],
           /ticket_persona_supervisor_key/,
         );
-        // la unidad no está asignada al ticket
-        await rechaza(
-          "INSERT INTO fcr.ticket_persona (ticket_id, usuario_id, rol, vehiculo_id) VALUES ($1, $2, 'operador', $3)",
-          [t.id, OPERADOR.id, VEHICULO_AJENO.id],
-          /ticket_persona_unidad_fkey/,
-        );
-        await admin.query(
-          'INSERT INTO fcr.ticket_unidad (ticket_id, vehiculo_id) VALUES ($1, $2)',
-          [t.id, VEHICULO.id],
-        );
-        await rechaza(
-          "INSERT INTO fcr.ticket_persona (ticket_id, usuario_id, rol, vehiculo_id) VALUES ($1, $2, 'supervisor', $3)",
-          [t.id, OTRO_SUPERVISOR.id, VEHICULO.id],
-          /ticket_persona_unidad_check/,
-        );
         await rechaza(
           "INSERT INTO fcr.ticket_persona (ticket_id, usuario_id, rol) VALUES ($1, $2, 'operador')",
           [t.id, uuidv7()],
@@ -903,7 +866,7 @@ run(
         );
       });
 
-      it('un requisito no se repite, no es de una unidad y un operador a la vez y el puente exige motivo', async () => {
+      it('un requisito no se repite y el puente exige motivo', async () => {
         const t = await crear({ tipoOt: 'servicio' });
         await rechaza(
           "INSERT INTO fcr.ticket_requisito (id, ticket_id, requisito_codigo) VALUES ($1, $2, 'tipo_operador_definido')",

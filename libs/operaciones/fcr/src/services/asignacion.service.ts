@@ -5,11 +5,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from './requisitos.service';
 import { nombreDe, ROL_SUPERVISOR, TicketsService } from './tickets.service';
 
-/** Lo que el Supervisor elige: solo ids. La unidad de cada operador es opcional (FCR no siempre lleva vehículo). */
+/** Lo que el Supervisor elige: solo ids. */
 export interface AsignacionEntrada {
   /** Si el ticket ya tiene supervisor no hace falta; solo lo cambia quien coordina. */
   supervisorId?: string;
-  operadores: Array<{ usuarioId: string; vehiculoId?: string | null }>;
+  operadores: Array<{ usuarioId: string }>;
 }
 
 /** Paso en el que se asigna, y paso al que pasa el ticket cuando la asignación queda completa. */
@@ -19,8 +19,8 @@ const PASO_SIGUIENTE = 'reunion_operativa';
 const ROLES_OPERADOR = ['operador_fcr'];
 
 /**
- * Asignación del Supervisor: el operador (o los operadores) del servicio y, si lleva vehículo, su unidad. Al completarla el ticket pasa a
- * «Reunión operativa», se crean los requisitos de operador y de unidad y se publica `operaciones.fcr.asignacion_realizada` con las
+ * Asignación del Supervisor: el operador (o los operadores) del servicio. Al completarla el ticket pasa a
+ * «Reunión operativa», se crean los requisitos de operador y se publica `operaciones.fcr.asignacion_realizada` con las
  * cuentas elegidas, para avisarles a ellas (no a todos los de su rol) y para que QHSE abra la entrega de EPI de cada operador.
  */
 @Injectable()
@@ -38,9 +38,6 @@ export class AsignacionService {
     const operadorIds = operadores.map((o) => o.usuarioId);
     if (new Set(operadorIds).size !== operadorIds.length)
       throw new BadRequestException('Un operador no puede asignarse dos veces');
-    const unidadIds = [
-      ...new Set(operadores.map((o) => o.vehiculoId).filter((v): v is string => !!v)),
-    ];
 
     await this.prisma.$transaction(async (tx) => {
       const t = await this.tickets.cargarEnTx(tx, id);
@@ -67,7 +64,7 @@ export class AsignacionService {
       if (operadorIds.includes(supervisorId))
         throw new BadRequestException('Una misma persona no puede ser supervisor y operador');
 
-      // las cuentas y las unidades salen de sus tablas maestras: existen, están activas y tienen el rol que corresponde
+      // las cuentas salen de su tabla maestra: existen, están activas y tienen el rol que corresponde
       const personas = await tx.idUsuario.findMany({
         where: { id: { in: [supervisorId, ...operadorIds] } },
         include: { rol: true },
@@ -85,21 +82,8 @@ export class AsignacionService {
         ...o,
         persona: persona(o.usuarioId, 'operador', ROLES_OPERADOR),
       }));
-      const unidades = await tx.catVehiculo.findMany({ where: { id: { in: unidadIds } } });
-      if (unidades.length !== unidadIds.length || unidades.some((u) => !u.habilitado)) {
-        throw new BadRequestException(
-          'Alguna de las unidades indicadas no existe o no está habilitada',
-        );
-      }
-
-      // se reemplaza lo anterior: primero las personas (apuntan a la unidad) y después las unidades
+      // se reemplaza el equipo anterior
       await tx.ticketPersona.deleteMany({ where: { ticketId: id } });
-      await tx.ticketUnidad.deleteMany({ where: { ticketId: id } });
-      if (unidades.length) {
-        await tx.ticketUnidad.createMany({
-          data: unidades.map((u) => ({ ticketId: id, vehiculoId: u.id, asignadoPor: actor.id })),
-        });
-      }
       await tx.ticketPersona.createMany({
         data: [
           {
@@ -112,7 +96,6 @@ export class AsignacionService {
             ticketId: id,
             usuarioId: o.persona.id,
             rol: 'operador' as const,
-            vehiculoId: o.vehiculoId ?? null,
             asignadoPor: actor.id,
           })),
         ],
@@ -121,13 +104,11 @@ export class AsignacionService {
       await this.tickets.moverPaso(tx, t, PASO_SIGUIENTE, actor, {
         // el equipo se acaba de guardar: no hay requisitos del paso de asignación
         exigirRequisitos: false,
-        motivo: `Asignado: supervisor ${supervisor.nombre}; ${equipo.length} operador(es); ${unidades.length} unidad(es)`,
+        motivo: `Asignado: supervisor ${supervisor.nombre}; ${equipo.length} operador(es)`,
       });
-      // lo que los pasos siguientes exigen a cada operador y a cada unidad
+      // lo que los pasos siguientes exigen a cada operador
       await this.requisitos.generar(tx, id);
 
-      const placaDe = (vid: string | null | undefined) =>
-        unidades.find((u) => u.id === vid)?.placa ?? null;
       const n = await tx.ticket.findUniqueOrThrow({
         where: { id },
         include: { cliente: true, campo: true, pozo: true, taladro: true },
@@ -152,24 +133,14 @@ export class AsignacionService {
               : null,
             asignadoPor: actor.name,
             supervisor: supervisor.nombre,
-            operadores: equipo
-              .map((o) =>
-                placaDe(o.vehiculoId)
-                  ? `${o.persona.nombre} (${placaDe(o.vehiculoId)})`
-                  : o.persona.nombre,
-              )
-              .join(', '),
-            unidades: unidades.map((u) => u.placa).join(', ') || 'Sin unidad',
-            // Las cuentas elegidas: a ellas (y solo a ellas) se les avisa, con la plantilla de su rol de asignación. QHSE abre la entrega
-            // de EPI de cada operador con `operadoresUnidades` (en FCR `vehiculoId` puede ser nulo: no todo servicio lleva vehículo).
+            operadores: equipo.map((o) => o.persona.nombre).join(', '),
+            // Las cuentas elegidas: a ellas (y solo a ellas) se les avisa, con la plantilla de su rol de asignación. `operadoresUnidades` conserva
+            // la forma que lee QHSE (solo `usuarioId`): FCR no lleva unidades.
             asignados: [
               { usuarioId: supervisor.id, rolCodigo: 'supervisor' },
               ...equipo.map((o) => ({ usuarioId: o.persona.id, rolCodigo: 'operador' })),
             ],
-            operadoresUnidades: equipo.map((o) => ({
-              usuarioId: o.persona.id,
-              vehiculoId: o.vehiculoId ?? null,
-            })),
+            operadoresUnidades: equipo.map((o) => ({ usuarioId: o.persona.id })),
           },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),

@@ -34,7 +34,6 @@ export const REQ = {
   bitacoraEnviada: 'bitacora_enviada',
   listadoUsoConfirmado: 'listado_uso_confirmado',
   herramientasDevueltas: 'herramientas_devueltas',
-  reporteUnidadLlegada: 'reporte_unidad_llegada',
   actaEntregaLocacion: 'acta_entrega_locacion',
 } as const;
 
@@ -189,14 +188,6 @@ export const REQUISITOS: RequisitoDef[] = [
     descripcion:
       'Bodega registró el retorno de cada herramienta: devuelta, o faltante con su causa y detalle.',
     ambito: 'ticket',
-    modulo: 'fcr',
-    paso: 'control_retorno',
-  },
-  {
-    codigo: REQ.reporteUnidadLlegada,
-    nombre: 'Reporte de unidad de llegada',
-    descripcion: 'El operador firmó el Reporte de Unidad (DYN-MNT-RE-012) de llegada de su unidad.',
-    ambito: 'unidad',
     modulo: 'fcr',
     paso: 'control_retorno',
   },

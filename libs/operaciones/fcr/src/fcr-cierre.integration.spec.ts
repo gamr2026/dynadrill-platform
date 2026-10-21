@@ -1,5 +1,5 @@
 /**
- * Integración real del retorno y el cierre de FCR (F5): control de retorno de herramientas, reporte de unidad de llegada, Acta de
+ * Integración real del retorno y el cierre de FCR (F5): control de retorno de herramientas, Acta de
  * Entrega de Locación y cierre con su evento. Postgres real; sin RabbitMQ.
  *   RUN_INTEGRATION=1 npx jest fcr-cierre
  */
@@ -48,7 +48,6 @@ const u = (nombre: string, rol: string) => ({ id: uuidv7(), nombre, rol });
 const SUPERVISOR = u('Sara Supervisora', 'supervisor');
 const OPERADOR = u('Olga Operadora', 'operador_fcr');
 const OTRO_OPERADOR = u('Omar Operador', 'operador_fcr');
-const VEHICULO = { id: uuidv7(), placa: `CI${String(n).slice(-5)}A` };
 const BODEGUERO = u('Bruno Bodeguero', 'bodeguero');
 const VENTAS = u('Vera Ventas', 'ingenieria_ventas');
 const JEFE = u('Jaime Jefe de Base', 'jefe_base');
@@ -66,7 +65,6 @@ const MAESTROS: MaestrosDePrueba = {
   campos: [CAMPO],
   bloques: [BLOQUE],
   pozos: [POZO],
-  vehiculos: [VEHICULO],
 };
 
 run(
@@ -134,10 +132,7 @@ run(
     };
 
     /** Ticket de venta en la ejecución, con un cepillo y un magneto recibidos, asignado al operador, con el acta confirmada. */
-    const enEjecucion = async (
-      fechas = { inicio: '2026-11-05', fin: '2026-11-12' },
-      conUnidad = false,
-    ) => {
+    const enEjecucion = async (fechas = { inicio: '2026-11-05', fin: '2026-11-12' }) => {
       const codigo = `SH-EJ-${n}-${cods++}`;
       await http()
         .put('/api/operaciones/fcr/configuracion-codigos')
@@ -231,11 +226,7 @@ run(
       await http()
         .post(`${base(id)}/asignar`)
         .set(supervisor())
-        .send({
-          operadores: [
-            { usuarioId: OPERADOR.id, ...(conUnidad ? { vehiculoId: VEHICULO.id } : {}) },
-          ],
-        })
+        .send({ operadores: [{ usuarioId: OPERADOR.id }] })
         .expect(201);
       await http()
         .put(`${base(id)}/reunion-operativa`)
@@ -393,9 +384,9 @@ run(
       await app.close();
     });
 
-    /** Lleva el ticket (con o sin unidad para el operador) hasta el control de retorno. */
-    const enRetorno = async (conUnidad = false) => {
-      const t = await enEjecucion(undefined, conUnidad);
+    /** Lleva el ticket hasta el control de retorno. */
+    const enRetorno = async () => {
+      const t = await enEjecucion();
       await guardar(t.id, '2026-11-05').expect(200);
       await enviar(t.id, '2026-11-05').expect(201);
       await uso(t.id, t.cepillo, '2026-11-05').expect(200);
@@ -417,22 +408,6 @@ run(
         .post(`${base(t)}/herramientas/${h}/faltante`)
         .set(auth)
         .send(cuerpo);
-    const llegada = (
-      t: string,
-      v: string,
-      extra: Record<string, unknown> = {},
-      auth = operador(),
-    ) =>
-      http()
-        .post(`${base(t)}/reportes-unidad-llegada/${v}`)
-        .set(auth)
-        .send({
-          fecha: '2026-11-12',
-          combustible: 40.5,
-          unidadLista: true,
-          operacionInterrumpida: false,
-          ...extra,
-        });
     const eventoQhse = (tipo: string, ticketId: string) =>
       ({
         id: uuidv7(),
@@ -502,107 +477,10 @@ run(
       });
     });
 
-    describe('reporte de unidad de llegada', () => {
-      it('lo firma el operador de la unidad, cumple el requisito de su unidad y publica el evento para Mantenimiento', async () => {
-        const t = await enRetorno(true);
-        const lista = (
-          await http()
-            .get(`${base(t.id)}/reportes-unidad-llegada`)
-            .set(operador())
-            .expect(200)
-        ).body;
-        expect(lista).toEqual([
-          expect.objectContaining({
-            vehiculoId: VEHICULO.id,
-            placa: VEHICULO.placa,
-            reporte: null,
-            operador: expect.objectContaining({ usuarioId: OPERADOR.id }),
-          }),
-        ]);
-        await devolver(t.id).expect(201);
-        // sin el reporte no se sale del control de retorno
-        const falta = await avanzar(t.id, 'cierre', bodega()).expect(409);
-        expect(q(falta)).toMatch(/Reporte de unidad de llegada/);
-        expect(q(falta)).toContain(VEHICULO.placa);
-        await llegada(t.id, VEHICULO.id, {}, tok(OTRO_OPERADOR)).expect(403);
-        await llegada(t.id, VEHICULO.id, {}, supervisor()).expect(403);
-        await llegada(t.id, VEHICULO.id, { fecha: '2026-02-31' }).expect(400);
-        await llegada(t.id, VEHICULO.id, { operacionInterrumpida: true }).expect(400); // falta explicar la interrupción
-        await llegada(t.id, VEHICULO.id, { combustible: -1 }).expect(400);
-        await llegada(t.id, uuidv7()).expect(404);
-        const ok = await llegada(t.id, VEHICULO.id, {
-          novedadesMecanica: 'Fuga de aceite',
-          unidadLista: false,
-        }).expect(201);
-        expect(ok.body[0].reporte).toMatchObject({
-          combustible: 40.5,
-          novedadesMecanica: 'Fuga de aceite',
-          novedadesInstrumentacion: null,
-          unidadLista: false,
-          firmadaPor: OPERADOR.nombre,
-        });
-        await llegada(t.id, VEHICULO.id).expect(409); // ya firmado
-        const ev = await salidas(t.pedidoId, 'operaciones.fcr.reporte_unidad_llegada');
-        expect(ev).toHaveLength(1);
-        expect(ev[0].d).toMatchObject({
-          ticketId: t.id,
-          vehiculoId: VEHICULO.id,
-          hayNovedades: true,
-        });
-        const reporte = await prisma.reporteUnidadLlegada.findFirstOrThrow({
-          where: { ticketId: t.id },
-        });
-        expect(ev[0].d['reporteUnidadId']).toBe(reporte.id);
-        await avanzar(t.id, 'cierre', bodega()).expect(201);
-      });
-
-      it('un reporte firmado es inmutable y respeta las reglas de la base de datos', async () => {
-        const t = await enRetorno(true);
-        await devolver(t.id).expect(201);
-        await llegada(t.id, VEHICULO.id, {
-          operacionInterrumpida: true,
-          detalleInterrupcion: 'Falla del cliente',
-        }).expect(201);
-        expect(
-          (await salidas(t.pedidoId, 'operaciones.fcr.reporte_unidad_llegada'))[0].d[
-            'hayNovedades'
-          ],
-        ).toBe(true);
-        const r = await prisma.reporteUnidadLlegada.findFirstOrThrow({ where: { ticketId: t.id } });
-        await expect(
-          appPool.query('UPDATE fcr.reporte_unidad_llegada SET combustible = 1 WHERE id = $1', [
-            r.id,
-          ]),
-        ).rejects.toThrow(/permission denied/);
-        await expect(
-          appPool.query('DELETE FROM fcr.reporte_unidad_llegada WHERE id = $1', [r.id]),
-        ).rejects.toThrow(/permission denied/);
-        await expect(
-          admin.query(
-            "INSERT INTO fcr.reporte_unidad_llegada (id, ticket_id, vehiculo_id, llegada_fecha, combustible, unidad_lista, operacion_interrumpida, firmada_por) VALUES ($1, $2, $3, '2026-11-12', 1, true, false, $4)",
-            [uuidv7(), t.id, VEHICULO.id, OPERADOR.id],
-          ),
-        ).rejects.toThrow(/reporte_unidad_llegada_unidad_key/);
-        await expect(
-          admin.query(
-            "INSERT INTO fcr.reporte_unidad_llegada (id, ticket_id, vehiculo_id, llegada_fecha, combustible, unidad_lista, operacion_interrumpida, detalle_interrupcion, firmada_por) VALUES ($1, $2, $3, '2026-11-12', 1, true, false, NULL, $4)",
-            [uuidv7(), t.id, uuidv7(), OPERADOR.id],
-          ),
-        ).rejects.toThrow(/reporte_unidad_llegada_unidad_fkey/);
-        await expect(
-          admin.query(
-            'UPDATE fcr.reporte_unidad_llegada SET detalle_interrupcion = NULL WHERE id = $1',
-            [r.id],
-          ),
-        ).rejects.toThrow(/reporte_unidad_llegada_interrupcion_check/);
-      });
-    });
-
     describe('cierre del ticket', () => {
-      const hastaCierre = async (conUnidad = false) => {
-        const t = await enRetorno(conUnidad);
+      const hastaCierre = async () => {
+        const t = await enRetorno();
         await devolver(t.id).expect(201);
-        if (conUnidad) await llegada(t.id, VEHICULO.id).expect(201);
         await avanzar(t.id, 'cierre', bodega()).expect(201);
         return t;
       };
@@ -667,7 +545,7 @@ run(
       });
 
       it('recorrido completo con unidad: asignación, ejecución, retorno, reporte de llegada y cierre dejan toda la historia', async () => {
-        const t = await hastaCierre(true);
+        const t = await hastaCierre();
         await actaConsumer.consumir(eventoQhse('qhse.acta_entrega.cargada', t.id));
         const r = await avanzar(t.id, 'cerrado').expect(201);
         expect(r.body.historial.map((h: { pasoNuevo: string }) => h.pasoNuevo)).toEqual([
@@ -688,7 +566,6 @@ run(
           'operaciones.fcr.asignacion_realizada',
           'operaciones.fcr.bitacora_enviada',
           'operaciones.fcr.reporte_herramientas_completado',
-          'operaciones.fcr.reporte_unidad_llegada',
           'operaciones.fcr.cerrado',
         ]) {
           expect(tipos).toContain(esperado);

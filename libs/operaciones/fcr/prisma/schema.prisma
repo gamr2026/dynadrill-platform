@@ -314,9 +314,7 @@ model Ticket {
   tiposServicio  TicketTipoServicio[]
   historial      TicketHistorial[]
   personas       TicketPersona[]
-  unidades       TicketUnidad[]
   requisitos     TicketRequisito[]
-  llegadas       ReporteUnidadLlegada[]
   lineas         TicketLinea[]
   herramientas   TicketHerramienta[]
   reporteItems   ReporteItem[]
@@ -364,16 +362,13 @@ model TicketHistorial {
   @@schema("fcr")
 }
 
-/// Personas del equipo: un supervisor y uno o más operadores (cada uno con su unidad, si el servicio lleva).
+/// Personas del equipo: un supervisor y uno o más operadores.
 model TicketPersona {
   ticketId    String       @map("ticket_id") @db.Uuid
   ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   usuarioId   String       @map("usuario_id") @db.Uuid
   usuario     IdUsuario    @relation("personaAsignada", fields: [usuarioId], references: [id])
   rol         RolAsignado
-  /// Unidad que lleva este operador (solo operadores; FK compuesta a `ticket_unidad` en la base de datos).
-  vehiculoId  String?      @map("vehiculo_id") @db.Uuid
-  vehiculo    CatVehiculo? @relation("operadorUnidad", fields: [vehiculoId], references: [id])
   /// FK a `identidad.usuario` (solo en la base de datos).
   asignadoPor String?      @map("asignado_por") @db.Uuid
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -384,22 +379,7 @@ model TicketPersona {
   @@schema("fcr")
 }
 
-/// Unidades (vehículos del catálogo) asignadas al ticket: la placa y la descripción salen del JOIN.
-model TicketUnidad {
-  ticketId    String      @map("ticket_id") @db.Uuid
-  ticket      Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  vehiculoId  String      @map("vehiculo_id") @db.Uuid
-  vehiculo    CatVehiculo @relation(fields: [vehiculoId], references: [id])
-  /// FK a `identidad.usuario` (solo en la base de datos).
-  asignadoPor String?     @map("asignado_por") @db.Uuid
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@id([ticketId, vehiculoId])
-  @@map("ticket_unidad")
-  @@schema("fcr")
-}
-
-/// Un requisito de un ticket, de una de sus unidades o de uno de sus operadores. Un índice único (en la base de datos) impide duplicados.
+/// Un requisito de un ticket o de uno de sus operadores. Un índice único (en la base de datos) impide duplicados.
 /// Se cumple desde FCR (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con el puente temporal
 /// (`manual_temporal`, con motivo).
 model TicketRequisito {
@@ -408,8 +388,6 @@ model TicketRequisito {
   ticket          Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   requisitoCodigo String              @map("requisito_codigo")
   requisito       Requisito           @relation(fields: [requisitoCodigo], references: [codigo])
-  vehiculoId      String?             @map("vehiculo_id") @db.Uuid
-  vehiculo        CatVehiculo?        @relation(fields: [vehiculoId], references: [id])
   usuarioId       String?             @map("usuario_id") @db.Uuid
   usuario         IdUsuario?          @relation("requisitoOperador", fields: [usuarioId], references: [id])
   estado          EstadoRequisito     @default(pendiente)
@@ -945,30 +923,6 @@ enum CausaFaltante {
   @@schema("fcr")
 }
 
-/// Reporte de unidad de llegada de un ticket (INMUTABLE): lo firma el operador de la unidad.
-model ReporteUnidadLlegada {
-  id                       String      @id @db.Uuid
-  ticketId                 String      @map("ticket_id") @db.Uuid
-  ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  vehiculoId               String      @map("vehiculo_id") @db.Uuid
-  vehiculo                 CatVehiculo @relation(fields: [vehiculoId], references: [id])
-  llegadaFecha             DateTime    @map("llegada_fecha") @db.Date
-  combustible              Decimal     @db.Decimal(8, 2)
-  novedadesMecanica        String?     @map("novedades_mecanica")
-  novedadesInstrumentacion String?     @map("novedades_instrumentacion")
-  novedadesOperaciones     String?     @map("novedades_operaciones")
-  unidadLista              Boolean     @map("unidad_lista")
-  operacionInterrumpida    Boolean     @map("operacion_interrumpida")
-  detalleInterrupcion      String?     @map("detalle_interrupcion")
-  firmadaPor               String      @map("firmada_por") @db.Uuid
-  firmante                 IdUsuario   @relation("llegadaFirmante", fields: [firmadaPor], references: [id])
-  firmadaAt                DateTime    @default(now()) @map("firmada_at") @db.Timestamptz(6)
-
-  @@unique([ticketId, vehiculoId])
-  @@map("reporte_unidad_llegada")
-  @@schema("fcr")
-}
-
 // ---------------------------------------------------------------------------------------------------------------
 // Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
 // Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
@@ -1024,32 +978,6 @@ model CatTaladro {
   @@schema("catalogos")
 }
 
-model CatTipoVehiculo {
-  id        String        @id @db.Uuid
-  nombre    String
-  vehiculos CatVehiculo[]
-
-  @@map("tipo_vehiculo")
-  @@schema("catalogos")
-}
-
-model CatVehiculo {
-  id             String                 @id @db.Uuid
-  placa          String
-  marca          String?
-  modelo         String?
-  tipoVehiculoId String?                @map("tipo_vehiculo_id") @db.Uuid
-  tipoVehiculo   CatTipoVehiculo?       @relation(fields: [tipoVehiculoId], references: [id])
-  habilitado     Boolean                @default(true)
-  unidades       TicketUnidad[]
-  operadores     TicketPersona[]        @relation("operadorUnidad")
-  requisitos     TicketRequisito[]
-  llegadas       ReporteUnidadLlegada[]
-
-  @@map("vehiculo")
-  @@schema("catalogos")
-}
-
 /// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde y para ligar los pasos a sus roles.
 model IdRol {
   id       String              @id @db.Uuid
@@ -1084,7 +1012,6 @@ model IdUsuario {
   firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
   documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
   reuniones             ReunionOperativa[]        @relation("reunionFirmante")
-  llegadasFirmadas      ReporteUnidadLlegada[]    @relation("llegadaFirmante")
   bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
   actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
   cambiosSolicitados    SolicitudCambioItems[]    @relation("solicitanteCambio")

@@ -10,12 +10,11 @@ const DATOS_ASIGNACION =
   FILA('Taladro', 'taladro') +
   FILA('Supervisor', 'supervisor') +
   FILA('Operadores', 'operadores') +
-  FILA('Unidades', 'unidades') +
   FILA('Inicio del servicio', 'fechaInicioServicio') +
   '</table>';
 const TEXTO_ASIGNACION =
   'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nCampo: {{campo}}\nPozo: {{pozo}}\nTaladro: {{taladro}}\n' +
-  'Supervisor: {{supervisor}}\nOperadores: {{operadores}}\nUnidades: {{unidades}}\nInicio del servicio: {{fechaInicioServicio}}';
+  'Supervisor: {{supervisor}}\nOperadores: {{operadores}}\nInicio del servicio: {{fechaInicioServicio}}';
 
 /**
  * Plantillas del módulo FCR. Cada regla liga un evento y un rol con el texto que ese cargo debe leer; para que otro cargo reciba el mismo

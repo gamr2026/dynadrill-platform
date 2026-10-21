@@ -13,7 +13,6 @@ import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { CatalogosService } from './services/catalogos.service';
 import { ConfiguracionCodigosService } from './services/configuracion-codigos.service';
-import { ReporteUnidadLlegadaService } from './services/reporte-unidad-llegada.service';
 import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
 import { EjecucionService } from './services/ejecucion.service';
@@ -69,7 +68,6 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     ResultadoCambioItemsConsumer,
     EjecucionService,
     RetornoService,
-    ReporteUnidadLlegadaService,
     ActaEntregaConsumer,
     ConfiguracionCodigosService,
     PedidosAbiertosConsumer,

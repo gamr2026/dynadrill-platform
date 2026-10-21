@@ -43,7 +43,6 @@ export class OperadorAsignadoDto {
   /** Cuenta del operador (rol operador_fcr). */
   @IsUUID() usuarioId!: string;
   /** Vehículo del catálogo que lleva este operador (opcional: no todo servicio lleva vehículo). */
-  @IsOptional() @IsUUID() vehiculoId?: string;
 }
 
 export class AsignarTicketDto {
@@ -116,7 +115,7 @@ export class TicketsController {
     return this.tipoOperador.definir(id, dto.tipoOperadorId, dto.inspectorId, actor);
   }
 
-  /** El Supervisor asigna a los operadores (y sus unidades, si el servicio lleva); el ticket pasa a la reunión operativa. */
+  /** El Supervisor asigna a los operadores; el ticket pasa a la reunión operativa. */
   @RequirePermission(P.FCR_OPERAR)
   @Post('tickets/:id/asignar')
   asignar(

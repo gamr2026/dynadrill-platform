@@ -14,8 +14,6 @@ type Db = Prisma.TransactionClient | PrismaService;
 export interface ClaveRequisito {
   ticketId: string;
   codigo: string;
-  /** Unidad (requisitos de ámbito `unidad`). */
-  vehiculoId?: string | null;
   /** Operador (requisitos de ámbito `operador`). */
   usuarioId?: string | null;
 }
@@ -24,7 +22,7 @@ export interface RequisitoPendiente {
   id: string;
   codigo: string;
   nombre: string;
-  /** A quién o a qué corresponde (placa de la unidad o nombre del operador); `null` si es del ticket. */
+  /** A quién o a qué corresponde (nombre del operador); `null` si es del ticket. */
   para: string | null;
   texto: string;
 }
@@ -54,10 +52,6 @@ export class RequisitosService {
         OR: [{ tipoOt: null }, { tipoOt: ticket.tipoOt }],
       },
     });
-    const unidades = await tx.ticketUnidad.findMany({
-      where: { ticketId },
-      select: { vehiculoId: true },
-    });
     const operadores = await tx.ticketPersona.findMany({
       where: { ticketId, rol: 'operador' },
       select: { usuarioId: true },
@@ -67,8 +61,6 @@ export class RequisitosService {
     for (const r of definiciones) {
       const base = { id: '', ticketId, requisitoCodigo: r.codigo };
       if (r.ambito === 'ticket') data.push({ ...base, id: uuidv7() });
-      if (r.ambito === 'unidad')
-        for (const u of unidades) data.push({ ...base, id: uuidv7(), vehiculoId: u.vehiculoId });
       if (r.ambito === 'operador')
         for (const o of operadores) data.push({ ...base, id: uuidv7(), usuarioId: o.usuarioId });
     }
@@ -133,7 +125,6 @@ export class RequisitosService {
       where: {
         ticketId: k.ticketId,
         requisitoCodigo: k.codigo,
-        vehiculoId: k.vehiculoId ?? null,
         usuarioId: k.usuarioId ?? null,
         estado: 'pendiente',
       },
@@ -154,7 +145,6 @@ export class RequisitosService {
       where: {
         ticketId: k.ticketId,
         requisitoCodigo: k.codigo,
-        vehiculoId: k.vehiculoId ?? null,
         usuarioId: k.usuarioId ?? null,
         estado: 'cumplido',
       },
@@ -183,11 +173,11 @@ export class RequisitosService {
         requisito: { pasos: { some: { pasoCodigo } } },
         ...(excepto.length ? { requisitoCodigo: { notIn: excepto } } : {}),
       },
-      include: { requisito: true, vehiculo: true, usuario: true },
+      include: { requisito: true, usuario: true },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
     });
     return filas.map((f) => {
-      const para = f.vehiculo?.placa ?? f.usuario?.nombre ?? null;
+      const para = f.usuario?.nombre ?? null;
       return {
         id: f.id,
         codigo: f.requisitoCodigo,
@@ -222,7 +212,6 @@ export class RequisitosService {
       where: { ticketId },
       include: {
         requisito: { include: { pasos: { include: { paso: true } } } },
-        vehiculo: true,
         usuario: true,
       },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
@@ -237,8 +226,7 @@ export class RequisitosService {
         ambito: f.requisito.ambito,
         paso: f.requisito.pasos[0]?.pasoCodigo ?? null,
         pasoOrden: f.requisito.pasos[0]?.paso.orden ?? 0,
-        para: f.vehiculo?.placa ?? f.usuario?.nombre ?? null,
-        vehiculoId: f.vehiculoId,
+        para: f.usuario?.nombre ?? null,
         usuarioId: f.usuarioId,
         estado: f.estado,
         cumplidoAt: f.cumplidoAt,
