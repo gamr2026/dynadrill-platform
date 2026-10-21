@@ -835,6 +835,7 @@ export class PedidosService {
           unidad: it.unidad,
           cantidad: Number(it.cantidad),
           tipoLinea: it.tipoLinea,
+          listaPreciosItemId: it.listaPreciosItemId ?? null,
         })),
       });
     } else {
@@ -1344,6 +1345,7 @@ export class PedidosService {
               unidad: it.unidad,
               cantidad: Number(it.cantidad),
               tipoLinea: it.tipoLinea,
+              listaPreciosItemId: it.listaPreciosItemId ?? null,
             })),
           }
         : {}),
