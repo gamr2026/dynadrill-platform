@@ -69,3 +69,20 @@ export class RechazarPrefacturaDto {
   @IsString() @MinLength(5) @MaxLength(1000) motivo!: string;
   @IsIn(AREAS_DEVOLUCION) devueltoA!: (typeof AREAS_DEVOLUCION)[number];
 }
+
+export class ReemplazarFirmaDto {
+  /** Archivo nuevo, subido a `archivos` con módulo `prefactura_documento` o `prefactura_company_man`. */
+  @IsUUID() archivoId!: string;
+}
+
+export const TIPOS_DOCUMENTO_RESPALDO = ['monitoreo', 'mezcla_quimica'] as const;
+
+export class CargarDocumentoFirmadoDto {
+  @IsIn(TIPOS_DOCUMENTO_RESPALDO) tipo!: (typeof TIPOS_DOCUMENTO_RESPALDO)[number];
+  /** El documento del ticket de Pumping al que corresponde (su id en `GET tickets/:id/documentos`). */
+  @IsUUID() documentoTicketId!: string;
+  /** Solo el monitoreo: el día de operación. */
+  @IsOptional() @IsDateString() fecha?: string;
+  /** Archivo subido a `archivos` con módulo `documento_respaldo_firmado`. */
+  @IsUUID() archivoId!: string;
+}

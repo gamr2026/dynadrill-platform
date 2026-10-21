@@ -17,6 +17,7 @@ import {
   FirmaCompanyManDto,
   FirmarPrefacturaDto,
   RechazarPrefacturaDto,
+  ReemplazarFirmaDto,
 } from '../dto/prefacturas.dto';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +47,12 @@ const aDia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 const INCLUDE = {
   items: { orderBy: { orden: 'asc' } },
   advertencias: { orderBy: { orden: 'asc' } },
-  firmas: { orderBy: { createdAt: 'asc' }, include: { archivo: true } },
+  /** Solo las firmas vigentes: las reemplazadas se conservan en la base como historia. */
+  firmas: {
+    where: { reemplazadaPorId: null },
+    orderBy: { createdAt: 'asc' },
+    include: { archivo: true },
+  },
 } as const;
 
 type PrefacturaCompleta = Prisma.PrefacturaGetPayload<{ include: typeof INCLUDE }>;
@@ -552,6 +558,70 @@ export class PrefacturasService {
     });
     // La lectura de la firma tarda unos segundos: se lanza aparte y no retrasa ni condiciona el registro.
     void this.verificarEnSegundoPlano(firmaId, archivo.id, nombre, cargo, ctx.token);
+    return this.detalle(id);
+  }
+
+  /**
+   * Facturación carga una prefactura firmada nueva en lugar de la registrada (p. ej. porque la lectura automática no detectó la firma).
+   * Vale mientras la prefactura esté vigente: la firma anterior se conserva como historia y la nueva se lee de nuevo (solo es una ayuda).
+   */
+  async reemplazarFirma(
+    id: string,
+    firmaId: string,
+    dto: ReemplazarFirmaDto,
+    ctx: ContextoPrefactura,
+  ) {
+    const p = await this.cargar(id);
+    if (!(VIGENTES as readonly string[]).includes(p.estado)) {
+      throw new ConflictException(
+        'Solo se reemplaza el documento firmado de una prefactura vigente',
+      );
+    }
+    const anterior = p.firmas.find((f) => f.id === firmaId);
+    if (!anterior) throw new NotFoundException('La firma no existe en esta prefactura');
+    const archivo = await this.directorio.archivo(dto.archivoId, ctx.token);
+    if (!archivo) throw new BadRequestException('El archivo indicado no existe');
+    if (archivo.modulo !== 'prefactura_documento' && archivo.modulo !== 'prefactura_company_man') {
+      throw new BadRequestException('El archivo no se subió como documento de prefactura');
+    }
+    if (archivo.subidoPor !== ctx.actor.id) {
+      throw new BadRequestException('Solo se puede registrar un archivo que usted mismo subió');
+    }
+    if (archivo.id === anterior.archivoId) {
+      throw new ConflictException('Es el mismo archivo que ya está registrado');
+    }
+    const yaExiste = await this.prisma.prefacturaFirma.findFirst({
+      where: { prefacturaId: id, archivoId: archivo.id },
+      select: { id: true },
+    });
+    if (yaExiste) throw new ConflictException('Ese archivo ya se registró en esta prefactura');
+    const nuevaId = uuidv7();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.prefacturaFirma.create({
+        data: {
+          id: nuevaId,
+          prefacturaId: id,
+          firmanteTipo: anterior.firmanteTipo,
+          personaId: anterior.personaId,
+          nombre: anterior.nombre,
+          cargo: anterior.cargo,
+          firmadoAt: anterior.firmadoAt,
+          archivoId: archivo.id,
+          registradoPor: ctx.actor.id,
+        },
+      });
+      await tx.prefacturaFirma.update({
+        where: { id: anterior.id },
+        data: { reemplazadaPorId: nuevaId },
+      });
+    });
+    void this.verificarEnSegundoPlano(
+      nuevaId,
+      archivo.id,
+      anterior.nombre,
+      anterior.cargo,
+      ctx.token,
+    );
     return this.detalle(id);
   }
 

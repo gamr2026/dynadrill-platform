@@ -7,6 +7,7 @@ import {
   FirmaCompanyManDto,
   FirmarPrefacturaDto,
   ListarPrefacturasQuery,
+  ReemplazarFirmaDto,
   RechazarPrefacturaDto,
   RegistrarTicketDto,
 } from '../dto/prefacturas.dto';
@@ -123,6 +124,19 @@ export class PrefacturasController {
   }
 
   /** Vuelve a leer la firma de un archivo registrado. Ayuda para revisar; no certifica la autenticidad. */
+  /** Facturación carga el documento firmado nuevo en lugar del registrado; la anterior queda como historia y se vuelve a leer. */
+  @RequirePermission(P.PREFACTURAS_FIRMAR)
+  @Post('prefacturas/:id/firmas/:firmaId/reemplazar')
+  reemplazarFirma(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('firmaId', ParseUUIDPipe) firmaId: string,
+    @Body() dto: ReemplazarFirmaDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.prefacturas.reemplazarFirma(id, firmaId, dto, this.ctx(actor, auth));
+  }
+
   @RequirePermission(P.PREFACTURAS_FIRMAR)
   @Post('prefacturas/:id/firmas/:firmaId/verificar')
   verificarFirma(

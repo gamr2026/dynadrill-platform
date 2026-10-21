@@ -315,6 +315,7 @@ model Pedido {
   despachoArchivoRespaldoId String?  @map("despacho_archivo_respaldo_id") @db.Uuid
   despachoArchivoMsdsId     String?  @map("despacho_archivo_msds_id") @db.Uuid
   prefacturas      Prefactura[]
+  documentosFirmados DocumentoRespaldoFirmado[]
   guias            GuiaRemision[]
   ordenTrabajo     OrdenTrabajo?
 
@@ -964,10 +965,48 @@ model PrefacturaFirma {
   nombreCoincide        Boolean?  @map("nombre_coincide")
   registradoPor String            @map("registrado_por") @db.Uuid
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// La firma que sustituyó a esta (la vigente no tiene reemplazo).
+  reemplazadaPorId String?         @unique @map("reemplazada_por_id") @db.Uuid
+  reemplazadaPor   PrefacturaFirma? @relation("reemplazoFirma", fields: [reemplazadaPorId], references: [id])
+  reemplaza        PrefacturaFirma? @relation("reemplazoFirma")
 
   @@unique([prefacturaId, archivoId])
   @@index([prefacturaId])
   @@map("prefactura_firma")
+  @@schema("comercial")
+}
+
+enum TipoDocumentoRespaldo {
+  monitoreo
+  mezcla_quimica
+
+  @@map("tipo_documento_respaldo")
+  @@schema("comercial")
+}
+
+/// Versión firmada de un documento de respaldo del ticket (monitoreo de un día o mezcla química), con la lectura automática de la firma.
+/// `documentoTicketId` es el documento de Pumping al que corresponde (referencia por id: son contenedores distintos).
+model DocumentoRespaldoFirmado {
+  id                   String                   @id @db.Uuid
+  pedidoId             String                   @map("pedido_id") @db.Uuid
+  pedido               Pedido                   @relation(fields: [pedidoId], references: [id])
+  tipo                 TipoDocumentoRespaldo
+  documentoTicketId    String                   @map("documento_ticket_id") @db.Uuid
+  fecha                DateTime?                @db.Date
+  archivoId            String                   @map("archivo_id") @db.Uuid
+  archivo              CatArchivo               @relation(fields: [archivoId], references: [id])
+  verificacion         VerificacionFirma        @default(no_verificada)
+  verificacionConfianza Decimal?                @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt       DateTime?                @map("verificacion_at") @db.Timestamptz(6)
+  registradoPor        String                   @map("registrado_por") @db.Uuid
+  createdAt            DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  reemplazadoPorId     String?                  @unique @map("reemplazado_por_id") @db.Uuid
+  reemplazadoPor       DocumentoRespaldoFirmado? @relation("reemplazoDocumento", fields: [reemplazadoPorId], references: [id])
+  reemplaza            DocumentoRespaldoFirmado? @relation("reemplazoDocumento")
+
+  @@unique([pedidoId, archivoId])
+  @@index([pedidoId, documentoTicketId])
+  @@map("documento_respaldo_firmado")
   @@schema("comercial")
 }
 
@@ -1361,6 +1400,7 @@ model CatArchivo {
 
   documentosPedido PedidoDocumento[]
   firmasPrefactura PrefacturaFirma[]
+  documentosFirmados DocumentoRespaldoFirmado[]
   guias            GuiaRemision[]    @relation("guiaArchivo")
   ordenes          OrdenTrabajo[]    @relation("ordenArchivo")
 

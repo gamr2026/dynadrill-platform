@@ -164,12 +164,39 @@ run('prefactura (base de datos real)', () => {
     tamanoBytes: 3000,
     subidoPor: ACTOR,
   };
+  /** Documento firmado nuevo que Facturación carga en lugar del registrado. */
+  const ARCHIVO_NUEVO = {
+    id: uuidv7(),
+    modulo: 'prefactura_documento',
+    nombre: 'prefactura firmada (nueva).pdf',
+    mimeType: 'application/pdf',
+    tamanoBytes: 5000,
+    subidoPor: ACTOR,
+  };
+  /** Monitoreo o mezcla firmados (dos versiones). */
+  const FIRMADO_1 = {
+    id: uuidv7(),
+    modulo: 'documento_respaldo_firmado',
+    nombre: 'monitoreo firmado.pdf',
+    mimeType: 'application/pdf',
+    tamanoBytes: 1500,
+    subidoPor: ACTOR,
+  };
+  const FIRMADO_2 = { ...FIRMADO_1, id: uuidv7(), nombre: 'monitoreo firmado v2.pdf' };
   // los archivos que se guardan de verdad (los otros se rechazan antes de guardarse)
-  MAESTROS.archivos = [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_CM];
+  MAESTROS.archivos = [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_CM, ARCHIVO_NUEVO, FIRMADO_1, FIRMADO_2];
   const directorioFalso = {
     archivo: async (i: string) =>
-      [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_AJENO, ARCHIVO_OTRO, ARCHIVO_CM].find((a) => a.id === i) ??
-      null,
+      [
+        ARCHIVO_OK,
+        ARCHIVO_2,
+        ARCHIVO_AJENO,
+        ARCHIVO_OTRO,
+        ARCHIVO_CM,
+        ARCHIVO_NUEVO,
+        FIRMADO_1,
+        FIRMADO_2,
+      ].find((a) => a.id === i) ?? null,
     persona: async (i: string) =>
       i === COMPANY_MAN ? { id: COMPANY_MAN, nombre: `Carlos Company Man ${n}` } : null,
     eliminarArchivo: async () => undefined,
@@ -380,6 +407,10 @@ run('prefactura (base de datos real)', () => {
     if (pedidos.length) {
       await quitarGuiasDePrueba(admin, pedidos);
       await admin.query(
+        'DELETE FROM comercial.documento_respaldo_firmado WHERE pedido_id = ANY($1::uuid[])',
+        [pedidos],
+      );
+      await admin.query(
         'DELETE FROM comercial.pedido_ticket_operativo WHERE pedido_id = ANY($1::uuid[])',
         [pedidos],
       );
@@ -519,6 +550,144 @@ run('prefactura (base de datos real)', () => {
       .get('/api/comercial/reporteria/pedidos')
       .set(bearer([P.PEDIDOS_VER]))
       .expect(403);
+  });
+
+  it('Facturación reemplaza el documento firmado: la lectura se repite, la anterior queda como historia y solo hay una vigente', async () => {
+    const id = await pedidoListo();
+    const p = (await generar(id).expect(201)).body;
+    const url = `/api/comercial/prefacturas/${p.id}`;
+    ocr.respuesta = { resultado: 'no_detectada', confianza: 0.2, nombreCoincide: false };
+    const r = await http()
+      .post(`${url}/firmas`)
+      .set(fact())
+      .send({
+        firmanteTipo: 'company_man',
+        personaId: COMPANY_MAN,
+        firmadoAt: '2026-11-05',
+        archivoId: ARCHIVO_OK.id,
+      })
+      .expect(201);
+    const firmaId = r.body.firmas[0].id;
+    expect((await esperarVerificacion(p.id, ARCHIVO_OK.id)).verificacion).toBe(
+      'firma_no_detectada',
+    );
+    // sin permiso, con un archivo ajeno o con el mismo archivo no se reemplaza
+    const rutaReemplazo = `${url}/firmas/${firmaId}/reemplazar`;
+    await http()
+      .post(rutaReemplazo)
+      .set(soloVer())
+      .send({ archivoId: ARCHIVO_NUEVO.id })
+      .expect(403);
+    await http().post(rutaReemplazo).set(fact()).send({ archivoId: ARCHIVO_AJENO.id }).expect(400);
+    await http().post(rutaReemplazo).set(fact()).send({ archivoId: ARCHIVO_OK.id }).expect(409);
+    // el reemplazo conserva a quien firma y se vuelve a leer
+    ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.93, nombreCoincide: true };
+    const n2 = (
+      await http().post(rutaReemplazo).set(fact()).send({ archivoId: ARCHIVO_NUEVO.id }).expect(201)
+    ).body;
+    expect(n2.firmas).toHaveLength(1);
+    expect(n2.firmas[0]).toMatchObject({
+      archivoId: ARCHIVO_NUEVO.id,
+      firmanteTipo: 'company_man',
+      nombre: `Carlos Company Man ${n}`,
+    });
+    expect((await esperarVerificacion(p.id, ARCHIVO_NUEVO.id)).verificacion).toBe(
+      'firma_detectada',
+    );
+    // la anterior sigue en la base, enlazada a la que la reemplazó
+    const vieja = await prisma.prefacturaFirma.findFirstOrThrow({
+      where: { prefacturaId: p.id, archivoId: ARCHIVO_OK.id },
+    });
+    expect(vieja.reemplazadaPorId).toBe(n2.firmas[0].id);
+    // una prefactura rechazada ya no admite reemplazos
+    await http().post(`${url}/enviar`).set(fact()).send({ medio: 'email' }).expect(201);
+    await http()
+      .post(`${url}/rechazar`)
+      .set(fact())
+      .send({ motivo: 'Faltan soportes', devueltoA: 'operaciones' })
+      .expect(201);
+    await http()
+      .post(`${url}/firmas/${n2.firmas[0].id}/reemplazar`)
+      .set(fact())
+      .send({ archivoId: ARCHIVO_2.id })
+      .expect(409);
+  });
+
+  it('el monitoreo y la mezcla se cargan firmados con su indicador de firma; una versión nueva reemplaza a la anterior', async () => {
+    const id = await pedidoListo();
+    const base = `/api/comercial/pedidos/${id}/documentos-firmados`;
+    const doc = uuidv7();
+    const cuerpo = {
+      tipo: 'monitoreo',
+      documentoTicketId: doc,
+      fecha: '2026-11-01',
+      archivoId: FIRMADO_1.id,
+    };
+    // sin ticket de Pumping el pedido no tiene estos documentos
+    await http().post(base).set(fact()).send(cuerpo).expect(409);
+    await prisma.pedidoTicketOperativo.create({
+      data: {
+        pedidoId: id,
+        origen: 'pumping',
+        ticketId: uuidv7(),
+        pasoCodigo: 'ejecucion_operativa',
+      },
+    });
+    // validaciones: permiso, fecha del monitoreo, archivo de otro módulo
+    await http().post(base).set(soloVer()).send(cuerpo).expect(403);
+    await http()
+      .post(base)
+      .set(fact())
+      .send({ ...cuerpo, fecha: undefined })
+      .expect(400);
+    await http()
+      .post(base)
+      .set(fact())
+      .send({ ...cuerpo, tipo: 'mezcla_quimica' })
+      .expect(400);
+    await http()
+      .post(base)
+      .set(fact())
+      .send({ ...cuerpo, archivoId: ARCHIVO_OK.id })
+      .expect(400);
+    ocr.respuesta = { resultado: 'no_detectada', confianza: 0.1, nombreCoincide: null };
+    const r = await http().post(base).set(fact()).send(cuerpo).expect(201);
+    expect(r.body).toHaveLength(1);
+    // la lectura no retrasa la carga: se espera a que termine
+    let fila;
+    for (let i = 0; i < 50 && !fila?.verificacionAt; i++) {
+      await new Promise((x) => setTimeout(x, 100));
+      fila = await prisma.documentoRespaldoFirmado.findFirst({
+        where: { pedidoId: id, archivoId: FIRMADO_1.id },
+      });
+    }
+    expect(fila?.verificacion).toBe('firma_no_detectada');
+    // una versión nueva del mismo documento: queda una sola vigente, con su propio indicador
+    ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.9, nombreCoincide: null };
+    const r2 = await http()
+      .post(base)
+      .set(fact())
+      .send({ ...cuerpo, archivoId: FIRMADO_2.id })
+      .expect(201);
+    expect(r2.body).toHaveLength(1);
+    expect(r2.body[0]).toMatchObject({
+      archivoId: FIRMADO_2.id,
+      tipo: 'monitoreo',
+      fecha: '2026-11-01',
+      documentoTicketId: doc,
+    });
+    for (let i = 0; i < 50; i++) {
+      const g = await prisma.documentoRespaldoFirmado.findFirst({
+        where: { pedidoId: id, archivoId: FIRMADO_2.id },
+      });
+      if (g?.verificacionAt) break;
+      await new Promise((x) => setTimeout(x, 100));
+    }
+    const lista = (await http().get(base).set(fact()).expect(200)).body;
+    expect(lista).toHaveLength(1);
+    expect(lista[0]).toMatchObject({ archivoId: FIRMADO_2.id, verificacion: 'firma_detectada' });
+    // la versión anterior se conserva como historia
+    expect(await prisma.documentoRespaldoFirmado.count({ where: { pedidoId: id } })).toBe(2);
   });
 
   it('no se genera sin la documentación completa ni sin permiso', async () => {
