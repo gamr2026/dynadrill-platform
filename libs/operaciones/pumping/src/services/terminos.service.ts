@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -6,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
+import { hashTexto } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { RequisitosService } from './requisitos.service';
@@ -27,7 +29,72 @@ export class TerminosService {
   async vigente() {
     const v = await this.prisma.terminosVersion.findFirst({ where: { vigente: true } });
     if (!v) throw new NotFoundException('No hay una versión vigente de los términos y condiciones');
-    return { codigo: v.codigo, titulo: v.titulo, texto: v.texto, textoHash: v.textoHash };
+    return {
+      codigo: v.codigo,
+      titulo: v.titulo,
+      texto: v.texto,
+      textoHash: v.textoHash,
+      /** `false` = borrador: QHSE todavía no validó el texto (D9). */
+      validada: v.validadoAt !== null,
+    };
+  }
+
+  /** Todas las versiones, la más reciente primero, con su estado de validación (para QHSE). */
+  async versiones() {
+    const filas = await this.prisma.terminosVersion.findMany({
+      orderBy: { publicadoAt: 'desc' },
+      include: { validador: { select: { nombre: true } } },
+    });
+    return filas.map((v) => ({
+      codigo: v.codigo,
+      titulo: v.titulo,
+      texto: v.texto,
+      textoHash: v.textoHash,
+      vigente: v.vigente,
+      publicadoAt: v.publicadoAt,
+      validada: v.validadoAt !== null,
+      validadoAt: v.validadoAt,
+      validadoPor: v.validador?.nombre ?? null,
+    }));
+  }
+
+  /** QHSE da por válido el texto de una versión tal como está (la v1 sembrada es un borrador de la demo). */
+  async validar(codigo: string, actor: AuthUser) {
+    const v = await this.prisma.terminosVersion.findUnique({ where: { codigo } });
+    if (!v) throw new NotFoundException('La versión no existe');
+    if (v.validadoAt) throw new ConflictException('Esa versión ya está validada');
+    await this.prisma.terminosVersion.update({
+      where: { codigo },
+      data: { validadoAt: new Date(), validadoPor: actor.id },
+    });
+    return this.versiones();
+  }
+
+  /**
+   * QHSE publica una versión nueva del texto: queda validada por quien la publica y pasa a ser la vigente (la anterior deja de serlo).
+   * Las versiones ya aceptadas no se editan nunca: lo que se leyó queda como constancia.
+   */
+  async publicar(titulo: string, texto: string, actor: AuthUser) {
+    const t = texto.trim();
+    if (t.length < 50) throw new BadRequestException('El texto de los términos es demasiado corto');
+    await this.prisma.$transaction(async (tx) => {
+      const previas = await tx.terminosVersion.findMany({ select: { codigo: true } });
+      const n =
+        previas.reduce((m, p) => Math.max(m, Number(/-v(\d+)$/.exec(p.codigo)?.[1] ?? 0)), 0) + 1;
+      await tx.terminosVersion.updateMany({ where: { vigente: true }, data: { vigente: false } });
+      await tx.terminosVersion.create({
+        data: {
+          codigo: `PUMP-TyC-v${n}`,
+          titulo: titulo.trim(),
+          texto: t,
+          textoHash: hashTexto(t),
+          vigente: true,
+          validadoAt: new Date(),
+          validadoPor: actor.id,
+        },
+      });
+    });
+    return this.versiones();
   }
 
   /** Estado de cada operador asignado: aceptó la versión vigente (o alguna) o falta. */

@@ -25,6 +25,7 @@ import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
 import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
+import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -114,6 +115,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   const operador = () =>
     token('operador', 'Oscar Operador', [P.PUMPING_OPERAR], OPERADOR_QUE_ACTUA);
   const sinPermiso = () => token('ingenieria_ventas', 'Vera Ventas', []);
+  // quien valida queda registrado: debe ser una cuenta real (FK a identidad.usuario)
+  const qhse = () =>
+    token('gerente_hse', 'Gloria HSE', [P.PUMPING_TERMINOS_VALIDAR], SUPERVISORA.id);
 
   const pedidos: string[] = [];
   const eventos: string[] = [];
@@ -1117,6 +1121,52 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       motivo: 'QHSE aún no está en el portal nuevo',
       cumplido_por: JEFE,
     });
+  });
+
+  it('D9: QHSE valida el texto de los términos o publica una versión nueva; la anterior queda como constancia y solo QHSE puede', async () => {
+    const urlV = `${base}/terminos/versiones`;
+    // el operador no administra los términos
+    await http().get(urlV).set(op1()).expect(403);
+    await http().post(`${urlV}/PUMP-TyC-v1/validar`).set(op1()).expect(403);
+    const vigenteAntes = (await http().get(`${base}/terminos/vigente`).set(op1()).expect(200)).body;
+    const lista = (await http().get(urlV).set(qhse()).expect(200)).body;
+    const v1 = lista.find((v: { codigo: string }) => v.codigo === vigenteAntes.codigo);
+    expect(v1).toMatchObject({ vigente: true });
+    if (!v1.validada) {
+      expect(vigenteAntes.validada).toBe(false); // borrador hasta que QHSE lo valide
+      await http().post(`${urlV}/${v1.codigo}/validar`).set(qhse()).expect(201);
+      await http().post(`${urlV}/${v1.codigo}/validar`).set(qhse()).expect(409);
+      expect(
+        (await http().get(`${base}/terminos/vigente`).set(op1()).expect(200)).body.validada,
+      ).toBe(true);
+    }
+    await http().post(urlV).set(qhse()).send({ titulo: 'x', texto: 'corto' }).expect(400);
+    const texto =
+      'Texto de prueba de la versión nueva de los términos y condiciones de uso de equipos. '.repeat(
+        2,
+      );
+    const nueva = (
+      await http().post(urlV).set(qhse()).send({ titulo: 'Términos de prueba', texto }).expect(201)
+    ).body;
+    const n = nueva.find((v: { vigente: boolean }) => v.vigente);
+    expect(n).toMatchObject({ validada: true, titulo: 'Términos de prueba' });
+    expect(n.textoHash).toBe(hashTexto(texto.trim()));
+    expect(n.codigo).not.toBe(v1.codigo);
+    // la anterior deja de ser la vigente pero se conserva
+    expect(nueva.find((v: { codigo: string }) => v.codigo === v1.codigo)).toMatchObject({
+      vigente: false,
+    });
+    // deja la versión original como vigente para no alterar las demás pruebas
+    await admin.query('DELETE FROM pumping.terminos_version WHERE codigo = $1', [n.codigo]);
+    await admin.query('UPDATE pumping.terminos_version SET vigente = true WHERE codigo = $1', [
+      v1.codigo,
+    ]);
+    if (!v1.validada) {
+      await admin.query(
+        'UPDATE pumping.terminos_version SET validado_at = NULL, validado_por = NULL WHERE codigo = $1',
+        [v1.codigo],
+      );
+    }
   });
 
   it('SWA y PTW de QHSE bloquean la salida del traslado: una SWA activa la frena hasta que no quede ninguna, y el PTW del primer día debe existir', async () => {

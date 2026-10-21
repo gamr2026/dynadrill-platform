@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
@@ -133,6 +134,11 @@ export class CumplirManualDto {
  * más el puente temporal para los requisitos de módulos que todavía no existen (QHSE, Mantenimiento). Ver
  * documentacion/pumping/PLAN-TRASLADO-SALIDA.md.
  */
+export class PublicarTerminosDto {
+  @IsString() @MinLength(5) @MaxLength(200) titulo!: string;
+  @IsString() @MinLength(50) @MaxLength(20000) texto!: string;
+}
+
 @Controller('operaciones/pumping')
 export class TrasladoSalidaController {
   constructor(
@@ -148,6 +154,25 @@ export class TrasladoSalidaController {
   @Get('terminos/vigente')
   vigente() {
     return this.terminos.vigente();
+  }
+
+  /** QHSE valida el texto (D9): lista de versiones con su estado, validar una tal cual y publicar una nueva. */
+  @RequirePermission(P.PUMPING_TERMINOS_VALIDAR)
+  @Get('terminos/versiones')
+  versionesTerminos() {
+    return this.terminos.versiones();
+  }
+
+  @RequirePermission(P.PUMPING_TERMINOS_VALIDAR)
+  @Post('terminos/versiones/:codigo/validar')
+  validarTerminos(@Param('codigo') codigo: string, @CurrentUser() actor: AuthUser) {
+    return this.terminos.validar(codigo, actor);
+  }
+
+  @RequirePermission(P.PUMPING_TERMINOS_VALIDAR)
+  @Post('terminos/versiones')
+  publicarTerminos(@Body() dto: PublicarTerminosDto, @CurrentUser() actor: AuthUser) {
+    return this.terminos.publicar(dto.titulo, dto.texto, actor);
   }
 
   @RequirePermission(P.PUMPING_OPERAR)

@@ -336,6 +336,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Consultar los tickets en los que la cuenta es operador asignado, con los datos mínimos del viaje (portal del Conductor)',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.OPERADOR, RoleCode.CONDUCTOR],
   ),
+  nuevo(
+    'pumping.terminos.validar',
+    'QHSE: validar el texto de los términos y condiciones de uso de equipos y publicar versiones nuevas',
+    [...ADMIN_ROLE_CODES, RoleCode.TECNICO_HSE, RoleCode.GERENTE_HSE],
+  ),
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
   def(
     'pumpingDocumentosRead',
@@ -648,6 +653,7 @@ export const Permission = {
   PUMPING_OPERAR: 'pumping.tickets.operar',
   PUMPING_CONTEXTO_CONDUCTOR: 'pumping.tickets.contexto_conductor',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',
+  PUMPING_TERMINOS_VALIDAR: 'pumping.terminos.validar',
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
   PUMPING_REQUISITOS_PUENTE: 'pumping.requisitos.puente',

@@ -574,6 +574,10 @@ model TerminosVersion {
   textoHash   String   @map("texto_hash")
   vigente     Boolean  @default(false)
   publicadoAt DateTime @default(now()) @map("publicado_at") @db.Timestamptz(6)
+  /// QHSE valida el texto (D9): sin validar es un borrador.
+  validadoAt  DateTime? @map("validado_at") @db.Timestamptz(6)
+  validadoPor String?   @map("validado_por") @db.Uuid
+  validador   IdUsuario? @relation("terminosValidados", fields: [validadoPor], references: [id])
 
   aceptaciones AceptacionTerminos[]
 
@@ -897,6 +901,7 @@ model IdUsuario {
   historial    TicketHistorial[] @relation("historialActor")
   requisitos   TicketRequisito[] @relation("requisitoOperador")
   aceptaciones AceptacionTerminos[] @relation("aceptacionTerminos")
+  terminosValidados TerminosVersion[] @relation("terminosValidados")
   actividadesDiarias ReporteDiarioActividad[] @relation("actividadAutor")
   cambiosSolicitados SolicitudCambioItems[] @relation("solicitanteCambio")
   cambiosRevisados SolicitudCambioItems[] @relation("revisorCambio")
