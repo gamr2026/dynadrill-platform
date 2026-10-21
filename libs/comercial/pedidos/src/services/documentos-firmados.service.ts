@@ -51,6 +51,7 @@ export class DocumentosFirmadosService {
       verificacion: f.verificacion,
       verificacionConfianza:
         f.verificacionConfianza === null ? null : Number(f.verificacionConfianza),
+      verificacionAt: f.verificacionAt,
       cargadoAt: f.createdAt,
     }));
   }
