@@ -479,69 +479,22 @@ run('orden de trabajo y cierre (base de datos real)', () => {
     await http().post(url).set(fact()).send({}).expect(409);
   });
 
-  it('cierre con OT: control de costos → listo para facturar → facturado (con el número de factura), en orden y con permiso', async () => {
+  it('el pedido ya no tiene pasos de cierre: el flujo termina en la prefactura firmada o la orden de trabajo', async () => {
     const { id } = await pedidoFirmado(CLIENTE_OT);
-    const base = `/api/comercial/pedidos/${id}/cierre`;
-    // con el contrato que exige la OT no se salta
-    const salto = await http().post(`${base}/control-costos`).set(fact()).expect(409);
-    expect(salto.body.detail).toContain('exige la orden de trabajo');
-    await http()
-      .post(`/api/comercial/pedidos/${id}/orden-trabajo`)
-      .set(fact())
-      .send({})
-      .expect(201);
-    await http().post(`${base}/control-costos`).set(soloVer()).expect(403);
-    await http().post(`${base}/listo-para-facturar`).set(fact()).expect(409);
-    await http()
-      .post(`${base}/facturado`)
-      .set(fact())
-      .send({ numeroFactura: '001-001-000001234' })
-      .expect(409);
-    expect((await http().post(`${base}/control-costos`).set(fact()).expect(201)).body.estado).toBe(
-      'enviado_a_control_de_costos',
+    for (const ruta of ['control-costos', 'listo-para-facturar', 'facturado']) {
+      await http()
+        .post(`/api/comercial/pedidos/${id}/cierre/${ruta}`)
+        .set(fact())
+        .send({})
+        .expect(404);
+    }
+    const estados = await admin.query(
+      "SELECT codigo FROM comercial.proceso_estado WHERE proceso = 'pedido'",
     );
-    await http().post(`${base}/control-costos`).set(fact()).expect(409);
-    expect(
-      (await http().post(`${base}/listo-para-facturar`).set(fact()).expect(201)).body.estado,
-    ).toBe('listo_para_facturar');
-    await http().post(`${base}/facturado`).set(fact()).send({}).expect(400);
-    const fin = await http()
-      .post(`${base}/facturado`)
-      .set(fact())
-      .send({ numeroFactura: ' 001-001-000001234 ' })
-      .expect(201);
-    expect(fin.body).toMatchObject({ estado: 'facturado', facturaNumero: '001-001-000001234' });
-    expect((await http().get(base).set(soloVer()).expect(200)).body.facturaNumero).toBe(
-      '001-001-000001234',
-    );
-    await http()
-      .post(`${base}/facturado`)
-      .set(fact())
-      .send({ numeroFactura: '001-001-000009999' })
-      .expect(409);
-    // el historial del pedido muestra todos los pasos por el motor de estados
-    const pasos = await admin.query(
-      'SELECT estado_nuevo FROM comercial.proceso_historial WHERE entidad_id = $1 ORDER BY id',
-      [id],
-    );
-    expect(pasos.rows.map((p: { estado_nuevo: string }) => p.estado_nuevo)).toEqual(
-      expect.arrayContaining([
-        'ticket_firmado',
-        'aot_generada',
-        'enviado_a_control_de_costos',
-        'listo_para_facturar',
-        'facturado',
-      ]),
-    );
-  });
-
-  it('el cliente sin OT pasa directo de ticket firmado a control de costos', async () => {
-    const { id } = await pedidoFirmado(CLIENTE_SIN);
-    const r = await http()
-      .post(`/api/comercial/pedidos/${id}/cierre/control-costos`)
-      .set(fact())
-      .expect(201);
-    expect(r.body.estado).toBe('enviado_a_control_de_costos');
+    const codigos = estados.rows.map((e: { codigo: string }) => e.codigo);
+    expect(codigos).not.toContain('enviado_a_control_de_costos');
+    expect(codigos).not.toContain('listo_para_facturar');
+    expect(codigos).toContain('facturado'); // sigue como estado final que da el Superadmin
   });
 
   it('exporta a AS2 solo la prefactura firmada, con las columnas de la plantilla y avisos de lo que AS2 no reconocerá', async () => {

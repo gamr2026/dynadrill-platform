@@ -70,18 +70,6 @@ const ESTADOS: EstadoDef[] = [
   },
   { codigo: 'ticket_firmado', nombre: 'Ticket firmado', macro: 'en_proceso', rol: 'facturacion' },
   { codigo: 'aot_generada', nombre: 'AOT generada', macro: 'en_proceso', rol: 'facturacion' },
-  {
-    codigo: 'enviado_a_control_de_costos',
-    nombre: 'Enviado a control de costos',
-    macro: 'esperando_aprobacion',
-    rol: null,
-  },
-  {
-    codigo: 'listo_para_facturar',
-    nombre: 'Listo para facturar',
-    macro: 'en_proceso',
-    rol: 'facturacion',
-  },
   { codigo: 'facturado', nombre: 'Facturado', macro: 'aprobado', rol: null, terminal: true },
   { codigo: 'anulado', nombre: 'Anulado', macro: 'rechazado', rol: null, terminal: true },
 ];
@@ -117,8 +105,6 @@ const ANULABLES = [
   'rechazado_por_cliente',
   'ticket_firmado',
   'aot_generada',
-  'enviado_a_control_de_costos',
-  'listo_para_facturar',
 ];
 
 /**
@@ -219,16 +205,6 @@ const PASOS: PasoDef[] = [
     a: 'aot_generada',
     automatica: true,
     evento: 'comercial.orden_trabajo.generada',
-  },
-  // los clientes que no exigen OT pasan directo a control de costos
-  { de: 'ticket_firmado', a: 'enviado_a_control_de_costos', automatica: true },
-  { de: 'aot_generada', a: 'enviado_a_control_de_costos', automatica: true },
-  { de: 'enviado_a_control_de_costos', a: 'listo_para_facturar', automatica: true },
-  {
-    de: 'listo_para_facturar',
-    a: 'facturado',
-    automatica: true,
-    evento: 'comercial.pedido.facturado',
   },
 ];
 

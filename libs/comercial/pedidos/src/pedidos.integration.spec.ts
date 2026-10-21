@@ -1130,7 +1130,7 @@ run('pedidos (base de datos real)', () => {
 
     it('el catálogo de estados del proceso se puede consultar', async () => {
       const r = await http().get('/api/comercial/pedidos/estados').set(ventas()).expect(200);
-      expect(r.body).toHaveLength(17);
+      expect(r.body).toHaveLength(15);
       expect(r.body.find((e: { codigo: string }) => e.codigo === 'borrador')).toMatchObject({
         nombre: 'Por completar',
         macroEstado: 'borrador',

@@ -6,7 +6,6 @@ import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
 import { CambioItemsService } from './services/cambio-items.service';
-import { CierrePedidoService } from './services/cierre-pedido.service';
 import { OrdenesTrabajoService } from './services/ordenes-trabajo.service';
 import { GuiasController } from './controllers/guias.controller';
 import { GuiasService } from './services/guias.service';
@@ -61,7 +60,6 @@ import { WorkflowService } from './workflow/workflow.service';
     ReporteriaService,
     GuiasService,
     OrdenesTrabajoService,
-    CierrePedidoService,
     TicketCerradoConsumer,
     TicketOperativoConsumer,
     ReporteDiarioConsumer,

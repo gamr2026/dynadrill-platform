@@ -14,8 +14,3 @@ export class RegistrarOrdenFirmadaDto {
   /** Archivo opcional subido a `archivos` con módulo `orden_trabajo_documento`. */
   @IsOptional() @IsUUID() archivoId?: string;
 }
-
-export class RegistrarFacturaDto {
-  /** Número de la factura emitida en AS2. */
-  @IsString() @MinLength(3) @MaxLength(40) numeroFactura!: string;
-}
