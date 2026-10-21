@@ -19,7 +19,7 @@ export const MODULOS_ARCHIVO = [
     permisoSubir: 'comercial.pedidos.editar',
     permisoVer: 'comercial.pedidos.ver',
     tiposMime: DOCUMENTOS,
-    tamanoMaxMb: 25,
+    tamanoMaxMb: 10,
   },
   {
     codigo: 'prefactura_documento',
