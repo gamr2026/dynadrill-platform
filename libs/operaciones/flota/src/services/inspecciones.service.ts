@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -220,6 +221,7 @@ export class InspeccionesService {
   async aprobar(inspeccionId: string, actor: ActorInspeccion) {
     return this.prisma.$transaction(async (tx) => {
       const i = await this.paraRevisar(tx, inspeccionId);
+      this.exigirSupervisorAsignado(i, actor);
       if (i.revisiones[0]?.decision === 'aprobada') {
         throw new ConflictException({
           message: 'La inspección ya está aprobada',
@@ -247,6 +249,7 @@ export class InspeccionesService {
   async rechazar(inspeccionId: string, motivo: string, actor: ActorInspeccion) {
     return this.prisma.$transaction(async (tx) => {
       const i = await this.paraRevisar(tx, inspeccionId);
+      this.exigirSupervisorAsignado(i, actor);
       await tx.inspeccionVehiculoRevision.create({
         data: {
           id: uuidv7(),
@@ -476,7 +479,7 @@ export class InspeccionesService {
     const i = await tx.inspeccionVehiculo.findUnique({
       where: { id },
       include: {
-        caso: { select: { ticketId: true } },
+        caso: { select: { ticketId: true, supervisorId: true } },
         unidad: { select: { vehiculoId: true, codigo: true } },
         resultados: { include: { item: { select: { etiqueta: true, bloqueaSiNoCumple: true } } } },
         revisiones: { orderBy: { revisadaAt: 'desc' }, take: 1 },
@@ -490,6 +493,20 @@ export class InspeccionesService {
       });
     }
     return i;
+  }
+
+  /** D13: la inspección de un ticket la aprueba o rechaza el supervisor asignado a ese ticket (no cualquiera con el permiso). */
+  private exigirSupervisorAsignado(
+    i: { caso: { supervisorId: string | null } | null },
+    actor: ActorInspeccion,
+  ): void {
+    const asignado = i.caso?.supervisorId;
+    if (asignado && asignado !== actor.id) {
+      throw new ForbiddenException({
+        message: 'Solo el supervisor asignado al ticket puede aprobar o rechazar esta inspección',
+        code: 'solo_supervisor_asignado',
+      });
+    }
   }
 
   private base(i: {

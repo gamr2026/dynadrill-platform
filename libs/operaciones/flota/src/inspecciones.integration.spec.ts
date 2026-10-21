@@ -121,7 +121,11 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       type: 'operaciones.pumping.asignacion_realizada',
       source: 'operaciones',
       subject: { type: 'pumping_ticket', id: ticketId },
-      data: { ticketId, operadoresUnidades: pares },
+      data: {
+        ticketId,
+        operadoresUnidades: pares,
+        asignados: [{ usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' }],
+      },
       actor: { userId: SUPERVISOR.id, role: 'supervisor_pumping' },
     });
     eventosEnviados.push(e.id);
@@ -438,6 +442,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
           ticketId,
           operadoresUnidades: [{ usuarioId: OPERADOR.id, vehiculoId: VEHICULO.id }],
           conductoresUnidades: [{ usuarioId: CONDUCTOR.id, vehiculoId: VEHICULO.id }],
+          asignados: [{ usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' }],
         },
         actor: { userId: SUPERVISOR.id, role: 'jefe_base' },
       });
@@ -576,6 +581,32 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
         .set(jefe())
         .send({ motivo: 'Quiero repetirla' });
       expect([anular.status, anular.body.code]).toEqual([409, 'inspeccion_aprobada']);
+    });
+
+    it('D13: solo el supervisor asignado al ticket aprueba o rechaza; otro supervisor con el permiso recibe 403', async () => {
+      const r = await registrar(cuerpo({ casoId: casoB, resultados: todoCumple() }));
+      expect(r.status).toBe(201);
+      const insp = r.body.id as string;
+      const otro = token('supervisor_pumping', 'Otro Supervisor', PERMISOS_SUPERVISOR, uuidv7());
+      for (const accion of ['aprobar', 'rechazar']) {
+        const x = await http()
+          .post(`${base}/inspecciones-vehiculo/${insp}/${accion}`)
+          .set(otro)
+          .send({ motivo: 'No me corresponde' });
+        expect([x.status, x.body.code]).toEqual([403, 'solo_supervisor_asignado']);
+      }
+      // el caso guarda al supervisor que trajo el evento de asignación
+      const fila = await admin.query(
+        'SELECT supervisor_id FROM flota.inspeccion_caso WHERE id = $1',
+        [casoB],
+      );
+      expect(fila.rows[0].supervisor_id).toBe(SUPERVISOR.id);
+      // lo deja anulado para no alterar las pruebas siguientes
+      await http()
+        .post(`${base}/inspecciones-vehiculo/${insp}/anular`)
+        .set(jefe())
+        .send({ motivo: 'Prueba de la regla del supervisor asignado' })
+        .expect(201);
     });
 
     it('Nota 1: con el cinturón en «No cumple» se registra pero no se aprueba (también lo impide la base)', async () => {

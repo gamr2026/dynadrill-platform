@@ -63,6 +63,17 @@ export class AsignacionPumpingConsumer implements OnApplicationBootstrap {
             return;
           }
           const actorId = event.actor?.userId ?? null;
+          // el supervisor asignado al ticket (D13): es quien aprueba o rechaza las inspecciones de sus casos
+          const asignados = Array.isArray(event.data['asignados'])
+            ? (event.data['asignados'] as unknown[])
+            : [];
+          const supervisor = asignados.find(
+            (a): a is { usuarioId: string } =>
+              typeof a === 'object' &&
+              a !== null &&
+              (a as { rolCodigo?: unknown }).rolCodigo === 'supervisor' &&
+              typeof (a as { usuarioId?: unknown }).usuarioId === 'string',
+          );
           const vigentes: string[] = [];
           for (const par of pares) {
             const unidad = await tx.unidad.findFirst({
@@ -78,10 +89,16 @@ export class AsignacionPumpingConsumer implements OnApplicationBootstrap {
                 ticketId,
                 unidadId: unidad.id,
                 operadorId: par.usuarioId,
+                supervisorId: supervisor?.usuarioId ?? null,
                 createdBy: actorId,
                 updatedBy: actorId,
               },
-              update: { operadorId: par.usuarioId, updatedBy: actorId, updatedAt: new Date() },
+              update: {
+                operadorId: par.usuarioId,
+                ...(supervisor ? { supervisorId: supervisor.usuarioId } : {}),
+                updatedBy: actorId,
+                updatedAt: new Date(),
+              },
             });
           }
           const retirados = await tx.inspeccionCaso.deleteMany({

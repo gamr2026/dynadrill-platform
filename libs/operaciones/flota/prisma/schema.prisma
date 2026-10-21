@@ -344,6 +344,9 @@ model InspeccionCaso {
   unidad     Unidad    @relation(fields: [unidadId], references: [id])
   operadorId String    @map("operador_id") @db.Uuid
   operador   IdUsuario @relation("casoOperador", fields: [operadorId], references: [id])
+  /// Supervisor asignado al ticket: el único que aprueba o rechaza las inspecciones del caso (nulo en casos anteriores a la regla).
+  supervisorId String?  @map("supervisor_id") @db.Uuid
+  supervisor   IdUsuario? @relation("casoSupervisor", fields: [supervisorId], references: [id])
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy  String?   @map("created_by") @db.Uuid
   updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -700,6 +703,7 @@ model IdUsuario {
   permisosConductor       ConductorPermiso[]           @relation("permisoConductor")
   permisosRegistrados     ConductorPermiso[]           @relation("permisoRegistrador")
   casosOperador           InspeccionCaso[]             @relation("casoOperador")
+  casosSupervisor         InspeccionCaso[]             @relation("casoSupervisor")
   inspeccionesConductor   InspeccionVehiculo[]         @relation("inspeccionConductor")
   inspeccionesAnuladas    InspeccionVehiculo[]         @relation("inspeccionAnulador")
   inspeccionesRegistradas InspeccionVehiculo[]         @relation("inspeccionRegistrador")
