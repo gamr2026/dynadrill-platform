@@ -23,29 +23,34 @@ const PERIODO_DIA = /d[ií]a/i;
 export const esUnidadPorDia = (unidad: string | null | undefined): boolean =>
   !!unidad && PERIODO_DIA.test(unidad);
 
-/** Cantidad real de una fila: las marcas de los días si es por día; si no, la cantidad escrita. */
-export const cantidadDeFila = (f: {
-  porDia: boolean;
-  cantidad: Prisma.Decimal | number | null;
-  dias: unknown[];
-}): number => (f.porDia ? f.dias.length : Number(f.cantidad ?? 0));
+/** Cantidad real de una fila: la suma de las cantidades de sus días (cada marca de una fila por día vale 1). */
+export const cantidadDeFila = (f: { dias: Array<{ cantidad: Prisma.Decimal | number }> }): number =>
+  Math.round(f.dias.reduce((a, d) => a + Number(d.cantidad), 0) * 1000) / 1000;
+
+/** Lo cotizado por código: la suma de las líneas del pedido con ese código. */
+const cotizadoPorCodigo = (
+  lineas: Array<{ codigo: string; cantidad: Prisma.Decimal | number }>,
+): Map<string, number> => {
+  const m = new Map<string, number>();
+  for (const l of lineas) m.set(l.codigo, (m.get(l.codigo) ?? 0) + Number(l.cantidad));
+  return m;
+};
 
 export interface AgregarItemEntrada {
-  /** Ítem de la lista de precios del cliente (en Comercial). */
-  listaPreciosItemId: string;
+  /** Ítem de la lista de precios del cliente (en Comercial); vacío si el ítem no está enlazado. */
+  listaPreciosItemId?: string | null;
   codigo: string;
   descripcion: string;
   unidad?: string | null;
   serie?: string | null;
-  /** Solo si la unidad no es de tiempo. */
-  cantidad?: number;
 }
 
 /**
- * Reporte de Herramientas (DYN-FCR-RE-008) de un ticket: filas por código de la lista de precios del cliente, con su serie y su cantidad real
- * (marcas por día si la unidad es de tiempo; si no, la cantidad escrita). De esa cantidad salen la guía de remisión, la prefactura y la orden de
- * trabajo. Se arma en la Ejecución operativa; cualquier cambio obliga a confirmar de nuevo el listado antes de finalizar. La selección de
- * herramientas físicas no es la fuente del reporte: sirve para las inspecciones, el registro de completación y el retorno, y propone las series.
+ * Reporte de Herramientas (DYN-FCR-RE-008) de un ticket: una matriz ítem × día. Las filas son los códigos de la lista de precios del cliente (nace
+ * precargado con todos los ítems cotizados del pedido, también la movilización); el operador reparte la cantidad de cada ítem en los días del servicio: una
+ * marca que vale 1 en las filas de tiempo y la cantidad aplicada ese día en las demás. De la suma de cada fila salen la guía de remisión, la
+ * prefactura y la orden de trabajo. Cualquier cambio obliga a confirmar de nuevo el listado antes de finalizar. La selección de herramientas
+ * físicas no es la fuente del reporte: sirve para las inspecciones, el registro de completación y el retorno, y propone las series.
  */
 @Injectable()
 export class ReporteHerramientasService {
@@ -55,13 +60,15 @@ export class ReporteHerramientasService {
     private readonly requisitos: RequisitosService,
   ) {}
 
-  async obtener(ticketId: string) {
+  /** `actorId`: quien consulta; si se indica y el reporte aún no se precargó, esa persona queda como autora de la precarga. */
+  async obtener(ticketId: string, actorId?: string) {
+    if (actorId) await this.precargarSiCorresponde(ticketId, actorId);
     const t = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { id: true, fechaInicioServicio: true, fechaFinServicio: true },
     });
     if (!t) throw new NotFoundException('El ticket no existe');
-    const [filas, herramientas, confirmado] = await Promise.all([
+    const [filas, herramientas, confirmado, lineas] = await Promise.all([
       this.prisma.reporteItem.findMany({
         where: { ticketId },
         include: { dias: { orderBy: { fecha: 'asc' } } },
@@ -74,7 +81,12 @@ export class ReporteHerramientasService {
       this.prisma.ticketRequisito.count({
         where: { ticketId, requisitoCodigo: REQ.listadoUsoConfirmado, estado: 'cumplido' },
       }),
+      this.prisma.ticketLinea.findMany({
+        where: { ticketId },
+        select: { codigo: true, cantidad: true },
+      }),
     ]);
+    const cotizado = cotizadoPorCodigo(lineas);
     return {
       listadoConfirmado: confirmado > 0,
       fechaInicio: t.fechaInicioServicio ? aDia(t.fechaInicioServicio) : null,
@@ -89,7 +101,13 @@ export class ReporteHerramientasService {
         porDia: f.porDia,
         serie: f.serie,
         cantidad: cantidadDeFila(f),
-        dias: f.dias.map((d) => ({ fecha: aDia(d.fecha), estado: d.estado })),
+        /** Lo cotizado por Ventas para ese código (las filas con el mismo código comparten ese tope). */
+        cotizado: cotizado.get(f.codigo) ?? 0,
+        dias: f.dias.map((d) => ({
+          fecha: aDia(d.fecha),
+          estado: d.estado,
+          cantidad: Number(d.cantidad),
+        })),
         // series de las herramientas físicas que el ticket tiene para ese código (para proponerlas al operador)
         seriesSugeridas: [
           ...new Set(
@@ -109,12 +127,6 @@ export class ReporteHerramientasService {
       throw new BadRequestException('Indique el código y la descripción');
     const serie = e.serie?.trim() || null;
     const porDia = esUnidadPorDia(e.unidad);
-    if (porDia && e.cantidad !== undefined) {
-      throw new BadRequestException('Una fila por día se reporta con marcas, no con cantidad');
-    }
-    if (!porDia && !(typeof e.cantidad === 'number' && e.cantidad > 0)) {
-      throw new BadRequestException('Escriba la cantidad real (mayor que cero)');
-    }
     await this.prisma.$transaction(async (tx) => {
       await this.exigirOperador(tx, ticketId, actor);
       const ultimo = await tx.reporteItem.aggregate({
@@ -138,12 +150,11 @@ export class ReporteHerramientasService {
           id: uuidv7(),
           ticketId,
           orden: (ultimo._max.orden ?? 0) + 1,
-          listaPreciosItemId: e.listaPreciosItemId,
+          listaPreciosItemId: e.listaPreciosItemId ?? null,
           codigo,
           descripcion,
           unidad: e.unidad?.trim() || null,
           porDia,
-          cantidad: porDia ? null : e.cantidad,
           serie,
           createdBy: actor.id,
           updatedBy: actor.id,
@@ -154,24 +165,17 @@ export class ReporteHerramientasService {
     return this.obtener(ticketId);
   }
 
-  /** Cambia la serie o, si la fila no es por día, la cantidad. */
+  /** Cambia la serie de una fila (las cantidades se reparten por día con `marcarDia`). */
   async actualizarItem(
     ticketId: string,
     itemId: string,
-    cambios: { serie?: string | null; cantidad?: number },
+    cambios: { serie?: string | null },
     actor: AuthUser,
   ) {
     await this.prisma.$transaction(async (tx) => {
       await this.exigirOperador(tx, ticketId, actor);
-      const f = await this.fila(tx, ticketId, itemId);
+      await this.fila(tx, ticketId, itemId);
       const datos: Prisma.ReporteItemUpdateInput = { updatedBy: actor.id };
-      if (cambios.cantidad !== undefined) {
-        if (f.porDia)
-          throw new BadRequestException('Una fila por día se reporta con marcas, no con cantidad');
-        if (!(cambios.cantidad > 0))
-          throw new BadRequestException('La cantidad debe ser mayor que cero');
-        datos.cantidad = cambios.cantidad;
-      }
       if (cambios.serie !== undefined) datos.serie = cambios.serie?.trim() || null;
       try {
         await tx.reporteItem.update({ where: { id: itemId }, data: datos });
@@ -196,12 +200,16 @@ export class ReporteHerramientasService {
     return this.obtener(ticketId);
   }
 
-  /** Marca (o desmarca con `estado = null`) un día de una fila por día. El día va dentro de las fechas del servicio. */
+  /**
+   * Pone (o quita con `estado = null`) la celda de un día. En una fila por día la marca vale 1; en las demás hay que indicar la cantidad aplicada
+   * ese día. El día va dentro de las fechas del servicio.
+   */
   async marcarDia(
     ticketId: string,
     itemId: string,
     fecha: string,
     estado: EstadoItemReporte | null,
+    cantidad: number | undefined,
     actor: AuthUser,
   ) {
     exigirFecha(fecha);
@@ -209,19 +217,35 @@ export class ReporteHerramientasService {
       const t = await this.exigirOperador(tx, ticketId, actor);
       exigirDentroDelServicio(t, fecha);
       const f = await this.fila(tx, ticketId, itemId);
-      if (!f.porDia) {
-        throw new BadRequestException('Esta fila no es por día: escriba su cantidad');
+      let valor = 1;
+      if (estado !== null && !f.porDia) {
+        if (!(typeof cantidad === 'number' && cantidad > 0)) {
+          throw new BadRequestException('Escriba la cantidad aplicada ese día (mayor que cero)');
+        }
+        valor = cantidad;
       }
       const previo = await tx.reporteItemDia.findUnique({
         where: { itemId_fecha: { itemId, fecha: deDia(fecha) } },
       });
+      if (estado !== null)
+        await this.exigirDentroDeLoCotizado(tx, ticketId, f.codigo, itemId, previo?.id, valor);
       if (estado === null) {
         if (previo) await tx.reporteItemDia.delete({ where: { id: previo.id } });
       } else if (previo) {
-        await tx.reporteItemDia.update({ where: { id: previo.id }, data: { estado } });
+        await tx.reporteItemDia.update({
+          where: { id: previo.id },
+          data: { estado, cantidad: valor },
+        });
       } else {
         await tx.reporteItemDia.create({
-          data: { id: uuidv7(), itemId, fecha: deDia(fecha), estado, createdBy: actor.id },
+          data: {
+            id: uuidv7(),
+            itemId,
+            fecha: deDia(fecha),
+            estado,
+            cantidad: valor,
+            createdBy: actor.id,
+          },
         });
       }
       await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.listadoUsoConfirmado });
@@ -237,7 +261,7 @@ export class ReporteHerramientasService {
       if (confirmado) {
         const filas = await tx.reporteItem.findMany({
           where: { ticketId },
-          include: { dias: { select: { id: true } } },
+          include: { dias: { select: { cantidad: true } } },
         });
         if (!filas.length) {
           throw new ConflictException({
@@ -249,7 +273,7 @@ export class ReporteHerramientasService {
         const sinCantidad = filas.filter((f) => cantidadDeFila(f) <= 0);
         if (sinCantidad.length) {
           throw new ConflictException({
-            message: `Marque al menos un día en: ${sinCantidad.map((f) => f.codigo).join(', ')} (o quite la fila)`,
+            message: `Reparta la cantidad en los días de: ${sinCantidad.map((f) => f.codigo).join(', ')} (o quite la fila)`,
             code: 'FILA_SIN_CANTIDAD',
           });
         }
@@ -273,8 +297,119 @@ export class ReporteHerramientasService {
       unidad: f.unidad ?? undefined,
       serie: f.serie ?? undefined,
       cantidad: cantidadDeFila(f),
-      usos: f.dias.map((d) => ({ fecha: aDia(d.fecha), estado: d.estado })),
+      // las filas por día envían sus marcas; en las demás solo importa la cantidad total
+      usos: f.porDia ? f.dias.map((d) => ({ fecha: aDia(d.fecha), estado: d.estado })) : [],
     }));
+  }
+
+  /**
+   * Al llegar a la Ejecución operativa el reporte se precarga una sola vez con todos los ítems cotizados del pedido (la movilización también va, como en los reportes reales): así el operador
+   * solo reparte las cantidades en los días. Lo que quite no vuelve a aparecer.
+   */
+  private async precargarSiCorresponde(ticketId: string, quien: string): Promise<void> {
+    const t = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        pasoCodigo: true,
+        reportePrecargadoAt: true,
+        fechaInicioServicio: true,
+        fechaFinServicio: true,
+      },
+    });
+    if (!t || t.reportePrecargadoAt || t.pasoCodigo !== PASO) return;
+    await this.prisma.$transaction(async (tx) => {
+      const ya = await tx.ticket.updateMany({
+        where: { id: ticketId, reportePrecargadoAt: null },
+        data: { reportePrecargadoAt: new Date() },
+      });
+      if (ya.count === 0) return; // otra petición lo está haciendo
+      const lineas = await tx.ticketLinea.findMany({
+        where: { ticketId },
+        orderBy: { orden: 'asc' },
+      });
+      // si el servicio dura un solo día no hay nada que repartir: cada ítem se aplica a ese día con su cantidad cotizada. Con más de un día
+      // el operador decide en qué días se aplicó cada cantidad.
+      const unSoloDia =
+        !!t.fechaInicioServicio &&
+        !!t.fechaFinServicio &&
+        aDia(t.fechaInicioServicio) === aDia(t.fechaFinServicio);
+      const existentes = await tx.reporteItem.findMany({
+        where: { ticketId },
+        select: { codigo: true, serie: true, orden: true },
+      });
+      const usados = new Set(existentes.filter((x) => !x.serie).map((x) => x.codigo));
+      let orden = existentes.reduce((m, x) => Math.max(m, x.orden), 0);
+      for (const l of lineas) {
+        if (usados.has(l.codigo)) continue; // el operador ya agregó ese código
+        usados.add(l.codigo);
+        const porDia = esUnidadPorDia(l.unidad);
+        const id = uuidv7();
+        await tx.reporteItem.create({
+          data: {
+            id,
+            ticketId,
+            orden: ++orden,
+            listaPreciosItemId: l.listaPreciosItemId,
+            codigo: l.codigo,
+            descripcion: l.descripcion,
+            unidad: l.unidad,
+            porDia,
+            createdBy: quien,
+            updatedBy: quien,
+          },
+        });
+        if (unSoloDia && t.fechaInicioServicio) {
+          await tx.reporteItemDia.create({
+            data: {
+              id: uuidv7(),
+              itemId: id,
+              fecha: t.fechaInicioServicio,
+              estado: 'operacion',
+              cantidad: porDia ? 1 : Number(l.cantidad),
+              createdBy: quien,
+            },
+          });
+        }
+      }
+    });
+  }
+
+  /**
+   * Lo reportado de un código no puede superar lo que Ventas cotizó (suma de las filas con ese código, cada una con sus días). Para reportar más,
+   * el equipo propone el cambio de ítems del pedido y, aprobado, lo cotizado sube.
+   */
+  private async exigirDentroDeLoCotizado(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    codigo: string,
+    itemId: string,
+    celdaId: string | undefined,
+    valor: number,
+  ): Promise<void> {
+    const [lineas, celdas] = await Promise.all([
+      tx.ticketLinea.findMany({
+        where: { ticketId, codigo },
+        select: { codigo: true, cantidad: true },
+      }),
+      tx.reporteItemDia.findMany({
+        where: { item: { ticketId, codigo }, ...(celdaId ? { id: { not: celdaId } } : {}) },
+        select: { cantidad: true },
+      }),
+    ]);
+    const tope = cotizadoPorCodigo(lineas).get(codigo) ?? 0;
+    const suma =
+      Math.round((celdas.reduce((a, c) => a + Number(c.cantidad), 0) + valor) * 1000) / 1000;
+    if (suma > tope) {
+      throw new ConflictException({
+        message:
+          tope > 0
+            ? `${codigo}: con esta cantidad suma ${suma} y lo cotizado es ${tope}. Si de verdad se usó más, proponga el cambio de ítems del pedido.`
+            : `${codigo} no está en lo cotizado del pedido: proponga el cambio de ítems para poder reportarlo.`,
+        code: 'CANTIDAD_SUPERA_COTIZADO',
+        cotizado: tope,
+        itemId,
+      });
+    }
   }
 
   private async fila(tx: Prisma.TransactionClient, ticketId: string, itemId: string) {

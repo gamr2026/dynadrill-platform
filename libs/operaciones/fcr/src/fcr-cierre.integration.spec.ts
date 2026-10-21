@@ -173,6 +173,14 @@ run(
             cantidad: 1,
             tipoLinea: 'herramienta',
           },
+          // lo cotizado del ítem que el reporte de estas pruebas marca (el reporte no puede superar lo cotizado)
+          {
+            codigo: `SFS-EJ-${n}`,
+            descripcion: 'Ítem de prueba',
+            unidad: 'día',
+            cantidad: 10,
+            tipoLinea: 'servicio',
+          },
         ],
       });
       await consumer.consumir(e);

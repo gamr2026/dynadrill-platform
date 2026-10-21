@@ -80,24 +80,23 @@ export class ConfirmarListadoUsoDto {
 const ESTADOS_ITEM = ['operacion', 'daily_charge', 'venta'];
 
 export class AgregarItemReporteDto {
-  /** El ítem de la lista de precios del cliente (en Comercial). */
-  @IsUUID() listaPreciosItemId!: string;
+  /** El ítem de la lista de precios del cliente (en Comercial); vacío si el ítem no está enlazado. */
+  @IsOptional() @IsUUID() listaPreciosItemId?: string;
   /** Código de un ítem de la lista de precios del cliente (con él se factura). */
   @IsString() @MinLength(1) @MaxLength(100) codigo!: string;
   @IsString() @MinLength(1) @MaxLength(300) descripcion!: string;
   @IsOptional() @IsString() @MaxLength(50) unidad?: string;
   @IsOptional() @IsString() @MaxLength(100) serie?: string;
-  /** Solo si la unidad no es de tiempo. */
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Max(999999999) cantidad?: number;
 }
 
 export class ActualizarItemReporteDto {
   @IsOptional() @IsString() @MaxLength(100) serie?: string;
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Max(999999999) cantidad?: number;
 }
 
 export class MarcarDiaDto {
   @IsIn(ESTADOS_ITEM) estado!: 'operacion' | 'daily_charge' | 'venta';
+  /** Cantidad aplicada ese día: solo en las filas que no son por día (en las de tiempo la marca vale 1). */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Max(999999999) cantidad?: number;
 }
 
 export class RechazarReportesDto {
@@ -198,8 +197,8 @@ export class EjecucionController {
   // ── Reporte de Herramientas (por ítem de la lista de precios del cliente) ──
   @RequirePermission(P.FCR_OPERAR)
   @Get('reporte-herramientas')
-  obtenerReporte(@Param('id', ParseUUIDPipe) id: string) {
-    return this.reporte.obtener(id);
+  obtenerReporte(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.reporte.obtener(id, actor.id);
   }
 
   @RequirePermission(P.FCR_OPERAR)
@@ -243,7 +242,7 @@ export class EjecucionController {
     @Body() dto: MarcarDiaDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.reporte.marcarDia(id, itemId, fecha, dto.estado, actor);
+    return this.reporte.marcarDia(id, itemId, fecha, dto.estado, dto.cantidad, actor);
   }
 
   @RequirePermission(P.FCR_OPERAR)
@@ -254,7 +253,7 @@ export class EjecucionController {
     @Param('fecha') fecha: string,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.reporte.marcarDia(id, itemId, fecha, null, actor);
+    return this.reporte.marcarDia(id, itemId, fecha, null, undefined, actor);
   }
 
   /** «El reporte está completo»: requisito para finalizar la ejecución. */

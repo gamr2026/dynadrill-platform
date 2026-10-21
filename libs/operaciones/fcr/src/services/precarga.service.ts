@@ -10,6 +10,8 @@ export interface LineaPedido {
   unidad: string;
   cantidad: number;
   tipoLinea: string;
+  /** Ítem de la lista de precios del cliente (si el pedido lo trae enlazado). */
+  listaPreciosItemId?: string | null;
 }
 
 const TIPOS_LINEA: readonly string[] = ['servicio', 'material', 'herramienta', 'movilizacion'];
@@ -56,6 +58,7 @@ export class PrecargaService {
         unidad: String(l.unidad ?? '').trim() || 'unidad',
         cantidad: Number(l.cantidad),
         tipoLinea: l.tipoLinea as TipoLinea,
+        listaPreciosItemId: l.listaPreciosItemId ?? null,
       })),
     });
     return validas.length;

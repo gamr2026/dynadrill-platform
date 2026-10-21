@@ -126,7 +126,10 @@ run(
     };
 
     /** Ticket de venta en la ejecución, con un cepillo y un magneto recibidos, asignado al operador, con el acta confirmada. */
-    const enEjecucion = async (fechas = { inicio: '2026-11-05', fin: '2026-11-12' }) => {
+    const enEjecucion = async (
+      fechas = { inicio: '2026-11-05', fin: '2026-11-12' },
+      opciones: { lineas?: Array<Record<string, unknown>>; precargado?: boolean } = {},
+    ) => {
       const codigo = `SH-EJ-${n}-${cods++}`;
       await http()
         .put('/api/operaciones/fcr/configuracion-codigos')
@@ -162,6 +165,44 @@ run(
             cantidad: 1,
             tipoLinea: 'herramienta',
           },
+          ...(opciones.lineas ?? [
+            // lo cotizado de los códigos que usan las pruebas del reporte (topes de lo que se puede reportar)
+            {
+              codigo: `SFS-EJ-${n}`,
+              descripcion: 'Ítem de prueba',
+              unidad: 'día',
+              cantidad: 10,
+              tipoLinea: 'servicio',
+            },
+            {
+              codigo: 'SFS6001',
+              descripcion: 'Hydraulic jar',
+              unidad: 'día',
+              cantidad: 10,
+              tipoLinea: 'servicio',
+            },
+            {
+              codigo: 'SFS6057',
+              descripcion: 'Daily charge',
+              unidad: 'día',
+              cantidad: 10,
+              tipoLinea: 'servicio',
+            },
+            {
+              codigo: 'SFC33012',
+              descripcion: 'Bombeo',
+              unidad: 'gls',
+              cantidad: 5000,
+              tipoLinea: 'material',
+            },
+            {
+              codigo: 'SFS6146',
+              descripcion: 'Movilización livianas',
+              unidad: 'km',
+              cantidad: 200,
+              tipoLinea: 'movilizacion',
+            },
+          ]),
         ],
       });
       await consumer.consumir(e);
@@ -224,24 +265,38 @@ run(
         .set(supervisor())
         .send({ hacia: 'ejecucion_operativa' })
         .expect(201);
-      // el reporte de herramientas (por ítem de la lista de precios) con una fila por día marcada: lo mínimo para poder confirmarlo
-      const fila = await http()
-        .post(`${base(id)}/reporte-herramientas/items`)
-        .set(operador())
-        .send({
-          listaPreciosItemId: uuidv7(),
-          codigo: `SFS-EJ-${n}`,
-          descripcion: 'Ítem de prueba',
-          unidad: 'día',
-        })
-        .expect(201);
-      await http()
-        .put(
-          `${base(id)}/reporte-herramientas/items/${fila.body.items[0].id}/dias/${fechas.inicio}`,
-        )
-        .set(operador())
-        .send({ estado: 'operacion' })
-        .expect(200);
+      if (!opciones.precargado) {
+        // el reporte nace precargado con los ítems cotizados; estas pruebas arman el suyo desde cero
+        const pre = (
+          await http()
+            .get(`${base(id)}/reporte-herramientas`)
+            .set(operador())
+            .expect(200)
+        ).body.items as Array<{ id: string }>;
+        for (const f of pre)
+          await http()
+            .delete(`${base(id)}/reporte-herramientas/items/${f.id}`)
+            .set(operador())
+            .expect(200);
+        // una fila por día marcada: lo mínimo para poder confirmar el reporte
+        const fila = await http()
+          .post(`${base(id)}/reporte-herramientas/items`)
+          .set(operador())
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: `SFS-EJ-${n}`,
+            descripcion: 'Ítem de prueba',
+            unidad: 'día',
+          })
+          .expect(201);
+        await http()
+          .put(
+            `${base(id)}/reporte-herramientas/items/${fila.body.items[0].id}/dias/${fechas.inicio}`,
+          )
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(200);
+      }
       return {
         id,
         pedidoId: e.subject.id,
@@ -712,47 +767,71 @@ run(
         const fila = dos.body.items.find((x: { id: string }) => x.id === id);
         expect(fila).toMatchObject({ porDia: true, cantidad: 2, serie: 'DY-RT-391' });
         expect(fila.dias).toEqual([
-          { fecha: '2026-11-05', estado: 'venta' },
-          { fecha: '2026-11-06', estado: 'daily_charge' },
+          { fecha: '2026-11-05', estado: 'venta', cantidad: 1 },
+          { fecha: '2026-11-06', estado: 'daily_charge', cantidad: 1 },
         ]);
         const una = await http()
           .delete(`${url}/items/${id}/dias/2026-11-06`)
           .set(operador())
           .expect(200);
         expect(una.body.items.find((x: { id: string }) => x.id === id).cantidad).toBe(1);
-        // fuera de las fechas del servicio no se marca; una fila por día no lleva cantidad escrita
+        // fuera de las fechas del servicio no se marca; en una fila por día la marca siempre vale 1 aunque se mande otra cantidad
         await http()
           .put(`${url}/items/${id}/dias/2026-12-30`)
           .set(operador())
           .send({ estado: 'operacion' })
           .expect(400);
-        await http().patch(`${url}/items/${id}`).set(operador()).send({ cantidad: 5 }).expect(400);
+        const otra = await http()
+          .put(`${url}/items/${id}/dias/2026-11-07`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 9 })
+          .expect(200);
+        expect(otra.body.items.find((x: { id: string }) => x.id === id).cantidad).toBe(2);
       });
 
-      it('las filas que no son por día llevan la cantidad real escrita (km, galones, horas...) y se puede corregir', async () => {
+      it('si el servicio dura un solo día la precarga ya distribuye cada ítem en ese día con su cantidad cotizada', async () => {
+        const t = await enEjecucion(
+          { inicio: '2026-11-05', fin: '2026-11-05' },
+          {
+            precargado: true,
+            lineas: [
+              {
+                codigo: 'SFS6057',
+                descripcion: 'Daily charge',
+                unidad: 'día',
+                cantidad: 1,
+                tipoLinea: 'servicio',
+                listaPreciosItemId: uuidv7(),
+              },
+              {
+                codigo: 'SFC33012',
+                descripcion: 'Bombeo',
+                unidad: 'gls',
+                cantidad: 2000,
+                tipoLinea: 'material',
+                listaPreciosItemId: uuidv7(),
+              },
+            ],
+          },
+        );
+        const r = (await http().get(rep(t.id)).set(operador()).expect(200)).body.items.filter(
+          (x: { codigo: string }) => !x.codigo.startsWith('SH-EJ-'),
+        );
+        expect(r[0]).toMatchObject({
+          cantidad: 1,
+          dias: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 1 }],
+        });
+        expect(r[1]).toMatchObject({
+          cantidad: 2000,
+          dias: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 2000 }],
+        });
+        // así el reporte ya se puede confirmar sin repartir nada
+        await confirmarUso(t.id).expect(201);
+      });
+
+      it('las filas que no son por día reparten su cantidad real en los días en que se aplicó (km, galones, horas...) y el total es la suma', async () => {
         const t = await enEjecucion();
         const url = rep(t.id);
-        await http()
-          .post(`${url}/items`)
-          .set(operador())
-          .send({
-            listaPreciosItemId: uuidv7(),
-            codigo: 'SFC33012',
-            descripcion: 'Bombeo',
-            unidad: 'gls',
-          })
-          .expect(400); // falta la cantidad
-        await http()
-          .post(`${url}/items`)
-          .set(operador())
-          .send({
-            listaPreciosItemId: uuidv7(),
-            codigo: 'SFC33012',
-            descripcion: 'Bombeo',
-            unidad: 'gls',
-            cantidad: 0,
-          })
-          .expect(400);
         const a = await http()
           .post(`${url}/items`)
           .set(operador())
@@ -761,26 +840,165 @@ run(
             codigo: 'SFC33012',
             descripcion: 'Bombeo',
             unidad: 'gls',
-            cantidad: 4200,
           })
           .expect(201);
         const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012').id;
-        const b = await http()
-          .patch(`${url}/items/${id}`)
-          .set(operador())
-          .send({ cantidad: 3800 })
-          .expect(200);
-        expect(b.body.items.find((x: { id: string }) => x.id === id)).toMatchObject({
+        expect(a.body.items.find((x: { id: string }) => x.id === id)).toMatchObject({
           porDia: false,
-          cantidad: 3800,
+          cantidad: 0,
           dias: [],
         });
+        // el día pide su cantidad (mayor que cero)
         await http()
           .put(`${url}/items/${id}/dias/2026-11-05`)
           .set(operador())
           .send({ estado: 'operacion' })
-          .expect(400); // no es por día
+          .expect(400);
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 0 })
+          .expect(400);
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 1176 })
+          .expect(200);
+        const b = await http()
+          .put(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 1050.5 })
+          .expect(200);
+        const fila = b.body.items.find((x: { id: string }) => x.id === id);
+        expect(fila.cantidad).toBe(2226.5);
+        expect(fila.dias).toEqual([
+          { fecha: '2026-11-05', estado: 'operacion', cantidad: 1176 },
+          { fecha: '2026-11-06', estado: 'operacion', cantidad: 1050.5 },
+        ]);
+        // corregir un día reemplaza su cantidad; quitarlo la resta
+        const c = await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 1000 })
+          .expect(200);
+        expect(c.body.items.find((x: { id: string }) => x.id === id).cantidad).toBe(2050.5);
+        const d = await http()
+          .delete(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .expect(200);
+        expect(d.body.items.find((x: { id: string }) => x.id === id).cantidad).toBe(1000);
         await http().delete(`${url}/items/${id}`).set(operador()).expect(200);
+      });
+
+      it('lo reportado de un código no puede superar lo cotizado (la suma de sus días); para pasarse hay que proponer el cambio de ítems', async () => {
+        const t = await enEjecucion();
+        const url = rep(t.id);
+        const a = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'SFC33012',
+            descripcion: 'Bombeo',
+            unidad: 'gls',
+          })
+          .expect(201);
+        const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012');
+        expect(id.cotizado).toBe(5000);
+        await http()
+          .put(`${url}/items/${id.id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 3000 })
+          .expect(200);
+        const pasa = await http()
+          .put(`${url}/items/${id.id}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 2500 })
+          .expect(409);
+        expect(pasa.body.code).toBe('CANTIDAD_SUPERA_COTIZADO');
+        await http()
+          .put(`${url}/items/${id.id}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 2000 })
+          .expect(200); // justo lo cotizado
+        // corregir un día ya reportado también respeta el tope
+        await http()
+          .put(`${url}/items/${id.id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 3500 })
+          .expect(409);
+        // un código que Ventas no cotizó no se puede repartir hasta que el pedido lo incluya
+        const z = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'NO-COTIZADO',
+            descripcion: 'Extra',
+            unidad: 'gls',
+          })
+          .expect(201);
+        const idz = z.body.items.find((x: { codigo: string }) => x.codigo === 'NO-COTIZADO');
+        expect(idz.cotizado).toBe(0);
+        const sin = await http()
+          .put(`${url}/items/${idz.id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 1 })
+          .expect(409);
+        expect(sin.body.code).toBe('CANTIDAD_SUPERA_COTIZADO');
+      });
+
+      it('nace precargado con todos los ítems cotizados del pedido (también la movilización), una sola vez, y sin pisar lo que el operador cambió', async () => {
+        const lista1 = uuidv7();
+        const t = await enEjecucion(undefined, {
+          precargado: true,
+          lineas: [
+            {
+              codigo: 'SFS6057',
+              descripcion: 'Daily charge',
+              unidad: 'día',
+              cantidad: 3,
+              tipoLinea: 'servicio',
+              listaPreciosItemId: lista1,
+            },
+            {
+              codigo: 'SFC33012',
+              descripcion: 'Bombeo',
+              unidad: 'gls',
+              cantidad: 2000,
+              tipoLinea: 'material',
+              listaPreciosItemId: uuidv7(),
+            },
+            {
+              codigo: 'SFC33026',
+              descripcion: 'Movilización unidades livianas',
+              unidad: 'km',
+              cantidad: 76.6,
+              tipoLinea: 'movilizacion',
+              listaPreciosItemId: null,
+            },
+          ],
+        });
+        const url = rep(t.id);
+        const r = (await http().get(url).set(operador()).expect(200)).body;
+        r.items = r.items.filter((x: { codigo: string }) => !x.codigo.startsWith('SH-EJ-'));
+        expect(r.items.map((x: { codigo: string }) => x.codigo)).toEqual([
+          'SFS6057',
+          'SFC33012',
+          'SFC33026',
+        ]);
+        expect(r.items.map((x: { porDia: boolean }) => x.porDia)).toEqual([true, false, false]);
+        expect(r.items[0].listaPreciosItemId).toBe(lista1);
+        expect(r.items[2].listaPreciosItemId).toBeNull(); // un ítem de AS2 sin enlace a la lista también se reporta
+        expect(r.items.every((x: { cantidad: number }) => x.cantidad === 0)).toBe(true);
+        // lo que el operador quita no vuelve a aparecer en la siguiente consulta
+        await http().delete(`${url}/items/${r.items[1].id}`).set(operador()).expect(200);
+        const otra = (await http().get(url).set(operador()).expect(200)).body.items.filter(
+          (x: { codigo: string }) => !x.codigo.startsWith('SH-EJ-'),
+        );
+        expect(otra.map((x: { codigo: string }) => x.codigo)).toEqual(['SFS6057', 'SFC33026']);
+        // confirmar exige repartir la cantidad de todas las filas
+        expect((await confirmarUso(t.id).expect(409)).body.code).toBe('FILA_SIN_CANTIDAD');
       });
 
       it('no repite el mismo código con la misma serie; con otra serie es otro equipo; propone las series de las herramientas del ticket', async () => {
@@ -823,7 +1041,6 @@ run(
             codigo: cod,
             descripcion: 'Sarta',
             unidad: 'Corrida',
-            cantidad: 1,
           })
           .expect(201);
         const lista = (await http().get(url).set(operador()).expect(200)).body.items;
@@ -843,7 +1060,6 @@ run(
             codigo: 'X1',
             descripcion: 'x',
             unidad: 'unidad',
-            cantidad: 1,
           })
           .expect(403);
         await http()
@@ -854,7 +1070,6 @@ run(
             codigo: 'X1',
             descripcion: 'x',
             unidad: 'unidad',
-            cantidad: 1,
           })
           .expect(403);
         // un reporte sin filas no se confirma; una fila por día sin marcas tampoco
@@ -1043,7 +1258,7 @@ run(
         const rep = `${base(t.id)}/reporte-herramientas`;
         const filas = (await http().get(rep).set(operador()).expect(200)).body.items;
         // una fila por kilómetros (cantidad escrita) y una por día con dos marcas, con serie
-        await http()
+        const km = await http()
           .post(`${rep}/items`)
           .set(operador())
           .send({
@@ -1051,9 +1266,15 @@ run(
             codigo: 'SFS6146',
             descripcion: 'Movilización livianas',
             unidad: 'km',
-            cantidad: 115,
           })
           .expect(201);
+        await http()
+          .put(
+            `${rep}/items/${km.body.items.find((x: { codigo: string }) => x.codigo === 'SFS6146').id}/dias/2026-11-05`,
+          )
+          .set(operador())
+          .send({ estado: 'operacion', cantidad: 115 })
+          .expect(200);
         const con = await http()
           .post(`${rep}/items`)
           .set(operador())
