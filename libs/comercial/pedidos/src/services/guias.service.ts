@@ -182,12 +182,51 @@ export class GuiasService {
    * Material del pedido. No incluye personal, horas ni movilización, ni precios. Todo se puede editar antes de emitir.
    */
   async sugerirItems(pedidoId: string): Promise<GuiaItemDto[]> {
-    await this.pedido(pedidoId);
+    const pedido = await this.prisma.pedido.findUnique({
+      where: { id: pedidoId },
+      select: { clienteId: true },
+    });
+    if (!pedido) throw new NotFoundException('El pedido no existe');
     const docs = await this.prisma.documentoOperativoHerramienta.findMany({
       where: { documento: { pedidoId, tipo: 'reporte_herramientas' } },
       orderBy: [{ documento: { recibidoAt: 'asc' } }, { orden: 'asc' }],
     });
     const items: GuiaItemDto[] = [];
+    const porItem = docs.some((h) => h.cantidad !== null);
+    if (porItem) {
+      // Reporte por ítem: la guía lleva lo físico (cada equipo con su serie, y los materiales con su cantidad real); los servicios por día,
+      // por kilómetro o por hora no viajan en una guía. Las cantidades siguen al reporte.
+      const lista = pedido.clienteId
+        ? await this.prisma.listaPreciosItem.findMany({
+            where: {
+              listaPrecios: { clienteId: pedido.clienteId, activa: true },
+              codigo: { in: docs.map((h) => h.codigo).filter((c): c is string => !!c) },
+            },
+            select: { codigo: true, tipo: true, descripcion: true, unidad: true },
+          })
+        : [];
+      const porCodigo = new Map(lista.map((l) => [l.codigo, l]));
+      const vistos = new Set<string>();
+      for (const h of docs) {
+        const cantidad = h.cantidad === null ? 0 : Number(h.cantidad);
+        if (cantidad <= 0) continue;
+        const li = h.codigo ? porCodigo.get(h.codigo) : undefined;
+        const esMaterial = li?.tipo === 'Material';
+        if (!h.serie && !esMaterial) continue;
+        const clave = `${h.codigo ?? ''}|${h.serie ?? ''}`.toLowerCase();
+        if (vistos.has(clave)) continue;
+        vistos.add(clave);
+        items.push({
+          codigo: h.codigo ?? undefined,
+          descripcion: li?.descripcion ?? h.nombre,
+          cantidad: h.serie ? 1 : cantidad,
+          unidad: h.serie ? 'Unidad' : (li?.unidad ?? h.unidad ?? 'Unidad'),
+          serie: h.serie ?? undefined,
+          origen: esMaterial && !h.serie ? 'material' : 'herramienta',
+        });
+      }
+      return items;
+    }
     const vistos = new Set<string>();
     const codigosHerramienta = new Set<string>();
     for (const h of docs) {

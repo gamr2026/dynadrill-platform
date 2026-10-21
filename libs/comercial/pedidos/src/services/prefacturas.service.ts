@@ -780,6 +780,8 @@ export class PrefacturasService {
         nombre: h.nombre,
         serie: h.serie,
         codigo: h.codigo,
+        unidad: h.unidad,
+        cantidad: h.cantidad === null ? null : Number(h.cantidad),
         usos: h.usos.map((u) => ({ estado: u.estado })),
       }));
 

@@ -32,7 +32,7 @@ const base = {
 };
 
 describe('calcularPrefactura', () => {
-  it('renta de herramienta: cuenta los días en operación, stand by y cargo diario (no los de venta)', () => {
+  it('reporte anterior (sin cantidad): cuenta los días en operación y cargo diario; el stand by y la venta no son renta', () => {
     const r = calcularPrefactura({
       ...base,
       herramientas: [
@@ -51,12 +51,74 @@ describe('calcularPrefactura', () => {
     });
     const renta = r.items.find((i) => i.unidad === 'día');
     expect(renta).toMatchObject({
-      cantidad: 3,
+      cantidad: 2,
       precioUnitario: 100,
-      precioTotal: 300,
+      precioTotal: 200,
       fuente: 'herramienta',
       serie: 'DY-CT-018',
     });
+  });
+
+  it('reporte por ítem: se factura la cantidad real del reporte, con el precio de la lista, y lo cotizado no se factura', () => {
+    const r = calcularPrefactura({
+      ...base,
+      // se cotizaron 3 unidades de MAT-1 y 5 días de supervisor; el reporte dice 2 y 4
+      itemsPedido: [pedido('MAT-1', 3), pedido('SUP-DIA', 5, { unidad: 'día' })],
+      herramientas: [
+        {
+          nombre: 'Material uno',
+          serie: null,
+          codigo: 'MAT-1',
+          unidad: 'Unidad',
+          cantidad: 2,
+          usos: [],
+        },
+        {
+          nombre: 'Supervisor',
+          serie: null,
+          codigo: 'SUP-DIA',
+          unidad: 'día',
+          cantidad: 4,
+          usos: [{ estado: 'operacion' }],
+        },
+      ],
+    });
+    expect(r.items.map((i) => [i.codigo, i.cantidad, i.precioTotal, i.fuente])).toEqual([
+      ['MAT-1', 2, 100, 'material'],
+      ['SUP-DIA', 4, 1748.92, 'herramienta'],
+    ]);
+    expect(r.advertencias).toEqual([]);
+    expect(r.totales.subtotal).toBe(1848.92);
+  });
+
+  it('reporte por ítem: lo cotizado que no se reportó solo se avisa; un código fuera de la lista no se factura', () => {
+    const r = calcularPrefactura({
+      ...base,
+      itemsPedido: [pedido('MOV', 1), pedido('MAT-1', 1)],
+      herramientas: [
+        {
+          nombre: 'Material uno',
+          serie: null,
+          codigo: 'MAT-1',
+          unidad: 'Unidad',
+          cantidad: 1,
+          usos: [],
+        },
+        {
+          nombre: 'Otro',
+          serie: null,
+          codigo: 'NO-EXISTE',
+          unidad: 'Unidad',
+          cantidad: 3,
+          usos: [],
+        },
+      ],
+    });
+    expect(r.items.map((i) => i.codigo)).toEqual(['MAT-1']);
+    expect(r.advertencias.join(' ')).toContain(
+      'El ítem cotizado MOV (1) no está en el Reporte de Herramientas',
+    );
+    expect(r.advertencias.join(' ')).toContain('NO-EXISTE');
   });
 
   it('venta de herramienta: una línea aparte por unidad; si es Material sale como material', () => {

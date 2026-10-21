@@ -245,6 +245,8 @@ export class DocumentosOperativosService {
         nombre: h.nombre,
         serie: h.serie,
         codigo: h.codigo,
+        unidad: h.unidad,
+        cantidad: h.cantidad === null ? null : Number(h.cantidad),
         usos: h.usos.map((u) => ({ fecha: aDia(u.fecha), estado: u.estado })),
       })),
     }));
@@ -489,6 +491,8 @@ export class DocumentosOperativosService {
         nombre: h.nombre,
         serie: h.serie ?? null,
         codigo: h.codigo ?? null,
+        unidad: h.unidad ?? null,
+        cantidad: h.cantidad ?? null,
       },
     });
     const unicos = new Map(h.usos.map((u) => [u.fecha.slice(0, 10), u.estado]));

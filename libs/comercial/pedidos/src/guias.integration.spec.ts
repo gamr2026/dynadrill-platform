@@ -531,6 +531,66 @@ run('guía de remisión y despacho (base de datos real)', () => {
       .expect(404);
   });
 
+  it('con el reporte por ítem la guía sigue la cantidad real: cada equipo con su serie, el material con lo usado, y sin servicios por día, km u horas', async () => {
+    const id = await pedido();
+    await doc(job(1), id).expect(201);
+    await doc(
+      {
+        tipo: 'reporte_herramientas',
+        origen: 'fcr',
+        herramientas: [
+          {
+            nombre: 'Cargo básico',
+            serie: 'DY-9',
+            codigo: `CT-${n}`,
+            unidad: 'día',
+            cantidad: 2,
+            usos: [
+              { fecha: '2026-11-01', estado: 'operacion' },
+              { fecha: '2026-11-02', estado: 'daily_charge' },
+            ],
+          },
+          { nombre: 'Niple', codigo: `MAT-${n}`, unidad: 'Unidad', cantidad: 2, usos: [] },
+          {
+            nombre: 'Supervisor',
+            codigo: `SUP-${n}`,
+            unidad: 'día',
+            cantidad: 3,
+            usos: [
+              { fecha: '2026-11-01', estado: 'operacion' },
+              { fecha: '2026-11-02', estado: 'operacion' },
+              { fecha: '2026-11-03', estado: 'operacion' },
+            ],
+          },
+          { nombre: 'Movilización', codigo: `MOV-${n}`, unidad: 'km', cantidad: 115, usos: [] },
+        ],
+      },
+      id,
+    ).expect(201);
+    const r = await http()
+      .get(`/api/comercial/pedidos/${id}/guias/items-sugeridos`)
+      .set(soloVer())
+      .expect(200);
+    // el equipo viaja una vez (1 unidad con su serie, no 2 días); el material, con la cantidad del reporte (2) y no la cotizada (3)
+    expect(r.body).toEqual([
+      {
+        codigo: `CT-${n}`,
+        descripcion: 'Cargo básico unidad',
+        cantidad: 1,
+        unidad: 'Unidad',
+        serie: 'DY-9',
+        origen: 'herramienta',
+      },
+      {
+        codigo: `MAT-${n}`,
+        descripcion: 'Niple de prueba',
+        cantidad: 2,
+        unidad: 'Unidad',
+        origen: 'material',
+      },
+    ]);
+  });
+
   it('emite con el siguiente número del secuencial (003-001-), con los ítems editados, y alimenta el avance', async () => {
     const id = await pedidoConReportes();
     const antes = (

@@ -758,6 +758,9 @@ model DocumentoOperativoHerramienta {
   nombre      String
   serie       String?
   codigo      String?
+  /// Unidad de la lista de precios y cantidad real del ítem según el reporte (nula en los reportes anteriores).
+  unidad      String?
+  cantidad    Decimal? @db.Decimal(14, 3)
 
   usos DocumentoOperativoUso[]
 

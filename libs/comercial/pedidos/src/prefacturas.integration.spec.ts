@@ -288,7 +288,7 @@ run('prefactura (base de datos real)', () => {
         codigo: `CT-${n}`,
         usos: [
           { fecha: '2026-11-01', estado: 'operacion' },
-          { fecha: '2026-11-02', estado: 'stand_by' },
+          { fecha: '2026-11-02', estado: 'daily_charge' },
         ],
       },
       { nombre: 'Sin código', usos: [{ fecha: '2026-11-01', estado: 'operacion' }] },
@@ -688,6 +688,50 @@ run('prefactura (base de datos real)', () => {
     expect(lista[0]).toMatchObject({ archivoId: FIRMADO_2.id, verificacion: 'firma_detectada' });
     // la versión anterior se conserva como historia
     expect(await prisma.documentoRespaldoFirmado.count({ where: { pedidoId: id } })).toBe(2);
+  });
+
+  it('con el Reporte de Herramientas por ítem la prefactura toma la cantidad REAL del reporte (menor que la cotizada) y lo cotizado no se factura', async () => {
+    const id = await pedidoListo();
+    // se cotizaron 5 días de supervisor y 1 movilización; el reporte dice que se usó 1 día de supervisor y 1 equipo; la movilización no se reportó
+    await doc(
+      {
+        tipo: 'reporte_herramientas',
+        origen: 'fcr',
+        herramientas: [
+          {
+            nombre: 'Cargo básico',
+            serie: 'DY-1',
+            codigo: `CT-${n}`,
+            unidad: 'día',
+            cantidad: 1,
+            usos: [{ fecha: '2026-11-01', estado: 'operacion' }],
+          },
+          {
+            nombre: 'Supervisor',
+            codigo: `SUP-${n}`,
+            unidad: 'día',
+            cantidad: 1,
+            usos: [{ fecha: '2026-11-01', estado: 'operacion' }],
+          },
+        ],
+      },
+      id,
+    ).expect(201);
+    const r = (await generar(id).expect(201)).body;
+    expect(
+      r.items.map((i: { codigo: string; cantidad: number; precioTotal: number }) => [
+        i.codigo,
+        i.cantidad,
+        i.precioTotal,
+      ]),
+    ).toEqual([
+      [`CT-${n}`, 1, 100],
+      [`SUP-${n}`, 1, 437.23],
+    ]);
+    expect(r.totales.subtotal).toBe(537.23);
+    expect(r.advertencias.join(' ')).toContain(
+      `El ítem cotizado MOV-${n} (1) no está en el Reporte de Herramientas`,
+    );
   });
 
   it('no se genera sin la documentación completa ni sin permiso', async () => {

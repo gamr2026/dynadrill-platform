@@ -2,9 +2,13 @@
  * Cálculo de la prefactura. Funciones puras (sin base de datos) para poder probar cada regla.
  *
  * Fuentes de las líneas:
- *  1. Herramientas del Reporte de Herramientas con su código en la lista de precios: una línea de RENTA por los días en
- *     operación / stand by / cargo diario y una de VENTA por los días en estado venta.
- *  2. Ítems del pedido ("personal"): cantidad cotizada; si la unidad de la lista es por día, los días con Reporte Job.
+ *  1. Reporte de Herramientas por ítem (FCR): una línea por fila con su CANTIDAD REAL (marcas por día o cantidad escrita), con el precio y el
+ *     tipo de la lista de precios. Si el pedido tiene este reporte, lo cotizado NO se factura: manda el reporte (los cotizados que no aparecen
+ *     en él solo se avisan). Es lo que hace el Excel: la cantidad del TICKET es el total de la fila del reporte.
+ *  1b. Reportes anteriores (sin cantidad): una línea de RENTA por los días en operación o cargo diario y una de VENTA por los días en estado
+ *     venta (el stand-by no se cobra).
+ *  2. Ítems del pedido ("personal"), cuando no hay reporte por ítem: cantidad cotizada; si la unidad de la lista es por día, los días con
+ *     Reporte Job.
  *  3. Ítems del pedido que ya no coinciden con la lista: se facturan con lo cotizado y se avisan ("personal_manual").
  */
 
@@ -33,6 +37,10 @@ export interface HerramientaReportada {
   nombre: string;
   serie: string | null;
   codigo: string | null;
+  /** Unidad que trae el reporte (la de la lista manda si el código existe en ella). */
+  unidad?: string | null;
+  /** Cantidad real del reporte por ítem; nula en los reportes anteriores. */
+  cantidad?: number | null;
   usos: Array<{ estado: EstadoUso }>;
 }
 
@@ -106,7 +114,25 @@ export function calcularPrefactura(entrada: {
       );
       continue;
     }
-    const renta = h.usos.filter((u) => u.estado !== 'venta').length;
+    if (h.cantidad !== null && h.cantidad !== undefined) {
+      // reporte por ítem: la cantidad real del reporte es la que se factura
+      if (h.cantidad <= 0) continue;
+      agregar({
+        codigo: li.codigo,
+        descripcion: li.descripcion,
+        unidad: li.unidad ?? h.unidad ?? null,
+        serie: h.serie,
+        cantidad: h.cantidad,
+        precioUnitario: li.precio,
+        descuentoPct: 0,
+        precioTotal: redondear(h.cantidad * li.precio),
+        tipo: li.tipo,
+        fuente: li.tipo === 'Material' ? 'material' : 'herramienta',
+      });
+      continue;
+    }
+    // reportes anteriores (sin cantidad): el stand-by no se cobra
+    const renta = h.usos.filter((u) => u.estado !== 'venta' && u.estado !== 'stand_by').length;
     const venta = h.usos.filter((u) => u.estado === 'venta').length;
     if (renta > 0) {
       agregar({
@@ -138,8 +164,21 @@ export function calcularPrefactura(entrada: {
     }
   }
 
-  // 2) Ítems del pedido
-  for (const it of entrada.itemsPedido) {
+  // 2) Ítems del pedido. Con el reporte por ítem, lo cotizado no se factura: solo se avisa lo que no se reportó.
+  const hayReportePorItem = entrada.herramientas.some(
+    (h) => h.cantidad !== null && h.cantidad !== undefined,
+  );
+  if (hayReportePorItem) {
+    const reportados = new Set(entrada.herramientas.map((h) => h.codigo).filter(Boolean));
+    for (const it of entrada.itemsPedido) {
+      if (it.cantidad > 0 && !reportados.has(it.codigo)) {
+        advertencias.push(
+          `El ítem cotizado ${it.codigo} (${it.cantidad}) no está en el Reporte de Herramientas: no se factura.`,
+        );
+      }
+    }
+  }
+  for (const it of hayReportePorItem ? [] : entrada.itemsPedido) {
     const li = porCodigo.get(it.codigo);
     if (li) {
       const cantidad = PERIODO_DIA.test(li.unidad ?? '') ? entrada.diasReporteJob : it.cantidad;
