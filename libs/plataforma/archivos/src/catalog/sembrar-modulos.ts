@@ -30,6 +30,14 @@ export const MODULOS_ARCHIVO = [
     tamanoMaxMb: 25,
   },
   {
+    codigo: 'documento_respaldo_firmado',
+    nombre: 'Monitoreo o mezcla química del ticket, firmados',
+    permisoSubir: 'comercial.prefacturas.firmar',
+    permisoVer: 'comercial.documentos_operativos.ver',
+    tiposMime: ['application/pdf', 'image/png', 'image/jpeg'],
+    tamanoMaxMb: 25,
+  },
+  {
     codigo: 'guia_documento',
     nombre: 'Guía de remisión firmada',
     permisoSubir: 'comercial.guias.firmar',
