@@ -857,12 +857,16 @@ run('documentos operativos (base de datos real)', () => {
       });
       return id;
     };
-    const cambio = (pedidoId: string, items: object[]): EventEnvelope => {
+    const cambio = (
+      pedidoId: string,
+      items: object[],
+      tipo = 'operaciones.pumping.cambio_items_aprobado',
+    ): EventEnvelope => {
       const id = uuidv7();
       eventos.push(id);
       return {
         id,
-        type: 'operaciones.pumping.cambio_items_aprobado',
+        type: tipo,
         version: 1,
         occurredAt: new Date().toISOString(),
         source: 'operaciones',
@@ -932,6 +936,23 @@ run('documentos operativos (base de datos real)', () => {
       const r = await resultados(id);
       expect(r).toHaveLength(1);
       expect(r[0]).toMatchObject({ aplicado: true, motivo: null });
+    });
+
+    it('también aplica el cambio que aprueba el Supervisor de FCR y el equipo de FCR consulta los ítems con su propio permiso', async () => {
+      const id = await pedidoConItem();
+      const r = await http()
+        .get(`/api/comercial/pedidos/${id}/items-para-cambio`)
+        .set(bearer([P.FCR_CAMBIOS_SOLICITAR]));
+      expect(r.status).toBe(200);
+      await cambioItems.consumir(
+        cambio(
+          id,
+          [{ listaPreciosItemId: itemA, cantidad: 2 }],
+          'operaciones.fcr.cambio_items_aprobado',
+        ),
+      );
+      expect((await itemsDe(id))[0]).toMatchObject({ codigo: `SUP-${n}`, cantidad: 2 });
+      expect((await resultados(id))[0].aplicado).toBe(true);
     });
 
     it('los ítems que no vienen de la lista (los de AS2) se conservan al final', async () => {

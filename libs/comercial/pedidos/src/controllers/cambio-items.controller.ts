@@ -9,7 +9,12 @@ export class CambioItemsController {
   constructor(private readonly cambios: CambioItemsService) {}
 
   /** `?q=` (2 letras o más) trae además los ítems elegibles de la lista de precios del cliente. */
-  @RequirePermission(Permission.PUMPING_CAMBIOS_SOLICITAR, Permission.PUMPING_CAMBIOS_APROBAR)
+  @RequirePermission(
+    Permission.PUMPING_CAMBIOS_SOLICITAR,
+    Permission.PUMPING_CAMBIOS_APROBAR,
+    Permission.FCR_CAMBIOS_SOLICITAR,
+    Permission.FCR_CAMBIOS_APROBAR,
+  )
   @Get()
   itemsParaCambio(@Param('pedidoId', ParseUUIDPipe) pedidoId: string, @Query('q') q?: string) {
     return this.cambios.itemsParaCambio(pedidoId, q);
