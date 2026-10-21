@@ -314,6 +314,21 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   def('inventarioConsumo', 'inventario.movimientos.consumir', 'Registrar consumo de inventario'),
   // fcr
   def('fcr', 'fcr.tickets.operar', 'Operar el flujo de tickets FCR'),
+  nuevo(
+    'fcr.cambios_items.solicitar',
+    'Proponer cambios de ítems del pedido desde FCR (lo cotizado frente a lo realmente usado)',
+    [
+      ...ADMIN_ROLE_CODES,
+      RoleCode.OPERADOR_FCR,
+      RoleCode.SUPERVISOR,
+      RoleCode.SUPERVISOR_OPERACIONES_FCR,
+    ],
+  ),
+  nuevo(
+    'fcr.cambios_items.aprobar',
+    'Aprobar o rechazar los cambios de ítems del pedido que propone el equipo de FCR',
+    [...ADMIN_ROLE_CODES, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_OPERACIONES_FCR],
+  ),
   def('fcrRead', 'fcr.tickets.ver', 'Consultar tickets FCR de solo lectura'),
   nuevo(
     'fcr.requisitos.puente',
@@ -646,6 +661,8 @@ export const Permission = {
   ARTICULOS_VER: 'inventario.articulos.ver',
   INVENTARIO_CONSUMIR: 'inventario.movimientos.consumir',
   FCR_OPERAR: 'fcr.tickets.operar',
+  FCR_CAMBIOS_SOLICITAR: 'fcr.cambios_items.solicitar',
+  FCR_CAMBIOS_APROBAR: 'fcr.cambios_items.aprobar',
   FCR_VER: 'fcr.tickets.ver',
   FCR_REQUISITOS_PUENTE: 'fcr.requisitos.puente',
   FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',

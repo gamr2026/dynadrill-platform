@@ -320,6 +320,7 @@ model Ticket {
   lineas         TicketLinea[]
   herramientas   TicketHerramienta[]
   reporteItems   ReporteItem[]
+  solicitudesCambioItems SolicitudCambioItems[]
   avisosPrecarga TicketAvisoPrecarga[]
   documentos     TicketDocumento[]
   reunion        ReunionOperativa?
@@ -892,6 +893,8 @@ model ReporteItem {
   ticketId    String   @map("ticket_id") @db.Uuid
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   orden       Int      @db.SmallInt
+  /// Ítem de la lista de precios del cliente en `comercial` (otro contenedor): uuid sin FK; con él se propone el cambio del pedido.
+  listaPreciosItemId String @map("lista_precios_item_id") @db.Uuid
   codigo      String
   descripcion String
   unidad      String?
@@ -1080,6 +1083,8 @@ model IdUsuario {
   llegadasFirmadas      ReporteUnidadLlegada[]    @relation("llegadaFirmante")
   bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
   actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
+  cambiosSolicitados    SolicitudCambioItems[]    @relation("solicitanteCambio")
+  cambiosRevisados      SolicitudCambioItems[]    @relation("revisorCambio")
 
   @@map("usuario")
   @@schema("identidad")
@@ -1137,3 +1142,68 @@ model ArchivoRef {
   @@map("archivo")
   @@schema("archivos")
 }
+
+enum EstadoSolicitudItems {
+  pendiente
+  aprobada
+  rechazada
+
+  @@map("estado_solicitud_items")
+  @@schema("fcr")
+}
+
+enum AplicacionCambioItems {
+  pendiente
+  aplicada
+  no_aplicada
+
+  @@map("aplicacion_cambio_items")
+  @@schema("fcr")
+}
+
+/// Solicitud de cambio de ítems del pedido: la propone el Operador del equipo y la aprueba o rechaza el Supervisor del ticket.
+/// `aplicacion` es la respuesta de Comercial (otro contenedor) al aprobarse.
+model SolicitudCambioItems {
+  id               String                 @id @db.Uuid
+  ticketId         String                 @map("ticket_id") @db.Uuid
+  ticket           Ticket                 @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  estado           EstadoSolicitudItems   @default(pendiente)
+  motivo           String
+  solicitadoPor    String                 @map("solicitado_por") @db.Uuid
+  solicitante      IdUsuario              @relation("solicitanteCambio", fields: [solicitadoPor], references: [id])
+  solicitadoAt     DateTime               @default(now()) @map("solicitado_at") @db.Timestamptz(6)
+  revisadoPor      String?                @map("revisado_por") @db.Uuid
+  revisor          IdUsuario?             @relation("revisorCambio", fields: [revisadoPor], references: [id])
+  revisadoAt       DateTime?              @map("revisado_at") @db.Timestamptz(6)
+  motivoRechazo    String?                @map("motivo_rechazo")
+  aplicacion       AplicacionCambioItems?
+  aplicacionMotivo String?                @map("aplicacion_motivo")
+  aplicadaAt       DateTime?              @map("aplicada_at") @db.Timestamptz(6)
+
+  items SolicitudCambioItem[]
+
+  @@index([ticketId, solicitadoAt])
+  @@map("solicitud_cambio_items")
+  @@schema("fcr")
+}
+
+/// Ítem de la lista que debe quedar en el pedido. `listaPreciosItemId` es de `comercial` (otro contenedor): uuid sin FK. INMUTABLE.
+model SolicitudCambioItem {
+  id                 String               @id @db.Uuid
+  solicitudId        String               @map("solicitud_id") @db.Uuid
+  solicitud          SolicitudCambioItems @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  orden              Int
+  listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
+  codigo             String
+  descripcion        String
+  unidad             String
+  cantidad           Decimal              @db.Decimal(12, 3)
+  descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
+  tipoLinea          TipoLinea        @map("tipo_linea")
+
+  @@unique([solicitudId, orden])
+  @@unique([solicitudId, listaPreciosItemId])
+  @@map("solicitud_cambio_item")
+  @@schema("fcr")
+}
+

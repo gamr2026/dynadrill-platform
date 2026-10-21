@@ -22,6 +22,7 @@ import { DespachosConsumer } from '@dyn/inventario';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
+import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -229,6 +230,9 @@ run(
         .mockResolvedValue(undefined);
       jest
         .spyOn(ActaEntregaConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ResultadoCambioItemsConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);

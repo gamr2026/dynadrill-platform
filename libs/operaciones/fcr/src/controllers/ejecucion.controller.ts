@@ -80,6 +80,8 @@ export class ConfirmarListadoUsoDto {
 const ESTADOS_ITEM = ['operacion', 'daily_charge', 'venta'];
 
 export class AgregarItemReporteDto {
+  /** El ítem de la lista de precios del cliente (en Comercial). */
+  @IsUUID() listaPreciosItemId!: string;
   /** Código de un ítem de la lista de precios del cliente (con él se factura). */
   @IsString() @MinLength(1) @MaxLength(100) codigo!: string;
   @IsString() @MinLength(1) @MaxLength(300) descripcion!: string;

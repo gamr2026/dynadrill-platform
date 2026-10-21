@@ -23,6 +23,7 @@ import { DespachosConsumer } from '@dyn/inventario';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
+import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -227,7 +228,12 @@ run(
       const fila = await http()
         .post(`${base(id)}/reporte-herramientas/items`)
         .set(operador())
-        .send({ codigo: `SFS-EJ-${n}`, descripcion: 'Ítem de prueba', unidad: 'día' })
+        .send({
+          listaPreciosItemId: uuidv7(),
+          codigo: `SFS-EJ-${n}`,
+          descripcion: 'Ítem de prueba',
+          unidad: 'día',
+        })
         .expect(201);
       await http()
         .put(
@@ -327,6 +333,9 @@ run(
         .mockResolvedValue(undefined);
       jest
         .spyOn(ActaEntregaConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(ResultadoCambioItemsConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
@@ -672,6 +681,7 @@ run(
           .post(`${url}/items`)
           .set(operador())
           .send({
+            listaPreciosItemId: uuidv7(),
             codigo: 'SFS6001',
             descripcion: 'Hydraulic jar primer día',
             unidad: 'día',
@@ -725,17 +735,34 @@ run(
         await http()
           .post(`${url}/items`)
           .set(operador())
-          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls' })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'SFC33012',
+            descripcion: 'Bombeo',
+            unidad: 'gls',
+          })
           .expect(400); // falta la cantidad
         await http()
           .post(`${url}/items`)
           .set(operador())
-          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls', cantidad: 0 })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'SFC33012',
+            descripcion: 'Bombeo',
+            unidad: 'gls',
+            cantidad: 0,
+          })
           .expect(400);
         const a = await http()
           .post(`${url}/items`)
           .set(operador())
-          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls', cantidad: 4200 })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'SFC33012',
+            descripcion: 'Bombeo',
+            unidad: 'gls',
+            cantidad: 4200,
+          })
           .expect(201);
         const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012').id;
         const b = await http()
@@ -759,7 +786,12 @@ run(
       it('no repite el mismo código con la misma serie; con otra serie es otro equipo; propone las series de las herramientas del ticket', async () => {
         const t = await enEjecucion();
         const url = rep(t.id);
-        const cuerpo = { codigo: 'SFS6057', descripcion: 'Daily charge', unidad: 'día' };
+        const cuerpo = {
+          listaPreciosItemId: uuidv7(),
+          codigo: 'SFS6057',
+          descripcion: 'Daily charge',
+          unidad: 'día',
+        };
         await http()
           .post(`${url}/items`)
           .set(operador())
@@ -786,7 +818,13 @@ run(
         await http()
           .post(`${url}/items`)
           .set(operador())
-          .send({ codigo: cod, descripcion: 'Sarta', unidad: 'Corrida', cantidad: 1 })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: cod,
+            descripcion: 'Sarta',
+            unidad: 'Corrida',
+            cantidad: 1,
+          })
           .expect(201);
         const lista = (await http().get(url).set(operador()).expect(200)).body.items;
         expect(lista.find((x: { codigo: string }) => x.codigo === cod).seriesSugeridas).toContain(
@@ -800,12 +838,24 @@ run(
         await http()
           .post(`${url}/items`)
           .set(supervisor())
-          .send({ codigo: 'X1', descripcion: 'x', unidad: 'unidad', cantidad: 1 })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'X1',
+            descripcion: 'x',
+            unidad: 'unidad',
+            cantidad: 1,
+          })
           .expect(403);
         await http()
           .post(`${url}/items`)
           .set(tok(OTRO_OPERADOR))
-          .send({ codigo: 'X1', descripcion: 'x', unidad: 'unidad', cantidad: 1 })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'X1',
+            descripcion: 'x',
+            unidad: 'unidad',
+            cantidad: 1,
+          })
           .expect(403);
         // un reporte sin filas no se confirma; una fila por día sin marcas tampoco
         const filas = (await http().get(url).set(operador()).expect(200)).body.items;
@@ -814,7 +864,12 @@ run(
         const vacia = await http()
           .post(`${url}/items`)
           .set(operador())
-          .send({ codigo: 'SFS6057', descripcion: 'Daily', unidad: 'día' })
+          .send({
+            listaPreciosItemId: uuidv7(),
+            codigo: 'SFS6057',
+            descripcion: 'Daily',
+            unidad: 'día',
+          })
           .expect(201);
         const id = vacia.body.items[0].id;
         expect((await confirmarUso(t.id).expect(409)).body.code).toBe('FILA_SIN_CANTIDAD');
@@ -838,6 +893,129 @@ run(
           .set(operador())
           .expect(200);
         expect(quitada.body.listadoConfirmado).toBe(false);
+      });
+    });
+
+    describe('cambio de ítems del pedido: lo cotizado frente a lo realmente usado', () => {
+      const permisosOperador = [P.FCR_OPERAR, P.FCR_CAMBIOS_SOLICITAR];
+      const permisosSupervisor = [P.FCR_OPERAR, P.FCR_CAMBIOS_SOLICITAR, P.FCR_CAMBIOS_APROBAR];
+      const op = () => tok(OPERADOR, permisosOperador);
+      const sup = () => tok(SUPERVISOR, permisosSupervisor);
+      const item = (extra: Record<string, unknown> = {}) => ({
+        listaPreciosItemId: uuidv7(),
+        codigo: 'SFS6057',
+        descripcion: 'Daily charge',
+        unidad: 'día',
+        cantidad: 2,
+        tipoLinea: 'herramienta',
+        ...extra,
+      });
+      const url = (t: string) => `${base(t)}/cambios-items`;
+
+      it('el operador propone la lista que debe quedar en el pedido; el Supervisor del ticket aprueba y se publica el evento con los ítems (sin precios)', async () => {
+        const t = await enEjecucion();
+        // validaciones del cuerpo y de quién propone
+        await http()
+          .post(url(t.id))
+          .set(op())
+          .send({ motivo: 'Se usó menos', items: [] })
+          .expect(400);
+        const a = item();
+        await http()
+          .post(url(t.id))
+          .set(op())
+          .send({ motivo: 'x', items: [a] })
+          .expect(400);
+        await http()
+          .post(url(t.id))
+          .set(op())
+          .send({
+            motivo: 'Se usó menos',
+            items: [a, { ...item(), listaPreciosItemId: a.listaPreciosItemId }],
+          })
+          .expect(400);
+        await http()
+          .post(url(t.id))
+          .set(tok(OTRO_OPERADOR, permisosOperador))
+          .send({ motivo: 'Se usó menos', items: [a] })
+          .expect(403);
+        const r = await http()
+          .post(url(t.id))
+          .set(op())
+          .send({
+            motivo: 'Se usó menos',
+            items: [
+              a,
+              item({ codigo: 'SFS6146', unidad: 'km', cantidad: 115, tipoLinea: 'movilizacion' }),
+            ],
+          })
+          .expect(201);
+        expect(r.body).toMatchObject({ estado: 'pendiente', motivo: 'Se usó menos' });
+        expect(r.body.items).toHaveLength(2);
+        // una sola pendiente por ticket
+        expect(
+          (
+            await http()
+              .post(url(t.id))
+              .set(op())
+              .send({ motivo: 'Otra', items: [item()] })
+              .expect(409)
+          ).body.code,
+        ).toBe('SOLICITUD_PENDIENTE');
+        // solo el Supervisor del ticket decide
+        await http()
+          .post(`/api/operaciones/fcr/cambios-items/${r.body.id}/aprobar`)
+          .set(op())
+          .expect(403);
+        const pend = (
+          await http().get('/api/operaciones/fcr/cambios-items/pendientes').set(sup()).expect(200)
+        ).body;
+        expect(pend.map((x: { id: string }) => x.id)).toContain(r.body.id);
+        const ap = await http()
+          .post(`/api/operaciones/fcr/cambios-items/${r.body.id}/aprobar`)
+          .set(sup())
+          .expect(201);
+        expect(ap.body).toMatchObject({ estado: 'aprobada', aplicacion: 'pendiente' });
+        const ev = await salidas(t.pedidoId, 'operaciones.fcr.cambio_items_aprobado');
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({ solicitudId: r.body.id, pedidoId: t.pedidoId });
+        expect((ev[0].d['items'] as unknown[]).length).toBe(2);
+        expect(JSON.stringify(ev[0].d['items'])).not.toMatch(
+          /precioUnitario|valorUnitario|"precio"/,
+        );
+        await http()
+          .post(`/api/operaciones/fcr/cambios-items/${r.body.id}/aprobar`)
+          .set(sup())
+          .expect(409); // ya revisada
+        // Comercial responde: queda aplicado
+        const resp = evento('comercial.cambio_items.resultado', t.pedidoId, {
+          solicitudId: r.body.id,
+          aplicado: true,
+        });
+        await app.get(ResultadoCambioItemsConsumer).consumir(resp);
+        const lista = (await http().get(url(t.id)).set(op()).expect(200)).body;
+        expect(lista[0]).toMatchObject({ estado: 'aprobada', aplicacion: 'aplicada' });
+      });
+
+      it('el Supervisor puede rechazar con motivo; entonces no se publica nada y se puede proponer otra', async () => {
+        const t = await enEjecucion();
+        const r = await http()
+          .post(url(t.id))
+          .set(op())
+          .send({ motivo: 'Se usó más', items: [item({ cantidad: 5 })] })
+          .expect(201);
+        const rz = await http()
+          .post(`/api/operaciones/fcr/cambios-items/${r.body.id}/rechazar`)
+          .set(sup())
+          .send({ motivo: 'Falta soporte' })
+          .expect(201);
+        expect(rz.body).toMatchObject({ estado: 'rechazada', motivoRechazo: 'Falta soporte' });
+        expect(await salidas(t.pedidoId, 'operaciones.fcr.cambio_items_aprobado')).toHaveLength(0);
+        await http()
+          .post(url(t.id))
+          .set(op())
+          .send({ motivo: 'Con soporte', items: [item({ cantidad: 5 })] })
+          .expect(201);
       });
     });
 
@@ -869,6 +1047,7 @@ run(
           .post(`${rep}/items`)
           .set(operador())
           .send({
+            listaPreciosItemId: uuidv7(),
             codigo: 'SFS6146',
             descripcion: 'Movilización livianas',
             unidad: 'km',
@@ -879,6 +1058,7 @@ run(
           .post(`${rep}/items`)
           .set(operador())
           .send({
+            listaPreciosItemId: uuidv7(),
             codigo: 'SFS6057',
             descripcion: 'Daily charge',
             unidad: 'día',
@@ -910,6 +1090,7 @@ run(
         // las filas del reporte (códigos de la lista de precios) con su cantidad real: de ahí salen la guía, la prefactura y la OT
         expect(ev[0].d['herramientas']).toEqual([
           {
+            listaPreciosItemId: expect.any(String),
             codigo: expect.stringMatching(/^SFS-EJ-/),
             nombre: 'Ítem de prueba',
             unidad: 'día',
@@ -917,6 +1098,7 @@ run(
             usos: [{ fecha: '2026-11-05', estado: 'operacion' }],
           },
           {
+            listaPreciosItemId: expect.any(String),
             codigo: 'SFS6146',
             nombre: 'Movilización livianas',
             unidad: 'km',
@@ -924,6 +1106,7 @@ run(
             usos: [],
           },
           {
+            listaPreciosItemId: expect.any(String),
             codigo: 'SFS6057',
             nombre: 'Daily charge',
             unidad: 'día',

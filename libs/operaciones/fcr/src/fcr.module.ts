@@ -18,6 +18,9 @@ import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
 import { EjecucionService } from './services/ejecucion.service';
 import { ReporteHerramientasService } from './services/reporte-herramientas.service';
+import { CambiosItemsService } from './services/cambios-items.service';
+import { CambiosItemsController } from './controllers/cambios-items.controller';
+import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { UsoHerramientasService } from './services/uso-herramientas.service';
 import { DocumentosService } from './services/documentos.service';
 import { HerramientasService } from './services/herramientas.service';
@@ -46,6 +49,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     DocumentosController,
     EjecucionController,
     RetornoController,
+    CambiosItemsController,
   ],
   providers: [
     PrismaService,
@@ -61,6 +65,8 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     BitacoraService,
     UsoHerramientasService,
     ReporteHerramientasService,
+    CambiosItemsService,
+    ResultadoCambioItemsConsumer,
     EjecucionService,
     RetornoService,
     ReporteUnidadLlegadaService,

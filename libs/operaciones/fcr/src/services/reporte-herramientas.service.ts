@@ -31,6 +31,8 @@ export const cantidadDeFila = (f: {
 }): number => (f.porDia ? f.dias.length : Number(f.cantidad ?? 0));
 
 export interface AgregarItemEntrada {
+  /** Ítem de la lista de precios del cliente (en Comercial). */
+  listaPreciosItemId: string;
   codigo: string;
   descripcion: string;
   unidad?: string | null;
@@ -80,6 +82,7 @@ export class ReporteHerramientasService {
       items: filas.map((f) => ({
         id: f.id,
         orden: f.orden,
+        listaPreciosItemId: f.listaPreciosItemId,
         codigo: f.codigo,
         descripcion: f.descripcion,
         unidad: f.unidad,
@@ -135,6 +138,7 @@ export class ReporteHerramientasService {
           id: uuidv7(),
           ticketId,
           orden: (ultimo._max.orden ?? 0) + 1,
+          listaPreciosItemId: e.listaPreciosItemId,
           codigo,
           descripcion,
           unidad: e.unidad?.trim() || null,
@@ -263,6 +267,7 @@ export class ReporteHerramientasService {
       orderBy: { orden: 'asc' },
     });
     return filas.map((f) => ({
+      listaPreciosItemId: f.listaPreciosItemId,
       codigo: f.codigo,
       nombre: f.descripcion,
       unidad: f.unidad ?? undefined,
