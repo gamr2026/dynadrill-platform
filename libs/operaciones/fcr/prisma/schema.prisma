@@ -319,6 +319,7 @@ model Ticket {
   llegadas       ReporteUnidadLlegada[]
   lineas         TicketLinea[]
   herramientas   TicketHerramienta[]
+  reporteItems   ReporteItem[]
   avisosPrecarga TicketAvisoPrecarga[]
   documentos     TicketDocumento[]
   reunion        ReunionOperativa?
@@ -871,6 +872,58 @@ model UsoHerramientaDia {
 
   @@unique([herramientaId, fecha])
   @@map("uso_herramienta_dia")
+  @@schema("fcr")
+}
+
+/// Estado de cobro de un día de una fila del Reporte de Herramientas (sin stand-by: no se cobra).
+enum EstadoItemReporte {
+  operacion
+  daily_charge
+  venta
+
+  @@map("estado_item_reporte")
+  @@schema("fcr")
+}
+
+/// Fila del Reporte de Herramientas (DYN-FCR-RE-008): un código de la lista de precios del cliente con su serie y su cantidad real. De esa
+/// cantidad salen la guía de remisión, la prefactura y la orden de trabajo. Código, descripción y unidad son copias de la lista (otro contenedor).
+model ReporteItem {
+  id          String   @id @db.Uuid
+  ticketId    String   @map("ticket_id") @db.Uuid
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden       Int      @db.SmallInt
+  codigo      String
+  descripcion String
+  unidad      String?
+  /// La unidad es de tiempo: se reporta con marcas por día.
+  porDia      Boolean  @map("por_dia")
+  /// Solo si no es por día: la cantidad real escrita.
+  cantidad    Decimal? @db.Decimal(14, 3)
+  serie       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String   @map("updated_by") @db.Uuid
+
+  dias ReporteItemDia[]
+
+  @@unique([ticketId, orden])
+  @@map("reporte_item")
+  @@schema("fcr")
+}
+
+/// Marca de un día de una fila por día; cada marca vale una unidad.
+model ReporteItemDia {
+  id        String            @id @db.Uuid
+  itemId    String            @map("item_id") @db.Uuid
+  item      ReporteItem       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  fecha     DateTime          @db.Date
+  estado    EstadoItemReporte
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String            @map("created_by") @db.Uuid
+
+  @@unique([itemId, fecha])
+  @@map("reporte_item_dia")
   @@schema("fcr")
 }
 

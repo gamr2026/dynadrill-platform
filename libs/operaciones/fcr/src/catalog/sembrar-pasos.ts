@@ -228,9 +228,9 @@ export const REQUISITOS: RequisitoDef[] = [
   },
   {
     codigo: REQ.listadoUsoConfirmado,
-    nombre: 'Listado de uso de herramientas confirmado',
+    nombre: 'Reporte de herramientas confirmado',
     descripcion:
-      'El operador confirmó que el listado de uso diario de las herramientas está completo.',
+      'El operador confirmó que el Reporte de Herramientas (códigos de la lista de precios con su cantidad real) está completo.',
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'ejecucion_operativa',

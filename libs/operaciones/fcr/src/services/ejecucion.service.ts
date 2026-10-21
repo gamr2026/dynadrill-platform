@@ -3,6 +3,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { REQ } from '../catalog/sembrar-pasos';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReporteHerramientasService } from './reporte-herramientas.service';
 import { RequisitosService } from './requisitos.service';
 import { TicketsService } from './tickets.service';
 
@@ -11,8 +12,8 @@ const aDia = (d: Date) => d.toISOString().slice(0, 10);
 /**
  * Reunión operativa, finalización de la ejecución y revisión de reportes.
  *  - El Supervisor confirma el acta de la reunión operativa (con su fecha) para pasar a la ejecución.
- *  - El Operador finaliza la ejecución: la bitácora debe estar enviada (todos sus días) y el listado de uso confirmado. Al finalizar se
- *    envía a Comercial el Reporte de Herramientas (una sola vez, con el uso diario de cada herramienta; consulta F-21) y el ticket pasa a la
+ *  - El Operador finaliza la ejecución: la bitácora debe estar enviada (todos sus días) y el Reporte de Herramientas confirmado. Al finalizar se
+ *    envía a Comercial el Reporte de Herramientas (una sola vez, por código de la lista de precios y con la cantidad real; consulta F-21) y el ticket pasa a la
  *    revisión de reportes, donde el operador ya no corrige.
  *  - El Supervisor aprueba los reportes (pasa al control de retorno) o los rechaza con motivo (vuelve a la ejecución).
  */
@@ -23,6 +24,7 @@ export class EjecucionService {
     private readonly bus: EventBus,
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
+    private readonly reporte: ReporteHerramientasService,
   ) {}
 
   async reunion(ticketId: string) {
@@ -80,19 +82,12 @@ export class EjecucionService {
       }
       await this.requisitos.exigirCumplidos(tx, ticketId, t.pasoCodigo, t.paso.nombre);
 
-      const herramientas = await tx.ticketHerramienta.findMany({
-        where: { ticketId },
-        include: {
-          articulo: { select: { codigo: true, nombre: true } },
-          usos: { orderBy: { fecha: 'asc' } },
-        },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      });
+      const items = await this.reporte.paraEnvio(tx, ticketId);
       const supervisor = t.personas.find((p) => p.rol === 'supervisor');
       const operador = t.personas.find((p) => p.rol === 'operador' && p.usuarioId === actor.id);
       const ahora = new Date();
       await this.tickets.moverPaso(tx, t, 'revision_reportes', actor, { exigirRequisitos: false });
-      // el Reporte de Herramientas lleva solo las herramientas con uso registrado (Facturación cobra por su código en la lista de precios)
+      // el Reporte de Herramientas lleva las filas por código de la lista de precios con su cantidad real: de ahí salen la guía, la prefactura y la OT
       await this.bus.publish(
         tx,
         this.bus.create({
@@ -106,14 +101,7 @@ export class EjecucionService {
             firmadoAt: ahora.toISOString(),
             supervisorId: supervisor?.usuarioId ?? null,
             operadorId: operador?.usuarioId ?? null,
-            herramientas: herramientas
-              .filter((h) => h.usos.length > 0)
-              .map((h) => ({
-                nombre: h.articulo.nombre,
-                serie: h.numeroSerie ?? undefined,
-                codigo: h.codigoPedido ?? h.articulo.codigo,
-                usos: h.usos.map((u) => ({ fecha: aDia(u.fecha), estado: u.estado })),
-              })),
+            herramientas: items,
           },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),

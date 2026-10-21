@@ -223,6 +223,19 @@ run(
         .set(supervisor())
         .send({ hacia: 'ejecucion_operativa' })
         .expect(201);
+      // el reporte de herramientas (por ítem de la lista de precios) con una fila por día marcada: lo mínimo para poder confirmarlo
+      const fila = await http()
+        .post(`${base(id)}/reporte-herramientas/items`)
+        .set(operador())
+        .send({ codigo: `SFS-EJ-${n}`, descripcion: 'Ítem de prueba', unidad: 'día' })
+        .expect(201);
+      await http()
+        .put(
+          `${base(id)}/reporte-herramientas/items/${fila.body.items[0].id}/dias/${fechas.inicio}`,
+        )
+        .set(operador())
+        .send({ estado: 'operacion' })
+        .expect(200);
       return {
         id,
         pedidoId: e.subject.id,
@@ -259,7 +272,7 @@ run(
         .send(cuerpo);
     const confirmarUso = (t: string, confirmado = true) =>
       http()
-        .post(`${base(t)}/uso-herramientas/confirmar-listado`)
+        .post(`${base(t)}/reporte-herramientas/confirmar`)
         .set(operador())
         .send({ confirmado });
     const finalizar = (t: string, auth = operador()) =>
@@ -638,24 +651,198 @@ run(
         ).toMatchObject({ tipoTrabajo: null, tipoPicker: null, presion: null });
       });
 
-      it('cualquier cambio del listado de uso obliga a confirmarlo de nuevo', async () => {
+      it('el uso por herramienta ya no pide confirmación: eso es del reporte por ítem', async () => {
         const t = await enEjecucion();
-        const c = await confirmarUso(t.id).expect(201);
-        expect(c.body.listadoConfirmado).toBe(true);
         const r = await uso(t.id, t.cepillo, '2026-11-05').expect(200);
-        expect(r.body.listadoConfirmado).toBe(false);
-        await confirmarUso(t.id).expect(201);
-        const q2 = await http()
+        expect(r.body.listadoConfirmado).toBeUndefined();
+        await http()
           .delete(`${base(t.id)}/uso-herramientas/${r.body.usos[0].id}`)
           .set(operador())
           .expect(200);
-        expect(q2.body.listadoConfirmado).toBe(false);
-        await confirmarUso(t.id, false).expect(201);
+      });
+    });
+
+    describe('reporte de herramientas por ítem de la lista de precios', () => {
+      const rep = (t: string) => `${base(t)}/reporte-herramientas`;
+
+      it('las filas por día se marcan con operación, daily charge o venta (no hay stand-by) y la cantidad es el número de marcas', async () => {
+        const t = await enEjecucion();
+        const url = rep(t.id);
+        const a = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({
+            codigo: 'SFS6001',
+            descripcion: 'Hydraulic jar primer día',
+            unidad: 'día',
+            serie: 'DY-RT-391',
+          })
+          .expect(201);
+        const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFS6001').id;
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'stand_by' })
+          .expect(400);
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(200);
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'venta' })
+          .expect(200); // reemplaza la marca del día
+        const dos = await http()
+          .put(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'daily_charge' })
+          .expect(200);
+        const fila = dos.body.items.find((x: { id: string }) => x.id === id);
+        expect(fila).toMatchObject({ porDia: true, cantidad: 2, serie: 'DY-RT-391' });
+        expect(fila.dias).toEqual([
+          { fecha: '2026-11-05', estado: 'venta' },
+          { fecha: '2026-11-06', estado: 'daily_charge' },
+        ]);
+        const una = await http()
+          .delete(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .expect(200);
+        expect(una.body.items.find((x: { id: string }) => x.id === id).cantidad).toBe(1);
+        // fuera de las fechas del servicio no se marca; una fila por día no lleva cantidad escrita
+        await http()
+          .put(`${url}/items/${id}/dias/2026-12-30`)
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(400);
+        await http().patch(`${url}/items/${id}`).set(operador()).send({ cantidad: 5 }).expect(400);
+      });
+
+      it('las filas que no son por día llevan la cantidad real escrita (km, galones, horas...) y se puede corregir', async () => {
+        const t = await enEjecucion();
+        const url = rep(t.id);
+        await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls' })
+          .expect(400); // falta la cantidad
+        await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls', cantidad: 0 })
+          .expect(400);
+        const a = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ codigo: 'SFC33012', descripcion: 'Bombeo', unidad: 'gls', cantidad: 4200 })
+          .expect(201);
+        const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012').id;
+        const b = await http()
+          .patch(`${url}/items/${id}`)
+          .set(operador())
+          .send({ cantidad: 3800 })
+          .expect(200);
+        expect(b.body.items.find((x: { id: string }) => x.id === id)).toMatchObject({
+          porDia: false,
+          cantidad: 3800,
+          dias: [],
+        });
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(400); // no es por día
+        await http().delete(`${url}/items/${id}`).set(operador()).expect(200);
+      });
+
+      it('no repite el mismo código con la misma serie; con otra serie es otro equipo; propone las series de las herramientas del ticket', async () => {
+        const t = await enEjecucion();
+        const url = rep(t.id);
+        const cuerpo = { codigo: 'SFS6057', descripcion: 'Daily charge', unidad: 'día' };
+        await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ ...cuerpo, serie: 'S1' })
+          .expect(201);
+        const dup = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ ...cuerpo, serie: 'S1' })
+          .expect(409);
+        expect(dup.body.code).toBe('ITEM_REPETIDO');
+        await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ ...cuerpo, serie: 'S2' })
+          .expect(201);
+        // la selección de herramientas sigue existiendo: sus series se proponen en la fila de su código
+        const cod = (await prisma.ticketHerramienta.findUniqueOrThrow({ where: { id: t.cepillo } }))
+          .codigoPedido as string;
+        await prisma.ticketHerramienta.update({
+          where: { id: t.cepillo },
+          data: { numeroSerie: 'SN-CEPILLO' },
+        });
+        await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ codigo: cod, descripcion: 'Sarta', unidad: 'Corrida', cantidad: 1 })
+          .expect(201);
+        const lista = (await http().get(url).set(operador()).expect(200)).body.items;
+        expect(lista.find((x: { codigo: string }) => x.codigo === cod).seriesSugeridas).toContain(
+          'SN-CEPILLO',
+        );
+      });
+
+      it('solo el operador del ticket arma el reporte, en la ejecución; confirmarlo exige filas con cantidad y cualquier cambio lo reabre', async () => {
+        const t = await enEjecucion();
+        const url = rep(t.id);
+        await http()
+          .post(`${url}/items`)
+          .set(supervisor())
+          .send({ codigo: 'X1', descripcion: 'x', unidad: 'unidad', cantidad: 1 })
+          .expect(403);
+        await http()
+          .post(`${url}/items`)
+          .set(tok(OTRO_OPERADOR))
+          .send({ codigo: 'X1', descripcion: 'x', unidad: 'unidad', cantidad: 1 })
+          .expect(403);
+        // un reporte sin filas no se confirma; una fila por día sin marcas tampoco
+        const filas = (await http().get(url).set(operador()).expect(200)).body.items;
+        await http().delete(`${url}/items/${filas[0].id}`).set(operador()).expect(200);
+        expect((await confirmarUso(t.id).expect(409)).body.code).toBe('REPORTE_VACIO');
+        const vacia = await http()
+          .post(`${url}/items`)
+          .set(operador())
+          .send({ codigo: 'SFS6057', descripcion: 'Daily', unidad: 'día' })
+          .expect(201);
+        const id = vacia.body.items[0].id;
+        expect((await confirmarUso(t.id).expect(409)).body.code).toBe('FILA_SIN_CANTIDAD');
+        await http()
+          .put(`${url}/items/${id}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(200);
+        const ok = await confirmarUso(t.id).expect(201);
+        expect(ok.body.listadoConfirmado).toBe(true);
+        // cualquier cambio obliga a confirmar de nuevo
+        const cambio = await http()
+          .put(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'operacion' })
+          .expect(200);
+        expect(cambio.body.listadoConfirmado).toBe(false);
+        await confirmarUso(t.id).expect(201);
+        const quitada = await http()
+          .delete(`${url}/items/${id}/dias/2026-11-06`)
+          .set(operador())
+          .expect(200);
+        expect(quitada.body.listadoConfirmado).toBe(false);
       });
     });
 
     describe('finalizar la ejecución y revisar los reportes', () => {
-      it('no finaliza sin bitácora enviada ni listado de uso confirmado, ni con días por enviar', async () => {
+      it('no finaliza sin bitácora enviada ni reporte de herramientas confirmado, ni con días por enviar', async () => {
         const t = await enEjecucion();
         const falta = await finalizar(t.id).expect(409);
         expect(q(falta)).toMatch(/Bitácora enviada a Facturación/);
@@ -663,22 +850,52 @@ run(
         expect((await finalizar(t.id).expect(409)).body.code).toBe('BITACORA_SIN_ENVIAR');
         await enviar(t.id, '2026-11-05').expect(201);
         const sinListado = await finalizar(t.id).expect(409);
-        expect(q(sinListado)).toMatch(/Listado de uso de herramientas confirmado/);
+        expect(q(sinListado)).toMatch(/Reporte de herramientas confirmado/);
         expect(q(sinListado)).not.toMatch(/Bitácora enviada/);
         await finalizar(t.id, supervisor()).expect(403);
         await finalizar(t.id, tok(OTRO_OPERADOR)).expect(403);
       });
 
-      it('finaliza: envía el Reporte de Herramientas con el uso diario, pasa a la revisión y el operador ya no corrige', async () => {
+      it('finaliza: envía el Reporte de Herramientas por ítem con su cantidad real, pasa a la revisión y el operador ya no corrige', async () => {
         const t = await enEjecucion();
         await guardar(t.id, '2026-11-05').expect(200);
         await enviar(t.id, '2026-11-05').expect(201);
+        // el uso por herramienta (completación, picker...) no es la fuente del reporte
         await uso(t.id, t.cepillo, '2026-11-05', { estado: 'operacion' }).expect(200);
-        await uso(t.id, t.cepillo, '2026-11-06', { estado: 'stand_by' }).expect(200);
-        await prisma.ticketHerramienta.update({
-          where: { id: t.cepillo },
-          data: { numeroSerie: 'SN-1' },
-        });
+        const rep = `${base(t.id)}/reporte-herramientas`;
+        const filas = (await http().get(rep).set(operador()).expect(200)).body.items;
+        // una fila por kilómetros (cantidad escrita) y una por día con dos marcas, con serie
+        await http()
+          .post(`${rep}/items`)
+          .set(operador())
+          .send({
+            codigo: 'SFS6146',
+            descripcion: 'Movilización livianas',
+            unidad: 'km',
+            cantidad: 115,
+          })
+          .expect(201);
+        const con = await http()
+          .post(`${rep}/items`)
+          .set(operador())
+          .send({
+            codigo: 'SFS6057',
+            descripcion: 'Daily charge',
+            unidad: 'día',
+            serie: 'DY-RT-415',
+          })
+          .expect(201);
+        const idDia = con.body.items.find((x: { codigo: string }) => x.codigo === 'SFS6057').id;
+        await http()
+          .put(`${rep}/items/${idDia}/dias/2026-11-05`)
+          .set(operador())
+          .send({ estado: 'daily_charge' })
+          .expect(200);
+        await http()
+          .put(`${rep}/items/${idDia}/dias/2026-11-06`)
+          .set(operador())
+          .send({ estado: 'daily_charge' })
+          .expect(200);
         await confirmarUso(t.id).expect(201);
         const r = await finalizar(t.id).expect(201);
         expect(r.body.paso.codigo).toBe('revision_reportes');
@@ -690,18 +907,35 @@ run(
           supervisorId: SUPERVISOR.id,
           operadorId: OPERADOR.id,
         });
-        // solo la herramienta con uso; con el código de la línea del pedido (con él se factura)
+        // las filas del reporte (códigos de la lista de precios) con su cantidad real: de ahí salen la guía, la prefactura y la OT
         expect(ev[0].d['herramientas']).toEqual([
           {
-            nombre: `Herramienta ${CEPILLO.codigo}`,
-            serie: 'SN-1',
-            codigo: expect.stringMatching(/^SH-EJ-/),
+            codigo: expect.stringMatching(/^SFS-EJ-/),
+            nombre: 'Ítem de prueba',
+            unidad: 'día',
+            cantidad: 1,
+            usos: [{ fecha: '2026-11-05', estado: 'operacion' }],
+          },
+          {
+            codigo: 'SFS6146',
+            nombre: 'Movilización livianas',
+            unidad: 'km',
+            cantidad: 115,
+            usos: [],
+          },
+          {
+            codigo: 'SFS6057',
+            nombre: 'Daily charge',
+            unidad: 'día',
+            serie: 'DY-RT-415',
+            cantidad: 2,
             usos: [
-              { fecha: '2026-11-05', estado: 'operacion' },
-              { fecha: '2026-11-06', estado: 'stand_by' },
+              { fecha: '2026-11-05', estado: 'daily_charge' },
+              { fecha: '2026-11-06', estado: 'daily_charge' },
             ],
           },
         ]);
+        expect(filas).toHaveLength(1); // antes de agregar, solo la fila que dejó enEjecucion
         // el operador ya no corrige
         await guardar(t.id, '2026-11-06').expect(409);
         await uso(t.id, t.cepillo, '2026-11-07').expect(409);
@@ -745,9 +979,7 @@ run(
         // vuelve a poder corregir; el listado de uso se debe confirmar otra vez
         await guardar(t.id, '2026-11-06').expect(200);
         await enviar(t.id, '2026-11-06').expect(201);
-        expect(q(await finalizar(t.id).expect(409))).toMatch(
-          /Listado de uso de herramientas confirmado/,
-        );
+        expect(q(await finalizar(t.id).expect(409))).toMatch(/Reporte de herramientas confirmado/);
         await confirmarUso(t.id).expect(201);
         await finalizar(t.id).expect(201);
         const ap = await http()

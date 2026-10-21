@@ -238,6 +238,19 @@ run(
         .set(supervisor())
         .send({ hacia: 'ejecucion_operativa' })
         .expect(201);
+      // el reporte de herramientas (por ítem de la lista de precios) con una fila por día marcada: lo mínimo para poder confirmarlo
+      const fila = await http()
+        .post(`${base(id)}/reporte-herramientas/items`)
+        .set(operador())
+        .send({ codigo: `SFS-EJ-${n}`, descripcion: 'Ítem de prueba', unidad: 'día' })
+        .expect(201);
+      await http()
+        .put(
+          `${base(id)}/reporte-herramientas/items/${fila.body.items[0].id}/dias/${fechas.inicio}`,
+        )
+        .set(operador())
+        .send({ estado: 'operacion' })
+        .expect(200);
       return {
         id,
         pedidoId: e.subject.id,
@@ -274,7 +287,7 @@ run(
         .send(cuerpo);
     const confirmarUso = (t: string, confirmado = true) =>
       http()
-        .post(`${base(t)}/uso-herramientas/confirmar-listado`)
+        .post(`${base(t)}/reporte-herramientas/confirmar`)
         .set(operador())
         .send({ confirmado });
     const finalizar = (t: string, auth = operador()) =>

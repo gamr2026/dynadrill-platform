@@ -6,11 +6,9 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
-import { REQ } from '../catalog/sembrar-pasos';
 import type { EstadoUsoHerramienta, Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { exigirDentroDelServicio, exigirFecha } from './bitacora.service';
-import { RequisitosService } from './requisitos.service';
 import { TicketsService } from './tickets.service';
 
 const PASO = 'ejecucion_operativa';
@@ -32,37 +30,30 @@ export interface RegistroPicker {
 /**
  * Uso diario de las herramientas en la ejecución: por herramienta y día, su estado de cobro (operación, stand by, daily charge o venta,
  * el que recibe Comercial) y, opcionalmente, el registro de completación (venta) o tipo de trabajo (servicios), picker, presión y peso.
- * Registrar de nuevo la misma herramienta y día reemplaza la fila. Va dentro de las fechas del servicio. El operador confirma al final
- * que el listado de uso está completo (requisito para finalizar la ejecución).
+ * Registrar de nuevo la misma herramienta y día reemplaza la fila. Va dentro de las fechas del servicio. Es insumo de los demás documentos
+ * (completación, picker, retorno): el Reporte de Herramientas que se factura se arma por ítem de la lista de precios (`ReporteHerramientasService`).
  */
 @Injectable()
 export class UsoHerramientasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tickets: TicketsService,
-    private readonly requisitos: RequisitosService,
   ) {}
 
   async listar(ticketId: string) {
     if (!(await this.prisma.ticket.findUnique({ where: { id: ticketId }, select: { id: true } })))
       throw new NotFoundException('El ticket no existe');
-    const [usos, confirmado] = await Promise.all([
-      this.prisma.usoHerramientaDia.findMany({
-        where: { herramienta: { ticketId } },
-        include: {
-          herramienta: { include: { articulo: { select: { codigo: true, nombre: true } } } },
-          tipoCompletacion: true,
-          tipoTrabajo: true,
-          tipoPicker: true,
-        },
-        orderBy: [{ fecha: 'asc' }, { herramientaId: 'asc' }],
-      }),
-      this.prisma.ticketRequisito.count({
-        where: { ticketId, requisitoCodigo: REQ.listadoUsoConfirmado, estado: 'cumplido' },
-      }),
-    ]);
+    const usos = await this.prisma.usoHerramientaDia.findMany({
+      where: { herramienta: { ticketId } },
+      include: {
+        herramienta: { include: { articulo: { select: { codigo: true, nombre: true } } } },
+        tipoCompletacion: true,
+        tipoTrabajo: true,
+        tipoPicker: true,
+      },
+      orderBy: [{ fecha: 'asc' }, { herramientaId: 'asc' }],
+    });
     return {
-      listadoConfirmado: confirmado > 0,
       usos: usos.map((u) => ({
         id: u.id,
         herramientaId: u.herramientaId,
@@ -119,8 +110,6 @@ export class UsoHerramientasService {
             ...comunes,
           },
         });
-      // cualquier cambio del listado obliga a confirmarlo de nuevo
-      await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.listadoUsoConfirmado });
     });
     return this.listar(ticketId);
   }
@@ -133,18 +122,6 @@ export class UsoHerramientasService {
       });
       if (!u) throw new NotFoundException('El registro de uso no existe en este ticket');
       await tx.usoHerramientaDia.delete({ where: { id: usoId } });
-      await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.listadoUsoConfirmado });
-    });
-    return this.listar(ticketId);
-  }
-
-  /** «El listado de uso está completo»: verificación previa a finalizar la ejecución (distinta del listado de la preparación). */
-  async confirmarListado(ticketId: string, confirmado: boolean, actor: AuthUser) {
-    await this.prisma.$transaction(async (tx) => {
-      await this.exigirOperador(tx, ticketId, actor);
-      const clave = { ticketId, codigo: REQ.listadoUsoConfirmado };
-      if (confirmado) await this.requisitos.marcar(tx, clave, 'sistema', actor.id);
-      else await this.requisitos.reabrir(tx, clave);
     });
     return this.listar(ticketId);
   }

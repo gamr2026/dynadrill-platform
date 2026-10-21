@@ -1,4 +1,14 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+} from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -21,6 +31,7 @@ import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import type { EstadoUsoHerramienta } from '../generated/client';
 import { BitacoraService } from '../services/bitacora.service';
 import { EjecucionService } from '../services/ejecucion.service';
+import { ReporteHerramientasService } from '../services/reporte-herramientas.service';
 import { UsoHerramientasService } from '../services/uso-herramientas.service';
 
 const P = Permission;
@@ -66,6 +77,27 @@ export class ConfirmarListadoUsoDto {
   @IsBoolean() confirmado!: boolean;
 }
 
+const ESTADOS_ITEM = ['operacion', 'daily_charge', 'venta'];
+
+export class AgregarItemReporteDto {
+  /** Código de un ítem de la lista de precios del cliente (con él se factura). */
+  @IsString() @MinLength(1) @MaxLength(100) codigo!: string;
+  @IsString() @MinLength(1) @MaxLength(300) descripcion!: string;
+  @IsOptional() @IsString() @MaxLength(50) unidad?: string;
+  @IsOptional() @IsString() @MaxLength(100) serie?: string;
+  /** Solo si la unidad no es de tiempo. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Max(999999999) cantidad?: number;
+}
+
+export class ActualizarItemReporteDto {
+  @IsOptional() @IsString() @MaxLength(100) serie?: string;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Max(999999999) cantidad?: number;
+}
+
+export class MarcarDiaDto {
+  @IsIn(ESTADOS_ITEM) estado!: 'operacion' | 'daily_charge' | 'venta';
+}
+
 export class RechazarReportesDto {
   @IsString() @MinLength(3) @MaxLength(500) motivo!: string;
 }
@@ -77,6 +109,7 @@ export class EjecucionController {
     private readonly ejecucion: EjecucionService,
     private readonly bitacora: BitacoraService,
     private readonly uso: UsoHerramientasService,
+    private readonly reporte: ReporteHerramientasService,
   ) {}
 
   @RequirePermission(P.FCR_OPERAR)
@@ -160,14 +193,77 @@ export class EjecucionController {
     return this.uso.quitar(id, usoId, actor);
   }
 
+  // ── Reporte de Herramientas (por ítem de la lista de precios del cliente) ──
   @RequirePermission(P.FCR_OPERAR)
-  @Post('uso-herramientas/confirmar-listado')
-  confirmarListadoUso(
+  @Get('reporte-herramientas')
+  obtenerReporte(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reporte.obtener(id);
+  }
+
+  @RequirePermission(P.FCR_OPERAR)
+  @Post('reporte-herramientas/items')
+  agregarItemReporte(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AgregarItemReporteDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reporte.agregarItem(id, dto, actor);
+  }
+
+  @RequirePermission(P.FCR_OPERAR)
+  @Patch('reporte-herramientas/items/:itemId')
+  actualizarItemReporte(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: ActualizarItemReporteDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reporte.actualizarItem(id, itemId, dto, actor);
+  }
+
+  @RequirePermission(P.FCR_OPERAR)
+  @Delete('reporte-herramientas/items/:itemId')
+  quitarItemReporte(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reporte.quitarItem(id, itemId, actor);
+  }
+
+  /** Marca un día de una fila por día (operación, daily charge o venta; stand-by no existe). */
+  @RequirePermission(P.FCR_OPERAR)
+  @Put('reporte-herramientas/items/:itemId/dias/:fecha')
+  marcarDiaReporte(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: MarcarDiaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reporte.marcarDia(id, itemId, fecha, dto.estado, actor);
+  }
+
+  @RequirePermission(P.FCR_OPERAR)
+  @Delete('reporte-herramientas/items/:itemId/dias/:fecha')
+  desmarcarDiaReporte(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('fecha') fecha: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reporte.marcarDia(id, itemId, fecha, null, actor);
+  }
+
+  /** «El reporte está completo»: requisito para finalizar la ejecución. */
+  @RequirePermission(P.FCR_OPERAR)
+  @Post('reporte-herramientas/confirmar')
+  confirmarReporte(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ConfirmarListadoUsoDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.uso.confirmarListado(id, dto.confirmado, actor);
+    return this.reporte.confirmar(id, dto.confirmado, actor);
   }
 
   // ── finalizar y revisar ──

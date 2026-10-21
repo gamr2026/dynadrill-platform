@@ -17,6 +17,7 @@ import { ReporteUnidadLlegadaService } from './services/reporte-unidad-llegada.s
 import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
 import { EjecucionService } from './services/ejecucion.service';
+import { ReporteHerramientasService } from './services/reporte-herramientas.service';
 import { UsoHerramientasService } from './services/uso-herramientas.service';
 import { DocumentosService } from './services/documentos.service';
 import { HerramientasService } from './services/herramientas.service';
@@ -59,6 +60,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     DocumentosService,
     BitacoraService,
     UsoHerramientasService,
+    ReporteHerramientasService,
     EjecucionService,
     RetornoService,
     ReporteUnidadLlegadaService,
