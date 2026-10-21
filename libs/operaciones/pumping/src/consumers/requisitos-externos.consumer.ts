@@ -80,6 +80,12 @@ const FUENTES = [
   {
     source: 'qhse',
     patterns: [
+      'qhse.swa.activado',
+      'qhse.swa.cerrado',
+      'qhse.ptw.abierto',
+      'qhse.ptw.firmado',
+      'qhse.ptw.cerrado',
+      'qhse.ptw.anulado',
       'qhse.epi.despachada',
       'qhse.epi.revertida',
       'qhse.acta_entrega.cargada',
@@ -172,8 +178,57 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * SWA y PTW de QHSE bloquean la salida del traslado (decisión del 21/10/2026). Son requisitos DEL TICKET que se crean si todavía no
+   * existen, porque el PTW del primer día nace con el servicio, antes de la asignación:
+   * - `swa_sin_activar`: `qhse.swa.activado` lo reabre; `qhse.swa.cerrado` lo cumple solo si ya no queda ninguna SWA activa en el ticket.
+   * - `ptw_primer_dia_abierto`: cualquier hecho del PTW del primer día (abierto, firmado o cerrado) lo cumple; si se anula, vuelve a exigirse.
+   */
+  private async bloqueoQhse(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    event: EventEnvelope,
+  ): Promise<void> {
+    const ticketId = String(event.data['ticketId'] ?? '');
+    if (!ticketId) return; // una SWA o un PTW sin servicio no afecta a ningún ticket
+    const actor = (event.actor?.userId as string | undefined) ?? null;
+    if (event.type.startsWith('qhse.swa.')) {
+      if (event.type === 'qhse.swa.activado') {
+        await this.requisitos.fijar(tx, ticketId, REQ.swaSinActivar, 'pendiente', 'evento');
+      } else if (event.data['sinSwaActivas'] === true) {
+        await this.requisitos.fijar(tx, ticketId, REQ.swaSinActivar, 'cumplido', 'evento', actor);
+      }
+      return;
+    }
+    const ticket = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true },
+    });
+    if (!ticket) return;
+    // solo el PTW del primer día de operación (si el ticket no trae fecha de inicio, cuenta cualquiera)
+    const dia = String(event.data['diaOperacion'] ?? '').slice(0, 10);
+    const primero = ticket.fechaInicioServicio?.toISOString().slice(0, 10);
+    if (primero && dia && dia !== primero) return;
+    await this.requisitos.fijar(
+      tx,
+      ticketId,
+      REQ.ptwPrimerDia,
+      event.type === 'qhse.ptw.anulado' ? 'pendiente' : 'cumplido',
+      'evento',
+      actor,
+    );
+  }
+
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
+    if (/^qhse\.(swa|ptw)\./.test(event.type)) {
+      await runInEventSpan(`consume ${event.type}`, event.traceparent, async () => {
+        await this.prisma.$transaction(async (tx) => {
+          const nuevo = await this.bus.handleOnce(tx, event, () => this.bloqueoQhse(tx, event));
+          if (!nuevo) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
+        });
+      });
+      return;
+    }
     const regla = REGLAS_EXTERNAS[event.type];
     if (!regla) return;
     await runInEventSpan(`consume ${event.type}`, event.traceparent, async () => {

@@ -506,6 +506,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         externo('flota.inspeccion_vehiculo.realizada', { ticketId: id, vehiculoId: v.id }, 'flota'),
       );
     }
+    // QHSE abrió el PTW del primer día de operación (y no hay SWA activa: ese requisito nace cumplido)
+    await externos.consumir(
+      externo('qhse.ptw.abierto', { ticketId: id, ...(await diaInicio(id)) }),
+    );
+  };
+  /** El primer día de operación del ticket (lo que trae el PTW en `diaOperacion`). */
+  const diaInicio = async (id: string) => {
+    const t = await prisma.ticket.findUniqueOrThrow({ where: { id } });
+    return t.fechaInicioServicio
+      ? { diaOperacion: t.fechaInicioServicio.toISOString().slice(0, 10) }
+      : {};
   };
   const salidaValida = async (id: string, vehiculoId: string) => {
     const r = (
@@ -626,8 +637,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     );
     // lo que el proceso exige: del ticket 3 (checklist de ingreso, formalización de la ejecución, acta de entrega), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(3 + 6 * 2 + 2 * 2);
-    expect(req.every((x) => x.estado === 'pendiente')).toBe(true);
+    expect(req).toHaveLength(5 + 6 * 2 + 2 * 2); // los del ticket incluyen la SWA y el PTW de QHSE
+    expect(
+      req.filter((x) => x.codigo !== 'swa_sin_activar').every((x) => x.estado === 'pendiente'),
+    ).toBe(true);
+    // sin SWA activa nace cumplido; solo un aviso de QHSE lo reabre
+    expect(req.find((x) => x.codigo === 'swa_sin_activar')).toMatchObject({
+      estado: 'cumplido',
+      origen: 'sistema',
+    });
     expect(
       req
         .filter((x) => x.codigo === 'epi_despachado')
@@ -851,7 +869,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .replace(/^.*Falta: /, '')
       .replace(/\.$/, '')
       .split('; ');
-    expect(falta).toHaveLength(2 + 2 * 2 + 2); // 2 inspecciones, 2 EPI + 2 términos, 2 reportes (el checklist de ingreso es de la ejecución)
+    expect(falta).toHaveLength(2 + 2 * 2 + 2 + 1); // 2 inspecciones, 2 EPI + 2 términos, 2 reportes y el PTW del primer día (el checklist de ingreso es de la ejecución)
+    expect(falta).toContain('PTW del primer día de operación abierto');
     expect(falta).toContain(`Entrega de EPI despachada (${OP1.nombre})`);
     expect(falta).toContain(`Reporte de unidad de salida (${VEHICULO.placa})`);
   });
@@ -1098,6 +1117,105 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       motivo: 'QHSE aún no está en el portal nuevo',
       cumplido_por: JEFE,
     });
+  });
+
+  it('SWA y PTW de QHSE bloquean la salida del traslado: una SWA activa la frena hasta que no quede ninguna, y el PTW del primer día debe existir', async () => {
+    const t = await ticketEnTraslado();
+    const salida = () =>
+      http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'revision_reportes_salida' });
+    // solo los de QHSE que bloquean la salida del traslado (los de pasos posteriores siguen pendientes)
+    const faltan = async () =>
+      (await requisitosDe(t.id))
+        .filter(
+          (x) =>
+            x.estado === 'pendiente' &&
+            ['swa_sin_activar', 'ptw_primer_dia_abierto'].includes(x.codigo),
+        )
+        .map((x) => x.codigo);
+    await cumplirTodoMenosReporte(t.id);
+    for (const v of [VEHICULO, VEHICULO_2]) {
+      const id = (await requisitosDe(t.id)).find(
+        (x) => x.codigo === 'reporte_unidad_salida' && x.para === v.placa,
+      )!.id;
+      await prisma.ticketRequisito.update({
+        where: { id },
+        data: { estado: 'cumplido', origen: 'sistema', cumplidoAt: new Date() },
+      });
+    }
+    // con todo cumplido (y sin SWA) el traslado puede salir: se prueba el bloqueo antes de avanzar
+    // SWA activada: reabre el requisito y el paso no avanza
+    await externos.consumir(
+      externo('qhse.swa.activado', {
+        ticketId: t.id,
+        swaId: uuidv7(),
+        swaActivasEnTicket: 1,
+        sinSwaActivas: false,
+      }),
+    );
+    expect(await faltan()).toEqual(['swa_sin_activar']);
+    const r = await salida().expect(409);
+    expect(r.body.code).toBe('REQUISITOS_PENDIENTES');
+    expect(String(r.body.detail)).toContain('Sin Stop Work Authority activa');
+    // cerrar una SWA cuando quedan otras activas NO lo libera; al cerrar la última, sí (y el aviso repetido no cambia nada)
+    await externos.consumir(
+      externo('qhse.swa.cerrado', {
+        ticketId: t.id,
+        swaId: uuidv7(),
+        swaActivasEnTicket: 1,
+        sinSwaActivas: false,
+      }),
+    );
+    expect(await faltan()).toEqual(['swa_sin_activar']);
+    const ultima = externo('qhse.swa.cerrado', {
+      ticketId: t.id,
+      swaId: uuidv7(),
+      swaActivasEnTicket: 0,
+      sinSwaActivas: true,
+    });
+    await externos.consumir(ultima);
+    await externos.consumir(ultima);
+    expect(await faltan()).toEqual([]);
+    // un PTW anulado vuelve a exigirse; un PTW de otro día (no el primero) no cuenta
+    await externos.consumir(
+      externo('qhse.ptw.anulado', {
+        ticketId: t.id,
+        ...(await diaInicio(t.id)),
+        motivo: 'cambió el plan',
+      }),
+    );
+    expect(await faltan()).toEqual(['ptw_primer_dia_abierto']);
+    await externos.consumir(
+      externo('qhse.ptw.abierto', { ticketId: t.id, diaOperacion: '2030-01-01' }),
+    );
+    if ((await diaInicio(t.id)).diaOperacion)
+      expect(await faltan()).toEqual(['ptw_primer_dia_abierto']);
+    await externos.consumir(
+      externo('qhse.ptw.cerrado', { ticketId: t.id, ...(await diaInicio(t.id)) }),
+    );
+    expect(await faltan()).toEqual([]);
+    // una SWA sin servicio no afecta a ningún ticket
+    await externos.consumir(externo('qhse.swa.activado', { ticketId: null, swaId: uuidv7() }));
+    expect(await faltan()).toEqual([]);
+    await salida().expect(201);
+  });
+
+  it('los avisos de SWA y PTW que llegan antes de que la asignación genere los requisitos no se pierden', async () => {
+    const t = await ticketEnTraslado();
+    await admin.query(
+      "DELETE FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo IN ('swa_sin_activar', 'ptw_primer_dia_abierto')",
+      [t.id],
+    );
+    await externos.consumir(externo('qhse.swa.activado', { ticketId: t.id, swaId: uuidv7() }));
+    await externos.consumir(
+      externo('qhse.ptw.abierto', { ticketId: t.id, ...(await diaInicio(t.id)) }),
+    );
+    const req = await requisitosDe(t.id);
+    expect(req.find((x) => x.codigo === 'swa_sin_activar')).toMatchObject({ estado: 'pendiente' });
+    expect(req.find((x) => x.codigo === 'ptw_primer_dia_abierto')).toMatchObject({
+      estado: 'cumplido',
+      origen: 'evento',
+    });
+    expect(req.filter((x) => x.codigo === 'swa_sin_activar')).toHaveLength(1);
   });
 
   it('el reporte de unidad de salida lo firma el operador de cada unidad, solo con los demás requisitos cumplidos; con todo listo el ticket pasa a la revisión y se avisa al supervisor', async () => {

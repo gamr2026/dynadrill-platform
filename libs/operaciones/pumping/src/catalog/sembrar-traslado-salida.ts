@@ -26,6 +26,10 @@ export const REQ = {
   ejecucionFormalizada: 'ejecucion_formalizada',
   reporteLlegada: 'reporte_unidad_llegada',
   actaEntregaLocacion: 'acta_entrega_locacion',
+  /** QHSE: ninguna Stop Work Authority activa en el ticket (nace cumplido; la SWA lo reabre). */
+  swaSinActivar: 'swa_sin_activar',
+  /** QHSE: el PTW del primer día de operación ya existe (nace en gabinete con la matriz IPERC y el ART vigentes). */
+  ptwPrimerDia: 'ptw_primer_dia_abierto',
 } as const;
 
 interface RequisitoDef {
@@ -123,6 +127,24 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'unidad',
     modulo: 'pumping',
     paso: 'traslado_llegada',
+  },
+  {
+    codigo: REQ.swaSinActivar,
+    nombre: 'Sin Stop Work Authority activa',
+    descripcion:
+      'Ninguna Stop Work Authority (SWA) activa en el ticket. Una SWA activa bloquea la salida hasta que QHSE la cierre con el checklist de reinicio completo.',
+    ambito: 'ticket',
+    modulo: 'qhse',
+    paso: 'traslado_salida',
+  },
+  {
+    codigo: REQ.ptwPrimerDia,
+    nombre: 'PTW del primer día de operación abierto',
+    descripcion:
+      'QHSE abrió el Permiso de Trabajo (PTW) del primer día de operación: exige la matriz IPERC aprobada y vigente y el ART vigente. Se pierde si el PTW se anula.',
+    ambito: 'ticket',
+    modulo: 'qhse',
+    paso: 'traslado_salida',
   },
   {
     codigo: REQ.actaEntregaLocacion,

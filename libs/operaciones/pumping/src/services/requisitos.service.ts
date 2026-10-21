@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { uuidv7 } from '@dyn/utils';
 import type { OrigenCumplimiento, Prisma } from '../generated/client';
+import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
 
 type Db = Prisma.TransactionClient | PrismaService;
@@ -62,8 +63,44 @@ export class RequisitosService {
       if (r.ambito === 'operador')
         for (const o of operadores) data.push({ ...base, id: uuidv7(), usuarioId: o.usuarioId });
     }
+    // la SWA nace libre: no hay ninguna activa hasta que QHSE avise lo contrario (si el aviso llegó antes, esa fila se respeta)
+    const ahora = new Date();
+    for (const d of data) {
+      if (d.requisitoCodigo === REQ.swaSinActivar) {
+        d.estado = 'cumplido';
+        d.cumplidoAt = ahora;
+        d.origen = 'sistema';
+      }
+    }
     const r = await tx.ticketRequisito.createMany({ data, skipDuplicates: true });
     return r.count;
+  }
+
+  /**
+   * Deja un requisito DEL TICKET en el estado indicado, creando la fila si todavía no existe. Lo usan los avisos de QHSE (SWA y PTW),
+   * que pueden llegar antes de que la asignación genere los requisitos: no se pueden perder.
+   */
+  async fijar(
+    db: Db,
+    ticketId: string,
+    codigo: string,
+    estado: 'cumplido' | 'pendiente',
+    origen: OrigenCumplimiento,
+    actorId?: string | null,
+  ): Promise<void> {
+    const datos =
+      estado === 'cumplido'
+        ? { estado, cumplidoAt: new Date(), cumplidoPor: actorId ?? null, origen, motivo: null }
+        : { estado, cumplidoAt: null, cumplidoPor: null, origen: null, motivo: null };
+    const r = await db.ticketRequisito.updateMany({
+      where: { ticketId, requisitoCodigo: codigo, vehiculoId: null, usuarioId: null },
+      data: datos,
+    });
+    if (r.count === 0) {
+      await db.ticketRequisito.create({
+        data: { id: uuidv7(), ticketId, requisitoCodigo: codigo, ...datos },
+      });
+    }
   }
 
   /** Marca como cumplido el requisito (si existe y estaba pendiente). Devuelve cuántas filas cambió. */
