@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
@@ -8,6 +8,7 @@ import { DocumentosEstadoService } from './documentos-estado.service';
 import { DocumentosPedidoService } from './documentos-pedido.service';
 
 const P = Permission;
+const sinBearer = (auth?: string) => (auth ?? '').replace(/^Bearer\s+/i, '') || undefined;
 /** El Acta de Entrega no se carga por aquí: tiene su propia ruta, ligada al ticket. */
 const TIPOS_GENERALES = Object.values(TipoDocumentoPedido).filter(
   (t) => t !== TipoDocumentoPedido.formato_entrega,
@@ -79,8 +80,19 @@ export class DocumentosController {
 
   @RequirePermission(P.DOCUMENTOS_GESTIONAR)
   @Post('documentos')
-  cargar(@Body() dto: CargarDocumentoDto, @CurrentUser() actor: AuthUser) {
-    return this.documentos.cargar(dto, actor);
+  cargar(
+    @Body() dto: CargarDocumentoDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.documentos.cargar(dto, actor, sinBearer(auth));
+  }
+
+  /** Vuelve a leer la firma de un documento (solo un indicador; no certifica la autenticidad). */
+  @RequirePermission(P.DOCUMENTOS_GESTIONAR, P.ACTA_ENTREGA_CARGAR)
+  @Post('documentos/:id/verificar')
+  verificar(@Param('id', ParseUUIDPipe) id: string, @Headers('authorization') auth?: string) {
+    return this.documentos.verificarDeNuevo(id, sinBearer(auth) ?? '');
   }
 
   @RequirePermission(P.DOCUMENTOS_GESTIONAR)
@@ -106,7 +118,8 @@ export class DocumentosController {
     @Param('ticketId', ParseUUIDPipe) ticketId: string,
     @Body() dto: CargarActaDto,
     @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
   ) {
-    return this.documentos.cargarActa(ticketId, dto, actor);
+    return this.documentos.cargarActa(ticketId, dto, actor, sinBearer(auth));
   }
 }

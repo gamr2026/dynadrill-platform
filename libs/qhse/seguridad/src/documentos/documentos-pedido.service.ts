@@ -10,6 +10,7 @@ import { uuidv7 } from '@dyn/utils';
 import { TipoDocumentoPedido, type Prisma } from '../generated/client';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { PrismaService } from '../prisma/prisma.service';
+import { VerificadorFirmas } from './verificador-firmas';
 import { codigoPtw } from '../ptw/ptw-documentos';
 
 /** Código del módulo de archivos que guarda cada tipo (el archivo debe haberse subido por ahí: así se verifica el permiso de subida). */
@@ -46,6 +47,7 @@ export class DocumentosPedidoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly firmas: VerificadorFirmas,
   ) {}
 
   /** Documentos de un pedido, o de un ticket (el Acta). Por defecto solo los vigentes. */
@@ -96,6 +98,11 @@ export class DocumentosPedidoService {
       anuladoAt: d.anuladoAt,
       anuladoPor: d.anulador?.nombre ?? null,
       motivoAnulacion: d.motivoAnulacion,
+      /** Lectura automática de la firma: solo un indicador (Firmado o no); `null` en `verificacionAt` = todavía sin resultado. */
+      verificacion: d.verificacion,
+      verificacionConfianza:
+        d.verificacionConfianza === null ? null : Number(d.verificacionConfianza),
+      verificacionAt: d.verificacionAt,
     }));
   }
 
@@ -115,7 +122,7 @@ export class DocumentosPedidoService {
   }
 
   /** Carga ART, PT, SFI o el formato de recepción (el Acta tiene su propio camino: `cargarActa`). */
-  async cargar(entrada: CargarDocumentoEntrada, actor: AuthUser) {
+  async cargar(entrada: CargarDocumentoEntrada, actor: AuthUser, token?: string) {
     if (entrada.tipo === TipoDocumentoPedido.formato_entrega)
       throw new BadRequestException(
         'El Acta de Entrega de Locación se carga desde el ticket (cargarActa)',
@@ -125,6 +132,7 @@ export class DocumentosPedidoService {
       await this.publicar(tx, 'qhse.documento_pedido.cargado', id, actor);
       return id;
     });
+    this.leerFirma(id, entrada.archivoId, token);
     return this.uno(id);
   }
 
@@ -133,6 +141,7 @@ export class DocumentosPedidoService {
     ticketId: string,
     entrada: { archivoId: string; referencia?: string | null; motivoSuplencia?: string | null },
     actor: AuthUser,
+    token?: string,
   ) {
     const id = await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticketRef.findUnique({ where: { ticketId } });
@@ -161,7 +170,47 @@ export class DocumentosPedidoService {
       await this.publicar(tx, 'qhse.acta_entrega.cargada', id, actor);
       return id;
     });
+    this.leerFirma(id, entrada.archivoId, token);
     return this.uno(id);
+  }
+
+  /** Vuelve a leer la firma de un documento ya cargado (ayuda para revisar; no certifica nada). */
+  async verificarDeNuevo(id: string, token: string) {
+    const d = await this.prisma.documentoPedido.findUnique({
+      where: { id },
+      select: { archivoId: true },
+    });
+    if (!d) throw new NotFoundException('El documento no existe');
+    await this.guardarLectura(id, d.archivoId, token);
+    return this.uno(id);
+  }
+
+  /** La lectura tarda unos segundos: se lanza aparte y no retrasa ni condiciona la carga. */
+  private leerFirma(id: string, archivoId: string, token?: string): void {
+    if (token) void this.guardarLectura(id, archivoId, token);
+  }
+
+  private async guardarLectura(id: string, archivoId: string, token: string): Promise<void> {
+    try {
+      const v = await this.firmas.verificar(archivoId, token);
+      const resultado = {
+        firma_detectada: 'firma_detectada',
+        no_detectada: 'firma_no_detectada',
+        no_concluyente: 'no_concluyente',
+      } as const;
+      await this.prisma.documentoPedido.update({
+        where: { id },
+        data: v
+          ? {
+              verificacion: resultado[v.resultado],
+              verificacionConfianza: v.confianza,
+              verificacionAt: new Date(),
+            }
+          : { verificacionAt: new Date() },
+      });
+    } catch {
+      // la lectura es una ayuda: nunca interrumpe la carga del documento
+    }
   }
 
   /** Anula un documento (cualquier tipo) con su motivo; si es el Acta, el ticket vuelve a exigirla. */

@@ -36,6 +36,17 @@ enum TipoDocumentoPedido {
   @@schema("qhse")
 }
 
+/// Resultado de la lectura automática de una firma (ayuda para revisar; no certifica la autenticidad).
+enum VerificacionFirma {
+  no_verificada
+  firma_detectada
+  firma_no_detectada
+  no_concluyente
+
+  @@map("verificacion_firma")
+  @@schema("qhse")
+}
+
 enum FasePtw {
   gabinete
   formalizacion
@@ -332,6 +343,10 @@ model DocumentoPedido {
   anuladoPor      String?             @map("anulado_por") @db.Uuid
   anulador        IdUsuario?          @relation("documentoAnulador", fields: [anuladoPor], references: [id])
   motivoAnulacion String?             @map("motivo_anulacion")
+  /// Lectura automática de la firma del documento cargado: solo un indicador (con `verificacion_at` y `no_verificada`, el servicio no respondió).
+  verificacion          VerificacionFirma @default(no_verificada)
+  verificacionConfianza Decimal?          @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt        DateTime?         @map("verificacion_at") @db.Timestamptz(6)
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy       String              @map("created_by") @db.Uuid
   creador         IdUsuario           @relation("documentoCreador", fields: [createdBy], references: [id])

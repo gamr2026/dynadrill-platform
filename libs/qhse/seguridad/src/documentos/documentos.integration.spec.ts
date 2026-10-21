@@ -5,6 +5,7 @@
 import { Permission } from '@dyn/authz';
 import { uuidv7 } from '@dyn/utils';
 import { PumpingEventosConsumer } from '../consumers/pumping-eventos.consumer';
+import { VerificadorFirmasHttp, type LecturaFirma } from './verificador-firmas';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 
@@ -37,6 +38,19 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
   const archivos: string[] = [];
   const eventosUsados: string[] = [];
   const modulo: Record<string, string> = {};
+  /** Lectura de firmas simulada (D6): lo que responda `ocr.respuesta` (null = el servicio no respondió). */
+  const ocr: { respuesta: LecturaFirma | null; llamadas: string[] } = {
+    respuesta: null,
+    llamadas: [],
+  };
+  const esperarLectura = async (id: string) => {
+    for (let i = 0; i < 50; i++) {
+      const d = await t.prisma.documentoPedido.findUniqueOrThrow({ where: { id } });
+      if (d.verificacionAt) return d;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error('la lectura de la firma no terminó');
+  };
 
   const tecnico = () =>
     t.token(
@@ -112,6 +126,12 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
 
   beforeAll(async () => {
     t = await levantarAppDePrueba('3195');
+    jest
+      .spyOn(VerificadorFirmasHttp.prototype, 'verificar')
+      .mockImplementation(async (archivoId) => {
+        ocr.llamadas.push(archivoId);
+        return ocr.respuesta;
+      });
     await sembrarMaestros(t.admin, MAESTROS);
     const r = await t.admin.query(
       "SELECT id, codigo FROM archivos.modulo_archivo WHERE codigo IN ('qhse_acta_entrega','qhse_documento_pedido')",
@@ -134,6 +154,56 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
     await t.admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [archivos]);
     await quitarMaestros(t.admin, MAESTROS);
     await t.cerrar();
+  });
+
+  // --------------------------------------------------------------------------------------------- D6: lectura de la firma
+
+  it('D6: al cargar un documento firmado se lee la firma y se guarda solo el indicador; con el servicio caído no se interrumpe la carga y se puede repetir', async () => {
+    const { pedidoId, ticketId } = await ticketNuevo(SUPERVISOR.id);
+    // documento general (SFI): firma detectada
+    ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.92 };
+    const a1 = await archivo('qhse_documento_pedido');
+    const r = await t
+      .http()
+      .post('/api/qhse/documentos')
+      .set(tecnico())
+      .send({ pedidoId, tipo: 'sfi', archivoId: a1 })
+      .expect(201);
+    const d1 = await esperarLectura(r.body.id);
+    expect(d1.verificacion).toBe('firma_detectada');
+    expect(Number(d1.verificacionConfianza)).toBe(0.92);
+    expect(ocr.llamadas).toContain(a1);
+    // la lista lo trae
+    const lista = (
+      await t.http().get(`/api/qhse/documentos?pedidoId=${pedidoId}`).set(tecnico()).expect(200)
+    ).body;
+    expect(lista.find((x: { id: string }) => x.id === r.body.id)).toMatchObject({
+      verificacion: 'firma_detectada',
+    });
+    // el Acta: firma no detectada (el supervisor del ticket la sube)
+    ocr.respuesta = { resultado: 'no_detectada', confianza: 0.1 };
+    const a2 = await archivo('qhse_acta_entrega', SUPERVISOR.id);
+    const acta2 = await acta(ticketId, { archivoId: a2 }).expect(201);
+    expect((await esperarLectura(acta2.body.id)).verificacion).toBe('firma_no_detectada');
+    // servicio no disponible: el documento se carga igual, queda «sin verificar» y se puede volver a leer
+    ocr.respuesta = null;
+    const a3 = await archivo('qhse_documento_pedido');
+    const r3 = await t
+      .http()
+      .post('/api/qhse/documentos')
+      .set(tecnico())
+      .send({ pedidoId, tipo: 'formato_recepcion', archivoId: a3 })
+      .expect(201);
+    const d3 = await esperarLectura(r3.body.id);
+    expect(d3.verificacion).toBe('no_verificada');
+    ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.8 };
+    const otra = await t
+      .http()
+      .post(`/api/qhse/documentos/${r3.body.id}/verificar`)
+      .set(tecnico())
+      .expect(201);
+    expect(otra.body).toMatchObject({ verificacion: 'firma_detectada' });
+    await t.http().post(`/api/qhse/documentos/${r3.body.id}/verificar`).set(operador()).expect(403);
   });
 
   // --------------------------------------------------------------------------------------------- Acta de Entrega

@@ -16,6 +16,7 @@ import { IpercConsultaService } from './iperc/iperc-consulta.service';
 import { IpercController } from './iperc/iperc.controller';
 import { IpercService } from './iperc/iperc.service';
 import { PrismaService } from './prisma/prisma.service';
+import { VerificadorFirmas, VerificadorFirmasHttp } from './documentos/verificador-firmas';
 import { SwaConsultaService } from './swa/swa-consulta.service';
 import { SwaController } from './swa/swa.controller';
 import { SwaService } from './swa/swa.service';
@@ -49,6 +50,7 @@ import { PtwService } from './ptw/ptw.service';
     EpiService,
     EpiConsultaService,
     EpiRenglonesService,
+    { provide: VerificadorFirmas, useClass: VerificadorFirmasHttp },
     DocumentosPedidoService,
     DocumentosEstadoService,
     PtwService,
