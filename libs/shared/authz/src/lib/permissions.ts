@@ -529,11 +529,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Ver los documentos de seguridad de un pedido (formato de recepción, ART, PT, SFI)',
     ModuleRoles.qhse,
   ),
-  // El equipo de Pumping consulta el estado de los documentos del pedido de SU ticket (qué está cargado y qué falta); no ve la bandeja ni descarga.
+  // El equipo de Pumping y el de FCR consultan el estado de los documentos del pedido de SU ticket (qué está cargado y qué falta); no ven la bandeja.
   nuevo(
     'qhse.documentos.ver_ticket',
     'Ver qué documentos de seguridad tiene cargados y cuáles faltan en el pedido de un ticket',
-    ModuleRoles.pumping,
+    [...new Set([...ModuleRoles.pumping, ...ModuleRoles.fcr])],
   ),
   nuevo(
     'qhse.documentos.gestionar',
