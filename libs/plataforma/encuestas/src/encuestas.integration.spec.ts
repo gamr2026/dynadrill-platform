@@ -18,13 +18,27 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule } from '@dyn/messaging';
+import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { CierreFcrConsumer } from './consumers/cierre-fcr.consumer';
 import { EncuestasModule } from './encuestas.module';
+import { type CorreoDeEncuesta, EnvioCorreoPort } from './puertos/envio-correo.port';
 import { InvitacionesService } from './services/invitaciones.service';
 import { hashDeToken } from './services/token';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
+
+/** El correo de prueba: guarda lo que saldría (la salida real es la de avisos, probada allí) y puede fallar a pedido. */
+const correos: { enviados: CorreoDeEncuesta[]; falla: string | null } = {
+  enviados: [],
+  falla: null,
+};
+class EnvioFalso extends EnvioCorreoPort {
+  async enviar(c: CorreoDeEncuesta): Promise<void> {
+    if (correos.falla) throw new Error(correos.falla);
+    correos.enviados.push(c);
+  }
+}
 
 const { publicKey, privateKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -63,6 +77,8 @@ run('Encuestas: administración y reglas de la base (base de datos real)', () =>
 
   const codigos: string[] = [];
   const invitacionIds: string[] = [];
+  const eventoIds: string[] = [];
+  const ticketsDePrueba: string[] = [];
   let invitaciones: InvitacionesService;
   let escalaId = '';
   const crear = async (extra: Record<string, unknown> = {}) => {
@@ -127,13 +143,15 @@ run('Encuestas: administración y reglas de la base (base de datos real)', () =>
           databaseUrl: APP_DB,
           relay: { enabled: false },
         }),
-        EncuestasModule,
+        EncuestasModule.forRoot({ envio: EnvioFalso }),
       ],
     })
     class TestAppModule {}
     const mod = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
     app = mod.createNestApplication();
     configureApp(app, { corsOrigins: ['http://localhost:4200'] });
+    // sin RabbitMQ: el consumidor se invoca a mano; evitamos que intente suscribirse al arrancar
+    jest.spyOn(CierreFcrConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
     await app.init();
     invitaciones = app.get(InvitacionesService);
     const escalas = (await http().get('/api/encuestas/escalas').set(superadmin()).expect(200)).body;
@@ -141,6 +159,19 @@ run('Encuestas: administración y reglas de la base (base de datos real)', () =>
   });
 
   afterAll(async () => {
+    if (eventoIds.length) {
+      await admin.query('DELETE FROM msg_plataforma.inbox WHERE id = ANY($1::uuid[])', [eventoIds]);
+    }
+    if (ticketsDePrueba.length) {
+      // las invitaciones que creó el consumidor para tickets de prueba
+      const ids = (
+        await admin.query(
+          'SELECT id FROM encuestas.invitacion WHERE referencia_id = ANY($1::uuid[])',
+          [ticketsDePrueba],
+        )
+      ).rows.map((r: { id: string }) => r.id);
+      invitacionIds.push(...ids);
+    }
     if (invitacionIds.length) {
       await admin.query(
         "DELETE FROM msg_plataforma.outbox WHERE datos->'data'->>'invitacionId' = ANY($1::text[])",
@@ -1114,6 +1145,172 @@ run('Encuestas: administración y reglas de la base (base de datos real)', () =>
         /respuesta_encuesta_nombre_check/,
         appPool,
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------------------------------------------
+  // E3: el cierre de un ticket de FCR envía la encuesta de satisfacción al correo del cliente
+  // ---------------------------------------------------------------------------------------------------------------------------------
+  describe('cierre de FCR: envío de la encuesta de satisfacción', () => {
+    const cierreFcr = (
+      datos: Record<string, unknown> = {},
+      id = uuidv7(),
+    ): { evento: EventEnvelope; ticketId: string } => {
+      const ticketId = uuidv7();
+      ticketsDePrueba.push(ticketId);
+      eventoIds.push(id);
+      return {
+        ticketId,
+        evento: {
+          id,
+          type: 'operaciones.fcr.cerrado',
+          version: 1,
+          occurredAt: '2026-11-02T10:00:00.000Z',
+          source: 'operaciones',
+          subject: { type: 'fcr_ticket', id: ticketId },
+          data: {
+            ticketId,
+            ticketNumero: 4551,
+            pedidoId: uuidv7(),
+            correoCliente: 'compras@petroandes.test',
+            cliente: 'Petro Andes',
+            pozo: 'SACHA-12',
+            ...datos,
+          },
+        } as EventEnvelope,
+      };
+    };
+    const consumir = (e: EventEnvelope) => app.get(CierreFcrConsumer).consumir(e);
+    const deTicket = async (ticketId: string) =>
+      (
+        await admin.query(
+          'SELECT * FROM encuestas.invitacion WHERE referencia_id = $1 ORDER BY created_at',
+          [ticketId],
+        )
+      ).rows;
+    const tokenDe = (c: CorreoDeEncuesta) => c.enlace.replace('/encuesta/', '');
+
+    beforeEach(() => {
+      correos.enviados = [];
+      correos.falla = null;
+    });
+
+    it('crea la invitación con la encuesta de FCR y le envía al correo del cliente un enlace que sirve de verdad', async () => {
+      const { evento, ticketId } = cierreFcr();
+      await consumir(evento);
+      const filas = await deTicket(ticketId);
+      expect(filas).toHaveLength(1);
+      expect(filas[0]).toMatchObject({
+        modulo_codigo: 'fcr',
+        correo_destino: 'compras@petroandes.test',
+        envio_error: null,
+      });
+      expect(filas[0].enviada_at).toBeInstanceOf(Date);
+      expect(correos.enviados).toHaveLength(1);
+      const c = correos.enviados[0];
+      expect(c.para).toBe('compras@petroandes.test');
+      expect(c.textoBoton).toBe('Responder la encuesta');
+      expect(c.texto).toContain('el servicio N.º 4551 · pozo SACHA-12');
+      expect(c.texto).toContain('Estimados de Petro Andes:');
+      expect(filas[0].token_hash).toBe(hashDeToken(tokenDe(c)));
+      // el enlace del correo abre el formulario de la encuesta de satisfacción de FCR
+      const f = await formulario(tokenDe(c)).expect(200);
+      expect(f.body.titulo).toBe('Encuesta de satisfacción del cliente (FCR)');
+      expect(f.body.preguntas.length).toBeGreaterThanOrEqual(7);
+      // vigencia de un día
+      expect((filas[0].vence_at.getTime() - Date.now()) / 3_600_000).toBeGreaterThan(23);
+    });
+
+    it('un evento repetido no crea otra invitación ni manda otro correo', async () => {
+      const { evento, ticketId } = cierreFcr();
+      await consumir(evento);
+      await consumir(evento);
+      expect(await deTicket(ticketId)).toHaveLength(1);
+      expect(correos.enviados).toHaveLength(1);
+    });
+
+    it('sin correo del cliente, con un correo inválido o de otro tipo de evento, no envía nada y no falla', async () => {
+      const sin = cierreFcr({ correoCliente: null });
+      const invalido = cierreFcr({ correoCliente: 'no-es-correo' });
+      const otro = cierreFcr();
+      await consumir(sin.evento);
+      await consumir(invalido.evento);
+      await consumir({ ...otro.evento, type: 'operaciones.fcr.paso_cambiado' } as EventEnvelope);
+      for (const t of [sin.ticketId, invalido.ticketId, otro.ticketId])
+        expect(await deTicket(t)).toEqual([]);
+      expect(correos.enviados).toEqual([]);
+    });
+
+    it('si el correo no sale, la invitación queda con el error para reenviarla y el evento no falla', async () => {
+      correos.falla = 'SMTP caído';
+      const { evento, ticketId } = cierreFcr();
+      await expect(consumir(evento)).resolves.toBeUndefined();
+      const [inv] = await deTicket(ticketId);
+      expect(inv.enviada_at).toBeNull();
+      expect(inv.envio_error).toBe('SMTP caído');
+      expect(correos.enviados).toEqual([]);
+    });
+
+    it('el Superadmin reenvía una encuesta sin responder: enlace nuevo, mismo correo; no una ya respondida', async () => {
+      correos.falla = 'SMTP caído';
+      const { evento, ticketId } = cierreFcr();
+      await consumir(evento);
+      correos.falla = null;
+      const [vieja] = await deTicket(ticketId);
+      const r = await http()
+        .post(`/api/encuestas/invitaciones/${vieja.id}/reenviar`)
+        .set(superadmin())
+        .expect(201);
+      expect(r.body).toMatchObject({ correoDestino: 'compras@petroandes.test', enviada: true });
+      expect(r.body.token).toBeUndefined(); // el token solo va en el correo
+      const filas = await deTicket(ticketId);
+      expect(filas).toHaveLength(2);
+      expect(filas[1]).toMatchObject({ id: r.body.id, created_by: ADMIN.id });
+      expect(filas[1].enviada_at).toBeInstanceOf(Date);
+      expect(correos.enviados).toHaveLength(1);
+      expect(correos.enviados[0].texto).toContain('para su servicio.'); // un reenvío solo conoce el módulo
+      await formulario(tokenDe(correos.enviados[0])).expect(200);
+      // una ya respondida no se reenvía
+      const e = await publicada();
+      const i = await invitar(e.codigo);
+      await contestar(i.token, { nombre: 'Marta', respuestas: respuestasValidas(e) }).expect(201);
+      expect(
+        q(
+          await http()
+            .post(`/api/encuestas/invitaciones/${i.id}/reenviar`)
+            .set(superadmin())
+            .expect(409),
+        ),
+      ).toMatch(/ya fue respondida/);
+      await http()
+        .post(`/api/encuestas/invitaciones/${uuidv7()}/reenviar`)
+        .set(superadmin())
+        .expect(404);
+      await http()
+        .post(`/api/encuestas/invitaciones/${vieja.id}/reenviar`)
+        .set(sinPermiso())
+        .expect(403);
+      await http().post(`/api/encuestas/invitaciones/${vieja.id}/reenviar`).expect(401);
+    });
+
+    it('reenviar con el transporte caído deja la invitación nueva con su error, sin lanzarlo', async () => {
+      const e = await publicada();
+      const i = await invitar(e.codigo);
+      await vencer(i.id);
+      correos.falla = 'Sin conexión';
+      const r = await http()
+        .post(`/api/encuestas/invitaciones/${i.id}/reenviar`)
+        .set(superadmin())
+        .expect(201);
+      expect(r.body.enviada).toBe(false);
+      invitacionIds.push(r.body.id);
+      const fila = (
+        await admin.query(
+          'SELECT enviada_at, envio_error FROM encuestas.invitacion WHERE id = $1',
+          [r.body.id],
+        )
+      ).rows[0];
+      expect(fila).toEqual({ enviada_at: null, envio_error: 'Sin conexión' });
     });
   });
 });

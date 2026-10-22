@@ -19,6 +19,8 @@ export interface CorreoPorEnviar {
   contenidoHtml: string;
   contenidoTexto: string;
   enlace?: string | null;
+  /** Texto del botón del enlace; por defecto «Abrir en el portal» (el de una persona de la casa). */
+  textoBoton?: string | null;
 }
 
 /**
@@ -52,8 +54,13 @@ export class CorreoSeguroService {
     const saliente: CorreoSaliente = {
       para: this.opciones.redirigirA,
       asunto: `[PRUEBA] ${c.asunto}`,
-      html: envolverCorreo({ contenidoHtml: c.contenidoHtml, enlaceUrl, avisoPruebas: quien }),
-      texto: `CORREO DE PRUEBA. ${quien}\n\n${c.contenidoTexto}${enlaceUrl ? `\n\nAbrir en el portal: ${enlaceUrl}` : ''}`,
+      html: envolverCorreo({
+        contenidoHtml: c.contenidoHtml,
+        enlaceUrl,
+        ...(c.textoBoton ? { textoBoton: c.textoBoton } : {}),
+        avisoPruebas: quien,
+      }),
+      texto: `CORREO DE PRUEBA. ${quien}\n\n${c.contenidoTexto}${enlaceUrl ? `\n\n${c.textoBoton ?? 'Abrir en el portal'}: ${enlaceUrl}` : ''}`,
     };
     await this.mail.enviar(saliente);
     return saliente;

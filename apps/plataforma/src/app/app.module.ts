@@ -11,9 +11,16 @@ import { IntegracionesModule } from '@dyn/integraciones';
 import { MessagingModule } from '@dyn/messaging';
 import { DestinatariosIdentidadAdapter } from './avisos/destinatarios-identidad.adapter';
 import { DiagnosticoModule } from './diagnostico/diagnostico.module';
+import { EnvioCorreoAvisosAdapter } from './encuestas/envio-correo-avisos.adapter';
 import { PlataformaEnv, plataformaEnvSchema } from './env';
 
 const envFiles = ['apps/plataforma/.env', '.env'];
+
+/** Una sola instancia de avisos: la comparten el contenedor y las encuestas (que envían su correo por la misma puerta segura). */
+const avisos = AvisosModule.forRoot({
+  imports: [IdentidadModule],
+  destinatarios: DestinatariosIdentidadAdapter,
+});
 
 /**
  * Contenedor `plataforma`: identidad, catálogos e integraciones (hechos), archivos, firmas, auditoría y avisos
@@ -40,11 +47,8 @@ const envFiles = ['apps/plataforma/.env', '.env'];
     IntegracionesModule,
     CatalogosModule,
     ArchivosModule,
-    AvisosModule.forRoot({
-      imports: [IdentidadModule],
-      destinatarios: DestinatariosIdentidadAdapter,
-    }),
-    EncuestasModule,
+    avisos,
+    EncuestasModule.forRoot({ imports: [avisos], envio: EnvioCorreoAvisosAdapter }),
     ...(process.env['DIAGNOSTICO_ENABLED'] === 'true' ? [DiagnosticoModule] : []),
   ],
 })

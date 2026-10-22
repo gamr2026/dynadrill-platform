@@ -41,15 +41,19 @@ export class InvitacionesService {
    * Crea la invitación de una encuesta (por su código) para lo que se evalúa en otro contenedor (`referenciaId`, p. ej. el ticket de FCR).
    * `actorId` es quien la pide; nulo si la crea el sistema al recibir un evento.
    */
-  async crear(entrada: {
-    encuestaCodigo: string;
-    referenciaId: string;
-    correoDestino: string;
-    actorId?: string | null;
-  }) {
+  async crear(
+    entrada: {
+      encuestaCodigo: string;
+      referenciaId: string;
+      correoDestino: string;
+      actorId?: string | null;
+    },
+    /** Dentro de la transacción de quien llama (p. ej. el consumidor de un evento); por defecto, la conexión del módulo. */
+    db: Pick<Prisma.TransactionClient, 'encuesta' | 'invitacion'> = this.prisma,
+  ) {
     const correo = entrada.correoDestino.trim().toLowerCase();
     if (!CORREO.test(correo)) throw new BadRequestException('El correo indicado no es válido');
-    const encuesta = await this.prisma.encuesta.findUnique({
+    const encuesta = await db.encuesta.findUnique({
       where: { codigo: entrada.encuestaCodigo },
       include: { versiones: { where: { estado: EstadoVersion.publicada } } },
     });
@@ -61,7 +65,7 @@ export class InvitacionesService {
     const { token, hash } = nuevoToken();
     const id = uuidv7();
     const venceAt = new Date(Date.now() + VIGENCIA_HORAS * 3_600_000);
-    await this.prisma.invitacion.create({
+    await db.invitacion.create({
       data: {
         id,
         versionId: version.id,

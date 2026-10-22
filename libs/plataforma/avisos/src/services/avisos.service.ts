@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import type { EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
-import { CorreoSeguroService } from '../mail/correo-seguro.service';
+import { CorreoSeguroService, type CorreoPorEnviar } from '../mail/correo-seguro.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Destinatario, DestinatariosPort } from '../puertos/destinatarios.port';
 import { renderizar, variablesDeEvento, type Variables } from '../plantillas';
@@ -145,6 +145,15 @@ export class AvisosService {
   // ---- campanita ----------------------------------------------------------------------------------------------
 
   /** Avisos sin leer de la persona, los más recientes primero. */
+  /**
+   * Correo a una dirección que no es una cuenta del sistema (p. ej. el cliente que recibe una encuesta). Sale por la misma puerta segura que
+   * todos: mientras el proyecto esté en pruebas llega solo a la dirección de redirección y dice a quién habría llegado. No deja campanita
+   * ni bitácora: quien lo pide anota el resultado, y si falla lanza el error para que lo anote.
+   */
+  async enviarCorreoExterno(c: CorreoPorEnviar): Promise<void> {
+    await this.correo.enviar(c);
+  }
+
   async misAvisos(usuarioId: string) {
     const filas = await this.prisma.aviso.findMany({
       where: { usuarioId, leidoAt: null },

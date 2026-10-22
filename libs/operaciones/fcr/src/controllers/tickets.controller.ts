@@ -25,6 +25,8 @@ const P = Permission;
 export class AvanzarTicketDto {
   @IsString() @MinLength(1) @MaxLength(60) hacia!: string;
   @IsOptional() @IsString() @MaxLength(500) motivo?: string;
+  /** Obligatorio al cerrar (`hacia = 'cerrado'`): el correo del cliente al que se envía la encuesta de satisfacción. */
+  @IsOptional() @IsString() @MaxLength(254) correoCliente?: string;
 }
 
 export class ListarTicketsDto {
@@ -110,7 +112,7 @@ export class TicketsController {
     @Body() dto: AvanzarTicketDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.tickets.avanzar(id, dto.hacia, actor, dto.motivo);
+    return this.tickets.avanzar(id, dto.hacia, actor, dto.motivo, dto.correoCliente);
   }
 
   /** Entrada SERVICIOS: el Supervisor elige el tipo de operador y quién repara e inspecciona. */

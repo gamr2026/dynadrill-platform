@@ -1,8 +1,9 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Permission } from '@dyn/authz';
-import { RequirePermission } from '@dyn/common';
+import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { EnviosService } from '../services/envios.service';
 import { InvitacionesService } from '../services/invitaciones.service';
 
 const P = Permission;
@@ -23,7 +24,10 @@ export class ListarInvitacionesDto {
  */
 @Controller('encuestas/invitaciones')
 export class InvitacionesController {
-  constructor(private readonly invitaciones: InvitacionesService) {}
+  constructor(
+    private readonly invitaciones: InvitacionesService,
+    private readonly envios: EnviosService,
+  ) {}
 
   @RequirePermission(P.ENCUESTAS_GESTIONAR)
   @Get()
@@ -42,5 +46,12 @@ export class InvitacionesController {
   @Get(':id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
     return this.invitaciones.detalle(id);
+  }
+
+  /** Reenvía una encuesta sin responder con un enlace nuevo (vale otro día). */
+  @RequirePermission(P.ENCUESTAS_GESTIONAR)
+  @Post(':id/reenviar')
+  reenviar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.envios.reenviar(id, actor.id);
   }
 }

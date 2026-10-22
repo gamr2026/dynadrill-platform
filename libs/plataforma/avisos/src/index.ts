@@ -3,3 +3,4 @@ export { AvisosModule, type AvisosModuleOptions } from './avisos.module';
 export { avisosEnvSchema, type AvisosEnv } from './avisos.config';
 export { DestinatariosPort, type Destinatario } from './puertos/destinatarios.port';
 export { AvisosService } from './services/avisos.service';
+export type { CorreoPorEnviar } from './mail/correo-seguro.service';

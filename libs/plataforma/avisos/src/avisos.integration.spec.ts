@@ -23,6 +23,7 @@ import { avisosEnvSchema } from './avisos.config';
 import { AvisosModule } from './avisos.module';
 import { EventosConAvisoConsumer } from './consumers/eventos-con-aviso.consumer';
 import { CorreoSeguroService } from './mail/correo-seguro.service';
+import { AvisosService } from './services/avisos.service';
 import { CorreoSaliente, MailPort } from './mail/mail.port';
 import { Destinatario, DestinatariosPort } from './puertos/destinatarios.port';
 import { PrismaService } from './prisma/prisma.service';
@@ -378,6 +379,38 @@ run('avisos: campanita y correo (base de datos real)', () => {
     );
     expect(salida.enviados.every((c) => c.asunto.startsWith('[PRUEBA] '))).toBe(true);
     expect(app.get(CorreoSeguroService).destinoReal).toBe(REDIRECCION);
+  });
+
+  it('un correo a una dirección que no es cuenta (el cliente) sale también solo a la redirección, con su botón y sin copias', async () => {
+    const antes = salida.enviados.length;
+    await app.get(AvisosService).enviarCorreoExterno({
+      destinatarioNombre: null,
+      destinatarioCorreo: 'cliente.real@empresa.test',
+      asunto: 'Su opinión sobre el servicio',
+      contenidoHtml: '<p>Gracias por confiar en nosotros.</p>',
+      contenidoTexto: 'Gracias por confiar en nosotros.',
+      enlace: '/encuesta/abc123',
+      textoBoton: 'Responder la encuesta',
+    });
+    const c = salida.enviados[antes];
+    expect(salida.enviados).toHaveLength(antes + 1);
+    expect(c.para).toBe(REDIRECCION);
+    expect(Object.keys(c).sort()).toEqual(['asunto', 'html', 'para', 'texto']);
+    expect(c.asunto).toBe('[PRUEBA] Su opinión sobre el servicio');
+    expect(c.html).toContain('Habría llegado a cliente.real@empresa.test');
+    expect(c.html).toContain('Responder la encuesta');
+    expect(c.html).not.toContain('Abrir en el portal');
+    expect(c.texto).toContain('Responder la encuesta: http://portal.test/encuesta/abc123');
+    // si el transporte falla, el error llega a quien lo pidió (para que lo anote)
+    salida.falla = 'SMTP caído';
+    await expect(
+      app.get(AvisosService).enviarCorreoExterno({
+        asunto: 'x',
+        contenidoHtml: '<p>x</p>',
+        contenidoTexto: 'x',
+      }),
+    ).rejects.toThrow('SMTP caído');
+    salida.falla = null;
   });
 
   it('no avisa dos veces por el mismo evento, aunque llegue repetido', async () => {
