@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ArchivosModule } from '@dyn/archivos';
+import { AuditoriaModule } from '@dyn/auditoria';
 import { AvisosModule } from '@dyn/avisos';
 import { AppConfigModule } from '@dyn/config';
 import { CatalogosModule } from '@dyn/catalogos';
@@ -43,6 +44,7 @@ const envFiles = ['apps/plataforma/.env', '.env'];
       imports: [IdentidadModule],
       destinatarios: DestinatariosIdentidadAdapter,
     }),
+    AuditoriaModule,
     ...(process.env['DIAGNOSTICO_ENABLED'] === 'true' ? [DiagnosticoModule] : []),
   ],
 })

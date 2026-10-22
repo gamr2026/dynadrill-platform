@@ -1,1 +1,2 @@
-// Única puerta pública del módulo (se completa en las rebanadas siguientes).
+// Única puerta pública del módulo: lo demás (Prisma, servicios, consumidores) es interno.
+export { AuditoriaModule } from './auditoria.module';
