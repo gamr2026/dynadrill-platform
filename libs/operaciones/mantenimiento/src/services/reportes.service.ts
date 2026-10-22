@@ -131,6 +131,68 @@ export class ReportesService {
     return id;
   }
 
+  /**
+   * Recibe el reporte de unidad que QHSE genera cuando una inspección de campo del vehículo-grúa se rechaza (contrato 4.6-bis). El
+   * `casoId` (la inspección de QHSE, de otro contenedor: sin FK) es la clave: un caso se recibe una sola vez. De QHSE solo se copia la
+   * `novedad`; la unidad se valida contra Flota. Devuelve el id del reporte recibido, o `null` si no corresponde recibirlo (sin novedad o
+   * con una unidad que no existe en Flota: QHSE no lo sabe porque es otro contenedor).
+   */
+  async recibirDeQhse(
+    tx: Prisma.TransactionClient,
+    caso: { casoId: string; unidadId: string; novedad: string; ticketId?: string | null },
+    actorId: string | null,
+  ): Promise<string | null> {
+    const novedad = caso.novedad.trim();
+    if (!novedad) {
+      this.logger.warn(`Caso ${caso.casoId} de QHSE sin novedad; se ignora`);
+      return null;
+    }
+    const ya = await tx.reporteRecibido.findUnique({ where: { qhseReferenciaId: caso.casoId } });
+    if (ya) return ya.id;
+
+    const unidad = await tx.flotaUnidad.findUnique({ where: { id: caso.unidadId } });
+    if (!unidad) {
+      this.logger.warn(
+        `Caso ${caso.casoId} de QHSE: la unidad ${caso.unidadId} no existe en Flota; no se puede recibir`,
+      );
+      return null;
+    }
+
+    const id = uuidv7();
+    const codigo = await this.siguienteCodigo(tx);
+    await tx.reporteRecibido.create({
+      data: {
+        id,
+        codigo,
+        origen: 'qhse',
+        unidadId: unidad.id,
+        qhseReferenciaId: caso.casoId,
+        novedadQhse: novedad,
+        recibidoPor: actorId,
+        createdBy: actorId,
+        updatedBy: actorId,
+      },
+    });
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.mantenimiento.reporte.recibido',
+        subject: { type: 'mantenimiento_reporte', id },
+        data: {
+          reporteId: id,
+          codigo,
+          origen: 'qhse',
+          unidadId: unidad.id,
+          unidad: unidad.codigo,
+          // la inspección de QHSE no siempre es de un ticket, y el número del ticket no viaja en el evento de QHSE
+          ticketId: caso.ticketId ?? null,
+          ticketNumero: null,
+        },
+      }),
+    );
+    return id;
+  }
+
   async listar(filtros: { estado?: EstadoReporte; unidadId?: string; q?: string }) {
     const where: Prisma.ReporteRecibidoWhereInput = {
       ...(filtros.unidadId ? { unidadId: filtros.unidadId } : {}),

@@ -24,6 +24,7 @@ import { uuidv7 } from '@dyn/utils';
 import { AsignacionPumpingConsumer, PreventivosService } from '@dyn/flota';
 import { DespachosConsumer, MovimientosService } from '@dyn/inventario';
 import { ReporteUnidadLlegadaConsumer } from './consumers/reporte-unidad-llegada.consumer';
+import { ReporteUnidadQhseConsumer } from './consumers/reporte-unidad-qhse.consumer';
 import { MantenimientoModule } from './mantenimiento.module';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -82,6 +83,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
   let app: INestApplication;
   let prisma: PrismaService;
   let consumer: ReporteUnidadLlegadaConsumer;
+  let consumerQhse: ReporteUnidadQhseConsumer;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -230,11 +232,15 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     jest
       .spyOn(ReporteUnidadLlegadaConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
+    jest
+      .spyOn(ReporteUnidadQhseConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
     jest.spyOn(DespachosConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
     jest.spyOn(AsignacionPumpingConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue();
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(ReporteUnidadLlegadaConsumer);
+    consumerQhse = app.get(ReporteUnidadQhseConsumer);
     // 20 unidades del repuesto en la bodega de prueba (compra, por la API de Inventario)
     const compra = (
       await admin.query("SELECT id FROM inventario.motivo_movimiento WHERE origen = 'compra'")
@@ -384,6 +390,183 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect(Object.keys(salida.rows[0].d).sort()).toEqual(
         ['codigo', 'origen', 'reporteId', 'ticketId', 'ticketNumero', 'unidad', 'unidadId'].sort(),
       );
+    });
+  });
+
+  describe('recepción del reporte de unidad de QHSE (B3: inspección rechazada del vehículo-grúa)', () => {
+    const NOVEDAD =
+      'Vehículo-grúa rechazado en la inspección INSP-000123. Criterios que fallan: frenos. Observaciones: pérdida de presión';
+    /** Un `qhse.reporte_unidad.generado` como lo publica QHSE (contrato 4.6-bis). */
+    const eventoQhse = (extra: Record<string, unknown> = {}, tipo?: string): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      const casoId = (extra['casoId'] as string | undefined) ?? uuidv7();
+      return {
+        id,
+        type: tipo ?? 'qhse.reporte_unidad.generado',
+        version: 1,
+        occurredAt: '2026-11-06T10:00:00.000Z',
+        source: 'qhse',
+        subject: { type: 'inspeccion', id: casoId },
+        actor: { userId: OPERADOR.id, role: 'operador' },
+        data: {
+          casoId,
+          unidadId: UNIDAD.id,
+          unidadCodigo: UNIDAD.codigo,
+          novedad: NOVEDAD,
+          inspeccionId: casoId,
+          codigo: 'INSP-000123',
+          fecha: '2026-11-06',
+          ticketId: null,
+          ...extra,
+        },
+      };
+    };
+    const delCaso = (casoId: string) =>
+      prisma.reporteRecibido.findUnique({ where: { qhseReferenciaId: casoId } });
+    const contador = async () =>
+      Number(
+        (await admin.query("SELECT valor FROM mantenimiento.contador WHERE clave = 'reporte'"))
+          .rows[0].valor,
+      );
+
+    it('recibe el caso: queda por clasificar con origen QHSE, la referencia del caso, la novedad y la unidad de Flota', async () => {
+      const e = eventoQhse();
+      await consumerQhse.consumir(e);
+      const r = await delCaso(e.data['casoId'] as string);
+      expect(r).toMatchObject({
+        origen: 'qhse',
+        unidadId: UNIDAD.id,
+        qhseReferenciaId: e.data['casoId'],
+        novedadQhse: NOVEDAD,
+        pumpingReporteUnidadId: null,
+        descartadoAt: null,
+        recibidoPor: OPERADOR.id,
+      });
+      expect(r?.codigo).toMatch(/^R\d{4,}$/);
+      // la bandeja lo muestra con la novedad de QHSE y sin ticket
+      const lista = await http()
+        .get('/api/operaciones/mantenimiento/reportes?estado=por_clasificar')
+        .set(jefe())
+        .expect(200);
+      const visto = lista.body.find((x: { id: string }) => x.id === r?.id);
+      expect(visto).toMatchObject({
+        origen: 'qhse',
+        estado: 'por_clasificar',
+        ticket: null,
+        novedades: { qhse: NOVEDAD },
+        unidad: { id: UNIDAD.id, codigo: UNIDAD.codigo },
+      });
+    });
+
+    it('publica el aviso de reporte recibido con origen qhse y la misma forma que el de Pumping', async () => {
+      const e = eventoQhse({ ticketId: uuidv7() });
+      await consumerQhse.consumir(e);
+      const r = await delCaso(e.data['casoId'] as string);
+      const salida = await admin.query(
+        "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.mantenimiento.reporte.recibido' AND datos->'data'->>'reporteId' = $1",
+        [r?.id],
+      );
+      expect(salida.rows).toHaveLength(1);
+      expect(salida.rows[0].d).toMatchObject({
+        reporteId: r?.id,
+        codigo: r?.codigo,
+        origen: 'qhse',
+        unidadId: UNIDAD.id,
+        unidad: UNIDAD.codigo,
+        ticketId: e.data['ticketId'],
+        ticketNumero: null,
+      });
+      expect(Object.keys(salida.rows[0].d).sort()).toEqual(
+        ['codigo', 'origen', 'reporteId', 'ticketId', 'ticketNumero', 'unidad', 'unidadId'].sort(),
+      );
+      // sin el texto de la novedad: lo que se avisa son ids y códigos
+      expect(JSON.stringify(salida.rows[0].d)).not.toContain('frenos');
+    });
+
+    it('es idempotente: el mismo evento, o el mismo caso en otro evento, no crea otro reporte ni otro aviso', async () => {
+      const e = eventoQhse();
+      await consumerQhse.consumir(e);
+      await consumerQhse.consumir(e); // mismo evento: lo ignora el inbox
+      await consumerQhse.consumir(eventoQhse({ casoId: e.data['casoId'] })); // otro evento del mismo caso: lo ignora la clave del caso
+      expect(
+        await prisma.reporteRecibido.count({
+          where: { qhseReferenciaId: e.data['casoId'] as string },
+        }),
+      ).toBe(1);
+      const r = await delCaso(e.data['casoId'] as string);
+      const avisos = await admin.query(
+        "SELECT 1 FROM msg_operaciones.outbox WHERE tipo = 'operaciones.mantenimiento.reporte.recibido' AND datos->'data'->>'reporteId' = $1",
+        [r?.id],
+      );
+      expect(avisos.rowCount).toBe(1);
+    });
+
+    it('registra y omite, sin error, un evento incompleto, con ids que no son uuid, de otro tipo o con una unidad que no existe en Flota', async () => {
+      const ignorados = [
+        eventoQhse({ casoId: '' }),
+        eventoQhse({ unidadId: undefined }),
+        eventoQhse({ novedad: '   ' }),
+        eventoQhse({ novedad: undefined }),
+        eventoQhse({ casoId: 'no-es-uuid' }),
+        eventoQhse({ unidadId: 'no-es-uuid' }),
+        eventoQhse({ unidadId: uuidv7() }), // QHSE no sabe si la unidad existe: es otro contenedor
+        eventoQhse({}, 'qhse.inspeccion.rechazada'),
+      ];
+      const antes = await prisma.reporteRecibido.count({ where: { origen: 'qhse' } });
+      for (const e of ignorados) await expect(consumerQhse.consumir(e)).resolves.toBeUndefined();
+      expect(await prisma.reporteRecibido.count({ where: { origen: 'qhse' } })).toBe(antes);
+    });
+
+    it('un caso que se omite no gasta un número de reporte; uno aceptado toma el siguiente', async () => {
+      const antes = await contador();
+      await consumerQhse.consumir(eventoQhse({ unidadId: uuidv7() })); // se omite
+      expect(await contador()).toBe(antes);
+      const e = eventoQhse();
+      await consumerQhse.consumir(e);
+      const r = await delCaso(e.data['casoId'] as string);
+      expect(r?.codigo).toBe(`R${String(antes + 1).padStart(4, '0')}`);
+    });
+
+    it('el Jefe de Mantenimiento lo clasifica como cualquier otro: genera la orden, o lo descarta con motivo', async () => {
+      const a = eventoQhse();
+      const b = eventoQhse();
+      await consumerQhse.consumir(a);
+      await consumerQhse.consumir(b);
+      const ra = await delCaso(a.data['casoId'] as string);
+      const rb = await delCaso(b.data['casoId'] as string);
+      const orden = await http()
+        .post(`/api/operaciones/mantenimiento/reportes/${ra?.id}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }] })
+        .expect(201);
+      expect(orden.body).toMatchObject({ codigo: ra?.codigo, unidad: { id: UNIDAD.id } });
+      const descartado = await http()
+        .post(`/api/operaciones/mantenimiento/reportes/${rb?.id}/descartar`)
+        .set(jefe())
+        .send({ motivo: 'Ya se corrigió en el sitio' })
+        .expect(201);
+      expect(descartado.body).toMatchObject({ origen: 'qhse', estado: 'descartado' });
+    });
+
+    it('la base exige la referencia y la novedad de QHSE, no las admite en otro origen y no repite el caso', async () => {
+      const insertar = (origen: string, ref: string | null, novedad: string | null) =>
+        admin.query(
+          `INSERT INTO mantenimiento.reporte_recibido (id, codigo, origen, unidad_id, qhse_referencia_id, novedad_qhse)
+           VALUES ($1, $2, $3::mantenimiento.origen_reporte, $4, $5, $6)`,
+          [uuidv7(), `RZ${uuidv7().slice(-8)}`, origen, UNIDAD.id, ref, novedad],
+        );
+      await expect(insertar('qhse', null, 'x')).rejects.toThrow(/reporte_recibido_origen_check/);
+      await expect(insertar('qhse', uuidv7(), '   ')).rejects.toThrow(
+        /reporte_recibido_origen_check/,
+      );
+      await expect(insertar('qhse', uuidv7(), null)).rejects.toThrow(
+        /reporte_recibido_origen_check/,
+      );
+      await expect(insertar('fcr', uuidv7(), 'x')).rejects.toThrow(/reporte_recibido_origen_check/);
+      const ref = uuidv7();
+      await insertar('qhse', ref, 'novedad');
+      await expect(insertar('qhse', ref, 'otra')).rejects.toThrow(/reporte_recibido_qhse_key/);
     });
   });
 
