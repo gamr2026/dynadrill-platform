@@ -11,6 +11,7 @@ import { IdentidadModule } from '@dyn/identidad';
 import { IntegracionesModule } from '@dyn/integraciones';
 import { MessagingModule } from '@dyn/messaging';
 import { DestinatariosIdentidadAdapter } from './avisos/destinatarios-identidad.adapter';
+import { VerificadorFirmaArchivosAdapter } from './firmas/verificador-firma-archivos.adapter';
 import { DiagnosticoModule } from './diagnostico/diagnostico.module';
 import { PlataformaEnv, plataformaEnvSchema } from './env';
 
@@ -46,7 +47,10 @@ const envFiles = ['apps/plataforma/.env', '.env'];
       destinatarios: DestinatariosIdentidadAdapter,
     }),
     AuditoriaModule,
-    FirmasModule,
+    FirmasModule.forRoot({
+      imports: [ArchivosModule],
+      verificador: VerificadorFirmaArchivosAdapter,
+    }),
     ...(process.env['DIAGNOSTICO_ENABLED'] === 'true' ? [DiagnosticoModule] : []),
   ],
 })

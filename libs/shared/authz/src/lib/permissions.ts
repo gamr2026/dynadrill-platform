@@ -601,6 +601,15 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Consultar el registro de auditoría y la línea de tiempo de una entidad',
     [RoleCode.SUPERADMIN],
   ),
+  // ---- firmas (plataforma): evidencia de firma de los documentos. Solo Superadmin por defecto; se asigna desde Roles.
+  nuevo('firmas.evidencia.ver', 'Consultar las firmas de un documento y su historia', [
+    RoleCode.SUPERADMIN,
+  ]),
+  nuevo(
+    'firmas.evidencia.verificar',
+    'Leer el archivo de una firma manuscrita y guardar el resultado',
+    [RoleCode.SUPERADMIN],
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -729,6 +738,8 @@ export const Permission = {
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
   AUDITORIA_VER: 'auditoria.eventos.ver',
+  FIRMAS_VER: 'firmas.evidencia.ver',
+  FIRMAS_VERIFICAR: 'firmas.evidencia.verificar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

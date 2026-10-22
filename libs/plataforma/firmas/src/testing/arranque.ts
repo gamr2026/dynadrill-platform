@@ -19,6 +19,7 @@ import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { FirmasConsumer } from '../consumers/firmas.consumer';
 import { FirmasModule } from '../firmas.module';
+import { LecturaDeFirma, VerificadorFirmaPort } from '../puertos/verificador.port';
 import { PrismaService } from '../prisma/prisma.service';
 
 export const APP_DB =
@@ -27,6 +28,20 @@ export const APP_DB =
 export const MIGRATOR_DB =
   process.env['TEST_MIGRATOR_DATABASE_URL'] ??
   'postgresql://dyn_migrator:dev_dyn_migrator@localhost:5433/dynadrill';
+
+/** Lo que el lector de firmas «responde» en las pruebas (el servicio real es otro contenedor). */
+export const lectura: { respuesta: LecturaDeFirma | Error; llamadas: string[] } = {
+  respuesta: { resultado: 'firma_detectada', confianza: 0.9, nombreCoincide: true },
+  llamadas: [],
+};
+
+class VerificadorFalso extends VerificadorFirmaPort {
+  async leer(archivoId: string): Promise<LecturaDeFirma> {
+    lectura.llamadas.push(archivoId);
+    if (lectura.respuesta instanceof Error) throw lectura.respuesta;
+    return lectura.respuesta;
+  }
+}
 
 export interface AppDePrueba {
   app: INestApplication;
@@ -61,7 +76,7 @@ export async function arrancarApp(puerto: string): Promise<AppDePrueba> {
         databaseUrl: APP_DB,
         relay: { enabled: false },
       }),
-      FirmasModule,
+      FirmasModule.forRoot({ verificador: VerificadorFalso }),
     ],
   })
   class TestAppModule {}
