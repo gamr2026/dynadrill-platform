@@ -1324,7 +1324,7 @@ run(
             nombre: 'Ítem de prueba',
             unidad: 'día',
             cantidad: 1,
-            usos: [{ fecha: '2026-11-05', estado: 'operacion' }],
+            usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 1 }],
           },
           {
             listaPreciosItemId: expect.any(String),
@@ -1332,7 +1332,7 @@ run(
             nombre: 'Movilización livianas',
             unidad: 'km',
             cantidad: 115,
-            usos: [],
+            usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 115 }],
           },
           {
             listaPreciosItemId: expect.any(String),
@@ -1342,11 +1342,18 @@ run(
             serie: 'DY-RT-415',
             cantidad: 2,
             usos: [
-              { fecha: '2026-11-05', estado: 'daily_charge' },
-              { fecha: '2026-11-06', estado: 'daily_charge' },
+              { fecha: '2026-11-05', estado: 'daily_charge', cantidad: 1 },
+              { fecha: '2026-11-06', estado: 'daily_charge', cantidad: 1 },
             ],
           },
         ]);
+        // la suma de las cantidades de los días es la cantidad de la fila (Comercial lo exige)
+        for (const h of ev[0].d['herramientas'] as Array<{
+          cantidad: number;
+          usos: Array<{ cantidad: number }>;
+        }>) {
+          expect(h.usos.reduce((a, u) => a + u.cantidad, 0)).toBeCloseTo(h.cantidad, 3);
+        }
         expect(filas).toHaveLength(1); // antes de agregar, solo la fila que dejó enEjecucion
         // el operador ya no corrige
         await guardar(t.id, '2026-11-06').expect(409);

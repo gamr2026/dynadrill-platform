@@ -297,8 +297,13 @@ export class ReporteHerramientasService {
       unidad: f.unidad ?? undefined,
       serie: f.serie ?? undefined,
       cantidad: cantidadDeFila(f),
-      // las filas por día envían sus marcas; en las demás solo importa la cantidad total
-      usos: f.porDia ? f.dias.map((d) => ({ fecha: aDia(d.fecha), estado: d.estado })) : [],
+      // todas las filas envían sus días con la cantidad aplicada (en las de por día cada marca vale 1): la suma de las cantidades de los
+      // días es la cantidad total de la fila, y Comercial la comprueba contra ella
+      usos: f.dias.map((d) => ({
+        fecha: aDia(d.fecha),
+        estado: d.estado,
+        cantidad: Number(d.cantidad),
+      })),
     }));
   }
 
