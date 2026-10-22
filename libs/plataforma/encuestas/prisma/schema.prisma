@@ -1,0 +1,218 @@
+// Módulo `encuestas` (contenedor plataforma, sección de administración). Schema PostgreSQL: encuestas.
+// Plantillas de encuesta versionadas, preguntas con su tipo de respuesta, invitaciones de un solo uso y respuestas en filas.
+// Sirve a cualquier módulo: lo que se evalúa (p. ej. el ticket de FCR) se enlaza por id sin FK (otro contenedor).
+// Las IDs son UUIDv7 generados por la aplicación (sin DEFAULT en la base). El cliente se genera dentro del módulo y nadie más
+// lo importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts). Las columnas `created_by` / `updated_by` /
+// `publicada_by` tienen FK a `identidad.usuario` solo en la base de datos.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["encuestas"]
+}
+
+enum TipoRespuesta {
+  escala
+  texto
+  si_no
+  opcion_unica
+  opcion_multiple
+
+  @@map("tipo_respuesta")
+  @@schema("encuestas")
+}
+
+enum EstadoVersion {
+  borrador
+  publicada
+  archivada
+
+  @@map("estado_version")
+  @@schema("encuestas")
+}
+
+/// Módulo del sistema al que sirve una encuesta (se siembra: `fcr`).
+model ModuloEncuesta {
+  codigo       String       @id
+  nombre       String
+  activo       Boolean      @default(true)
+  encuestas    Encuesta[]
+  invitaciones Invitacion[]
+
+  @@map("modulo_encuesta")
+  @@schema("encuestas")
+}
+
+/// Escala de calificación (por ejemplo 1 a 5 con sus etiquetas).
+model Escala {
+  id        String        @id @db.Uuid
+  codigo    String        @unique
+  nombre    String
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?       @map("created_by") @db.Uuid
+  updatedAt DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?       @map("updated_by") @db.Uuid
+  valores   EscalaValor[]
+  preguntas Pregunta[]
+
+  @@map("escala")
+  @@schema("encuestas")
+}
+
+model EscalaValor {
+  escalaId String @map("escala_id") @db.Uuid
+  escala   Escala @relation(fields: [escalaId], references: [id], onDelete: Cascade)
+  valor    Int    @db.SmallInt
+  etiqueta String
+
+  @@id([escalaId, valor])
+  @@map("escala_valor")
+  @@schema("encuestas")
+}
+
+/// Plantilla de encuesta. Lo que se envía es una de sus versiones.
+model Encuesta {
+  id           String            @id @db.Uuid
+  codigo       String            @unique
+  nombre       String
+  moduloCodigo String            @map("modulo_codigo")
+  modulo       ModuloEncuesta    @relation(fields: [moduloCodigo], references: [codigo])
+  activa       Boolean           @default(true)
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?           @map("created_by") @db.Uuid
+  updatedAt    DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?           @map("updated_by") @db.Uuid
+  versiones    EncuestaVersion[]
+
+  @@index([moduloCodigo])
+  @@map("encuesta")
+  @@schema("encuestas")
+}
+
+/// Una versión publicada no se edita: un cambio crea una versión nueva.
+model EncuestaVersion {
+  id           String        @id @db.Uuid
+  encuestaId   String        @map("encuesta_id") @db.Uuid
+  encuesta     Encuesta      @relation(fields: [encuestaId], references: [id])
+  numero       Int
+  estado       EstadoVersion @default(borrador)
+  titulo       String
+  introduccion String?
+  publicadaAt  DateTime?     @map("publicada_at") @db.Timestamptz(6)
+  publicadaBy  String?       @map("publicada_by") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?       @map("created_by") @db.Uuid
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?       @map("updated_by") @db.Uuid
+  preguntas    Pregunta[]
+  invitaciones Invitacion[]
+
+  @@unique([encuestaId, numero])
+  @@map("encuesta_version")
+  @@schema("encuestas")
+}
+
+model Pregunta {
+  id          String           @id @db.Uuid
+  versionId   String           @map("version_id") @db.Uuid
+  version     EncuestaVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  orden       Int
+  texto       String
+  tipo        TipoRespuesta
+  obligatoria Boolean          @default(true)
+  escalaId    String?          @map("escala_id") @db.Uuid
+  escala      Escala?          @relation(fields: [escalaId], references: [id])
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?          @map("created_by") @db.Uuid
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?          @map("updated_by") @db.Uuid
+  opciones    PreguntaOpcion[]
+  respuestas  Respuesta[]
+
+  @@unique([versionId, orden])
+  @@unique([id, tipo])
+  @@index([escalaId])
+  @@map("pregunta")
+  @@schema("encuestas")
+}
+
+model PreguntaOpcion {
+  id           String        @id @db.Uuid
+  preguntaId   String        @map("pregunta_id") @db.Uuid
+  preguntaTipo TipoRespuesta @map("pregunta_tipo")
+  pregunta     Pregunta      @relation(fields: [preguntaId, preguntaTipo], references: [id, tipo], onDelete: Cascade)
+  orden        Int
+  etiqueta     String
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?       @map("created_by") @db.Uuid
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?       @map("updated_by") @db.Uuid
+  respuestas   Respuesta[]
+
+  @@unique([preguntaId, orden])
+  @@unique([id, preguntaId])
+  @@map("pregunta_opcion")
+  @@schema("encuestas")
+}
+
+/// El envío de una encuesta a un correo: enlace de un solo uso con vigencia. Solo se guarda el hash del token.
+model Invitacion {
+  id            String             @id @db.Uuid
+  versionId     String             @map("version_id") @db.Uuid
+  version       EncuestaVersion    @relation(fields: [versionId], references: [id])
+  moduloCodigo  String             @map("modulo_codigo")
+  modulo        ModuloEncuesta     @relation(fields: [moduloCodigo], references: [codigo])
+  /// Id de lo que se evalúa (p. ej. el ticket de FCR), de OTRO contenedor: sin FK.
+  referenciaId  String             @map("referencia_id") @db.Uuid
+  tokenHash     String             @unique @map("token_hash")
+  correoDestino String             @map("correo_destino")
+  venceAt       DateTime           @map("vence_at") @db.Timestamptz(6)
+  enviadaAt     DateTime?          @map("enviada_at") @db.Timestamptz(6)
+  envioError    String?            @map("envio_error")
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     String?            @map("created_by") @db.Uuid
+  respuesta     RespuestaEncuesta?
+
+  @@index([moduloCodigo, referenciaId])
+  @@index([versionId])
+  @@map("invitacion")
+  @@schema("encuestas")
+}
+
+/// Lo que contestó el cliente con un enlace. Inmutable.
+model RespuestaEncuesta {
+  id                 String      @id @db.Uuid
+  invitacionId       String      @unique @map("invitacion_id") @db.Uuid
+  invitacion         Invitacion  @relation(fields: [invitacionId], references: [id])
+  nombreRespondiente String      @map("nombre_respondiente")
+  cargoRespondiente  String?     @map("cargo_respondiente")
+  respondidaAt       DateTime    @default(now()) @map("respondida_at") @db.Timestamptz(6)
+  respuestas         Respuesta[]
+
+  @@map("respuesta_encuesta")
+  @@schema("encuestas")
+}
+
+/// Una fila por pregunta respondida (por opción elegida en la múltiple), con exactamente un valor. Inmutable.
+model Respuesta {
+  id                  String            @id @db.Uuid
+  respuestaEncuestaId String            @map("respuesta_encuesta_id") @db.Uuid
+  respuestaEncuesta   RespuestaEncuesta @relation(fields: [respuestaEncuestaId], references: [id])
+  preguntaId          String            @map("pregunta_id") @db.Uuid
+  pregunta            Pregunta          @relation(fields: [preguntaId], references: [id])
+  valorNumero         Int?              @map("valor_numero") @db.SmallInt
+  valorTexto          String?           @map("valor_texto")
+  valorBooleano       Boolean?          @map("valor_booleano")
+  opcionId            String?           @map("opcion_id") @db.Uuid
+  opcion              PreguntaOpcion?   @relation(fields: [opcionId, preguntaId], references: [id, preguntaId])
+
+  @@index([preguntaId])
+  @@map("respuesta")
+  @@schema("encuestas")
+}

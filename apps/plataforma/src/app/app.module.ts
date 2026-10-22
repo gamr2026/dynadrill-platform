@@ -5,6 +5,7 @@ import { AvisosModule } from '@dyn/avisos';
 import { AppConfigModule } from '@dyn/config';
 import { CatalogosModule } from '@dyn/catalogos';
 import { CommonModule } from '@dyn/common';
+import { EncuestasModule } from '@dyn/encuestas';
 import { IdentidadModule } from '@dyn/identidad';
 import { IntegracionesModule } from '@dyn/integraciones';
 import { MessagingModule } from '@dyn/messaging';
@@ -43,6 +44,7 @@ const envFiles = ['apps/plataforma/.env', '.env'];
       imports: [IdentidadModule],
       destinatarios: DestinatariosIdentidadAdapter,
     }),
+    EncuestasModule,
     ...(process.env['DIAGNOSTICO_ENABLED'] === 'true' ? [DiagnosticoModule] : []),
   ],
 })

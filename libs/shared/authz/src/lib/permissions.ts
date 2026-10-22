@@ -345,6 +345,12 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Bodega: preparar y enviar las herramientas que el Supervisor de FCR solicitó, y recibir su retorno',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.BODEGUERO],
   ),
+  // encuestas (plataforma, sección de administración)
+  nuevo(
+    'encuestas.administracion.gestionar',
+    'Administrar las encuestas: plantillas por módulo, versiones, preguntas y tipos de respuesta, envíos y respuestas recibidas',
+    [RoleCode.SUPERADMIN],
+  ),
   // pumping
   nuevo(
     'pumping.tickets.contexto_conductor',
@@ -667,6 +673,7 @@ export const Permission = {
   FCR_REQUISITOS_PUENTE: 'fcr.requisitos.puente',
   FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
   FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
+  ENCUESTAS_GESTIONAR: 'encuestas.administracion.gestionar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
   PUMPING_CONTEXTO_CONDUCTOR: 'pumping.tickets.contexto_conductor',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',

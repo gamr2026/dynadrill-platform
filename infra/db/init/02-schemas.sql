@@ -85,3 +85,8 @@ BEGIN
   END LOOP;
 END
 $$;
+
+-- encuestas (24/10/2026, plataforma): schema creado después de los 20 originales. No está en la lista de privilegios de arriba:
+-- su primera migración concede a app_plataforma lo que necesita (SELECT, INSERT, UPDATE y los REVOKE de lo inmutable).
+CREATE SCHEMA encuestas AUTHORIZATION dyn_migrator;
+COMMENT ON SCHEMA encuestas IS 'Encuestas (plantillas versionadas, invitaciones y respuestas), administradas por el Superadmin';
