@@ -611,6 +611,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Aprobar el informe de una investigación de incidente y cerrarla',
     ModuleRoles.ipercApprove,
   ),
+  // ---- qhse: requisitos legales (matrices de Gestión Ambiental y SST). El Supervisor no entra.
+  nuevo(
+    'qhse.legal.ver',
+    'Ver los requisitos legales (matrices de Gestión Ambiental y SST), su vigencia y sus revisiones',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.legal.gestionar',
+    'Registrar una revisión nueva de los requisitos legales con su documento y vigencia',
+    ModuleRoles.qhse,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -741,6 +752,8 @@ export const Permission = {
   INVESTIGACIONES_VER: 'qhse.investigaciones.ver',
   INVESTIGACIONES_GESTIONAR: 'qhse.investigaciones.gestionar',
   INVESTIGACIONES_APROBAR: 'qhse.investigaciones.aprobar',
+  LEGAL_VER: 'qhse.legal.ver',
+  LEGAL_GESTIONAR: 'qhse.legal.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

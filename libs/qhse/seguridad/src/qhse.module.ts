@@ -36,6 +36,9 @@ import { InvestigacionesAccionesController } from './investigaciones/investigaci
 import { InvestigacionesAccionesService } from './investigaciones/investigaciones-acciones.service';
 import { InvestigacionesCierreController } from './investigaciones/investigaciones-cierre.controller';
 import { InvestigacionesCierreService } from './investigaciones/investigaciones-cierre.service';
+import { RequisitosLegalesConsultaService } from './legal/requisitos-legales-consulta.service';
+import { RequisitosLegalesController } from './legal/requisitos-legales.controller';
+import { RequisitosLegalesService } from './legal/requisitos-legales.service';
 import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
@@ -60,6 +63,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     InvestigacionesCausasController,
     InvestigacionesAccionesController,
     InvestigacionesCierreController,
+    RequisitosLegalesController,
   ],
   providers: [
     PrismaService,
@@ -88,6 +92,8 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     InvestigacionesCausasService,
     InvestigacionesAccionesService,
     InvestigacionesCierreService,
+    RequisitosLegalesService,
+    RequisitosLegalesConsultaService,
   ],
   exports: [
     EpiService,

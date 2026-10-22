@@ -1680,3 +1680,55 @@ enum ConclusionInvestigacion {
   @@map("conclusion_investigacion")
   @@schema("qhse")
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Requisitos legales (DocumentoLegalQhse de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoRequisitoLegal {
+  vigente
+  reemplazado
+
+  @@map("estado_requisito_legal")
+  @@schema("qhse")
+}
+
+/// Tipos de matriz de requisitos legales (catálogo): Gestión Ambiental y Seguridad y Salud en el Trabajo.
+model RequisitoLegalTipo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  revisiones RequisitoLegal[]
+
+  @@map("requisito_legal_tipo")
+  @@schema("qhse")
+}
+
+/// Revisión de la matriz de requisitos legales. Una vigente por tipo; las anteriores quedan como historia.
+model RequisitoLegal {
+  id              String               @id @db.Uuid
+  tipoId          String               @map("tipo_id") @db.Uuid
+  tipo            RequisitoLegalTipo   @relation(fields: [tipoId], references: [id])
+  revision        String
+  fechaAprobacion DateTime             @map("fecha_aprobacion") @db.Date
+  vigenteHasta    DateTime?            @map("vigente_hasta") @db.Date
+  archivoId       String               @unique @map("archivo_id") @db.Uuid
+  estado          EstadoRequisitoLegal @default(vigente)
+  reemplazadoAt   DateTime?            @map("reemplazado_at") @db.Timestamptz(6)
+  reemplazadoPor  String?              @map("reemplazado_por") @db.Uuid
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String               @map("created_by") @db.Uuid
+  updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?              @map("updated_by") @db.Uuid
+
+  @@unique([tipoId, revision])
+  @@map("requisito_legal")
+  @@schema("qhse")
+}

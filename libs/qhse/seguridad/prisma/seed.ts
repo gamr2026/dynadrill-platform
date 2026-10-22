@@ -8,6 +8,7 @@ import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
 import { sembrarInvestigacion } from '../src/catalog/sembrar-investigacion';
+import { sembrarRequisitosLegales } from '../src/catalog/sembrar-requisitos-legales';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
 import { PrismaClient } from '../src/generated/client';
@@ -36,6 +37,8 @@ async function main() {
     console.log(
       `qhse: investigación con ${inv.resultados} resultados de incidente y ${inv.categorias} categorías de Ishikawa nuevos`,
     );
+    const legal = await sembrarRequisitosLegales(prisma);
+    console.log(`qhse: requisitos legales con ${legal.tipos} tipos nuevos`);
   } finally {
     await prisma.$disconnect();
   }

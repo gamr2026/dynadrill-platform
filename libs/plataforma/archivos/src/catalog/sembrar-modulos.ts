@@ -125,6 +125,15 @@ export const MODULOS_ARCHIVO = [
     tiposMime: DOCUMENTOS,
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'qhse_requisito_legal',
+    nombre:
+      'Matriz de requisitos legales de QHSE (Gestión Ambiental o Seguridad y Salud en el Trabajo)',
+    permisoSubir: 'qhse.legal.gestionar',
+    permisoVer: 'qhse.legal.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */
