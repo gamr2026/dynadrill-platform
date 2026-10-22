@@ -85,15 +85,59 @@ export class InvestigacionesConsultaService {
           orderBy: { createdAt: 'asc' },
           include: { actor: { select: { id: true, nombre: true } } },
         },
+        trabajador: {
+          include: {
+            usuario: {
+              select: { nombre: true, perfil: { select: { cedula: true, cargo: true } } },
+            },
+          },
+        },
+        detalle: true,
+        equipo: {
+          orderBy: { createdAt: 'asc' },
+          include: { usuario: { select: { nombre: true } } },
+        },
+        testigos: { orderBy: { orden: 'asc' } },
+        entorno: { orderBy: { orden: 'asc' } },
       },
     });
     if (!i) throw new NotFoundException('La investigación no existe');
+    const t = i.trabajador;
     return {
       ...this.resumen(i),
       descripcionEvento: i.descripcionEvento,
       origenEmergenciaId: i.origenEmergenciaId,
       creadoPor: i.creador.nombre,
       createdAt: i.createdAt,
+      evidenciasRecopiladas: i.evidenciasRecopiladas,
+      testimoniosResumen: i.testimoniosResumen,
+      // con cuenta del portal, el nombre, la cédula y el cargo salen de identidad (no se copian al guardar)
+      trabajador: t && {
+        ...t,
+        apellidosNombres: t.usuario?.nombre ?? t.apellidosNombres,
+        cedula: t.usuario?.perfil?.cedula ?? t.cedula,
+        cargo: t.usuario?.perfil?.cargo ?? t.cargo,
+        usuario: undefined,
+      },
+      incidente: i.detalle,
+      equipo: i.equipo.map((m) => ({
+        id: m.id,
+        usuarioId: m.usuarioId,
+        nombre: m.usuario?.nombre ?? m.nombreExterno,
+      })),
+      testigos: i.testigos.map((x) => ({
+        orden: x.orden,
+        nombresApellidos: x.nombresApellidos,
+        cedula: x.cedula,
+        version: x.version,
+      })),
+      entorno: i.entorno.map((x) => ({
+        orden: x.orden,
+        tipo: x.tipo,
+        fuente: x.fuente,
+        existeControl: x.existeControl,
+        contribuyoAlSuceso: x.contribuyoAlSuceso,
+      })),
       historial: i.historial.map((h) => ({
         id: h.id,
         estadoAnterior: h.estadoAnterior,

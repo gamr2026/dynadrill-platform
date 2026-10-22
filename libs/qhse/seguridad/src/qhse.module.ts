@@ -28,6 +28,8 @@ import { PtwController } from './ptw/ptw.controller';
 import { PtwService } from './ptw/ptw.service';
 import { InvestigacionesConsultaService } from './investigaciones/investigaciones-consulta.service';
 import { InvestigacionesController } from './investigaciones/investigaciones.controller';
+import { InvestigacionesFormatoController } from './investigaciones/investigaciones-formato.controller';
+import { InvestigacionesFormatoService } from './investigaciones/investigaciones-formato.service';
 import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
@@ -48,6 +50,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     StopController,
     InspeccionesController,
     InvestigacionesController,
+    InvestigacionesFormatoController,
   ],
   providers: [
     PrismaService,
@@ -72,6 +75,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     ArticulosEpiConsumer,
     InvestigacionesService,
     InvestigacionesConsultaService,
+    InvestigacionesFormatoService,
   ],
   exports: [
     EpiService,

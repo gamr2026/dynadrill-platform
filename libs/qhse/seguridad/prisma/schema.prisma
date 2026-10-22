@@ -1169,6 +1169,8 @@ model IdUsuario {
   investigacionesCreadas   Investigacion[]          @relation("investigacionCreador")
   investigacionesEditadas  Investigacion[]          @relation("investigacionEditor")
   investigacionHistorial   InvestigacionHistorial[] @relation("investigacionHistorialActor")
+  investigacionesTrabajador InvestigacionTrabajador[] @relation("investigacionTrabajadorUsuario")
+  investigacionesEquipo     InvestigacionEquipo[]     @relation("investigacionEquipoUsuario")
 
   @@map("usuario")
   @@schema("identidad")
@@ -1301,8 +1303,15 @@ model Investigacion {
   updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy          String?                @map("updated_by") @db.Uuid
   editor             IdUsuario?             @relation("investigacionEditor", fields: [updatedBy], references: [id])
+  evidenciasRecopiladas String? @map("evidencias_recopiladas")
+  testimoniosResumen    String? @map("testimonios_resumen")
 
-  historial InvestigacionHistorial[]
+  historial  InvestigacionHistorial[]
+  trabajador InvestigacionTrabajador?
+  detalle    InvestigacionDetalle?
+  equipo     InvestigacionEquipo[]
+  testigos   InvestigacionTestigo[]
+  entorno    InvestigacionEntornoFactor[]
 
   @@index([estado])
   @@index([fechaIncidente])
@@ -1325,5 +1334,149 @@ model InvestigacionHistorial {
 
   @@index([investigacionId, createdAt])
   @@map("investigacion_historial")
+  @@schema("qhse")
+}
+
+enum JornadaSuceso {
+  ordinaria
+  extra
+  suplementaria
+
+  @@map("jornada_suceso")
+  @@schema("qhse")
+}
+
+enum ZonaIncidente {
+  rural
+  urbana
+
+  @@map("zona_incidente")
+  @@schema("qhse")
+}
+
+enum SexoPersona {
+  masculino
+  femenino
+
+  @@map("sexo_persona")
+  @@schema("qhse")
+}
+
+/// «Datos del trabajador involucrado»: cuenta del portal (datos por JOIN) o persona externa. Solo si el resultado involucra a un lesionado.
+model InvestigacionTrabajador {
+  investigacionId        String        @id @map("investigacion_id") @db.Uuid
+  investigacion          Investigacion @relation(fields: [investigacionId], references: [id])
+  usuarioId              String?       @map("usuario_id") @db.Uuid
+  usuario                IdUsuario?    @relation("investigacionTrabajadorUsuario", fields: [usuarioId], references: [id])
+  apellidosNombres       String?       @map("apellidos_nombres")
+  cedula                 String?
+  cargo                  String?
+  direccion              String?
+  telefono               String?
+  fechaNacimiento        DateTime?     @map("fecha_nacimiento") @db.Date
+  sexo                   SexoPersona?
+  fechaIngreso           DateTime?     @map("fecha_ingreso") @db.Date
+  tipoVinculacion        String?       @map("tipo_vinculacion")
+  oficioDesempenaba      String?       @map("oficio_desempenaba")
+  jornadaHabitual        String?       @map("jornada_habitual")
+  tiempoExperienciaMeses Int?          @map("tiempo_experiencia_meses")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy              String        @map("created_by") @db.Uuid
+  updatedAt              DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy              String?       @map("updated_by") @db.Uuid
+
+  @@map("investigacion_trabajador")
+  @@schema("qhse")
+}
+
+/// «Información sobre el incidente o accidente» del formato.
+model InvestigacionDetalle {
+  investigacionId           String         @id @map("investigacion_id") @db.Uuid
+  investigacion             Investigacion  @relation(fields: [investigacionId], references: [id])
+  jornadaSuceso             JornadaSuceso? @map("jornada_suceso")
+  empresaDondeOcurrio       String?        @map("empresa_donde_ocurrio")
+  direccionOcurrencia       String?        @map("direccion_ocurrencia")
+  zona                      ZonaIncidente?
+  oficioEraPropioDelCargo   Boolean?       @map("oficio_era_propio_del_cargo")
+  horaInicioJornada         DateTime?      @map("hora_inicio_jornada") @db.Time(0)
+  tiempoLaboradoPrevioHoras Decimal?       @map("tiempo_laborado_previo_horas") @db.Decimal(5, 2)
+  seInformoOportunamente    Boolean?       @map("se_informo_oportunamente")
+  tiempoAtencionMedica      String?        @map("tiempo_atencion_medica")
+  centroMedico              String?        @map("centro_medico")
+  causoMuerte               Boolean        @default(false) @map("causo_muerte")
+  fechaMuerte               DateTime?      @map("fecha_muerte") @db.Date
+  parteCuerpoAfectada       String?        @map("parte_cuerpo_afectada")
+  tipoLesionSufrida         String?        @map("tipo_lesion_sufrida")
+  factorQueOrigino          String?        @map("factor_que_origino")
+  totalDiasIncapacidad      Int?           @map("total_dias_incapacidad")
+  continuaIncapacitado      Boolean?       @map("continua_incapacitado")
+  sucesosSimilaresPrevios   Boolean?       @map("sucesos_similares_previos")
+  sucesosSimilaresDetalle   String?        @map("sucesos_similares_detalle")
+  danosMateriales           String?        @map("danos_materiales")
+  totalPerdidasEconomicas   Decimal?       @map("total_perdidas_economicas") @db.Decimal(14, 2)
+  danosMedioAmbiente        String?        @map("danos_medio_ambiente")
+  createdAt                 DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                 String         @map("created_by") @db.Uuid
+  updatedAt                 DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                 String?        @map("updated_by") @db.Uuid
+
+  @@map("investigacion_detalle")
+  @@schema("qhse")
+}
+
+/// Equipo investigador: cuentas del portal o personas externas.
+model InvestigacionEquipo {
+  id              String        @id @db.Uuid
+  investigacionId String        @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion @relation(fields: [investigacionId], references: [id])
+  usuarioId       String?       @map("usuario_id") @db.Uuid
+  usuario         IdUsuario?    @relation("investigacionEquipoUsuario", fields: [usuarioId], references: [id])
+  nombreExterno   String?       @map("nombre_externo")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String        @map("created_by") @db.Uuid
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?       @map("updated_by") @db.Uuid
+
+  @@index([investigacionId])
+  @@map("investigacion_equipo")
+  @@schema("qhse")
+}
+
+/// Testigos del incidente (máximo 3).
+model InvestigacionTestigo {
+  id               String        @id @db.Uuid
+  investigacionId  String        @map("investigacion_id") @db.Uuid
+  investigacion    Investigacion @relation(fields: [investigacionId], references: [id])
+  orden            Int
+  nombresApellidos String        @map("nombres_apellidos")
+  cedula           String?
+  version          String
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String        @map("created_by") @db.Uuid
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy        String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_testigo")
+  @@schema("qhse")
+}
+
+/// Factores de riesgo presentes en la estación de trabajo.
+model InvestigacionEntornoFactor {
+  id                 String        @id @db.Uuid
+  investigacionId    String        @map("investigacion_id") @db.Uuid
+  investigacion      Investigacion @relation(fields: [investigacionId], references: [id])
+  orden              Int
+  tipo               String
+  fuente             String
+  existeControl      Boolean       @map("existe_control")
+  contribuyoAlSuceso Boolean       @map("contribuyo_al_suceso")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String        @map("created_by") @db.Uuid
+  updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_entorno_factor")
   @@schema("qhse")
 }
