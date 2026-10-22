@@ -1164,6 +1164,12 @@ model IdUsuario {
   inspeccionesHechas  Inspeccion[]    @relation("inspeccionInspector")
   inspeccionesCreadas Inspeccion[]    @relation("inspeccionCreador")
 
+  // investigación de incidentes (S2)
+  investigacionesLideradas Investigacion[]          @relation("investigacionLider")
+  investigacionesCreadas   Investigacion[]          @relation("investigacionCreador")
+  investigacionesEditadas  Investigacion[]          @relation("investigacionEditor")
+  investigacionHistorial   InvestigacionHistorial[] @relation("investigacionHistorialActor")
+
   @@map("usuario")
   @@schema("identidad")
 }
@@ -1235,4 +1241,89 @@ model CatCliente {
 
   @@map("cliente")
   @@schema("catalogos")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Investigación de incidentes (DYN-SGI-RE-034, HSE-TRIAGE-002), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoInvestigacion {
+  abierta
+  en_investigacion
+  en_revision
+  cerrada
+
+  @@map("estado_investigacion")
+  @@schema("qhse")
+}
+
+/// Resultado del incidente con los plazos de HSE-TRIAGE-002 (catálogo).
+model InvestigacionResultado {
+  id                       String   @id @db.Uuid
+  codigo                   String   @unique
+  nombre                   String
+  orden                    Int      @unique
+  inicioHoras              Int      @map("inicio_horas")
+  preliminarHoras          Int?     @map("preliminar_horas")
+  finalDias                Int      @map("final_dias")
+  plazoSupuesto            Boolean  @default(false) @map("plazo_supuesto")
+  involucraLesionado       Boolean  @map("involucra_lesionado")
+  sugiereNotificacionLegal Boolean  @map("sugiere_notificacion_legal")
+  activo                   Boolean  @default(true)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?  @map("created_by") @db.Uuid
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?  @map("updated_by") @db.Uuid
+
+  investigaciones Investigacion[]
+
+  @@map("investigacion_resultado")
+  @@schema("qhse")
+}
+
+/// Investigación de incidente o accidente. Los plazos se calculan con el catálogo de resultados.
+model Investigacion {
+  id                 String                 @id @db.Uuid
+  numero             Int                    @unique @default(autoincrement())
+  resultadoId        String                 @map("resultado_id") @db.Uuid
+  resultado          InvestigacionResultado @relation(fields: [resultadoId], references: [id])
+  descripcionEvento  String                 @map("descripcion_evento")
+  fechaIncidente     DateTime               @map("fecha_incidente") @db.Timestamptz(6)
+  ubicacion          String
+  origenEmergenciaId String?                @unique @map("origen_emergencia_id") @db.Uuid
+  estado             EstadoInvestigacion    @default(abierta)
+  liderId            String?                @map("lider_id") @db.Uuid
+  lider              IdUsuario?             @relation("investigacionLider", fields: [liderId], references: [id])
+  escenaAseguradaAt  DateTime?              @map("escena_asegurada_at") @db.Timestamptz(6)
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String                 @map("created_by") @db.Uuid
+  creador            IdUsuario              @relation("investigacionCreador", fields: [createdBy], references: [id])
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?                @map("updated_by") @db.Uuid
+  editor             IdUsuario?             @relation("investigacionEditor", fields: [updatedBy], references: [id])
+
+  historial InvestigacionHistorial[]
+
+  @@index([estado])
+  @@index([fechaIncidente])
+  @@index([resultadoId])
+  @@map("investigacion")
+  @@schema("qhse")
+}
+
+/// Rastro de estados de la investigación: solo se agrega.
+model InvestigacionHistorial {
+  id              String               @id @db.Uuid
+  investigacionId String               @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion        @relation(fields: [investigacionId], references: [id])
+  estadoAnterior  EstadoInvestigacion? @map("estado_anterior")
+  estadoNuevo     EstadoInvestigacion  @map("estado_nuevo")
+  observacion     String?
+  actorId         String               @map("actor_id") @db.Uuid
+  actor           IdUsuario            @relation("investigacionHistorialActor", fields: [actorId], references: [id])
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([investigacionId, createdAt])
+  @@map("investigacion_historial")
+  @@schema("qhse")
 }

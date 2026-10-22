@@ -595,6 +595,22 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     RoleCode.TECNICO_HSE,
     RoleCode.GERENTE_HSE,
   ]),
+  // ---- qhse: investigación de incidentes (DYN-SGI-RE-034). Aprobar el informe y cerrar es solo del Gerente HSE; el Supervisor no entra.
+  nuevo(
+    'qhse.investigaciones.ver',
+    'Ver las investigaciones de incidentes, sus plazos y acciones',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.investigaciones.gestionar',
+    'Abrir y conducir una investigación de incidente: escena, causas, acciones y notificación legal',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.investigaciones.aprobar',
+    'Aprobar el informe de una investigación de incidente y cerrarla',
+    ModuleRoles.ipercApprove,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -722,6 +738,9 @@ export const Permission = {
   QHSE_INSPECCIONES_VER: 'qhse.inspecciones.ver',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
+  INVESTIGACIONES_VER: 'qhse.investigaciones.ver',
+  INVESTIGACIONES_GESTIONAR: 'qhse.investigaciones.gestionar',
+  INVESTIGACIONES_APROBAR: 'qhse.investigaciones.aprobar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

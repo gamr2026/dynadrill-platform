@@ -7,6 +7,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
+import { sembrarInvestigacion } from '../src/catalog/sembrar-investigacion';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
 import { PrismaClient } from '../src/generated/client';
@@ -31,6 +32,8 @@ async function main() {
     console.log(
       `qhse: SWA con ${swa.tipos} tipos de peligro, ${swa.roles} roles de la cadena y ${swa.criterios} criterios de reinicio nuevos`,
     );
+    const inv = await sembrarInvestigacion(prisma);
+    console.log(`qhse: investigación con ${inv.resultados} resultados de incidente nuevos`);
   } finally {
     await prisma.$disconnect();
   }

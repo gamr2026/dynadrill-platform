@@ -26,6 +26,9 @@ import { StopService } from './stop/stop.service';
 import { PtwConsultaService } from './ptw/ptw-consulta.service';
 import { PtwController } from './ptw/ptw.controller';
 import { PtwService } from './ptw/ptw.service';
+import { InvestigacionesConsultaService } from './investigaciones/investigaciones-consulta.service';
+import { InvestigacionesController } from './investigaciones/investigaciones.controller';
+import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
  * QHSE (contenedor qhse). Dueño exclusivo del schema `qhse`. Requiere en la app `AppConfigModule` (DATABASE_URL),
@@ -44,6 +47,7 @@ import { PtwService } from './ptw/ptw.service';
     IpercController,
     StopController,
     InspeccionesController,
+    InvestigacionesController,
   ],
   providers: [
     PrismaService,
@@ -66,6 +70,8 @@ import { PtwService } from './ptw/ptw.service';
     InspeccionesConsultaService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
+    InvestigacionesService,
+    InvestigacionesConsultaService,
   ],
   exports: [
     EpiService,
