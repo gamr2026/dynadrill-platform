@@ -84,6 +84,14 @@ export interface EventoAuditadoResponse {
   datos: Record<string, string>;
 }
 
+/** Lo que se puede elegir al filtrar: lo que ya existe en el registro y las claves de negocio de la lista blanca. */
+export interface CatalogosAuditoriaResponse {
+  origenes: string[];
+  tiposEvento: string[];
+  sujetoTipos: string[];
+  claves: { codigo: string; descripcion: string }[];
+}
+
 export interface PaginaDeEventosResponse {
   total: number;
   pagina: number;

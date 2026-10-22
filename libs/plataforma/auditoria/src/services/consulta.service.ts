@@ -2,12 +2,13 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { CLAVE_DE_SUJETO } from '../catalog/claves-dato';
 import type {
   BuscarEventosQueryDto,
+  CatalogosAuditoriaResponse,
   ConsultaBaseDto,
   EventoAuditadoResponse,
   LineaDeTiempoQueryDto,
   PaginaDeEventosResponse,
 } from '../dto/consulta.dto';
-import type { Prisma } from '../generated/client';
+import { OrigenEvento, type Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const LIMITE_POR_DEFECTO = 50;
@@ -68,6 +69,24 @@ export class ConsultaService {
       ...this.rango(q),
     ];
     return this.pagina(filtros, q, 'desc');
+  }
+
+  /** Para armar los filtros de la pantalla: los tipos y entidades que ya aparecieron y las claves buscables. */
+  async catalogos(): Promise<CatalogosAuditoriaResponse> {
+    const [tipos, sujetos, claves] = await Promise.all([
+      this.prisma.tipoEvento.findMany({ select: { codigo: true }, orderBy: { codigo: 'asc' } }),
+      this.prisma.sujetoTipo.findMany({ select: { codigo: true }, orderBy: { codigo: 'asc' } }),
+      this.prisma.claveDato.findMany({
+        select: { codigo: true, descripcion: true },
+        orderBy: { codigo: 'asc' },
+      }),
+    ]);
+    return {
+      origenes: Object.keys(OrigenEvento),
+      tiposEvento: tipos.map((t) => t.codigo),
+      sujetoTipos: sujetos.map((t) => t.codigo),
+      claves,
+    };
   }
 
   private rango(q: ConsultaBaseDto): Prisma.EventoAuditadoWhereInput[] {

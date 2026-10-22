@@ -9,6 +9,13 @@ import { ConsultaService } from '../services/consulta.service';
 export class AuditoriaController {
   constructor(private readonly consulta: ConsultaService) {}
 
+  /** Lo que se puede elegir al filtrar la búsqueda. */
+  @RequirePermission(Permission.AUDITORIA_VER)
+  @Get('catalogos')
+  catalogos() {
+    return this.consulta.catalogos();
+  }
+
   /** Qué pasó con una entidad (pedido, ticket, orden...), en orden cronológico. */
   @RequirePermission(Permission.AUDITORIA_VER)
   @Get('linea-de-tiempo')

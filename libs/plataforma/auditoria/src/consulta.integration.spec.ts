@@ -182,6 +182,25 @@ run('auditoria: consulta (base de datos real)', () => {
     expect(r.body.items.map((i: { tipo: string }) => i.tipo)).toEqual([tipo('ticket_cerrado')]);
   });
 
+  it('ofrece los catálogos para filtrar: orígenes, tipos de evento, entidades y claves de negocio', async () => {
+    const r = await consulta('catalogos').expect(200);
+    expect(r.body.origenes).toEqual(
+      expect.arrayContaining(['comercial', 'operaciones', 'qhse', 'plataforma']),
+    );
+    expect(r.body.tiposEvento).toEqual(
+      expect.arrayContaining([tipo('ticket_creado'), tipo('pedido_abierto')]),
+    );
+    expect(r.body.sujetoTipos).toEqual(expect.arrayContaining(sujetoTipos));
+    expect(r.body.claves).toEqual(
+      expect.arrayContaining([{ codigo: 'pedido_codigo', descripcion: 'Código del pedido' }]),
+    );
+    expect([...r.body.tiposEvento].sort()).toEqual(r.body.tiposEvento);
+    await http()
+      .get('/api/auditoria/catalogos')
+      .set('Authorization', `Bearer ${sinPermiso}`)
+      .expect(403);
+  });
+
   it('rechaza filtros inválidos con un mensaje claro', async () => {
     await consulta('linea-de-tiempo?sujetoTipo=pedido').expect(400);
     await consulta('linea-de-tiempo?sujetoTipo=pedido&sujetoId=no-es-uuid').expect(400);
