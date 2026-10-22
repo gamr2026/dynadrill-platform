@@ -22,6 +22,8 @@ import { DesechosDocumentosService } from './desechos/desechos-documentos.servic
 import { DesechosEventosService } from './desechos/desechos-eventos.service';
 import { DesechosManifiestoService } from './desechos/desechos-manifiesto.service';
 import { DesechosService } from './desechos/desechos.service';
+import { DerramesBandasService } from './derrames/derrames-bandas.service';
+import { DerramesDesechoService } from './derrames/derrames-desecho.service';
 import { DerramesMaeService } from './derrames/derrames-mae.service';
 import { DerramesContencionService } from './derrames/derrames-contencion.service';
 import { DerramesConsultaService } from './derrames/derrames-consulta.service';
@@ -90,6 +92,8 @@ import { PtwService } from './ptw/ptw.service';
     DerramesEventosService,
     DerramesContencionService,
     DerramesMaeService,
+    DerramesDesechoService,
+    DerramesBandasService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],

@@ -473,6 +473,215 @@ run('QHSE: Derrames (base de datos real)', () => {
         expect((await mae(uuidv7())).status).toBe(404);
       });
     });
+
+    describe('desecho generado, configuración de bandas y tablero', () => {
+      const tecnicoDesechos = () =>
+        t.token(
+          'tecnico_hse',
+          TECNICO.nombre,
+          [P.QHSE_REPORTAR, P.DESECHOS_VER, P.DERRAMES_VER],
+          TECNICO.id,
+        );
+      const gerente = () =>
+        t.token(
+          'gerente_hse',
+          'Gina Gerente HSE',
+          [P.QHSE_REPORTAR, P.DERRAMES_VER, P.DERRAMES_CONFIGURAR],
+          TECNICO.id,
+        );
+      const catalogoDesechos = async () =>
+        (await t.http().get('/api/qhse/desechos/catalogos').set(operador())).body as {
+          caracteristicas: Array<{ id: string; codigo: string }>;
+          contenedores: Array<{ id: string; codigo: string }>;
+        };
+      const generar = (id: string, cuerpo: Record<string, unknown>, quien = gestor()) =>
+        t.http().post(`/api/qhse/derrames/${id}/generar-desecho`).set(quien).send(cuerpo);
+      const desechosCreados: string[] = [];
+
+      afterAll(async () => {
+        await sql('DELETE FROM qhse.desecho WHERE id = ANY($1::uuid[])', [desechosCreados]);
+        await sql(
+          "DELETE FROM msg_qhse.outbox WHERE datos->'data'->>'desechoId' = ANY($1::text[])",
+          [desechosCreados],
+        );
+      });
+
+      it('un derrame en suelo genera un desecho peligroso: HSE elige la característica, el contenedor y los galones', async () => {
+        const dc = await catalogoDesechos();
+        const cuerpo = {
+          contenedorId: dc.contenedores.find((c) => c.codigo === 'negro')?.id,
+          caracteristicaIds: [dc.caracteristicas.find((c) => c.codigo === 'inflamable')?.id],
+          items: [
+            { descripcion: 'Suelo con aceite', codigo: 'NE-09', cantidadGalones: 55, bultos: 3 },
+          ],
+        };
+        const id = (
+          await activar({ ubicacionId: ubicacion('suelo'), ubicacionFisica: 'Junto a la bomba 2' })
+        ).body.id as string;
+        expect((await detalle(id)).puedeGenerarDesecho).toBe(true);
+        expect((await generar(id, cuerpo, tecnico())).status).toBe(403);
+        expect((await generar(id, cuerpo, operador())).status).toBe(403);
+        // sin característica o sin líneas, o con un contenedor que no existe, no se genera
+        expect((await generar(id, { ...cuerpo, caracteristicaIds: [] })).status).toBe(400);
+        expect((await generar(id, { ...cuerpo, items: [] })).status).toBe(400);
+        expect((await generar(id, { ...cuerpo, contenedorId: uuidv7() })).status).toBe(400);
+
+        const r = await generar(id, { ...cuerpo, nota: 'Retirar con pala' });
+        expect(r.status).toBe(201);
+        expect(r.body.desecho).toMatchObject({ codigo: expect.stringMatching(/^DES-\d{6}$/) });
+        expect(r.body.puedeGenerarDesecho).toBe(false);
+        desechosCreados.push(r.body.desecho.id);
+
+        const des = (
+          await t.http().get(`/api/qhse/desechos/${r.body.desecho.id}`).set(tecnicoDesechos())
+        ).body;
+        expect(des).toMatchObject({
+          clasificacion: 'peligroso',
+          estado: { codigo: 'almacenado' },
+          ubicacion: 'Junto a la bomba 2',
+          derrame: { id, codigo: r.body.codigo },
+          totalGalones: 55,
+        });
+        expect(des.cretib).toEqual(['Inflamable']);
+        expect(des.descripcion).toMatch(
+          /^Suelo contaminado por el derrame DER-\d{6}: Fuga de aceite hidráulico.*Retirar con pala$/,
+        );
+        const ev = await eventos('qhse.derrame.desecho_generado', id);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].datos.data).toMatchObject({
+          desechoId: r.body.desecho.id,
+          desechoCodigo: r.body.desecho.codigo,
+        });
+        // uno por derrame
+        expect((await generar(id, cuerpo)).status).toBe(409);
+      });
+
+      it('solo el derrame de una ubicación que genera desecho (suelo) lo origina', async () => {
+        const dc = await catalogoDesechos();
+        const cuerpo = {
+          contenedorId: dc.contenedores[0].id,
+          caracteristicaIds: [dc.caracteristicas[0].id],
+          items: [{ descripcion: 'x', codigo: 'X-1', cantidadGalones: 1 }],
+        };
+        const id = (await activar({ ubicacionId: ubicacion('geomembrana') })).body.id as string;
+        const d = await detalle(id);
+        expect(d.puedeGenerarDesecho).toBe(false);
+        const r = await generar(id, cuerpo);
+        expect(r.status).toBe(409);
+        expect(r.body.detail).toMatch(/no genera desecho/);
+        expect((await generar(uuidv7(), cuerpo)).status).toBe(404);
+        expect(
+          await sql('SELECT 1 FROM qhse.desecho WHERE derrame_id = $1', [id]).then(
+            (x) => x.rowCount,
+          ),
+        ).toBe(0);
+      });
+
+      it('el Gerente HSE configura las bandas; la base impide solapes y cada cambio se publica con el antes y el después', async () => {
+        const lista = (await t.http().get('/api/qhse/derrames/bandas').set(tecnico()))
+          .body as Array<{
+          codigo: string;
+          porConfirmar: boolean;
+        }>;
+        expect(lista.map((b) => b.codigo)).toEqual(
+          expect.arrayContaining(['menor', 'moderado', 'mayor']),
+        );
+        expect(lista.find((b) => b.codigo === 'mayor')?.porConfirmar).toBe(true);
+        expect((await t.http().get('/api/qhse/derrames/bandas').set(operador())).status).toBe(403);
+
+        // se prueba con una banda propia e inactiva: no se toca la configuración real
+        const id = uuidv7();
+        await sql(
+          `INSERT INTO qhse.derrame_banda_volumen (id, codigo, nombre, orden, desde_barriles, hasta_barriles, activo)
+           VALUES ($1, $2, 'Prueba', $3, 100, 200, false)`,
+          [id, `tmp-cfg-${n}`, 950_000 + Math.floor(Math.random() * 40_000)],
+        );
+        try {
+          const put = (cuerpo: Record<string, unknown>, quien = gerente()) =>
+            t.http().put(`/api/qhse/derrames/bandas/${id}`).set(quien).send(cuerpo);
+          expect((await put({ nombre: 'X' }, tecnico())).status).toBe(403);
+          expect((await put({ desdeBarriles: 10, hastaBarriles: 10 })).status).toBe(400);
+          expect((await put({ desdeBarriles: -1 })).status).toBe(400);
+          expect((await put({ nombre: '   ' })).status).toBe(400);
+          expect((await put({ exigeNotificacionMae: 'si' })).status).toBe(400);
+
+          const ok = await put({
+            nombre: 'Prueba ajustada',
+            desdeBarriles: 150,
+            hastaBarriles: null,
+            exigeNotificacionMae: true,
+            porConfirmar: false,
+          });
+          expect(ok.status).toBe(200);
+          expect(ok.body).toMatchObject({
+            nombre: 'Prueba ajustada',
+            desdeBarriles: 150,
+            hastaBarriles: null,
+            exigeNotificacionMae: true,
+            porConfirmar: false,
+            activo: false,
+          });
+          const ev = (
+            await sql(
+              "SELECT datos FROM msg_qhse.outbox WHERE tipo = 'qhse.derrame.banda_configurada' AND datos->'data'->>'bandaId' = $1",
+              [id],
+            )
+          ).rows as Array<{
+            datos: {
+              data: { antes: { desdeBarriles: number }; despues: { desdeBarriles: number } };
+            };
+          }>;
+          expect(ev).toHaveLength(1);
+          expect(ev[0].datos.data.antes.desdeBarriles).toBe(100);
+          expect(ev[0].datos.data.despues.desdeBarriles).toBe(150);
+
+          // activarla solapa con «mayor» (5 o más): la base lo impide y el servicio lo dice
+          const solapa = await put({ activo: true });
+          expect(solapa.status).toBe(409);
+          expect(solapa.body.detail).toMatch(/se solapa con otra banda activa/);
+          expect((await put({ activo: true, desdeBarriles: 0, hastaBarriles: 0.5 })).status).toBe(
+            409,
+          );
+          expect(
+            (await t.http().put(`/api/qhse/derrames/bandas/${uuidv7()}`).set(gerente()).send({}))
+              .status,
+          ).toBe(404);
+        } finally {
+          await sql(
+            "DELETE FROM msg_qhse.outbox WHERE tipo = 'qhse.derrame.banda_configurada' AND datos->'data'->>'bandaId' = $1",
+            [id],
+          );
+          await sql('DELETE FROM qhse.derrame_banda_volumen WHERE id = $1', [id]);
+        }
+      });
+
+      it('el tablero suma el volumen real del año y cuenta la contención dentro del plazo y los MAE pendientes', async () => {
+        const resumen = async () =>
+          (await t.http().get('/api/qhse/derrames/resumen').set(tecnico())).body;
+        expect((await t.http().get('/api/qhse/derrames/resumen').set(operador())).status).toBe(403);
+        const antes = await resumen();
+        expect(antes).toMatchObject({ plazoContencionMinutos: 5 });
+
+        const id = (await activar({ ubicacionId: ubicacion('cuerpo_agua') })).body.id as string;
+        await confirmarTodo(id);
+        await contener(id);
+        await volumen(id, 2.5);
+        const despues = await resumen();
+        expect(despues.total).toBe(antes.total + 1);
+        expect(despues.contenidos).toBe(antes.contenidos + 1);
+        expect(despues.contenidosEnPlazo).toBe(antes.contenidosEnPlazo + 1);
+        expect(despues.porEstado.contenido).toBe(antes.porEstado.contenido + 1);
+        expect(despues.maePendientes).toBe(antes.maePendientes + 1);
+        expect(despues.volumenRealBarriles).toBeCloseTo(antes.volumenRealBarriles + 2.5, 3);
+        // otro año, vacío
+        const otro = (await t.http().get('/api/qhse/derrames/resumen?anio=2001').set(tecnico()))
+          .body;
+        expect(otro).toMatchObject({ anio: 2001, total: 0, volumenRealBarriles: 0 });
+        expect(
+          (await t.http().get('/api/qhse/derrames/resumen?anio=abc').set(tecnico())).status,
+        ).toBe(400);
+      });
+    });
   });
 
   describe('reglas de la base', () => {
@@ -720,6 +929,73 @@ run('QHSE: Derrames (base de datos real)', () => {
       await expect(
         t.prisma.derrame.update({ where: { id }, data: { cerradoPor: TECNICO.id } }),
       ).rejects.toThrow(/derrame_cierre_check|permission denied|denegado/i);
+    });
+
+    it('el desecho de un derrame: solo de una ubicación que genera desecho, peligroso, uno por derrame, y su origen no se cambia', async () => {
+      const contenedor = (
+        await sql("SELECT id FROM qhse.desecho_contenedor WHERE codigo = 'negro'")
+      ).rows[0].id;
+      const estado = (await sql("SELECT id FROM qhse.desecho_estado WHERE codigo = 'almacenado'"))
+        .rows[0].id;
+      const caracteristica = (await sql('SELECT id FROM qhse.desecho_caracteristica LIMIT 1'))
+        .rows[0].id;
+      const desechosDePrueba: string[] = [];
+      const crearDesecho = async (derrameId: string, clasificacion: string) => {
+        const id = uuidv7();
+        desechosDePrueba.push(id);
+        const c = await t.admin.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query(
+            `INSERT INTO qhse.desecho (id, clasificacion, contenedor_id, estado_id, descripcion, derrame_id, registrado_el, limite_almacenamiento_hasta, created_by)
+             VALUES ($1, $2::qhse.clasificacion_desecho, $3, $4, 'Prueba', $5, CURRENT_DATE, (CURRENT_DATE + INTERVAL '12 months')::date, $6)`,
+            [id, clasificacion, contenedor, estado, derrameId, OPERADOR.id],
+          );
+          if (clasificacion === 'peligroso')
+            await c.query(
+              'INSERT INTO qhse.desecho_caracteristica_asignada (desecho_id, caracteristica_id) VALUES ($1, $2)',
+              [id, caracteristica],
+            );
+          await c.query(
+            "INSERT INTO qhse.desecho_item (id, desecho_id, orden, descripcion, codigo, cantidad_galones, created_by) VALUES ($1, $2, 1, 'x', 'X-1', 1, $3)",
+            [uuidv7(), id, OPERADOR.id],
+          );
+          await c.query('COMMIT');
+        } catch (e) {
+          await c.query('ROLLBACK').catch(() => undefined);
+          throw e;
+        } finally {
+          c.release();
+        }
+        return id;
+      };
+      try {
+        const geo = (await activar({ ubicacionId: ubicacion('geomembrana') })).body.id as string;
+        await expect(crearDesecho(geo, 'peligroso')).rejects.toThrow(
+          /ubicación que genera desecho/,
+        );
+        const suelo = (await activar({ ubicacionId: ubicacion('suelo') })).body.id as string;
+        await expect(crearDesecho(suelo, 'no_peligroso')).rejects.toThrow(
+          /desecho que genera un derrame es peligroso/,
+        );
+        const d1 = await crearDesecho(suelo, 'peligroso');
+        await expect(crearDesecho(suelo, 'peligroso')).rejects.toThrow(/desecho_derrame_key/);
+        await expect(
+          t.prisma.desecho.update({ where: { id: d1 }, data: { derrameId: null } }),
+        ).rejects.toThrow(/permission denied|denegado/i);
+        await expect(
+          sql('UPDATE qhse.desecho SET derrame_id = $2 WHERE id = $1', [d1, geo]),
+        ).resolves.toBeDefined(); // el dueño de la base puede; la aplicación no (arriba)
+      } finally {
+        await sql('DELETE FROM qhse.desecho WHERE id = ANY($1::uuid[])', [desechosDePrueba]);
+      }
+      // los catálogos de derrames se configuran, no se borran
+      await expect(
+        t.prisma.derrameBandaVolumen.deleteMany({ where: { codigo: 'menor' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.derrameUbicacion.deleteMany({ where: { codigo: 'suelo' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
     });
 
     it('la descripción no puede estar vacía y el ticket, la ubicación y la banda deben existir (FK)', async () => {

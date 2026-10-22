@@ -150,6 +150,7 @@ export class DesechosConsultaService {
         },
         manifiesto: { include: { firmas: true } },
         documentos: { orderBy: { createdAt: 'asc' } },
+        derrame: { select: { id: true, numero: true } },
         _count: { select: { items: true } },
       },
     });
@@ -185,6 +186,10 @@ export class DesechosConsultaService {
         bultos: i.bultos,
       })),
       totalGalones: d.items.reduce((t, i) => t + Number(i.cantidadGalones), 0),
+      /** Derrame de origen (si el desecho lo generó un derrame en suelo). */
+      derrame: d.derrame
+        ? { id: d.derrame.id, codigo: `DER-${String(d.derrame.numero).padStart(6, '0')}` }
+        : null,
       manifiesto: m
         ? {
             numero: m.numero,

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { codigoDesecho } from '../desechos/desechos-consulta.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Consecutivo visible del derrame: DER-000001. */
@@ -191,6 +192,7 @@ export class DerramesConsultaService {
         historial: { orderBy: { createdAt: 'asc' } },
         checklist: true,
         volumenes: { orderBy: { createdAt: 'asc' } },
+        desecho: { select: { id: true, numero: true } },
       },
     });
     if (!d) throw new NotFoundException('El derrame no existe');
@@ -278,6 +280,9 @@ export class DerramesConsultaService {
       /** Se puede cerrar un derrame contenido que no tenga la notificación al MAE pendiente. */
       puedeCerrar:
         d.estado === 'contenido' && !(requiereNotificacionMae(reglas) && !d.notificadoMaeAt),
+      /** El suelo contaminado genera un desecho peligroso (uno por derrame); nulo mientras no se genere. */
+      desecho: d.desecho ? { id: d.desecho.id, codigo: codigoDesecho(d.desecho.numero) } : null,
+      puedeGenerarDesecho: d.ubicacion.generaDesecho && !d.desecho,
       cerradoAt: d.cerradoAt,
       cerradoPor: d.cerradoPor ? (nombres.get(d.cerradoPor) ?? null) : null,
       volumenes: d.volumenes.map((v) => ({
@@ -290,6 +295,57 @@ export class DerramesConsultaService {
         actor: nombres.get(h.actorId) ?? null,
         at: h.createdAt,
       })),
+    };
+  }
+
+  /**
+   * Tablero de derrames: por estado, notificaciones al MAE pendientes, contención dentro del plazo de 5 minutos y el volumen real derramado
+   * del año (KPI «volumen total derramado» de HSE-MASTER-001).
+   */
+  async tablero(
+    anio = Number(
+      new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' }).slice(0, 4),
+    ),
+  ) {
+    const desde = new Date(`${anio}-01-01T00:00:00-05:00`);
+    const hasta = new Date(`${anio + 1}-01-01T00:00:00-05:00`);
+    const [filas, bandas] = await Promise.all([
+      this.prisma.derrame.findMany({
+        where: { activadoAt: { gte: desde, lt: hasta } },
+        include: INCLUIR,
+      }),
+      this.bandasActivas(),
+    ]);
+    const porEstado = { activo: 0, contenido: 0, cerrado: 0 };
+    let maePendientes = 0;
+    let contenidos = 0;
+    let enPlazo = 0;
+    let volumen = 0;
+    let sinVolumen = 0;
+    for (const d of filas) {
+      porEstado[d.estado]++;
+      const reglas = this.reglas(d, bandas);
+      if (requiereNotificacionMae(reglas) && !d.notificadoMaeAt && d.estado !== 'cerrado')
+        maePendientes++;
+      if (d.contenidoAt) {
+        contenidos++;
+        if (plazoDeContencion(d.activadoAt, d.contenidoAt).enPlazo) enPlazo++;
+      }
+      if (d.volumenRealBarriles !== null) volumen += Number(d.volumenRealBarriles);
+      else if (d.estado !== 'activo') sinVolumen++;
+    }
+    return {
+      anio,
+      total: filas.length,
+      porEstado,
+      maePendientes,
+      contenidos,
+      contenidosEnPlazo: enPlazo,
+      plazoContencionMinutos: PLAZO_CONTENCION_MINUTOS,
+      /** Suma del volumen real confirmado (barriles) de los derrames del año. */
+      volumenRealBarriles: Math.round(volumen * 1000) / 1000,
+      /** Contenidos o cerrados cuyo volumen real aún no se confirma (no suman al KPI). */
+      sinVolumenConfirmado: sinVolumen,
     };
   }
 

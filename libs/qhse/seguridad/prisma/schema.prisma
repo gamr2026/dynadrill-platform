@@ -1319,6 +1319,8 @@ model Desecho {
   pozoId                    String?              @map("pozo_id") @db.Uuid
   pozo                      CatPozo?             @relation(fields: [pozoId], references: [id])
   ubicacion                 String?
+  derrameId                 String?              @unique @map("derrame_id") @db.Uuid
+  derrame                   Derrame?             @relation(fields: [derrameId], references: [id])
   registradoAt              DateTime             @default(now()) @map("registrado_at") @db.Timestamptz(6)
   registradoEl              DateTime             @map("registrado_el") @db.Date
   limiteAlmacenamientoHasta DateTime             @map("limite_almacenamiento_hasta") @db.Date
@@ -1595,6 +1597,7 @@ model Derrame {
   updatedBy       String?             @map("updated_by") @db.Uuid
 
   historial DerrameHistorial[]
+  desecho   Desecho?
   checklist DerrameChecklistConfirmacion[]
   volumenes DerrameVolumenHistorial[]
 

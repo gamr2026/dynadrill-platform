@@ -613,6 +613,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Contener, confirmar el volumen, notificar al MAE y cerrar un derrame; generar su desecho',
     ModuleRoles.qhse,
   ),
+  nuevo(
+    'qhse.derrames.configurar',
+    'Configurar las bandas de volumen de los derrames (umbrales de notificación al MAE y de escalada)',
+    [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -744,6 +749,7 @@ export const Permission = {
   DESECHOS_GESTIONAR: 'qhse.desechos.gestionar',
   DERRAMES_VER: 'qhse.derrames.ver',
   DERRAMES_GESTIONAR: 'qhse.derrames.gestionar',
+  DERRAMES_CONFIGURAR: 'qhse.derrames.configurar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];
