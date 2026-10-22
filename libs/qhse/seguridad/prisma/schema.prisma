@@ -1312,6 +1312,9 @@ model Investigacion {
   equipo     InvestigacionEquipo[]
   testigos   InvestigacionTestigo[]
   entorno    InvestigacionEntornoFactor[]
+  porques    InvestigacionPorque[]
+  ishikawa   InvestigacionIshikawaCausa[]
+  causas     InvestigacionCausa[]
 
   @@index([estado])
   @@index([fechaIncidente])
@@ -1478,5 +1481,90 @@ model InvestigacionEntornoFactor {
 
   @@unique([investigacionId, orden])
   @@map("investigacion_entorno_factor")
+  @@schema("qhse")
+}
+
+enum TipoCausaInvestigacion {
+  acto_inseguro
+  condicion_insegura
+  factor_personal
+  factor_trabajo
+  fuente_gestion
+
+  @@map("tipo_causa_investigacion")
+  @@schema("qhse")
+}
+
+/// Categorías (6 M) del diagrama de Ishikawa (catálogo).
+model IshikawaCategoria {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  causas InvestigacionIshikawaCausa[]
+
+  @@map("ishikawa_categoria")
+  @@schema("qhse")
+}
+
+/// Un nivel de los 5 Porqués.
+model InvestigacionPorque {
+  id              String        @id @db.Uuid
+  investigacionId String        @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion @relation(fields: [investigacionId], references: [id])
+  orden           Int
+  pregunta        String
+  respuesta       String
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String        @map("created_by") @db.Uuid
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_porque")
+  @@schema("qhse")
+}
+
+/// Una causa del diagrama de Ishikawa.
+model InvestigacionIshikawaCausa {
+  id              String            @id @db.Uuid
+  investigacionId String            @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion     @relation(fields: [investigacionId], references: [id])
+  categoriaId     String            @map("categoria_id") @db.Uuid
+  categoria       IshikawaCategoria @relation(fields: [categoriaId], references: [id])
+  orden           Int
+  descripcion     String
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String            @map("created_by") @db.Uuid
+  updatedAt       DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?           @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@index([categoriaId])
+  @@map("investigacion_ishikawa_causa")
+  @@schema("qhse")
+}
+
+/// Una causa del formato (acto inseguro, condición insegura, factor personal, factor de trabajo, fuente de gestión).
+model InvestigacionCausa {
+  id              String                  @id @db.Uuid
+  investigacionId String                  @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion           @relation(fields: [investigacionId], references: [id])
+  tipo            TipoCausaInvestigacion
+  orden           Int
+  descripcion     String
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String                  @map("created_by") @db.Uuid
+  updatedAt       DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?                 @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, tipo, orden])
+  @@map("investigacion_causa")
   @@schema("qhse")
 }

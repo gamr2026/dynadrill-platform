@@ -33,7 +33,9 @@ async function main() {
       `qhse: SWA con ${swa.tipos} tipos de peligro, ${swa.roles} roles de la cadena y ${swa.criterios} criterios de reinicio nuevos`,
     );
     const inv = await sembrarInvestigacion(prisma);
-    console.log(`qhse: investigación con ${inv.resultados} resultados de incidente nuevos`);
+    console.log(
+      `qhse: investigación con ${inv.resultados} resultados de incidente y ${inv.categorias} categorías de Ishikawa nuevos`,
+    );
   } finally {
     await prisma.$disconnect();
   }

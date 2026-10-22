@@ -23,6 +23,15 @@ type Fila = Prisma.InvestigacionGetPayload<{ include: typeof CON_DATOS }>;
 export class InvestigacionesConsultaService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Categorías (6 M) del diagrama de Ishikawa, para armar sus causas. */
+  categoriasIshikawa() {
+    return this.prisma.ishikawaCategoria.findMany({
+      where: { activo: true },
+      orderBy: { orden: 'asc' },
+      select: { id: true, codigo: true, nombre: true },
+    });
+  }
+
   /** Resultados posibles del incidente, para el formulario de apertura. */
   resultados() {
     return this.prisma.investigacionResultado.findMany({
@@ -99,6 +108,12 @@ export class InvestigacionesConsultaService {
         },
         testigos: { orderBy: { orden: 'asc' } },
         entorno: { orderBy: { orden: 'asc' } },
+        porques: { orderBy: { orden: 'asc' } },
+        ishikawa: {
+          orderBy: { orden: 'asc' },
+          include: { categoria: { select: { codigo: true, nombre: true } } },
+        },
+        causas: { orderBy: [{ tipo: 'asc' }, { orden: 'asc' }] },
       },
     });
     if (!i) throw new NotFoundException('La investigación no existe');
@@ -138,6 +153,18 @@ export class InvestigacionesConsultaService {
         existeControl: x.existeControl,
         contribuyoAlSuceso: x.contribuyoAlSuceso,
       })),
+      porques: i.porques.map((x) => ({
+        orden: x.orden,
+        pregunta: x.pregunta,
+        respuesta: x.respuesta,
+      })),
+      ishikawa: i.ishikawa.map((x) => ({
+        orden: x.orden,
+        categoriaId: x.categoriaId,
+        categoria: x.categoria.nombre,
+        descripcion: x.descripcion,
+      })),
+      causas: i.causas.map((x) => ({ tipo: x.tipo, orden: x.orden, descripcion: x.descripcion })),
       historial: i.historial.map((h) => ({
         id: h.id,
         estadoAnterior: h.estadoAnterior,

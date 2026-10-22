@@ -83,8 +83,20 @@ export const RESULTADOS_INVESTIGACION: readonly ResultadoSembrado[] = [
   },
 ];
 
+/** Categorías (6 M) del diagrama de Ishikawa. */
+export const CATEGORIAS_ISHIKAWA = [
+  ['mano_de_obra', 'Mano de obra'],
+  ['metodo', 'Método'],
+  ['maquina', 'Máquina'],
+  ['material', 'Material'],
+  ['medioambiente', 'Medioambiente'],
+  ['medicion', 'Medición'],
+] as const;
+
 /** Idempotente: solo agrega lo que falta y no toca lo que QHSE ya ajustó. */
-export async function sembrarInvestigacion(prisma: PrismaClient): Promise<{ resultados: number }> {
+export async function sembrarInvestigacion(
+  prisma: PrismaClient,
+): Promise<{ resultados: number; categorias: number }> {
   let resultados = 0;
   for (const [i, r] of RESULTADOS_INVESTIGACION.entries()) {
     if (await prisma.investigacionResultado.count({ where: { codigo: r.codigo } })) continue;
@@ -104,5 +116,11 @@ export async function sembrarInvestigacion(prisma: PrismaClient): Promise<{ resu
     });
     resultados++;
   }
-  return { resultados };
+  let categorias = 0;
+  for (const [i, [codigo, nombre]] of CATEGORIAS_ISHIKAWA.entries()) {
+    if (await prisma.ishikawaCategoria.count({ where: { codigo } })) continue;
+    await prisma.ishikawaCategoria.create({ data: { id: uuidv7(), codigo, nombre, orden: i + 1 } });
+    categorias++;
+  }
+  return { resultados, categorias };
 }

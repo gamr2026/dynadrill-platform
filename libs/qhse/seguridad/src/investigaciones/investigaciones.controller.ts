@@ -46,6 +46,12 @@ export class InvestigacionesController {
   }
 
   @RequirePermission(P.INVESTIGACIONES_VER)
+  @Get('categorias-ishikawa')
+  categoriasIshikawa() {
+    return this.consulta.categoriasIshikawa();
+  }
+
+  @RequirePermission(P.INVESTIGACIONES_VER)
   @Get()
   listar(@Query() q: ListarInvestigacionesDto) {
     return this.consulta.listar(q);
