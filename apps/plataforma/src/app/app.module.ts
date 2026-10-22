@@ -4,6 +4,7 @@ import { ArchivosModule } from '@dyn/archivos';
 import { AuditoriaModule } from '@dyn/auditoria';
 import { AvisosModule } from '@dyn/avisos';
 import { AppConfigModule } from '@dyn/config';
+import { FirmasModule } from '@dyn/firmas';
 import { CatalogosModule } from '@dyn/catalogos';
 import { CommonModule } from '@dyn/common';
 import { IdentidadModule } from '@dyn/identidad';
@@ -45,6 +46,7 @@ const envFiles = ['apps/plataforma/.env', '.env'];
       destinatarios: DestinatariosIdentidadAdapter,
     }),
     AuditoriaModule,
+    FirmasModule,
     ...(process.env['DIAGNOSTICO_ENABLED'] === 'true' ? [DiagnosticoModule] : []),
   ],
 })
