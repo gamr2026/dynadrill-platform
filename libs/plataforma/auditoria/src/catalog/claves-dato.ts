@@ -26,3 +26,21 @@ export const CLAVES_DATO: readonly ClaveDatoDef[] = [
     descripcion: 'Cuenta de usuario a la que se refiere el hecho',
   },
 ];
+
+/**
+ * Clave de negocio con la que otros hechos nombran a una entidad: la línea de tiempo del pedido incluye también los hechos de
+ * sus tickets porque estos llevan `pedido_id`. Los ids son uuid, así que una clave compartida (`ticket_id` de Pumping y de FCR)
+ * no mezcla entidades.
+ */
+export const CLAVE_DE_SUJETO: Readonly<Record<string, string>> = {
+  pedido: 'pedido_id',
+  pumping_ticket: 'ticket_id',
+  fcr_ticket: 'ticket_id',
+  flota_unidad: 'unidad_id',
+  mantenimiento_reporte: 'reporte_id',
+  inventario_articulo: 'articulo_id',
+  inspeccion: 'inspeccion_id',
+  ptw: 'ptw_id',
+  swa: 'swa_id',
+  identidad_usuario: 'usuario_id',
+};

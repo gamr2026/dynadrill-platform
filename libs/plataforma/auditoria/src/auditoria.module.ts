@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { AuditoriaController } from './controllers/auditoria.controller';
 import { AuditoriaConsumer } from './consumers/auditoria.consumer';
 import { PrismaService } from './prisma/prisma.service';
+import { ConsultaService } from './services/consulta.service';
 import { ProyectorService } from './services/proyector.service';
 
 /**
@@ -8,6 +10,7 @@ import { ProyectorService } from './services/proyector.service';
  * los contenedores. Dueño exclusivo del schema `auditoria`. Requiere en la app `AppConfigModule`, `CommonModule` y `MessagingModule`.
  */
 @Module({
-  providers: [PrismaService, ProyectorService, AuditoriaConsumer],
+  controllers: [AuditoriaController],
+  providers: [PrismaService, ProyectorService, ConsultaService, AuditoriaConsumer],
 })
 export class AuditoriaModule {}

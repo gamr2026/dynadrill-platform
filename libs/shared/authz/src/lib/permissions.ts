@@ -595,6 +595,12 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     RoleCode.TECNICO_HSE,
     RoleCode.GERENTE_HSE,
   ]),
+  // ---- auditoría (plataforma): consulta del registro central de hechos. Solo Superadmin por defecto; se asigna desde Roles.
+  nuevo(
+    'auditoria.eventos.ver',
+    'Consultar el registro de auditoría y la línea de tiempo de una entidad',
+    [RoleCode.SUPERADMIN],
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -722,6 +728,7 @@ export const Permission = {
   QHSE_INSPECCIONES_VER: 'qhse.inspecciones.ver',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
+  AUDITORIA_VER: 'auditoria.eventos.ver',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

@@ -3,38 +3,14 @@
  * auditoría solo los puede borrar dyn_migrator con la limpieza explícita de pruebas.
  *   RUN_INTEGRATION=1 npx nx test auditoria
  */
-import { Module } from '@nestjs/common';
-import { generateKeyPairSync } from 'node:crypto';
-import { Test, type TestingModule } from '@nestjs/testing';
 import { Pool } from 'pg';
-import {
-  AppConfigModule,
-  baseEnvSchema,
-  databaseEnvSchema,
-  defineEnv,
-  jwtVerifyEnvSchema,
-} from '@dyn/config';
-import { CommonModule } from '@dyn/common';
-import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
+import { type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import { AuditoriaModule } from './auditoria.module';
 import { AuditoriaConsumer } from './consumers/auditoria.consumer';
 import { PrismaService } from './prisma/prisma.service';
-
-const { publicKey } = generateKeyPairSync('rsa', {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: 'spki', format: 'pem' },
-  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-});
+import { arrancarApp, limpiar, MIGRATOR_DB } from './testing/arranque';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
-
-const APP_DB =
-  process.env['TEST_PLATAFORMA_DATABASE_URL'] ??
-  'postgresql://app_plataforma:dev_app_plataforma@localhost:6432/dynadrill?pgbouncer=true';
-const MIGRATOR_DB =
-  process.env['TEST_MIGRATOR_DATABASE_URL'] ??
-  'postgresql://dyn_migrator:dev_dyn_migrator@localhost:5433/dynadrill';
 
 run('auditoria: proyector de eventos (base de datos real)', () => {
   jest.setTimeout(60000);
@@ -42,7 +18,7 @@ run('auditoria: proyector de eventos (base de datos real)', () => {
   const sufijo = Date.now();
   const ids: string[] = [];
   const tiposNuevos: string[] = [];
-  let modulo: TestingModule;
+  let cerrar: () => Promise<void>;
   let prisma: PrismaService;
   let consumer: AuditoriaConsumer;
   let usuarioId = '';
@@ -77,59 +53,19 @@ run('auditoria: proyector de eventos (base de datos real)', () => {
     const rol = (await admin.query(`SELECT id, codigo FROM identidad.rol LIMIT 1`)).rows[0];
     rolId = rol.id;
     rolCodigo = rol.codigo;
-    Object.assign(process.env, {
-      SERVICE_NAME: 'auditoria-test',
-      PORT: '3198',
-      LOG_LEVEL: 'silent',
-      DATABASE_URL: APP_DB,
-      RABBITMQ_URL: 'amqp://x:x@localhost:5672',
-      JWT_PUBLIC_KEY: publicKey,
-    });
-    @Module({
-      imports: [
-        AppConfigModule.forRoot(defineEnv(baseEnvSchema, databaseEnvSchema, jwtVerifyEnvSchema)),
-        CommonModule.forRoot({ serviceName: 'auditoria-test' }),
-        MessagingModule.forRoot({
-          container: 'plataforma',
-          schema: 'msg_plataforma',
-          rabbitUrl: 'amqp://x:x@localhost:5672',
-          databaseUrl: APP_DB,
-          relay: { enabled: false },
-        }),
-        AuditoriaModule,
-      ],
-    })
-    class TestAppModule {}
-    jest.spyOn(AuditoriaConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
-    modulo = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
-    await modulo.init();
-    prisma = modulo.get(PrismaService);
-    consumer = modulo.get(AuditoriaConsumer);
+    const a = await arrancarApp('3198');
+    ({ prisma, consumer } = a);
+    cerrar = () => a.app.close();
   });
 
   afterAll(async () => {
-    const c = await admin.connect();
-    try {
-      await c.query('BEGIN');
-      await c.query(`SET LOCAL auditoria.limpieza_de_pruebas = 'on'`);
-      await c.query(
-        `DELETE FROM auditoria.evento_auditado_dato WHERE evento_id = ANY($1::uuid[])`,
-        [ids],
-      );
-      await c.query(`DELETE FROM auditoria.evento_auditado WHERE id = ANY($1::uuid[])`, [ids]);
-      await c.query('COMMIT');
-    } finally {
-      c.release();
-    }
-    await admin.query(`DELETE FROM auditoria.tipo_evento WHERE codigo = ANY($1::text[])`, [
-      tiposNuevos,
-    ]);
-    await admin.query(`DELETE FROM auditoria.sujeto_tipo WHERE codigo LIKE $1`, [
-      `sujeto_prueba_${sufijo}%`,
-    ]);
-    await admin.query(`DELETE FROM msg_plataforma.inbox WHERE id = ANY($1::uuid[])`, [ids]);
+    await limpiar(admin, {
+      eventos: ids,
+      tipos: tiposNuevos,
+      sujetoTipos: [`sujeto_prueba_${sufijo}`],
+    });
     await admin.end();
-    await modulo?.close();
+    await cerrar();
   });
 
   it('un evento de Pumping queda en el registro con su sujeto, su actor, su rol y las claves de la lista blanca', async () => {
