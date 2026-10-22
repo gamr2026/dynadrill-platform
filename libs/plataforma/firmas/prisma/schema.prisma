@@ -1,0 +1,139 @@
+// Módulo `firmas` (contenedor plataforma). Schema PostgreSQL: firmas.
+// Evidencia de firma INMUTABLE de los documentos de los demás módulos: quién firmó, en qué papel, cuándo (hora del servidor) y con
+// qué huella del documento. Los módulos NO escriben aquí: cada uno valida quién puede firmar, y publica un evento
+// `<contenedor>.<documento>.firmado` dentro de su transacción; este módulo lo registra. La validación de PDF firmados y de firma
+// manuscrita sigue siendo de `archivos` (aquí solo se guarda el resultado de cada intento).
+// Las IDs son UUIDv7 generados por la aplicación. El cliente se genera dentro del módulo y nadie más lo importa.
+// Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["firmas", "identidad", "archivos"]
+}
+
+/// Cómo se firmó: «una línea» (cuenta y hora del servidor sobre la huella de un texto), firma electrónica (PDF con firma digital) o
+/// manuscrita (documento escaneado). Es un conjunto fijo del sistema.
+enum MetodoFirma {
+  linea
+  electronica
+  manuscrita
+
+  @@map("metodo_firma")
+  @@schema("firmas")
+}
+
+/// Resultado de leer el archivo firmado en busca de la firma manuscrita (ayuda para revisar; no certifica la autenticidad).
+enum ResultadoVerificacionFirma {
+  firma_detectada
+  firma_no_detectada
+  no_concluyente
+
+  @@map("resultado_verificacion_firma")
+  @@schema("firmas")
+}
+
+/// Documentos que se firman (`qhse_ptw`, `fcr_inspeccion`...). Un tipo desconocido se rechaza: define qué cuenta como firma.
+model DocumentoTipo {
+  id          String  @id @db.Uuid
+  codigo      String  @unique
+  descripcion String
+  activo      Boolean @default(true)
+
+  firmas Firma[]
+
+  @@map("documento_tipo")
+  @@schema("firmas")
+}
+
+/// Papel de quien firma en el documento (`trabajador`, `talento_humano`, `revisado_por`...). No es el rol de la cuenta.
+model RolFirmante {
+  id          String  @id @db.Uuid
+  codigo      String  @unique
+  descripcion String
+  activo      Boolean @default(true)
+
+  firmas Firma[]
+
+  @@map("rol_firmante")
+  @@schema("firmas")
+}
+
+/// Una firma. Inmutable: una corrección es una firma nueva y vale la más reciente por documento y papel.
+/// `documento_id` es de otro contenedor (sin FK, con COMMENT en la base). `hash_documento` solo existe en la firma «de una línea»;
+/// en las firmas con archivo la huella sale de `archivos.archivo.sha256` por JOIN.
+model Firma {
+  id            String      @id @db.Uuid
+  /// Id del evento que la originó: llave de idempotencia y enlace con el registro de auditoría.
+  eventoId      String      @unique @map("evento_id") @db.Uuid
+  documentoTipoId String    @map("documento_tipo_id") @db.Uuid
+  documentoId   String      @map("documento_id") @db.Uuid
+  rolFirmanteId String      @map("rol_firmante_id") @db.Uuid
+  firmanteId    String      @map("firmante_id") @db.Uuid
+  firmadaAt     DateTime    @default(now()) @map("firmada_at") @db.Timestamptz(6)
+  metodo        MetodoFirma
+  archivoId     String?     @map("archivo_id") @db.Uuid
+  hashDocumento String?     @map("hash_documento")
+
+  documentoTipo DocumentoTipo @relation(fields: [documentoTipoId], references: [id])
+  rolFirmante   RolFirmante   @relation(fields: [rolFirmanteId], references: [id])
+  firmante      IdUsuario     @relation("firmante", fields: [firmanteId], references: [id])
+  archivo       IdArchivo?    @relation(fields: [archivoId], references: [id])
+  verificaciones FirmaVerificacion[]
+
+  @@index([documentoTipoId, documentoId, rolFirmanteId, firmadaAt(sort: Desc)])
+  @@index([firmanteId, firmadaAt(sort: Desc)])
+  @@map("firma")
+  @@schema("firmas")
+}
+
+/// Un intento de leer la firma del archivo firmado. Solo se agrega: vale el más reciente.
+model FirmaVerificacion {
+  id            String                     @id @db.Uuid
+  firmaId       String                     @map("firma_id") @db.Uuid
+  resultado     ResultadoVerificacionFirma
+  /// Confianza de la lectura (0 a 1; no es una probabilidad calibrada).
+  confianza     Decimal                    @db.Decimal(4, 3)
+  /// Nulo si no se comparó el nombre; si no, si apareció junto a la firma.
+  nombreCoincide Boolean?                  @map("nombre_coincide")
+  verificadaAt  DateTime                   @default(now()) @map("verificada_at") @db.Timestamptz(6)
+  solicitadaPor String                     @map("solicitada_por") @db.Uuid
+
+  firma     Firma     @relation(fields: [firmaId], references: [id])
+  solicitante IdUsuario @relation("solicitante", fields: [solicitadaPor], references: [id])
+
+  @@index([firmaId, verificadaAt(sort: Desc)])
+  @@map("firma_verificacion")
+  @@schema("firmas")
+}
+
+/// Espejo de SOLO LECTURA de `identidad.usuario` (quién firmó). Lo administra el módulo identidad.
+model IdUsuario {
+  id     String @id @db.Uuid
+  nombre String
+
+  firmas         Firma[]             @relation("firmante")
+  verificaciones FirmaVerificacion[] @relation("solicitante")
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// Espejo de SOLO LECTURA de `archivos.archivo` (el documento firmado y su huella).
+model IdArchivo {
+  id           String    @id @db.Uuid
+  nombreOriginal String   @map("nombre_original")
+  sha256       String
+  eliminadoAt  DateTime? @map("eliminado_at") @db.Timestamptz(6)
+
+  firmas Firma[]
+
+  @@map("archivo")
+  @@schema("archivos")
+}
