@@ -1306,6 +1306,16 @@ model Investigacion {
   editor             IdUsuario?             @relation("investigacionEditor", fields: [updatedBy], references: [id])
   evidenciasRecopiladas String? @map("evidencias_recopiladas")
   testimoniosResumen    String? @map("testimonios_resumen")
+  conclusion                   ConclusionInvestigacion? @map("conclusion")
+  leccionesAprendidas          String?                  @map("lecciones_aprendidas")
+  ipercActividadId             String?                  @map("iperc_actividad_id") @db.Uuid
+  notificacionLegalRequerida   Boolean                  @default(false) @map("notificacion_legal_requerida")
+  ministerioTrabajoNotificadoAt DateTime?               @map("ministerio_trabajo_notificado_at") @db.Timestamptz(6)
+  iessNotificadoAt             DateTime?                @map("iess_notificado_at") @db.Timestamptz(6)
+  revisionEnviadaAt            DateTime?                @map("revision_enviada_at") @db.Timestamptz(6)
+  revisionEnviadaPor           String?                  @map("revision_enviada_por") @db.Uuid
+  cerradaAt                    DateTime?                @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor                   String?                  @map("cerrada_por") @db.Uuid
 
   historial  InvestigacionHistorial[]
   trabajador InvestigacionTrabajador?
@@ -1660,5 +1670,13 @@ model InvestigacionAccionHistorial {
 
   @@index([accionId, createdAt])
   @@map("investigacion_accion_historial")
+  @@schema("qhse")
+}
+
+enum ConclusionInvestigacion {
+  incidente
+  accidente
+
+  @@map("conclusion_investigacion")
   @@schema("qhse")
 }

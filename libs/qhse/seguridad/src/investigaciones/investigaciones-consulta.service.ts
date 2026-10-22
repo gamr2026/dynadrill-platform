@@ -3,6 +3,7 @@ import { aDia, hoyEcuador, masMeses } from '../comun/fechas';
 import { EstadoAccionInvestigacion, EstadoInvestigacion } from '../generated/client';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { faltaParaCierre, faltaParaRevision } from './cierre';
 import { calcularPlazos, codigoInvestigacion } from './plazos';
 
 export interface FiltroInvestigaciones {
@@ -126,12 +127,50 @@ export class InvestigacionesConsultaService {
     });
     if (!i) throw new NotFoundException('La investigación no existe');
     const t = i.trabajador;
+    const [personas, actividad] = await Promise.all([
+      this.prisma.idUsuario.findMany({
+        where: { id: { in: [i.revisionEnviadaPor, i.cerradaPor].filter((x): x is string => !!x) } },
+        select: { id: true, nombre: true },
+      }),
+      i.ipercActividadId
+        ? this.prisma.ipercActividad.findUnique({
+            where: { id: i.ipercActividadId },
+            select: { id: true, nombre: true },
+          })
+        : null,
+    ]);
+    const nombre = (uid: string | null) => personas.find((p) => p.id === uid)?.nombre ?? null;
     return {
       ...this.resumen(i),
       descripcionEvento: i.descripcionEvento,
       origenEmergenciaId: i.origenEmergenciaId,
       creadoPor: i.creador.nombre,
       createdAt: i.createdAt,
+      conclusion: i.conclusion,
+      leccionesAprendidas: i.leccionesAprendidas,
+      // lección aprendida: solo el vínculo con la actividad de la matriz IPERC (no cambia el estado de la matriz)
+      ipercActividad: actividad,
+      notificacionLegal: {
+        sugerida: i.resultado.sugiereNotificacionLegal,
+        requerida: i.notificacionLegalRequerida,
+        ministerioTrabajoNotificadoAt: i.ministerioTrabajoNotificadoAt,
+        iessNotificadoAt: i.iessNotificadoAt,
+      },
+      revisionEnviadaAt: i.revisionEnviadaAt,
+      revisionEnviadaPor: nombre(i.revisionEnviadaPor),
+      cerradaAt: i.cerradaAt,
+      cerradaPor: nombre(i.cerradaPor),
+      // lo que falta para avanzar, ya explicado (el cliente no recalcula las reglas)
+      cierre: {
+        pendientesParaRevision: faltaParaRevision({
+          porques: i.porques.length,
+          conclusion: i.conclusion,
+          accionesVigentes: i.acciones.filter(
+            (a) => a.estado !== EstadoAccionInvestigacion.cancelada,
+          ).length,
+        }),
+        pendientesParaCierre: faltaParaCierre(i),
+      },
       evidenciasRecopiladas: i.evidenciasRecopiladas,
       testimoniosResumen: i.testimoniosResumen,
       // con cuenta del portal, el nombre, la cédula y el cargo salen de identidad (no se copian al guardar)

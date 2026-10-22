@@ -5,6 +5,7 @@
 import { Permission } from '@dyn/authz';
 import { uuidv7 } from '@dyn/utils';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
+import { borrarInvestigacionesDe } from '../testing/limpieza-investigaciones';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -113,28 +114,7 @@ run('QHSE: investigación de incidentes, acciones (base de datos real)', () => {
   });
 
   afterAll(async () => {
-    const ids = [TECNICO.id, RESPONSABLE.id];
-    const mias = '(SELECT id FROM qhse.investigacion WHERE created_by = ANY($1::uuid[]))';
-    const acc = `(SELECT id FROM qhse.investigacion_accion WHERE investigacion_id IN ${mias})`;
-    await sql(`DELETE FROM qhse.investigacion_accion_historial WHERE accion_id IN ${acc}`, [ids]);
-    // el trigger que protege los niveles de control de una acción ya implementada se apaga solo durante la limpieza (rol migrador)
-    await sql(
-      'ALTER TABLE qhse.investigacion_accion_control DISABLE TRIGGER investigacion_accion_control_editable_trg',
-    );
-    try {
-      await sql(`DELETE FROM qhse.investigacion_accion_control WHERE accion_id IN ${acc}`, [ids]);
-    } finally {
-      await sql(
-        'ALTER TABLE qhse.investigacion_accion_control ENABLE TRIGGER investigacion_accion_control_editable_trg',
-      );
-    }
-    await sql(`DELETE FROM qhse.investigacion_accion WHERE investigacion_id IN ${mias}`, [ids]);
-    await sql('DELETE FROM qhse.investigacion_historial WHERE actor_id = ANY($1::uuid[])', [ids]);
-    await sql('DELETE FROM qhse.investigacion WHERE created_by = ANY($1::uuid[])', [ids]);
-    await sql(
-      "DELETE FROM msg_qhse.outbox WHERE tipo LIKE 'qhse.investigacion.%' AND datos->'actor'->>'userId' = ANY($1::text[])",
-      [ids],
-    );
+    await borrarInvestigacionesDe(t.admin, [TECNICO.id, RESPONSABLE.id]);
     await quitarMaestros(t.admin, MAESTROS);
     await t.cerrar();
   });

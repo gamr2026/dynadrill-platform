@@ -34,6 +34,8 @@ import { InvestigacionesCausasController } from './investigaciones/investigacion
 import { InvestigacionesCausasService } from './investigaciones/investigaciones-causas.service';
 import { InvestigacionesAccionesController } from './investigaciones/investigaciones-acciones.controller';
 import { InvestigacionesAccionesService } from './investigaciones/investigaciones-acciones.service';
+import { InvestigacionesCierreController } from './investigaciones/investigaciones-cierre.controller';
+import { InvestigacionesCierreService } from './investigaciones/investigaciones-cierre.service';
 import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
@@ -57,6 +59,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     InvestigacionesFormatoController,
     InvestigacionesCausasController,
     InvestigacionesAccionesController,
+    InvestigacionesCierreController,
   ],
   providers: [
     PrismaService,
@@ -84,6 +87,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     InvestigacionesFormatoService,
     InvestigacionesCausasService,
     InvestigacionesAccionesService,
+    InvestigacionesCierreService,
   ],
   exports: [
     EpiService,
