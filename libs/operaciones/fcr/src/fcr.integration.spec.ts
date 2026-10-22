@@ -862,6 +862,64 @@ run(
       });
     });
 
+    describe('observaciones del ticket', () => {
+      const ruta = (id: string) => `/api/operaciones/fcr/tickets/${id}/observaciones`;
+
+      it('se agregan desde cualquier fase con autor, rol y fecha, y se listan en orden', async () => {
+        const t = await crear();
+        const primera = await http()
+          .post(ruta(t.id))
+          .set(supervisor())
+          .send({ mensaje: '  Revisar el programa con el cliente  ' })
+          .expect(201);
+        expect(primera.body).toMatchObject({
+          mensaje: 'Revisar el programa con el cliente',
+          autor: SUPERVISOR.nombre,
+          autorRol: 'supervisor',
+        });
+        expect(typeof primera.body.autorRolNombre).toBe('string');
+        expect(new Date(primera.body.fecha).getTime()).toBeGreaterThan(Date.now() - 60_000);
+        // en otra fase y por otra persona
+        await avanzar(t.id, 'preparacion_herramientas').expect(201);
+        await http()
+          .post(ruta(t.id))
+          .set(operador())
+          .send({ mensaje: 'Herramienta pendiente' })
+          .expect(201);
+        const lista = (await http().get(ruta(t.id)).set(supervisor()).expect(200)).body;
+        expect(lista.map((o: { mensaje: string }) => o.mensaje)).toEqual([
+          'Revisar el programa con el cliente',
+          'Herramienta pendiente',
+        ]);
+        expect(lista[1]).toMatchObject({ autor: OPERADOR.nombre, autorRol: 'operador_fcr' });
+        // otro ticket no las ve
+        const otro = await crear();
+        expect((await http().get(ruta(otro.id)).set(supervisor()).expect(200)).body).toEqual([]);
+      });
+
+      it('exige texto: vacío, en blanco o de más de 2000 caracteres se rechazan', async () => {
+        const t = await crear();
+        await http().post(ruta(t.id)).set(supervisor()).send({}).expect(400);
+        await http().post(ruta(t.id)).set(supervisor()).send({ mensaje: '' }).expect(400);
+        await http().post(ruta(t.id)).set(supervisor()).send({ mensaje: '    ' }).expect(400);
+        await http()
+          .post(ruta(t.id))
+          .set(supervisor())
+          .send({ mensaje: 'x'.repeat(2001) })
+          .expect(400);
+        expect((await http().get(ruta(t.id)).set(supervisor()).expect(200)).body).toEqual([]);
+      });
+
+      it('exige el permiso y que el ticket exista', async () => {
+        const t = await crear();
+        await http().post(ruta(t.id)).set(sinPermiso()).send({ mensaje: 'x' }).expect(403);
+        await http().get(ruta(t.id)).set(sinPermiso()).expect(403);
+        await http().get(ruta(uuidv7())).set(supervisor()).expect(404);
+        await http().post(ruta(uuidv7())).set(supervisor()).send({ mensaje: 'x' }).expect(404);
+        await http().get(ruta('no-es-uuid')).set(supervisor()).expect(400);
+      });
+    });
+
     describe('catálogos y puente de requisitos', () => {
       it('lista los catálogos activos de FCR en orden', async () => {
         const r = await http().get('/api/operaciones/fcr/catalogos').set(supervisor()).expect(200);
@@ -985,6 +1043,55 @@ run(
         await appPool.query(
           "INSERT INTO fcr.ticket_historial (id, ticket_id, paso_nuevo, motivo) VALUES ($1, $2, 'revision_inicial', 'nota')",
           [uuidv7(), t.id],
+        );
+      });
+
+      it('las observaciones son inmutables y exigen texto, rol y autor reales', async () => {
+        const t = await crear();
+        const agregada = (
+          await http()
+            .post(`/api/operaciones/fcr/tickets/${t.id}/observaciones`)
+            .set(supervisor())
+            .send({ mensaje: 'Falta el plano' })
+            .expect(201)
+        ).body;
+        await rechaza(
+          "UPDATE fcr.ticket_observacion SET mensaje = 'cambiado' WHERE id = $1",
+          [agregada.id],
+          /permission denied/,
+          appPool,
+        );
+        await rechaza(
+          'DELETE FROM fcr.ticket_observacion WHERE id = $1',
+          [agregada.id],
+          /permission denied/,
+          appPool,
+        );
+        const insertar = `INSERT INTO fcr.ticket_observacion (id, ticket_id, mensaje, autor_rol, created_by) VALUES ($1, $2, $3, $4, $5)`;
+        await rechaza(
+          insertar,
+          [uuidv7(), t.id, '   ', 'supervisor', SUPERVISOR.id],
+          /ticket_observacion_mensaje_check/,
+        );
+        await rechaza(
+          insertar,
+          [uuidv7(), t.id, 'x'.repeat(2001), 'supervisor', SUPERVISOR.id],
+          /ticket_observacion_mensaje_check/,
+        );
+        await rechaza(
+          insertar,
+          [uuidv7(), t.id, 'texto', 'rol_inventado', SUPERVISOR.id],
+          /ticket_observacion_rol_fkey/,
+        );
+        await rechaza(
+          insertar,
+          [uuidv7(), t.id, 'texto', 'supervisor', uuidv7()],
+          /ticket_observacion_autor_fkey/,
+        );
+        await rechaza(
+          insertar,
+          [uuidv7(), uuidv7(), 'texto', 'supervisor', SUPERVISOR.id],
+          /ticket_observacion_ticket_fkey/,
         );
       });
 

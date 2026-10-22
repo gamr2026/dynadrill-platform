@@ -515,6 +515,16 @@ run(
         await avanzar(t.id, 'cerrado').expect(409);
         await avanzar(t.id, 'cierre').expect(409);
         await guardar(t.id, '2026-11-06').expect(409);
+        // las observaciones se leen, pero un ticket cerrado ya no admite nuevas
+        await http()
+          .post(`${base(t.id)}/observaciones`)
+          .set(supervisor())
+          .send({ mensaje: 'Nota tardía' })
+          .expect(409);
+        await http()
+          .get(`${base(t.id)}/observaciones`)
+          .set(supervisor())
+          .expect(200);
         await http()
           .post(`${base(t.id)}/herramientas`)
           .set(supervisor())
