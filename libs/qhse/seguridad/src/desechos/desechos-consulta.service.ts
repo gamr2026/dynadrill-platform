@@ -11,8 +11,13 @@ export const PLAZO_CERTIFICADO_DIAS = 30;
 /** Las tres firmas del formato, en el orden en que se imprimen. */
 export const ROLES_FIRMA = ['despachado_por', 'transportado_por', 'recibido_por'] as const;
 
+/** Con cuántos días de anticipación se avisa que se acerca el límite de almacenamiento de 12 meses. */
+export const DIAS_AVISO_LIMITE = 30;
+
 export interface FiltroDesechos {
   estado?: string;
+  /** `vencidos`: pasaron el límite sin disponer; `por_vencer`: les faltan {@link DIAS_AVISO_LIMITE} días o menos. */
+  vencimiento?: 'vencidos' | 'por_vencer';
   q?: string;
 }
 
@@ -45,8 +50,26 @@ export class DesechosConsultaService {
 
   async listar(filtro: FiltroDesechos = {}) {
     const q = filtro.q?.trim();
+    const hoy = hoyEcuador();
+    const fecha = (dia: string) => new Date(`${dia}T00:00:00.000Z`);
+    const vencimiento =
+      filtro.vencimiento === 'vencidos'
+        ? {
+            estado: { codigo: { not: 'dispuesto' } },
+            limiteAlmacenamientoHasta: { lt: fecha(hoy) },
+          }
+        : filtro.vencimiento === 'por_vencer'
+          ? {
+              estado: { codigo: { not: 'dispuesto' } },
+              limiteAlmacenamientoHasta: {
+                gte: fecha(hoy),
+                lte: fecha(masDias(hoy, DIAS_AVISO_LIMITE)),
+              },
+            }
+          : {};
     const filas = await this.prisma.desecho.findMany({
       where: {
+        ...vencimiento,
         ...(filtro.estado ? { estado: { codigo: filtro.estado } } : {}),
         ...(q
           ? {
@@ -68,6 +91,46 @@ export class DesechosConsultaService {
       take: 300,
     });
     return filas.map((d) => this.resumen(d));
+  }
+
+  /** Tablero de desechos: cuántos hay por estado, cuántos se acercan al límite o lo pasaron y los galones sin disponer. */
+  async tablero() {
+    const hoy = hoyEcuador();
+    const fecha = (dia: string) => new Date(`${dia}T00:00:00.000Z`);
+    const abiertos = { estado: { codigo: { not: 'dispuesto' } } };
+    const [porEstado, vencidos, porVencer, galones] = await Promise.all([
+      this.prisma.desechoEstado.findMany({
+        orderBy: { orden: 'asc' },
+        select: { codigo: true, nombre: true, _count: { select: { desechos: true } } },
+      }),
+      this.prisma.desecho.count({
+        where: { ...abiertos, limiteAlmacenamientoHasta: { lt: fecha(hoy) } },
+      }),
+      this.prisma.desecho.count({
+        where: {
+          ...abiertos,
+          limiteAlmacenamientoHasta: {
+            gte: fecha(hoy),
+            lte: fecha(masDias(hoy, DIAS_AVISO_LIMITE)),
+          },
+        },
+      }),
+      this.prisma.desechoItem.aggregate({
+        where: { desecho: abiertos },
+        _sum: { cantidadGalones: true },
+      }),
+    ]);
+    return {
+      porEstado: porEstado.map((e) => ({
+        codigo: e.codigo,
+        nombre: e.nombre,
+        cantidad: e._count.desechos,
+      })),
+      vencidos,
+      porVencer,
+      diasAviso: DIAS_AVISO_LIMITE,
+      galonesSinDisponer: Number(galones._sum.cantidadGalones ?? 0),
+    };
   }
 
   async detalle(id: string) {

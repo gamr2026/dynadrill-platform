@@ -637,6 +637,136 @@ run('QHSE: Desechos (base de datos real)', () => {
         certificadoFueraDePlazo: true,
       });
     });
+
+    describe('avisos de vencimiento', () => {
+      const revisar = (quien = gestor()) =>
+        t.http().post('/api/qhse/desechos/avisos/revisar').set(quien);
+      const eventosDe = async (tipo: string, id: string) =>
+        (
+          await sql(
+            "SELECT datos FROM msg_qhse.outbox WHERE tipo = $1 AND datos->'data'->>'desechoId' = $2",
+            [tipo, id],
+          )
+        ).rows as Array<{ datos: { data: Record<string, unknown> } }>;
+
+      it('la bandeja y el resumen separan lo vencido (pasó los 12 meses) de lo que está por vencer (30 días o menos)', async () => {
+        const vencido = await insertarDirecto(400);
+        const porVencer = await insertarDirecto(345); // el límite cae en ~20 días
+        const lejos = await insertarDirecto(10);
+        const ids = async (q: string) =>
+          (
+            (await t.http().get(`/api/qhse/desechos?vencimiento=${q}`).set(tecnico()))
+              .body as Array<{ id: string }>
+          ).map((x) => x.id);
+        const v = await ids('vencidos');
+        expect(v).toContain(vencido);
+        expect(v).not.toContain(porVencer);
+        const p = await ids('por_vencer');
+        expect(p).toContain(porVencer);
+        expect(p).not.toContain(vencido);
+        expect(p).not.toContain(lejos);
+        expect(
+          (await t.http().get('/api/qhse/desechos?vencimiento=nunca').set(tecnico())).status,
+        ).toBe(400);
+
+        const r = (await t.http().get('/api/qhse/desechos/resumen').set(tecnico())).body;
+        expect(r.diasAviso).toBe(30);
+        expect(r.vencidos).toBeGreaterThanOrEqual(1);
+        expect(r.porVencer).toBeGreaterThanOrEqual(1);
+        expect(r.galonesSinDisponer).toBeGreaterThan(0);
+        expect(r.porEstado.map((e: { codigo: string }) => e.codigo)).toEqual([
+          'almacenado',
+          'con_manifiesto',
+          'dispuesto',
+        ]);
+        expect((await t.http().get('/api/qhse/desechos/resumen').set(operador())).status).toBe(403);
+      });
+
+      it('la revisión emite una sola vez el aviso de límite próximo y de límite vencido, y no toca lo que está lejos', async () => {
+        const vencido = await insertarDirecto(400);
+        const porVencer = await insertarDirecto(345);
+        const lejos = await insertarDirecto(10);
+        expect((await revisar(tecnico())).status).toBe(403);
+        const r1 = await revisar();
+        expect(r1.status).toBe(201);
+        expect(r1.body.limiteVencido).toBeGreaterThanOrEqual(1);
+        expect(r1.body.limiteProximo).toBeGreaterThanOrEqual(1);
+
+        const ev = await eventosDe('qhse.desecho.limite_vencido', vencido);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].datos.data).toMatchObject({
+          desechoId: vencido,
+          descripcion: 'Desecho antiguo',
+        });
+        expect(Number(ev[0].datos.data['diasVencido'])).toBeGreaterThan(0);
+        const prox = await eventosDe('qhse.desecho.limite_proximo', porVencer);
+        expect(prox).toHaveLength(1);
+        expect(Number(prox[0].datos.data['diasParaLimite'])).toBeLessThanOrEqual(30);
+        expect(await eventosDe('qhse.desecho.limite_proximo', lejos)).toHaveLength(0);
+        expect(await eventosDe('qhse.desecho.limite_vencido', lejos)).toHaveLength(0);
+        // el de límite próximo no se emite para uno ya vencido
+        expect(await eventosDe('qhse.desecho.limite_proximo', vencido)).toHaveLength(0);
+
+        // repetir la revisión no duplica nada
+        const r2 = await revisar();
+        expect(r2.body.limiteVencido).toBe(0);
+        expect(r2.body.limiteProximo).toBe(0);
+        expect(await eventosDe('qhse.desecho.limite_vencido', vencido)).toHaveLength(1);
+        expect(await eventosDe('qhse.desecho.limite_proximo', porVencer)).toHaveLength(1);
+      });
+
+      it('un desecho ya dispuesto no recibe avisos, y el certificado fuera de los 30 días avisa una sola vez', async () => {
+        // con más de 12 meses pero dispuesto (se completa todo el ciclo): no se avisa
+        const id = await firmado(3, (x) =>
+          sql(
+            "UPDATE qhse.desecho SET registrado_el = CURRENT_DATE - 400, limite_almacenamiento_hasta = (CURRENT_DATE - 400 + INTERVAL '12 months')::date WHERE id = $1",
+            [x],
+          ),
+        );
+        await certificado(id, { archivoId: await archivo(), emitidoEl: hoy }).expect(201);
+
+        // con manifiesto de hace 45 días y sin certificado: aviso de certificado
+        const atrasado = await firmado(3, (x) =>
+          sql(
+            'UPDATE qhse.desecho_manifiesto SET fecha = CURRENT_DATE - 45 WHERE desecho_id = $1',
+            [x],
+          ),
+        );
+        const reciente = await firmado();
+        const r = await revisar();
+        expect(r.body.certificadoVencido).toBeGreaterThanOrEqual(1);
+        for (const tipo of ['limite_proximo', 'limite_vencido', 'certificado_vencido'])
+          expect(await eventosDe(`qhse.desecho.${tipo}`, id)).toHaveLength(0);
+        const ev = await eventosDe('qhse.desecho.certificado_vencido', atrasado);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].datos.data).toMatchObject({ estado: 'con_manifiesto' });
+        expect(ev[0].datos.data['manifiestoNumero']).toEqual(expect.any(String));
+        expect(Number(ev[0].datos.data['diasVencido'])).toBeGreaterThan(0);
+        expect(await eventosDe('qhse.desecho.certificado_vencido', reciente)).toHaveLength(0);
+        await revisar();
+        expect(await eventosDe('qhse.desecho.certificado_vencido', atrasado)).toHaveLength(1);
+      });
+
+      it('la base impide repetir un aviso y no deja editar ni borrar los emitidos', async () => {
+        const id = await insertarDirecto(400);
+        await revisar();
+        await expect(
+          sql(
+            "INSERT INTO qhse.desecho_aviso (id, desecho_id, tipo, emitido_por) VALUES ($1, $2, 'limite_vencido', $3)",
+            [uuidv7(), id, OPERADOR.id],
+          ),
+        ).rejects.toThrow(/desecho_aviso_unico_key/);
+        await expect(
+          t.prisma.desechoAviso.updateMany({
+            where: { desechoId: id },
+            data: { tipo: 'limite_proximo' },
+          }),
+        ).rejects.toThrow(/permission denied|denegado/i);
+        await expect(
+          t.prisma.desechoAviso.deleteMany({ where: { desechoId: id } }),
+        ).rejects.toThrow(/permission denied|denegado/i);
+      });
+    });
   });
 
   describe('reglas de la base', () => {

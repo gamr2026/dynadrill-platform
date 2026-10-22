@@ -28,6 +28,7 @@ import {
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { ClasificacionDesecho, RolFirmaDesecho, TipoDocumentoDesecho } from '../generated/client';
+import { DesechosAvisosService } from './desechos-avisos.service';
 import { DesechosConsultaService } from './desechos-consulta.service';
 import { DesechosDocumentosService } from './desechos-documentos.service';
 import { DesechosManifiestoService } from './desechos-manifiesto.service';
@@ -39,6 +40,7 @@ const sinBearer = (auth?: string) => (auth ?? '').replace(/^Bearer\s+/i, '') || 
 
 export class ListarDesechosDto {
   @IsOptional() @IsString() @MaxLength(30) estado?: string;
+  @IsOptional() @IsIn(['vencidos', 'por_vencer']) vencimiento?: 'vencidos' | 'por_vencer';
   @IsOptional() @IsString() @MaxLength(100) q?: string;
 }
 
@@ -118,6 +120,7 @@ export class DesechosController {
     private readonly desechos: DesechosService,
     private readonly manifiestos: DesechosManifiestoService,
     private readonly documentos: DesechosDocumentosService,
+    private readonly avisos: DesechosAvisosService,
     private readonly consulta: DesechosConsultaService,
   ) {}
 
@@ -132,6 +135,13 @@ export class DesechosController {
   @Post()
   registrar(@Body() dto: RegistrarDesechoDto, @CurrentUser() actor: AuthUser) {
     return this.desechos.registrar(dto, actor);
+  }
+
+  /** Tablero: por estado, por vencer, vencidos y galones sin disponer. Va antes de `:id`. */
+  @RequirePermission(P.DESECHOS_VER)
+  @Get('resumen')
+  resumen() {
+    return this.consulta.tablero();
   }
 
   @RequirePermission(P.DESECHOS_VER)
@@ -209,5 +219,12 @@ export class DesechosController {
     @Headers('authorization') auth?: string,
   ) {
     return this.documentos.verificarDeNuevo(id, dto.tipo, sinBearer(auth) ?? '');
+  }
+
+  /** Emite los avisos de vencimiento que falten (límite de 12 meses próximo o vencido, certificado fuera de plazo). Idempotente. */
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post('avisos/revisar')
+  revisarAvisos(@CurrentUser() actor: AuthUser) {
+    return this.avisos.revisar(actor);
   }
 }

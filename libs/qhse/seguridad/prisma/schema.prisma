@@ -1332,6 +1332,7 @@ model Desecho {
   historial       DesechoHistorial[]
   manifiesto      DesechoManifiesto?
   documentos      DesechoDocumento[]
+  avisos          DesechoAviso[]
 
   @@index([estadoId])
   @@index([limiteAlmacenamientoHasta])
@@ -1482,5 +1483,28 @@ model DesechoDocumento {
 
   @@unique([desechoId, tipo])
   @@map("desecho_documento")
+  @@schema("qhse")
+}
+
+enum TipoAvisoDesecho {
+  limite_proximo
+  limite_vencido
+  certificado_vencido
+
+  @@map("tipo_aviso_desecho")
+  @@schema("qhse")
+}
+
+/// Aviso de vencimiento ya emitido de un desecho (uno de cada tipo). Inmutable.
+model DesechoAviso {
+  id         String           @id @db.Uuid
+  desechoId  String           @map("desecho_id") @db.Uuid
+  desecho    Desecho          @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  tipo       TipoAvisoDesecho
+  emitidoAt  DateTime         @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  emitidoPor String           @map("emitido_por") @db.Uuid
+
+  @@unique([desechoId, tipo])
+  @@map("desecho_aviso")
   @@schema("qhse")
 }

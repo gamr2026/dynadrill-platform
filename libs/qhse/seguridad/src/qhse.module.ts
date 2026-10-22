@@ -15,6 +15,7 @@ import { IpercCatalogosService } from './iperc/iperc-catalogos.service';
 import { IpercConsultaService } from './iperc/iperc-consulta.service';
 import { IpercController } from './iperc/iperc.controller';
 import { IpercService } from './iperc/iperc.service';
+import { DesechosAvisosService } from './desechos/desechos-avisos.service';
 import { DesechosConsultaService } from './desechos/desechos-consulta.service';
 import { DesechosController } from './desechos/desechos.controller';
 import { DesechosDocumentosService } from './desechos/desechos-documentos.service';
@@ -76,6 +77,7 @@ import { PtwService } from './ptw/ptw.service';
     DesechosEventosService,
     DesechosManifiestoService,
     DesechosDocumentosService,
+    DesechosAvisosService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
