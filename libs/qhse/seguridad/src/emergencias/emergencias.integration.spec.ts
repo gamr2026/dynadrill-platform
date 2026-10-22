@@ -366,6 +366,144 @@ run('QHSE: Emergencias (base de datos real)', () => {
     );
   });
 
+  describe('nivel, conteo de personal y cascada de notificación', () => {
+    const post = (id: string, ruta: string, cuerpo: Record<string, unknown>, quien = gestor()) =>
+      t.http().post(`/api/qhse/emergencias/${id}/${ruta}`).set(quien).send(cuerpo);
+
+    it('Base HSE declara el nivel (1 a 3), lo puede cambiar y cada declaración queda con su línea, su historial y su evento', async () => {
+      const id = (await activar()).body.id as string;
+      expect((await detalle(id)).nivel).toBeNull();
+      expect((await post(id, 'nivel', { nivel: 2 }, tecnico())).status).toBe(403);
+      for (const malo of [0, 4, '2', null])
+        expect((await post(id, 'nivel', { nivel: malo })).status).toBe(400);
+
+      const r = await post(id, 'nivel', { nivel: 2 });
+      expect(r.status).toBe(201);
+      expect(r.body.nivel).toMatchObject({ valor: 2, declaradoPor: TECNICO.nombre });
+      expect(r.body.cronometro.at(-1)).toMatchObject({
+        automatica: true,
+        texto: expect.stringMatching(/^Nivel declarado: Nivel 2/),
+      });
+      expect((await post(id, 'nivel', { nivel: 2 })).status).toBe(409); // ya tiene ese nivel
+      const sube = await post(id, 'nivel', { nivel: 3 });
+      expect(sube.body.nivel.valor).toBe(3);
+      expect(sube.body.niveles.map((x: { nivel: number }) => x.nivel)).toEqual([2, 3]);
+      expect(sube.body.cronometro.at(-1).texto).toMatch(/^Nivel cambiado de 2 a 3/);
+      const ev = await eventos('qhse.emergencia.nivel_declarado', id);
+      expect(ev.map((e) => e.datos.data['nivel'])).toEqual([2, 3]);
+      expect(ev[1].datos.data['nivelAnterior']).toBe(2);
+    });
+
+    it('el conteo de personal calcula los faltantes, se puede repetir y no admite más evacuados que personas', async () => {
+      const id = (await activar()).body.id as string;
+      expect((await detalle(id)).conteo).toBeNull();
+      expect(
+        (await post(id, 'conteo', { totalEnLocacion: 20, evacuados: 15 }, tecnico())).status,
+      ).toBe(403);
+      for (const malo of [
+        { totalEnLocacion: 5, evacuados: 6 },
+        { totalEnLocacion: -1, evacuados: 0 },
+        { totalEnLocacion: 5, evacuados: -2 },
+        { totalEnLocacion: 5.5, evacuados: 2 },
+        { totalEnLocacion: 'cinco', evacuados: 2 },
+      ])
+        expect((await post(id, 'conteo', malo)).status).toBe(400);
+
+      const r = await post(id, 'conteo', { totalEnLocacion: 20, evacuados: 15 });
+      expect(r.status).toBe(201);
+      expect(r.body.conteo).toMatchObject({
+        totalEnLocacion: 20,
+        evacuados: 15,
+        faltantes: 5,
+        por: TECNICO.nombre,
+      });
+      expect(r.body.cronometro.at(-1).texto).toBe(
+        'Conteo de personal: 20 en la locación, 15 evacuados, 5 faltantes',
+      );
+      const segundo = await post(id, 'conteo', { totalEnLocacion: 20, evacuados: 20 });
+      expect(segundo.body.conteo.faltantes).toBe(0);
+      expect(segundo.body.conteos.map((c: { faltantes: number }) => c.faltantes)).toEqual([5, 0]);
+      const ev = await eventos('qhse.emergencia.conteo_completado', id);
+      expect(ev).toHaveLength(2);
+      expect(ev[0].datos.data).toMatchObject({ totalEnLocacion: 20, evacuados: 15, faltantes: 5 });
+    });
+
+    it('la cascada trae los 4 pasos con su plazo; cada notificación informa si fue en plazo y marca los vencidos', async () => {
+      const id = (await activar()).body.id as string;
+      // la emergencia se activó hace 7 minutos (se atrasa directo en la base)
+      await sql(
+        "UPDATE qhse.emergencia SET activado_at = now() - interval '7 minutes' WHERE id = $1",
+        [id],
+      );
+      const d0 = await detalle(id);
+      expect(
+        d0.cascada.map((c: { desde: string; hacia: string; plazoMinutos: number }) => [
+          c.desde,
+          c.hacia,
+          c.plazoMinutos,
+        ]),
+      ).toEqual([
+        ['Supervisor', 'Company Man', 2],
+        ['Company Man', 'Base HSE', 5],
+        ['Base HSE', 'Gerencia', 10],
+        ['Company Man', 'Base Operadora (Cliente)', 5],
+      ]);
+      expect(d0.notificacionCompleta).toBe(false);
+      // a los 7 minutos, los pasos de 2 y 5 minutos ya están vencidos; el de 10, no
+      expect(d0.cascada.map((c: { vencido: boolean }) => c.vencido)).toEqual([
+        true,
+        true,
+        false,
+        true,
+      ]);
+
+      const [p1, , p3] = d0.cascada as Array<{ pasoId: string }>;
+      expect((await post(id, 'notificaciones', { pasoId: p1.pasoId }, tecnico())).status).toBe(403);
+      expect((await post(id, 'notificaciones', { pasoId: uuidv7() })).status).toBe(400);
+      expect((await post(id, 'notificaciones', { pasoId: 'x' })).status).toBe(400);
+
+      const tarde = await post(id, 'notificaciones', { pasoId: p1.pasoId });
+      expect(tarde.status).toBe(201);
+      expect(tarde.body.cascada[0]).toMatchObject({
+        notificadoPor: TECNICO.nombre,
+        enPlazo: false,
+        vencido: false,
+      });
+      expect(tarde.body.cascada[0].minutos).toBeGreaterThanOrEqual(7);
+      expect(tarde.body.cronometro.at(-1).texto).toMatch(
+        /^Notificación 1: Supervisor → Company Man \(.* min; plazo 2 min, fuera de plazo\)$/,
+      );
+      const ok = await post(id, 'notificaciones', { pasoId: p3.pasoId });
+      expect(ok.body.cascada[2]).toMatchObject({ enPlazo: true, hacia: 'Gerencia' });
+      expect((await post(id, 'notificaciones', { pasoId: p3.pasoId })).status).toBe(409); // ya notificado
+      const ev = await eventos('qhse.emergencia.notificacion_realizada', id);
+      expect(ev.map((e) => [e.datos.data['paso'], e.datos.data['enPlazo']])).toEqual([
+        [1, false],
+        [3, true],
+      ]);
+      // completar el resto
+      for (const c of d0.cascada as Array<{ pasoId: string }>)
+        if (![p1.pasoId, p3.pasoId].includes(c.pasoId))
+          expect((await post(id, 'notificaciones', { pasoId: c.pasoId })).status).toBe(201);
+      expect((await detalle(id)).notificacionCompleta).toBe(true);
+    });
+
+    it('una emergencia cerrada ya no recibe nivel, conteo ni notificaciones', async () => {
+      const id = (await activar()).body.id as string;
+      const paso = ((await detalle(id)).cascada as Array<{ pasoId: string }>)[0].pasoId;
+      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
+      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      for (const [ruta, cuerpo] of [
+        ['nivel', { nivel: 1 }],
+        ['conteo', { totalEnLocacion: 1, evacuados: 1 }],
+        ['notificaciones', { pasoId: paso }],
+        ['cronometro', { texto: 'algo' }],
+      ] as Array<[string, Record<string, unknown>]>)
+        expect((await post(id, ruta, cuerpo)).status).toBe(409);
+      expect((await post(uuidv7(), 'nivel', { nivel: 1 })).status).toBe(404);
+    });
+  });
+
   describe('reglas de la base', () => {
     const insertar = (
       extra: { estado?: string; swa?: string | null; derrame?: string | null } = {},
@@ -462,6 +600,123 @@ run('QHSE: Emergencias (base de datos real)', () => {
       await expect(
         sql('UPDATE qhse.emergencia SET derrame_id = NULL WHERE id = $1', [ok.id]),
       ).rejects.toThrow(/origen de la emergencia no se cambia/);
+    });
+
+    it('el nivel y el conteo se registran completos y válidos, y su historial es inmutable', async () => {
+      const id = (await activar()).body.id as string;
+      const actualizar = (set: string, params: unknown[] = []) =>
+        sql(`UPDATE qhse.emergencia SET ${set} WHERE id = $1`, [id, ...params]);
+      // nivel fuera de 1 a 3, o sin quién y cuándo
+      await expect(
+        actualizar('nivel = 4, nivel_declarado_por = $2, nivel_declarado_at = now()', [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/emergencia_nivel_check/);
+      await expect(actualizar('nivel = 2')).rejects.toThrow(/emergencia_nivel_check/);
+      // conteo incompleto, con negativos, o con más evacuados que personas
+      await expect(actualizar('total_en_locacion = 5, evacuados = 2')).rejects.toThrow(
+        /emergencia_conteo_check/,
+      );
+      await expect(
+        actualizar('total_en_locacion = 5, evacuados = 6, conteo_por = $2, conteo_at = now()', [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/emergencia_conteo_check/);
+      await expect(
+        actualizar('total_en_locacion = -1, evacuados = 0, conteo_por = $2, conteo_at = now()', [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/emergencia_conteo_check/);
+      await expect(
+        sql(
+          'INSERT INTO qhse.emergencia_nivel_historial (id, emergencia_id, nivel, actor_id) VALUES ($1, $2, 7, $3)',
+          [uuidv7(), id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/emergencia_nivel_historial_nivel_check/);
+      await expect(
+        sql(
+          'INSERT INTO qhse.emergencia_conteo_historial (id, emergencia_id, total_en_locacion, evacuados, actor_id) VALUES ($1, $2, 1, 5, $3)',
+          [uuidv7(), id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/emergencia_conteo_historial_check/);
+      await sql(
+        'INSERT INTO qhse.emergencia_nivel_historial (id, emergencia_id, nivel, actor_id) VALUES ($1, $2, 1, $3)',
+        [uuidv7(), id, OPERADOR.id],
+      );
+      await expect(
+        t.prisma.emergenciaNivelHistorial.deleteMany({ where: { emergenciaId: id } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.emergenciaConteoHistorial.updateMany({
+          where: { emergenciaId: id },
+          data: { evacuados: 0 },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
+    it('la cascada: pasos válidos, una notificación por paso, inmutable, y nada se registra en una emergencia cerrada', async () => {
+      const id = (await activar()).body.id as string;
+      const paso = (
+        await sql('SELECT id FROM qhse.emergencia_paso_notificacion ORDER BY orden LIMIT 1')
+      ).rows[0].id;
+      const notificar = () =>
+        sql(
+          'INSERT INTO qhse.emergencia_notificacion (emergencia_id, paso_id, notificado_por) VALUES ($1, $2, $3)',
+          [id, paso, OPERADOR.id],
+        );
+      await notificar();
+      await expect(notificar()).rejects.toThrow(/emergencia_notificacion_pkey/);
+      await expect(
+        sql(
+          'INSERT INTO qhse.emergencia_notificacion (emergencia_id, paso_id, notificado_por) VALUES ($1, $2, $3)',
+          [id, uuidv7(), OPERADOR.id],
+        ),
+      ).rejects.toThrow(/emergencia_notificacion_paso_fkey/);
+      await expect(
+        t.prisma.emergenciaNotificacion.deleteMany({ where: { emergenciaId: id } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.emergenciaNotificacion.updateMany({
+          where: { emergenciaId: id },
+          data: { notificadoPor: TECNICO.id },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      // los pasos son un catálogo: plazo positivo, texto no vacío, y no se borran
+      await expect(
+        sql(
+          "INSERT INTO qhse.emergencia_paso_notificacion (id, orden, desde, hacia, plazo_minutos) VALUES ($1, 9000, 'A', 'B', 0)",
+          [uuidv7()],
+        ),
+      ).rejects.toThrow(/emergencia_paso_notificacion_plazo_check/);
+      await expect(
+        sql(
+          "INSERT INTO qhse.emergencia_paso_notificacion (id, orden, desde, hacia, plazo_minutos) VALUES ($1, 9001, '  ', 'B', 5)",
+          [uuidv7()],
+        ),
+      ).rejects.toThrow(/emergencia_paso_notificacion_texto_check/);
+      await expect(
+        t.prisma.emergenciaPasoNotificacion.deleteMany({ where: { orden: 1 } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      // una emergencia cerrada no se modifica ni recibe registros nuevos
+      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
+      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      await expect(
+        sql(
+          'UPDATE qhse.emergencia SET nivel = 1, nivel_declarado_por = $2, nivel_declarado_at = now() WHERE id = $1',
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/cerrada ya no se modifica/);
+      const otroPaso = (
+        await sql(
+          'SELECT id FROM qhse.emergencia_paso_notificacion ORDER BY orden OFFSET 1 LIMIT 1',
+        )
+      ).rows[0].id;
+      await expect(
+        sql(
+          'INSERT INTO qhse.emergencia_notificacion (emergencia_id, paso_id, notificado_por) VALUES ($1, $2, $3)',
+          [id, otroPaso, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/está cerrada y ya no recibe registros/);
     });
 
     it('la descripción no puede estar vacía y el tipo, el ticket y los orígenes deben existir (FK)', async () => {

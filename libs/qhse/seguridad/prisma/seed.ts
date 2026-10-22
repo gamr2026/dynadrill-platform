@@ -43,7 +43,9 @@ async function main() {
       `qhse: derrames con ${der.ubicaciones} ubicaciones, ${der.bandas} bandas de volumen y ${der.pasos} pasos de contención nuevos (bandas POR CONFIRMAR con Dynadrill)`,
     );
     const eme = await sembrarEmergencias(prisma);
-    console.log(`qhse: emergencias con ${eme.tipos} tipos nuevos`);
+    console.log(
+      `qhse: emergencias con ${eme.tipos} tipos y ${eme.pasos} pasos de la cascada nuevos`,
+    );
   } finally {
     await prisma.$disconnect();
   }

@@ -1713,6 +1713,13 @@ model Emergencia {
   derrameId   String?          @map("derrame_id") @db.Uuid
   activadoPor String           @map("activado_por") @db.Uuid
   activadoAt  DateTime         @default(now()) @map("activado_at") @db.Timestamptz(6)
+  nivel              Int?             @db.SmallInt
+  nivelDeclaradoPor  String?          @map("nivel_declarado_por") @db.Uuid
+  nivelDeclaradoAt   DateTime?        @map("nivel_declarado_at") @db.Timestamptz(6)
+  totalEnLocacion    Int?             @map("total_en_locacion")
+  evacuados          Int?
+  conteoPor          String?          @map("conteo_por") @db.Uuid
+  conteoAt           DateTime?        @map("conteo_at") @db.Timestamptz(6)
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy   String           @map("created_by") @db.Uuid
   updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1720,6 +1727,9 @@ model Emergencia {
 
   lineas    EmergenciaLinea[]
   historial EmergenciaHistorial[]
+  notificaciones EmergenciaNotificacion[]
+  niveles        EmergenciaNivelHistorial[]
+  conteos        EmergenciaConteoHistorial[]
 
   @@index([estado])
   @@index([tipoId])
@@ -1753,5 +1763,68 @@ model EmergenciaHistorial {
 
   @@index([emergenciaId, createdAt])
   @@map("emergencia_historial")
+  @@schema("qhse")
+}
+
+/// Paso de la cascada de notificación (HSE-TRIAGE-001): origen, destino y plazo en minutos desde la activación.
+model EmergenciaPasoNotificacion {
+  id           String   @id @db.Uuid
+  orden        Int      @unique
+  desde        String
+  hacia        String
+  plazoMinutos Int      @map("plazo_minutos")
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?  @map("created_by") @db.Uuid
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?  @map("updated_by") @db.Uuid
+
+  notificaciones EmergenciaNotificacion[]
+
+  @@map("emergencia_paso_notificacion")
+  @@schema("qhse")
+}
+
+/// Cada paso ya notificado (quién y cuándo). Inmutable.
+model EmergenciaNotificacion {
+  emergenciaId  String                     @map("emergencia_id") @db.Uuid
+  emergencia    Emergencia                 @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  pasoId        String                     @map("paso_id") @db.Uuid
+  paso          EmergenciaPasoNotificacion @relation(fields: [pasoId], references: [id])
+  notificadoPor String                     @map("notificado_por") @db.Uuid
+  notificadoAt  DateTime                   @default(now()) @map("notificado_at") @db.Timestamptz(6)
+
+  @@id([emergenciaId, pasoId])
+  @@index([pasoId])
+  @@map("emergencia_notificacion")
+  @@schema("qhse")
+}
+
+/// Cada declaración de nivel (el vigente está en `Emergencia`). Inmutable.
+model EmergenciaNivelHistorial {
+  id           String     @id @db.Uuid
+  emergenciaId String     @map("emergencia_id") @db.Uuid
+  emergencia   Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  nivel        Int        @db.SmallInt
+  actorId      String     @map("actor_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_nivel_historial")
+  @@schema("qhse")
+}
+
+/// Cada conteo de personal (el vigente está en `Emergencia`). Inmutable.
+model EmergenciaConteoHistorial {
+  id              String     @id @db.Uuid
+  emergenciaId    String     @map("emergencia_id") @db.Uuid
+  emergencia      Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  totalEnLocacion Int        @map("total_en_locacion")
+  evacuados       Int
+  actorId         String     @map("actor_id") @db.Uuid
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_conteo_historial")
   @@schema("qhse")
 }

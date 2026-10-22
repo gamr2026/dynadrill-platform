@@ -8,6 +8,10 @@ export const codigoEmergencia = (numero: number): string =>
 const codigoSwa = (numero: number) => `SWA-${String(numero).padStart(6, '0')}`;
 const codigoDerrame = (numero: number) => `DER-${String(numero).padStart(6, '0')}`;
 
+/** Minutos entre dos instantes, con un decimal. */
+export const minutosEntre = (desde: Date, hasta: Date): number =>
+  Math.max(0, Math.round(((hasta.getTime() - desde.getTime()) / 60_000) * 10) / 10);
+
 export interface FiltroEmergencias {
   estado?: 'activa' | 'controlada' | 'cerrada';
   ticketId?: string;
@@ -85,9 +89,16 @@ export class EmergenciasConsultaService {
         tipo: { select: { codigo: true, nombre: true } },
         lineas: { orderBy: [{ at: 'asc' }, { id: 'asc' }] },
         historial: { orderBy: { createdAt: 'asc' } },
+        notificaciones: true,
+        niveles: { orderBy: { createdAt: 'asc' } },
+        conteos: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!e) throw new NotFoundException('La emergencia no existe');
+    const pasos = await this.prisma.emergenciaPasoNotificacion.findMany({
+      where: { activo: true },
+      orderBy: { orden: 'asc' },
+    });
     const [tickets, swa, derrame] = await Promise.all([
       this.tickets([e.ticketId]),
       e.swaId
@@ -107,8 +118,32 @@ export class EmergenciasConsultaService {
       e.activadoPor,
       ...e.lineas.map((l) => l.actorId),
       ...e.historial.map((h) => h.actorId),
+      ...e.notificaciones.map((n) => n.notificadoPor),
+      ...e.niveles.map((n) => n.actorId),
+      ...e.conteos.map((c) => c.actorId),
+      ...(e.nivelDeclaradoPor ? [e.nivelDeclaradoPor] : []),
+      ...(e.conteoPor ? [e.conteoPor] : []),
     ]);
     const t = e.ticketId ? tickets.get(e.ticketId) : undefined;
+    const cascada = pasos.map((p) => {
+      const n = e.notificaciones.find((x) => x.pasoId === p.id);
+      const limite = e.activadoAt.getTime() + p.plazoMinutos * 60_000;
+      return {
+        pasoId: p.id,
+        orden: p.orden,
+        desde: p.desde,
+        hacia: p.hacia,
+        plazoMinutos: p.plazoMinutos,
+        notificadoAt: n?.notificadoAt ?? null,
+        notificadoPor: n ? (nombres.get(n.notificadoPor) ?? null) : null,
+        /** Minutos entre la activación y la notificación. */
+        minutos: n ? minutosEntre(e.activadoAt, n.notificadoAt) : null,
+        /** Verdadero si se notificó dentro del plazo; nulo mientras no se notifique. */
+        enPlazo: n ? n.notificadoAt.getTime() <= limite : null,
+        /** Sin notificar y con el plazo ya vencido (solo mientras la emergencia siga abierta). */
+        vencido: !n && e.estado !== 'cerrada' && Date.now() > limite,
+      };
+    });
     return {
       id: e.id,
       numero: e.numero,
@@ -136,6 +171,41 @@ export class EmergenciasConsultaService {
       pozo: t?.pozo ?? null,
       activadoPor: nombres.get(e.activadoPor) ?? null,
       activadoAt: e.activadoAt,
+      /** Nivel declarado por Base HSE (1 a 3); nulo hasta declararlo. */
+      nivel:
+        e.nivel === null
+          ? null
+          : {
+              valor: e.nivel,
+              declaradoPor: e.nivelDeclaradoPor ? (nombres.get(e.nivelDeclaradoPor) ?? null) : null,
+              declaradoAt: e.nivelDeclaradoAt,
+            },
+      niveles: e.niveles.map((n) => ({
+        nivel: n.nivel,
+        actor: nombres.get(n.actorId) ?? null,
+        at: n.createdAt,
+      })),
+      /** Conteo de personal; los faltantes se calculan (en locación menos evacuados). */
+      conteo:
+        e.totalEnLocacion === null || e.evacuados === null
+          ? null
+          : {
+              totalEnLocacion: e.totalEnLocacion,
+              evacuados: e.evacuados,
+              faltantes: e.totalEnLocacion - e.evacuados,
+              por: e.conteoPor ? (nombres.get(e.conteoPor) ?? null) : null,
+              at: e.conteoAt,
+            },
+      conteos: e.conteos.map((c) => ({
+        totalEnLocacion: c.totalEnLocacion,
+        evacuados: c.evacuados,
+        faltantes: c.totalEnLocacion - c.evacuados,
+        actor: nombres.get(c.actorId) ?? null,
+        at: c.createdAt,
+      })),
+      /** Cascada de notificación: cada paso con su plazo desde la activación. */
+      cascada,
+      notificacionCompleta: cascada.every((c) => c.notificadoAt !== null),
       /** Cronómetro: cada línea con los minutos transcurridos desde la activación. */
       cronometro: e.lineas.map((l) => ({
         at: l.at,
