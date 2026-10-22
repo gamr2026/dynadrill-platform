@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { aDia, diasHasta, masDias } from '../comun/fechas';
+import { aDia, diasHasta, hoyEcuador, masDias } from '../comun/fechas';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Consecutivo visible del desecho: DES-000001. */
@@ -86,11 +86,15 @@ export class DesechosConsultaService {
           include: { estadoNuevo: { select: { codigo: true, nombre: true } } },
         },
         manifiesto: { include: { firmas: true } },
+        documentos: { orderBy: { createdAt: 'asc' } },
         _count: { select: { items: true } },
       },
     });
     if (!d) throw new NotFoundException('El desecho no existe');
     const m = d.manifiesto;
+    const certificado = d.documentos.find((x) => x.tipo === 'certificado_disposicion');
+    const abierto = d.estado.codigo !== 'dispuesto';
+    const vence = m ? masDias(aDia(m.fecha), PLAZO_CERTIFICADO_DIAS) : '';
     const [nombres, cliente] = await Promise.all([
       this.nombres([
         d.createdBy,
@@ -123,7 +127,11 @@ export class DesechosConsultaService {
             numero: m.numero,
             fecha: aDia(m.fecha),
             /** Plazo de 30 días desde el manifiesto para tener el certificado de disposición final. */
-            certificadoVenceEl: masDias(aDia(m.fecha), PLAZO_CERTIFICADO_DIAS),
+            certificadoVenceEl: vence,
+            certificadoVencido: certificado ? false : abierto && hoyEcuador() > vence,
+            certificadoFueraDePlazo: certificado?.emitidoEl
+              ? aDia(certificado.emitidoEl) > vence
+              : false,
             gestorNombre: m.gestorNombre,
             gestorLicenciaSuia: m.gestorLicenciaSuia,
             cliente: cliente
@@ -152,6 +160,18 @@ export class DesechosConsultaService {
             firmasCompletas: m.firmas.length === ROLES_FIRMA.length,
           }
         : null,
+      documentos: d.documentos.map((x) => ({
+        tipo: x.tipo,
+        archivoId: x.archivoId,
+        emitidoEl: x.emitidoEl ? aDia(x.emitidoEl) : null,
+        referencia: x.referencia,
+        /** Lectura automática de la firma (solo un indicador para revisar). */
+        verificacion: x.verificacion,
+        verificacionConfianza:
+          x.verificacionConfianza === null ? null : Number(x.verificacionConfianza),
+        verificacionAt: x.verificacionAt,
+        cargadoAt: x.createdAt,
+      })),
       historial: d.historial.map((h) => ({
         estado: h.estadoNuevo,
         actor: nombres.get(h.actorId) ?? null,

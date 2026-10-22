@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -17,12 +27,15 @@ import {
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
-import { ClasificacionDesecho, RolFirmaDesecho } from '../generated/client';
+import { ClasificacionDesecho, RolFirmaDesecho, TipoDocumentoDesecho } from '../generated/client';
 import { DesechosConsultaService } from './desechos-consulta.service';
+import { DesechosDocumentosService } from './desechos-documentos.service';
 import { DesechosManifiestoService } from './desechos-manifiesto.service';
 import { DesechosService } from './desechos.service';
 
 const P = Permission;
+
+const sinBearer = (auth?: string) => (auth ?? '').replace(/^Bearer\s+/i, '') || undefined;
 
 export class ListarDesechosDto {
   @IsOptional() @IsString() @MaxLength(30) estado?: string;
@@ -81,6 +94,20 @@ export class FirmarManifiestoDto {
   @IsOptional() @IsString() @MaxLength(20) firmanteCedula?: string;
 }
 
+export class CargarManifiestoFirmadoDto {
+  @IsUUID() archivoId!: string;
+  @IsOptional() @IsString() @MaxLength(100) referencia?: string;
+}
+
+export class RegistrarCertificadoDto extends CargarManifiestoFirmadoDto {
+  /** AAAA-MM-DD: la fecha de emisión que dice el certificado del gestor. */
+  @IsISO8601({ strict: true }) emitidoEl!: string;
+}
+
+export class VerificarDocumentoDto {
+  @IsIn(Object.values(TipoDocumentoDesecho)) tipo!: TipoDocumentoDesecho;
+}
+
 /**
  * Desechos. Ruta pública `/api/v2/qhse/desechos`. Registrar es de cualquier usuario autenticado (`qhse.eventos.reportar`);
  * verlos y gestionarlos es del equipo HSE.
@@ -90,6 +117,7 @@ export class DesechosController {
   constructor(
     private readonly desechos: DesechosService,
     private readonly manifiestos: DesechosManifiestoService,
+    private readonly documentos: DesechosDocumentosService,
     private readonly consulta: DesechosConsultaService,
   ) {}
 
@@ -146,5 +174,40 @@ export class DesechosController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.manifiestos.firmar(id, dto.rol, dto, actor);
+  }
+
+  /** Carga el manifiesto firmado a mano (evidencia de las tres firmas); se lee la firma con el OCR de plataforma. */
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post(':id/manifiesto/documento')
+  cargarManifiestoFirmado(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CargarManifiestoFirmadoDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.documentos.cargarManifiestoFirmado(id, dto, actor, sinBearer(auth));
+  }
+
+  /** Certificado de disposición final: cierra el ciclo (el desecho pasa a dispuesto). */
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post(':id/certificado')
+  registrarCertificado(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RegistrarCertificadoDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.documentos.registrarCertificado(id, dto, actor, sinBearer(auth));
+  }
+
+  /** Vuelve a leer la firma de un documento (solo un indicador; no certifica la autenticidad). */
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post(':id/documentos/verificar')
+  verificar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificarDocumentoDto,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.documentos.verificarDeNuevo(id, dto.tipo, sinBearer(auth) ?? '');
   }
 }

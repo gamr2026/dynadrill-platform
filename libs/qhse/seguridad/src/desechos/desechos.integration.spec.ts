@@ -4,6 +4,7 @@
  */
 import { Permission } from '@dyn/authz';
 import { uuidv7 } from '@dyn/utils';
+import { VerificadorFirmasHttp, type LecturaFirma } from '../documentos/verificador-firmas';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 
@@ -107,14 +108,64 @@ run('QHSE: Desechos (base de datos real)', () => {
     return id;
   };
 
+  /** Lectura de firmas simulada (D6): lo que responda `ocr.respuesta` (null = el servicio no respondió). */
+  const ocr: { respuesta: LecturaFirma | null; llamadas: string[] } = {
+    respuesta: { resultado: 'firma_detectada', confianza: 0.9 },
+    llamadas: [],
+  };
+  const archivos: string[] = [];
+  let moduloDocumento = '';
+  /** Un archivo ya subido por el módulo de archivos de desechos, como lo deja `POST /api/archivos`. */
+  const archivo = async () => {
+    const id = uuidv7();
+    archivos.push(id);
+    await t.admin.query(
+      `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+       VALUES ($1, $2, 'doc.pdf', 'application/pdf', 10, $3, $4, 'omitido', $5)`,
+      [
+        id,
+        moduloDocumento,
+        id.replace(/-/g, '').padEnd(64, '0'),
+        `qhse-test/desechos/${id}`,
+        TECNICO.id,
+      ],
+    );
+    return id;
+  };
+  /** La lectura de firma corre aparte: se espera a que quede guardada. */
+  const esperarLectura = async (desechoId: string, tipo: string) => {
+    for (let i = 0; i < 40; i++) {
+      const f = (
+        await sql(
+          'SELECT verificacion, verificacion_confianza AS confianza, verificacion_at FROM qhse.desecho_documento WHERE desecho_id = $1 AND tipo = $2::qhse.tipo_documento_desecho',
+          [desechoId, tipo],
+        )
+      ).rows[0];
+      if (f?.verificacion_at) return f as { verificacion: string; confianza: string | null };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error('La lectura de firma no se guardó');
+  };
+
   beforeAll(async () => {
     t = await levantarAppDePrueba('3181');
+    jest
+      .spyOn(VerificadorFirmasHttp.prototype, 'verificar')
+      .mockImplementation(async (archivoId) => {
+        ocr.llamadas.push(archivoId);
+        return ocr.respuesta;
+      });
     await sembrarMaestros(t.admin, MAESTROS);
     cat = (await t.http().get('/api/qhse/desechos/catalogos').set(operador())).body;
+    // si falla aquí, falta correr `npm run db:seed:archivos`
+    moduloDocumento = (
+      await sql("SELECT id FROM archivos.modulo_archivo WHERE codigo = 'qhse_desecho_documento'")
+    ).rows[0].id;
   });
 
   afterAll(async () => {
     await t.admin.query('DELETE FROM qhse.desecho WHERE id = ANY($1::uuid[])', [desechos]);
+    await t.admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [archivos]);
     await t.admin.query(
       "DELETE FROM msg_qhse.outbox WHERE datos->'data'->>'desechoId' = ANY($1::text[])",
       [desechos],
@@ -378,6 +429,216 @@ run('QHSE: Desechos (base de datos real)', () => {
     });
   });
 
+  describe('documentos firmados y certificado de disposición final', () => {
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
+    /** Un desecho con manifiesto y las tres firmas, listo para cargar documentos. */
+    const firmado = async (firmas = 3, alGenerar?: (id: string) => Promise<unknown>) => {
+      const id = (await registrar()).body.id as string;
+      await t
+        .http()
+        .post(`/api/qhse/desechos/${id}/manifiesto`)
+        .set(gestor())
+        .send({
+          numero: `MAN-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+          gestorNombre: 'Gestor Ambiental S.A.',
+          gestorLicenciaSuia: 'SUIA-2026-0457',
+        })
+        .expect(201);
+      await alGenerar?.(id);
+      const cuerpos = [
+        { rol: 'despachado_por' },
+        { rol: 'transportado_por', firmanteNombre: 'Carlos', firmanteCedula: '1712345678' },
+        { rol: 'recibido_por', firmanteNombre: 'Rosa', firmanteCedula: '1798765432' },
+      ];
+      for (const c of cuerpos.slice(0, firmas))
+        await t
+          .http()
+          .post(`/api/qhse/desechos/${id}/manifiesto/firmas`)
+          .set(gestor())
+          .send(c)
+          .expect(201);
+      return id;
+    };
+    const certificado = (id: string, cuerpo: Record<string, unknown>, quien = gestor()) =>
+      t.http().post(`/api/qhse/desechos/${id}/certificado`).set(quien).send(cuerpo);
+    const eventos = async (tipo: string, id: string) =>
+      (
+        await sql(
+          "SELECT datos FROM msg_qhse.outbox WHERE tipo = $1 AND datos->'data'->>'desechoId' = $2",
+          [tipo, id],
+        )
+      ).rows as Array<{ datos: { data: Record<string, unknown> } }>;
+
+    it('el manifiesto firmado se carga con las tres firmas y se lee la firma (solo un indicador)', async () => {
+      const incompleto = await firmado(2);
+      const a0 = await archivo();
+      const sinFirmas = await t
+        .http()
+        .post(`/api/qhse/desechos/${incompleto}/manifiesto/documento`)
+        .set(gestor())
+        .send({ archivoId: a0 });
+      expect(sinFirmas.status).toBe(409);
+
+      const id = await firmado();
+      ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.92 };
+      const a1 = await archivo();
+      expect(
+        (
+          await t
+            .http()
+            .post(`/api/qhse/desechos/${id}/manifiesto/documento`)
+            .set(operador())
+            .send({ archivoId: a1 })
+        ).status,
+      ).toBe(403);
+      const r = await t
+        .http()
+        .post(`/api/qhse/desechos/${id}/manifiesto/documento`)
+        .set(gestor())
+        .send({ archivoId: a1, referencia: 'Escaneo 1' });
+      expect(r.status).toBe(201);
+      expect(r.body.estado.codigo).toBe('con_manifiesto');
+      expect(r.body.documentos[0]).toMatchObject({
+        tipo: 'manifiesto_firmado',
+        archivoId: a1,
+        referencia: 'Escaneo 1',
+      });
+      const lectura = await esperarLectura(id, 'manifiesto_firmado');
+      expect(lectura.verificacion).toBe('firma_detectada');
+      expect(Number(lectura.confianza)).toBe(0.92);
+      expect(ocr.llamadas).toContain(a1);
+      // uno solo, y el archivo no se reutiliza
+      expect(
+        (
+          await t
+            .http()
+            .post(`/api/qhse/desechos/${id}/manifiesto/documento`)
+            .set(gestor())
+            .send({ archivoId: await archivo() })
+        ).status,
+      ).toBe(409);
+      // un archivo de otro módulo no sirve
+      const ajeno = uuidv7();
+      archivos.push(ajeno);
+      const otroModulo = (
+        await sql("SELECT id FROM archivos.modulo_archivo WHERE codigo = 'qhse_stop_foto'")
+      ).rows[0].id;
+      await sql(
+        `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+         VALUES ($1, $2, 'f.png', 'image/png', 10, $3, $4, 'omitido', $5)`,
+        [
+          ajeno,
+          otroModulo,
+          ajeno.replace(/-/g, '').padEnd(64, '0'),
+          `qhse-test/desechos/${ajeno}`,
+          TECNICO.id,
+        ],
+      );
+      const certificadoAjeno = await certificado(id, { archivoId: ajeno, emitidoEl: hoy });
+      expect(certificadoAjeno.status).toBe(400);
+      expect(certificadoAjeno.body.detail).toMatch(/no se subió como documento de desechos/);
+    });
+
+    it('el certificado cierra el ciclo: exige las tres firmas, pasa a dispuesto, congela el desecho y publica el evento', async () => {
+      const incompleto = await firmado(1);
+      expect(
+        (await certificado(incompleto, { archivoId: await archivo(), emitidoEl: hoy })).status,
+      ).toBe(409);
+
+      const id = await firmado();
+      ocr.respuesta = { resultado: 'no_detectada', confianza: 0.1 };
+      const a = await archivo();
+      // validaciones
+      expect((await certificado(id, { archivoId: a, emitidoEl: 'mañana' })).status).toBe(400);
+      expect((await certificado(id, { archivoId: a, emitidoEl: '2099-01-01' })).status).toBe(400);
+      expect((await certificado(id, { archivoId: a, emitidoEl: '2000-01-01' })).status).toBe(400);
+      expect((await certificado(id, { archivoId: uuidv7(), emitidoEl: hoy })).status).toBe(400);
+      expect((await certificado(id, { archivoId: a, emitidoEl: hoy }, operador())).status).toBe(
+        403,
+      );
+
+      const r = await certificado(id, { archivoId: a, emitidoEl: hoy, referencia: 'CERT-001' });
+      expect(r.status).toBe(201);
+      expect(r.body.estado.codigo).toBe('dispuesto');
+      expect(r.body.diasParaLimite).toBeNull();
+      expect(r.body.vencido).toBe(false);
+      expect(r.body.manifiesto).toMatchObject({
+        certificadoVencido: false,
+        certificadoFueraDePlazo: false,
+      });
+      expect(r.body.historial.map((h: { estado: { codigo: string } }) => h.estado.codigo)).toEqual([
+        'almacenado',
+        'con_manifiesto',
+        'dispuesto',
+      ]);
+      expect((await esperarLectura(id, 'certificado_disposicion')).verificacion).toBe(
+        'firma_no_detectada',
+      );
+      const ev = await eventos('qhse.desecho.dispuesto', id);
+      expect(ev).toHaveLength(1);
+      expect(ev[0].datos.data).toMatchObject({ estado: 'dispuesto', certificadoEmitidoEl: hoy });
+      // un desecho dispuesto ya no recibe documentos ni manifiesto ni firmas
+      expect((await certificado(id, { archivoId: await archivo(), emitidoEl: hoy })).status).toBe(
+        409,
+      );
+      expect(
+        (
+          await t
+            .http()
+            .post(`/api/qhse/desechos/${id}/manifiesto/firmas`)
+            .set(gestor())
+            .send({ rol: 'despachado_por' })
+        ).status,
+      ).toBe(409);
+    });
+
+    it('con el servicio de lectura caído el documento se carga igual y la lectura se puede repetir', async () => {
+      const id = await firmado();
+      ocr.respuesta = null;
+      await t
+        .http()
+        .post(`/api/qhse/desechos/${id}/manifiesto/documento`)
+        .set(gestor())
+        .send({ archivoId: await archivo() })
+        .expect(201);
+      expect((await esperarLectura(id, 'manifiesto_firmado')).verificacion).toBe('no_verificada');
+      ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.8 };
+      const otra = await t
+        .http()
+        .post(`/api/qhse/desechos/${id}/documentos/verificar`)
+        .set(gestor())
+        .send({ tipo: 'manifiesto_firmado' });
+      expect(otra.status).toBe(201);
+      expect(otra.body.documentos[0].verificacion).toBe('firma_detectada');
+      expect(
+        (
+          await t
+            .http()
+            .post(`/api/qhse/desechos/${id}/documentos/verificar`)
+            .set(gestor())
+            .send({ tipo: 'certificado_disposicion' })
+        ).status,
+      ).toBe(404);
+    });
+
+    it('un certificado que llega después de 30 días del manifiesto se marca fuera de plazo (no se bloquea)', async () => {
+      // el manifiesto se generó hace 45 días (la fecha la fija el servidor; se atrasa directo en la base antes de firmar)
+      const id = await firmado(3, (x) =>
+        sql('UPDATE qhse.desecho_manifiesto SET fecha = CURRENT_DATE - 45 WHERE desecho_id = $1', [
+          x,
+        ]),
+      );
+      const vencido = (await t.http().get(`/api/qhse/desechos/${id}`).set(tecnico())).body;
+      expect(vencido.manifiesto.certificadoVencido).toBe(true);
+      const r = await certificado(id, { archivoId: await archivo(), emitidoEl: hoy });
+      expect(r.status).toBe(201);
+      expect(r.body.manifiesto).toMatchObject({
+        certificadoVencido: false,
+        certificadoFueraDePlazo: true,
+      });
+    });
+  });
+
   describe('reglas de la base', () => {
     const cabecera = async (
       extra: { limite?: string; estado?: string; clasificacion?: string } = {},
@@ -411,6 +672,12 @@ run('QHSE: Desechos (base de datos real)', () => {
         c.release();
       }
     };
+    /** Carga el certificado de disposición final directo en la base (el desecho debe tener ya las tres firmas). */
+    const certificar = async (id: string) =>
+      sql(
+        'INSERT INTO qhse.desecho_documento (id, desecho_id, tipo, archivo_id, emitido_el, created_by) VALUES ($1, $2, $3::qhse.tipo_documento_desecho, $4, CURRENT_DATE, $5)',
+        [uuidv7(), id, 'certificado_disposicion', await archivo(), OPERADOR.id],
+      );
     const item = (id: string): [string, unknown[]] => [
       "INSERT INTO qhse.desecho_item (id, desecho_id, orden, descripcion, codigo, cantidad_galones, created_by) VALUES ($1, $2, 1, 'Línea', 'X-1', 1, $3)",
       [uuidv7(), id, OPERADOR.id],
@@ -516,6 +783,7 @@ run('QHSE: Desechos (base de datos real)', () => {
           'INSERT INTO qhse.desecho_firma (id, manifiesto_id, rol, registrado_por, firmante_nombre, firmante_cedula) VALUES ($1, $2, $3::qhse.rol_firma_desecho, $4, $5, $6)',
           [uuidv7(), manifiesto, rol, OPERADOR.id, nombre, cedula],
         );
+      await certificar(id);
       await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
         id,
         await estadoId('dispuesto'),
@@ -606,6 +874,7 @@ run('QHSE: Desechos (base de datos real)', () => {
           'ZZZ-1',
         ]),
       ).rejects.toThrow(/ya tiene las tres firmas/);
+      await certificar(id);
       await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
         id,
         await estadoId('dispuesto'),
@@ -641,6 +910,88 @@ run('QHSE: Desechos (base de datos real)', () => {
       ).rejects.toThrow(
         /desecho_manifiesto_desecho_key|solo se genera|se genera con el desecho almacenado/,
       );
+    });
+
+    it('los documentos exigen las tres firmas, el certificado es lo que permite disponer y lo cargado no se reemplaza ni se borra', async () => {
+      const id = await insertarDirecto(1);
+      const manifiestoId = uuidv7();
+      await sql(
+        "INSERT INTO qhse.desecho_manifiesto (id, desecho_id, numero, fecha, gestor_nombre, gestor_licencia_suia, created_by) VALUES ($1, $2, $3, CURRENT_DATE, 'G', 'S', $4)",
+        [manifiestoId, id, `M-${Date.now()}-f`, OPERADOR.id],
+      );
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        id,
+        await estadoId('con_manifiesto'),
+      ]);
+      const documento = async (tipo: string, emitido: string | null) =>
+        sql(
+          'INSERT INTO qhse.desecho_documento (id, desecho_id, tipo, archivo_id, emitido_el, created_by) VALUES ($1, $2, $3::qhse.tipo_documento_desecho, $4, $5, $6)',
+          [uuidv7(), id, tipo, await archivo(), emitido, OPERADOR.id],
+        );
+      // sin las tres firmas no se carga ningún documento
+      await expect(documento('manifiesto_firmado', null)).rejects.toThrow(/tres firmas/);
+      for (const [rol, nombre, cedula] of [
+        ['despachado_por', null, null],
+        ['transportado_por', 'Carlos', '1712345678'],
+        ['recibido_por', 'Rosa', '1798765432'],
+      ])
+        await sql(
+          'INSERT INTO qhse.desecho_firma (id, manifiesto_id, rol, registrado_por, firmante_nombre, firmante_cedula) VALUES ($1, $2, $3::qhse.rol_firma_desecho, $4, $5, $6)',
+          [uuidv7(), manifiestoId, rol, OPERADOR.id, nombre, cedula],
+        );
+      // la fecha de emisión es del certificado y solo del certificado; no puede ser anterior al manifiesto
+      await expect(documento('manifiesto_firmado', '2026-10-01')).rejects.toThrow(
+        /desecho_documento_emision_check/,
+      );
+      await expect(documento('certificado_disposicion', null)).rejects.toThrow(
+        /desecho_documento_emision_check/,
+      );
+      await expect(documento('certificado_disposicion', '2000-01-01')).rejects.toThrow(
+        /anterior al manifiesto/,
+      );
+      // sin certificado no se dispone
+      await expect(
+        sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+          id,
+          await estadoId('dispuesto'),
+        ]),
+      ).rejects.toThrow(/certificado de disposición final/);
+      await documento('manifiesto_firmado', null);
+      await expect(documento('manifiesto_firmado', null)).rejects.toThrow(
+        /desecho_documento_unico_key/,
+      );
+      await documento('certificado_disposicion', new Date().toISOString().slice(0, 10));
+
+      // lo cargado no se reemplaza ni se borra; solo cambia el indicador de la lectura de firma
+      await expect(
+        t.prisma.desechoDocumento.updateMany({
+          where: { desechoId: id },
+          data: { archivoId: uuidv7() },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.desechoDocumento.updateMany({
+          where: { desechoId: id },
+          data: { emitidoEl: new Date('2026-01-01') },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.desechoDocumento.deleteMany({ where: { desechoId: id } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await t.prisma.desechoDocumento.updateMany({
+        where: { desechoId: id },
+        data: { verificacion: 'firma_detectada', verificacionConfianza: 0.5 },
+      });
+      await expect(
+        t.prisma.desechoDocumento.updateMany({
+          where: { desechoId: id },
+          data: { verificacionConfianza: 1.5 },
+        }),
+      ).rejects.toThrow(/desecho_documento_confianza_check|out of range|numeric/i);
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        id,
+        await estadoId('dispuesto'),
+      ]);
     });
 
     it('un contenedor, un estado o un pozo inexistentes no pasan (FK)', async () => {

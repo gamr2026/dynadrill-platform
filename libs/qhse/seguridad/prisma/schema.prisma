@@ -1331,6 +1331,7 @@ model Desecho {
   items           DesechoItem[]
   historial       DesechoHistorial[]
   manifiesto      DesechoManifiesto?
+  documentos      DesechoDocumento[]
 
   @@index([estadoId])
   @@index([limiteAlmacenamientoHasta])
@@ -1451,5 +1452,35 @@ model DesechoFirma {
 
   @@unique([manifiestoId, rol])
   @@map("desecho_firma")
+  @@schema("qhse")
+}
+
+enum TipoDocumentoDesecho {
+  manifiesto_firmado
+  certificado_disposicion
+
+  @@map("tipo_documento_desecho")
+  @@schema("qhse")
+}
+
+/// Manifiesto firmado y certificado de disposición final. `archivoId` es FK real a `archivos.archivo` (sin relación de Prisma: no se toca ArchivoRef).
+model DesechoDocumento {
+  id                   String               @id @db.Uuid
+  desechoId            String               @map("desecho_id") @db.Uuid
+  desecho              Desecho              @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  tipo                 TipoDocumentoDesecho
+  archivoId            String               @unique @map("archivo_id") @db.Uuid
+  emitidoEl            DateTime?            @map("emitido_el") @db.Date
+  referencia           String?
+  verificacion         VerificacionFirma    @default(no_verificada)
+  verificacionConfianza Decimal?            @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt       DateTime?            @map("verificacion_at") @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String               @map("created_by") @db.Uuid
+  updatedAt            DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?              @map("updated_by") @db.Uuid
+
+  @@unique([desechoId, tipo])
+  @@map("desecho_documento")
   @@schema("qhse")
 }
