@@ -36,7 +36,32 @@ const derrameActivado = (rol: 'tecnico_hse' | 'gerente_hse'): PlantillaDef => ({
   rol,
 });
 
+/** El derrame obliga a notificar al MAE (por su ubicación o su volumen): sin esa notificación no se puede cerrar. */
+const maePendiente = (rol: 'tecnico_hse' | 'gerente_hse'): PlantillaDef => ({
+  codigo: `qhse_derrame_mae_pendiente_${rol}`,
+  descripcion:
+    'Un derrame obliga a notificar al Ministerio del Ambiente (MAE) por su ubicación o su volumen: sin esa notificación no se puede cerrar.',
+  asunto: 'Notificación al MAE pendiente: {{codigo}} — {{ubicacionNombre}}',
+  cuerpoHtml:
+    '<p>Hola {{nombre}},</p>' +
+    '<p>Como <strong>{{cargo}}</strong>, debe notificar al <strong>Ministerio del Ambiente (MAE)</strong> el derrame <strong>{{codigo}}</strong>: es obligatorio por su ubicación o su volumen, y el derrame no se puede cerrar sin registrar esa notificación.</p>' +
+    DATOS +
+    '<p>Registre la notificación (y la referencia del oficio) en el detalle del derrame.</p>',
+  cuerpoTexto:
+    'Hola {{nombre}},\n\nComo {{cargo}}, debe notificar al Ministerio del Ambiente (MAE) el derrame {{codigo}}: es obligatorio por su ubicación o su volumen, y el derrame no se puede cerrar sin registrar esa notificación.\n\n' +
+    TEXTO +
+    '\n\nRegistre la notificación (y la referencia del oficio) en el detalle del derrame.',
+  tituloAviso: 'Notificación al MAE pendiente: {{codigo}}',
+  detalleAviso: '{{ubicacionNombre}} · {{bandaNombre}}',
+  enlaceAviso: '/dashboard/qhse/eventos',
+  tono: 'error',
+  evento: 'qhse.derrame.mae_pendiente',
+  rol,
+});
+
 export const PLANTILLAS_QHSE_DERRAMES: PlantillaDef[] = [
   derrameActivado('tecnico_hse'),
   derrameActivado('gerente_hse'),
+  maePendiente('tecnico_hse'),
+  maePendiente('gerente_hse'),
 ];

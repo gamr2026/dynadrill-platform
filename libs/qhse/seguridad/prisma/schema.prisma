@@ -1584,6 +1584,11 @@ model Derrame {
   volumenRealBarriles  Decimal?            @map("volumen_real_barriles") @db.Decimal(10, 3)
   volumenConfirmadoPor String?             @map("volumen_confirmado_por") @db.Uuid
   volumenConfirmadoAt  DateTime?           @map("volumen_confirmado_at") @db.Timestamptz(6)
+  notificadoMaeAt      DateTime?           @map("notificado_mae_at") @db.Timestamptz(6)
+  notificadoMaePor     String?             @map("notificado_mae_por") @db.Uuid
+  maeReferencia        String?             @map("mae_referencia")
+  cerradoAt            DateTime?           @map("cerrado_at") @db.Timestamptz(6)
+  cerradoPor           String?             @map("cerrado_por") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy       String              @map("created_by") @db.Uuid
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

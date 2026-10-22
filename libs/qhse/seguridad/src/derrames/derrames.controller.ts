@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestj
 import { IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { DerramesMaeService } from './derrames-mae.service';
 import { DerramesContencionService } from './derrames-contencion.service';
 import { DerramesConsultaService } from './derrames-consulta.service';
 import { DerramesService } from './derrames.service';
@@ -23,6 +24,11 @@ export class ActivarDerrameDto {
   @IsOptional() @IsUUID() ticketId?: string;
 }
 
+export class NotificarMaeDto {
+  /** Número o referencia del oficio o reporte presentado al MAE (opcional). */
+  @IsOptional() @IsString() @MaxLength(100) referencia?: string;
+}
+
 export class ConfirmarPasoDto {
   @IsUUID() itemId!: string;
 }
@@ -41,6 +47,7 @@ export class DerramesController {
   constructor(
     private readonly derrames: DerramesService,
     private readonly contencion: DerramesContencionService,
+    private readonly mae: DerramesMaeService,
     private readonly consulta: DerramesConsultaService,
   ) {}
 
@@ -96,5 +103,23 @@ export class DerramesController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.contencion.confirmarVolumen(id, dto.barriles, actor);
+  }
+
+  /** Registra la notificación al MAE (obligatoria si el derrame la requiere); una vez registrada no se cambia. */
+  @RequirePermission(P.DERRAMES_GESTIONAR)
+  @Post(':id/notificar-mae')
+  notificarMae(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: NotificarMaeDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.mae.notificarMae(id, dto, actor);
+  }
+
+  /** Cierra el derrame contenido; sin la notificación al MAE no se cierra si la requiere. */
+  @RequirePermission(P.DERRAMES_GESTIONAR)
+  @Post(':id/cerrar')
+  cerrar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.mae.cerrar(id, actor);
   }
 }

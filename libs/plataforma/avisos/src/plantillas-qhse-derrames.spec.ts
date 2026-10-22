@@ -19,7 +19,7 @@ const DATOS = {
 
 describe('plantillas de avisos de Derrames (QHSE)', () => {
   it('cada plantilla se completa con los datos del evento: no queda ninguna variable sin reemplazar', () => {
-    expect(PLANTILLAS_QHSE_DERRAMES.length).toBeGreaterThanOrEqual(2);
+    expect(PLANTILLAS_QHSE_DERRAMES).toHaveLength(4);
     for (const p of PLANTILLAS_QHSE_DERRAMES) {
       for (const t of [p.asunto, p.cuerpoHtml, p.cuerpoTexto, p.tituloAviso, p.detalleAviso]) {
         expect(renderizar(t, DATOS, true)).not.toContain('{{');
@@ -39,11 +39,10 @@ describe('plantillas de avisos de Derrames (QHSE)', () => {
   });
 
   it('el equipo HSE recibe la alerta y el texto usa «usted»', () => {
-    expect(
-      PLANTILLAS_QHSE_DERRAMES.filter((p) => p.evento === 'qhse.derrame.activado').map(
-        (p) => p.rol,
-      ),
-    ).toEqual(['tecnico_hse', 'gerente_hse']);
+    for (const evento of ['qhse.derrame.activado', 'qhse.derrame.mae_pendiente'])
+      expect(PLANTILLAS_QHSE_DERRAMES.filter((p) => p.evento === evento).map((p) => p.rol)).toEqual(
+        ['tecnico_hse', 'gerente_hse'],
+      );
     for (const p of PLANTILLAS_QHSE_DERRAMES)
       expect(`${p.cuerpoHtml} ${p.cuerpoTexto}`).not.toMatch(
         /\b(vos|tenés|dirigí|confirmá|avisá|notificá)\b/i,

@@ -14,6 +14,7 @@ import {
   PLAZO_CONTENCION_MINUTOS,
   bandaDeVolumen,
   plazoDeContencion,
+  requiereNotificacionMae,
 } from './derrames-consulta.service';
 import { DerramesEventosService } from './derrames-eventos.service';
 
@@ -117,6 +118,12 @@ export class DerramesContencionService {
             : 'Un derrame cerrado ya no cambia su volumen',
         );
       const redondeado = Math.round(barriles * 1000) / 1000;
+      const bandas = await this.consulta.bandasActivas(tx);
+      const antes = await tx.derrame.findUniqueOrThrow({
+        where: { id },
+        include: { ubicacion: true, banda: true },
+      });
+      const yaRequeria = requiereNotificacionMae(this.consulta.reglas(antes, bandas));
       await tx.derrame.update({
         where: { id },
         data: {
@@ -129,12 +136,19 @@ export class DerramesContencionService {
       await tx.derrameVolumenHistorial.create({
         data: { id: uuidv7(), derrameId: id, volumenBarriles: redondeado, actorId: actor.id },
       });
-      const bandas = await this.consulta.bandasActivas(tx);
       const real = bandaDeVolumen(bandas, redondeado);
       await this.eventos.publicar(tx, 'qhse.derrame.volumen_confirmado', id, actor, {
         volumenConfirmadoBarriles: redondeado,
         bandaReal: real?.codigo ?? null,
       });
+      // la banda real es más grave que la reportada y ahora exige notificar al MAE: aviso de inmediato
+      const ahoraRequiere = requiereNotificacionMae({
+        ubicacion: antes.ubicacion,
+        banda: antes.banda,
+        bandaReal: real,
+      });
+      if (!yaRequeria && ahoraRequiere)
+        await this.eventos.publicar(tx, 'qhse.derrame.mae_pendiente', id, actor);
     });
     return this.consulta.detalle(id);
   }

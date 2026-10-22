@@ -68,6 +68,8 @@ export class DerramesService {
         data: { id: uuidv7(), derrameId: id, estadoNuevo: EstadoDerrame.activo, actorId: actor.id },
       });
       await this.eventos.publicar(tx, 'qhse.derrame.activado', id, actor);
+      // la notificación al MAE es obligatoria desde el primer momento: se avisa de inmediato
+      if (requiereMae) await this.eventos.publicar(tx, 'qhse.derrame.mae_pendiente', id, actor);
     });
     return {
       id,

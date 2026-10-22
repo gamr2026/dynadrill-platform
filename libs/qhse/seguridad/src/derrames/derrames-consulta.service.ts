@@ -206,6 +206,8 @@ export class DerramesConsultaService {
       d.activadoPor,
       ...(d.contenidoPor ? [d.contenidoPor] : []),
       ...(d.volumenConfirmadoPor ? [d.volumenConfirmadoPor] : []),
+      ...(d.notificadoMaePor ? [d.notificadoMaePor] : []),
+      ...(d.cerradoPor ? [d.cerradoPor] : []),
       ...d.historial.map((h) => h.actorId),
       ...d.checklist.map((c) => c.confirmadoPor),
       ...d.volumenes.map((v) => v.actorId),
@@ -264,6 +266,20 @@ export class DerramesConsultaService {
         ? (nombres.get(d.volumenConfirmadoPor) ?? null)
         : null,
       volumenConfirmadoAt: d.volumenConfirmadoAt,
+      /** Notificación al Ministerio del Ambiente: obligatoria si `requiereNotificacionMae`; sin ella no se cierra. */
+      notificacionMae: d.notificadoMaeAt
+        ? {
+            at: d.notificadoMaeAt,
+            por: d.notificadoMaePor ? (nombres.get(d.notificadoMaePor) ?? null) : null,
+            referencia: d.maeReferencia,
+          }
+        : null,
+      maePendiente: requiereNotificacionMae(reglas) && !d.notificadoMaeAt && d.estado !== 'cerrado',
+      /** Se puede cerrar un derrame contenido que no tenga la notificación al MAE pendiente. */
+      puedeCerrar:
+        d.estado === 'contenido' && !(requiereNotificacionMae(reglas) && !d.notificadoMaeAt),
+      cerradoAt: d.cerradoAt,
+      cerradoPor: d.cerradoPor ? (nombres.get(d.cerradoPor) ?? null) : null,
       volumenes: d.volumenes.map((v) => ({
         barriles: Number(v.volumenBarriles),
         actor: nombres.get(v.actorId) ?? null,

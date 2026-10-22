@@ -367,6 +367,112 @@ run('QHSE: Derrames (base de datos real)', () => {
       ).find((x) => x.id === id);
       expect(fila).toMatchObject({ requiereNotificacionMae: true, volumenRealBarriles: 7.25 });
     });
+
+    describe('notificación al MAE y cierre', () => {
+      const mae = (id: string, cuerpo: Record<string, unknown> = {}, quien = gestor()) =>
+        t.http().post(`/api/qhse/derrames/${id}/notificar-mae`).set(quien).send(cuerpo);
+      const cerrar = (id: string, quien = gestor()) =>
+        t.http().post(`/api/qhse/derrames/${id}/cerrar`).set(quien);
+      const contenido = async (cuerpo: Record<string, unknown> = {}) => {
+        const id = (await activar(cuerpo)).body.id as string;
+        await confirmarTodo(id);
+        await contener(id);
+        return id;
+      };
+
+      it('un derrame que no requiere el MAE se cierra directo y no admite la notificación', async () => {
+        const id = await contenido(); // geomembrana + menor
+        const d = await detalle(id);
+        expect(d).toMatchObject({
+          requiereNotificacionMae: false,
+          maePendiente: false,
+          puedeCerrar: true,
+        });
+        const noAplica = await mae(id);
+        expect(noAplica.status).toBe(409);
+        expect(noAplica.body.detail).toMatch(/no requiere notificar al MAE/);
+        expect((await cerrar(id, tecnico())).status).toBe(403);
+        const r = await cerrar(id);
+        expect(r.status).toBe(201);
+        expect(r.body).toMatchObject({ estado: 'cerrado', cerradoPor: TECNICO.nombre });
+        expect(r.body.historial.map((h: { estado: string }) => h.estado)).toEqual([
+          'activo',
+          'contenido',
+          'cerrado',
+        ]);
+        expect(await eventos('qhse.derrame.cerrado', id)).toHaveLength(1);
+        expect(await eventos('qhse.derrame.mae_pendiente', id)).toHaveLength(0);
+        // cerrado: ya no cambia
+        expect((await cerrar(id)).status).toBe(409);
+        expect((await volumen(id, 1)).status).toBe(409);
+      });
+
+      it('en cuerpo de agua (cualquier volumen) el MAE es obligatorio: aviso inmediato, y no se cierra sin notificarlo', async () => {
+        const id = await contenido({
+          ubicacionId: ubicacion('cuerpo_agua'),
+          bandaId: banda('menor'),
+        });
+        // el aviso salió al activar
+        const ev = await eventos('qhse.derrame.mae_pendiente', id);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].datos.data).toMatchObject({
+          requiereNotificacionMae: true,
+          escalaAEmergencia: true,
+          ubicacion: 'cuerpo_agua',
+        });
+        const d = await detalle(id);
+        expect(d).toMatchObject({ maePendiente: true, puedeCerrar: false, notificacionMae: null });
+        const sinMae = await cerrar(id);
+        expect(sinMae.status).toBe(409);
+        expect(sinMae.body.detail).toMatch(/registre antes la notificación al MAE/);
+
+        expect((await mae(id, {}, tecnico())).status).toBe(403);
+        const n = await mae(id, { referencia: 'OFICIO-MAE-2026-001' });
+        expect(n.status).toBe(201);
+        expect(n.body).toMatchObject({
+          maePendiente: false,
+          puedeCerrar: true,
+          notificacionMae: { por: TECNICO.nombre, referencia: 'OFICIO-MAE-2026-001' },
+        });
+        expect((await eventos('qhse.derrame.mae_notificado', id))[0].datos.data).toMatchObject({
+          maeReferencia: 'OFICIO-MAE-2026-001',
+        });
+        // una vez registrada no se repite ni se cambia
+        expect((await mae(id)).status).toBe(409);
+        expect((await cerrar(id)).status).toBe(201);
+        expect((await mae(id)).status).toBe(409); // cerrado
+      });
+
+      it('un volumen real más grave que el reportado obliga a notificar al MAE y avisa en ese momento', async () => {
+        const id = await contenido(); // geomembrana + menor: no lo requería
+        expect(await eventos('qhse.derrame.mae_pendiente', id)).toHaveLength(0);
+        await volumen(id, 0.4); // sigue en la banda menor
+        expect(await eventos('qhse.derrame.mae_pendiente', id)).toHaveLength(0);
+        await volumen(id, 9); // banda mayor
+        const ev = await eventos('qhse.derrame.mae_pendiente', id);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].datos.data).toMatchObject({
+          volumenRealBarriles: 9,
+          requiereNotificacionMae: true,
+        });
+        expect((await detalle(id)).puedeCerrar).toBe(false);
+        expect((await cerrar(id)).status).toBe(409);
+        // otra corrección que sigue en banda mayor no repite el aviso
+        await volumen(id, 12);
+        expect(await eventos('qhse.derrame.mae_pendiente', id)).toHaveLength(1);
+        await mae(id).expect(201);
+        expect((await cerrar(id)).status).toBe(201);
+      });
+
+      it('el cierre exige que el derrame esté contenido', async () => {
+        const id = (await activar()).body.id as string;
+        const r = await cerrar(id);
+        expect(r.status).toBe(409);
+        expect(r.body.detail).toMatch(/Primero contenga el derrame/);
+        expect((await cerrar(uuidv7())).status).toBe(404);
+        expect((await mae(uuidv7())).status).toBe(404);
+      });
+    });
   });
 
   describe('reglas de la base', () => {
@@ -536,6 +642,84 @@ run('QHSE: Derrames (base de datos real)', () => {
           data: { actorId: TECNICO.id },
         }),
       ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
+    it('el cierre trae quién y cuándo, y un derrame que requiere el MAE no se cierra sin la notificación', async () => {
+      const cerrarDirecto = (id: string) =>
+        sql(
+          "UPDATE qhse.derrame SET estado = 'cerrado', cerrado_at = now(), cerrado_por = $2 WHERE id = $1",
+          [id, OPERADOR.id],
+        );
+      const aguaId = (await activar({ ubicacionId: ubicacion('cuerpo_agua') })).body.id as string;
+      await sql(
+        'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) SELECT $1, id, $2 FROM qhse.derrame_checklist_item WHERE activo',
+        [aguaId, OPERADOR.id],
+      );
+      await sql(
+        "UPDATE qhse.derrame SET estado = 'contenido', contenido_at = now(), contenido_por = $2 WHERE id = $1",
+        [aguaId, OPERADOR.id],
+      );
+      expect((await sql('SELECT qhse.derrame_requiere_mae($1) AS r', [aguaId])).rows[0].r).toBe(
+        true,
+      );
+      await expect(cerrarDirecto(aguaId)).rejects.toThrow(/registrar la notificación al MAE/);
+      // sin quién ni cuándo no es un cierre (en un derrame que no requiere el MAE, para llegar al CHECK)
+      const sinMae = await insertarContenido();
+      await expect(
+        sql("UPDATE qhse.derrame SET estado = 'cerrado' WHERE id = $1", [sinMae]),
+      ).rejects.toThrow(/derrame_cierre_check/);
+      // con la notificación sí; y la notificación ya registrada no se cambia
+      await sql(
+        'UPDATE qhse.derrame SET notificado_mae_at = now(), notificado_mae_por = $2, mae_referencia = $3 WHERE id = $1',
+        [aguaId, OPERADOR.id, 'OF-1'],
+      );
+      await expect(
+        sql("UPDATE qhse.derrame SET mae_referencia = 'OTRO' WHERE id = $1", [aguaId]),
+      ).rejects.toThrow(/ya está registrada y no se cambia/);
+      await expect(
+        sql('UPDATE qhse.derrame SET notificado_mae_at = now() WHERE id = $1', [aguaId]),
+      ).rejects.toThrow(/ya está registrada y no se cambia/);
+      await cerrarDirecto(aguaId);
+
+      // el derrame que no lo requiere se cierra directo y no admite la notificación
+      const simple = await insertarContenido();
+      expect((await sql('SELECT qhse.derrame_requiere_mae($1) AS r', [simple])).rows[0].r).toBe(
+        false,
+      );
+      await expect(
+        sql(
+          'UPDATE qhse.derrame SET notificado_mae_at = now(), notificado_mae_por = $2 WHERE id = $1',
+          [simple, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/no requiere notificar al MAE/);
+      // una banda real más grave lo convierte en obligatorio
+      await sql(
+        'UPDATE qhse.derrame SET volumen_real_barriles = 9, volumen_confirmado_por = $2, volumen_confirmado_at = now() WHERE id = $1',
+        [simple, OPERADOR.id],
+      );
+      expect((await sql('SELECT qhse.derrame_requiere_mae($1) AS r', [simple])).rows[0].r).toBe(
+        true,
+      );
+      await expect(cerrarDirecto(simple)).rejects.toThrow(/registrar la notificación al MAE/);
+    });
+
+    it('la notificación al MAE se registra completa, con referencia no vacía, y el cierre no puede ser anterior a la contención', async () => {
+      const id = (await activar({ ubicacionId: ubicacion('cuerpo_agua') })).body.id as string;
+      await expect(
+        sql('UPDATE qhse.derrame SET notificado_mae_at = now() WHERE id = $1', [id]),
+      ).rejects.toThrow(/derrame_notificacion_mae_check/);
+      await expect(
+        sql("UPDATE qhse.derrame SET mae_referencia = 'OF-1' WHERE id = $1", [id]),
+      ).rejects.toThrow(/derrame_notificacion_mae_check/);
+      await expect(
+        sql(
+          "UPDATE qhse.derrame SET notificado_mae_at = now(), notificado_mae_por = $2, mae_referencia = '   ' WHERE id = $1",
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_notificacion_mae_check/);
+      await expect(
+        t.prisma.derrame.update({ where: { id }, data: { cerradoPor: TECNICO.id } }),
+      ).rejects.toThrow(/derrame_cierre_check|permission denied|denegado/i);
     });
 
     it('la descripción no puede estar vacía y el ticket, la ubicación y la banda deben existir (FK)', async () => {
