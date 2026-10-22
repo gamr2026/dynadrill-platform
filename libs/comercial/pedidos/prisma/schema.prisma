@@ -301,10 +301,6 @@ model Pedido {
   /// prefactura al abrir el pedido por primera vez; la prefactura, cuando exista, lleva este mismo número.
   ticketNumero     Int?    @unique @map("ticket_numero")
   ticketEmisionId  String? @map("ticket_emision_id") @db.Uuid
-  /// Factura de AS2 con la que se cerró el pedido.
-  facturaNumero String?   @map("factura_numero")
-  facturadoAt   DateTime? @map("facturado_at") @db.Timestamptz(6)
-  facturadoPor  String?   @map("facturado_por") @db.Uuid
   despachoSolicitadoAt     DateTime? @map("despacho_solicitado_at") @db.Timestamptz(6)
   despachoSolicitadoPor    String?   @map("despacho_solicitado_por") @db.Uuid
   despachoSolicitante      IdUsuario? @relation("pedidoDespachoSolicitado", fields: [despachoSolicitadoPor], references: [id])
