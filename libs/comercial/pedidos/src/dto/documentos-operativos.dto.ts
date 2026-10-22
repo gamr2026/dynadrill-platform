@@ -65,6 +65,8 @@ export class CorregirDiaOperativoDto {
 export class UsoHerramientaDto {
   @IsDateString() fecha!: string;
   @IsIn(ESTADOS_USO_HERRAMIENTA) estado!: (typeof ESTADOS_USO_HERRAMIENTA)[number];
+  /** Cantidad aplicada ese día; sin ella el uso es una marca y vale 1. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) cantidad?: number;
 }
 
 export class HerramientaOperativaDto {
