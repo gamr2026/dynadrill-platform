@@ -1,0 +1,137 @@
+// Módulo `auditoria` (contenedor plataforma). Schema PostgreSQL: auditoria.
+// Registro central e INMUTABLE de los hechos de negocio: proyecta los eventos que publican todos los contenedores para responder
+// quién hizo qué, cuándo y sobre qué entidad. No guarda el cuerpo del evento (sin JSON): solo el sobre y unas pocas claves
+// consultables (lista blanca en `clave_dato`). Los historiales propios de cada módulo se quedan; este no los reemplaza.
+// Las IDs son UUIDv7 generados por la aplicación (el evento trae la suya). El cliente se genera dentro del módulo y nadie más lo
+// importa. Migraciones: dyn_migrator, directo a PostgreSQL (ver prisma.config.ts).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["auditoria", "identidad"]
+}
+
+/// Contenedor que produjo el evento. Es un conjunto fijo del sistema, por eso es enum.
+enum OrigenEvento {
+  comercial
+  operaciones
+  flota
+  qhse
+  plataforma
+  worker
+
+  @@map("origen_evento")
+  @@schema("auditoria")
+}
+
+/// Tipo de evento (`operaciones.pumping.ticket_creado`). Se da de alta solo cuando llega por primera vez.
+model TipoEvento {
+  id       String   @id @db.Uuid
+  codigo   String   @unique
+  creadoAt DateTime @default(now()) @map("creado_at") @db.Timestamptz(6)
+
+  eventos EventoAuditado[]
+
+  @@map("tipo_evento")
+  @@schema("auditoria")
+}
+
+/// Tipo de entidad sobre la que ocurre el hecho (`pedido`, `pumping_ticket`...). Alta automática, como `TipoEvento`.
+model SujetoTipo {
+  id       String   @id @db.Uuid
+  codigo   String   @unique
+  creadoAt DateTime @default(now()) @map("creado_at") @db.Timestamptz(6)
+
+  eventos EventoAuditado[]
+
+  @@map("sujeto_tipo")
+  @@schema("auditoria")
+}
+
+/// Claves de negocio que se extraen del evento para poder buscarlo (lista blanca, sembrada).
+model ClaveDato {
+  id          String @id @db.Uuid
+  codigo      String @unique
+  descripcion String
+
+  datos EventoAuditadoDato[]
+
+  @@map("clave_dato")
+  @@schema("auditoria")
+}
+
+/// Un hecho de negocio. Inmutable: ni la aplicación ni un trigger permiten UPDATE o DELETE.
+/// `sujeto_id` es de otro contenedor (sin FK, con COMMENT en la base).
+model EventoAuditado {
+  /// Es el id del evento (UUIDv7 del productor): la llave de idempotencia.
+  id            String       @id @db.Uuid
+  tipoEventoId  String       @map("tipo_evento_id") @db.Uuid
+  version       Int
+  ocurridoAt    DateTime     @map("ocurrido_at") @db.Timestamptz(6)
+  origen        OrigenEvento
+  sujetoTipoId  String       @map("sujeto_tipo_id") @db.Uuid
+  sujetoId      String       @map("sujeto_id") @db.Uuid
+  /// Nulo si lo hizo el sistema o la cuenta no existe en identidad.
+  actorId       String?      @map("actor_id") @db.Uuid
+  actorRolId    String?      @map("actor_rol_id") @db.Uuid
+  correlacionId String?      @map("correlacion_id") @db.Uuid
+  causaId       String?      @map("causa_id") @db.Uuid
+  registradoAt  DateTime     @default(now()) @map("registrado_at") @db.Timestamptz(6)
+
+  tipoEvento TipoEvento @relation(fields: [tipoEventoId], references: [id])
+  sujetoTipo SujetoTipo @relation(fields: [sujetoTipoId], references: [id])
+  actor      IdUsuario? @relation(fields: [actorId], references: [id])
+  actorRol   IdRol?     @relation(fields: [actorRolId], references: [id])
+  datos      EventoAuditadoDato[]
+
+  @@index([sujetoTipoId, sujetoId, ocurridoAt])
+  @@index([actorId, ocurridoAt])
+  @@index([tipoEventoId, ocurridoAt])
+  @@index([ocurridoAt])
+  @@map("evento_auditado")
+  @@schema("auditoria")
+}
+
+/// Clave de negocio del evento (pedido_id, ticket_numero...). Los ids son de otros contenedores: sin FK.
+model EventoAuditadoDato {
+  eventoId    String @map("evento_id") @db.Uuid
+  claveDatoId String @map("clave_dato_id") @db.Uuid
+  valor       String
+
+  evento    EventoAuditado @relation(fields: [eventoId], references: [id])
+  claveDato ClaveDato      @relation(fields: [claveDatoId], references: [id])
+
+  @@id([eventoId, claveDatoId])
+  @@index([claveDatoId, valor])
+  @@map("evento_auditado_dato")
+  @@schema("auditoria")
+}
+
+/// Espejo de SOLO LECTURA de `identidad.usuario` (quién actuó). Lo administra el módulo identidad.
+model IdUsuario {
+  id     String @id @db.Uuid
+  nombre String
+
+  eventos EventoAuditado[]
+
+  @@map("usuario")
+  @@schema("identidad")
+}
+
+/// Espejo de SOLO LECTURA de `identidad.rol` (con qué rol actuó).
+model IdRol {
+  id     String @id @db.Uuid
+  codigo String @unique
+  nombre String
+
+  eventos EventoAuditado[]
+
+  @@map("rol")
+  @@schema("identidad")
+}
