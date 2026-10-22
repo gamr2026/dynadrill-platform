@@ -1236,3 +1236,164 @@ model CatCliente {
   @@map("cliente")
   @@schema("catalogos")
 }
+
+// ---- Q4 Desechos (HSE-AMBIENTAL-001). Las columnas de auditoría y de personas (created_by, updated_by, actor_id) son FK reales a
+// identidad.usuario en la base; aquí se leen sin relación de Prisma para no tocar el modelo compartido IdUsuario.
+
+enum ClasificacionDesecho {
+  peligroso
+  no_peligroso
+
+  @@map("clasificacion_desecho")
+  @@schema("qhse")
+}
+
+/// Característica CRETIB de un desecho peligroso (catálogo).
+model DesechoCaracteristica {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  asignadas DesechoCaracteristicaAsignada[]
+
+  @@map("desecho_caracteristica")
+  @@schema("qhse")
+}
+
+/// Contenedor por color (convención interna de Dynadrill).
+model DesechoContenedor {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  uso       String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  desechos Desecho[]
+
+  @@map("desecho_contenedor")
+  @@schema("qhse")
+}
+
+/// Estado del ciclo del desecho: almacenado, con_manifiesto, dispuesto (los triggers deciden por `codigo`).
+model DesechoEstado {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  desechos       Desecho[]
+  historialAntes DesechoHistorial[] @relation("desechoEstadoAnterior")
+  historialAhora DesechoHistorial[] @relation("desechoEstadoNuevo")
+
+  @@map("desecho_estado")
+  @@schema("qhse")
+}
+
+/// Desecho generado en operación. Límite de almacenamiento de 12 meses (AM 142) garantizado por CHECK.
+model Desecho {
+  id                        String               @id @db.Uuid
+  numero                    Int                  @unique @default(autoincrement())
+  clasificacion             ClasificacionDesecho
+  contenedorId              String               @map("contenedor_id") @db.Uuid
+  contenedor                DesechoContenedor    @relation(fields: [contenedorId], references: [id])
+  estadoId                  String               @map("estado_id") @db.Uuid
+  estado                    DesechoEstado        @relation(fields: [estadoId], references: [id])
+  descripcion               String
+  pozoId                    String?              @map("pozo_id") @db.Uuid
+  pozo                      CatPozo?             @relation(fields: [pozoId], references: [id])
+  ubicacion                 String?
+  registradoAt              DateTime             @default(now()) @map("registrado_at") @db.Timestamptz(6)
+  registradoEl              DateTime             @map("registrado_el") @db.Date
+  limiteAlmacenamientoHasta DateTime             @map("limite_almacenamiento_hasta") @db.Date
+  createdAt                 DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                 String               @map("created_by") @db.Uuid
+  updatedAt                 DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                 String?              @map("updated_by") @db.Uuid
+
+  caracteristicas DesechoCaracteristicaAsignada[]
+  items           DesechoItem[]
+  historial       DesechoHistorial[]
+
+  @@index([estadoId])
+  @@index([limiteAlmacenamientoHasta])
+  @@index([contenedorId])
+  @@map("desecho")
+  @@schema("qhse")
+}
+
+model DesechoCaracteristicaAsignada {
+  desechoId        String                @map("desecho_id") @db.Uuid
+  desecho          Desecho               @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  caracteristicaId String                @map("caracteristica_id") @db.Uuid
+  caracteristica   DesechoCaracteristica @relation(fields: [caracteristicaId], references: [id])
+
+  @@id([desechoId, caracteristicaId])
+  @@index([caracteristicaId])
+  @@map("desecho_caracteristica_asignada")
+  @@schema("qhse")
+}
+
+/// Línea de la guía de remisión (DYN-SGI-RE-063).
+model DesechoItem {
+  id              String   @id @db.Uuid
+  desechoId       String   @map("desecho_id") @db.Uuid
+  desecho         Desecho  @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  orden           Int
+  descripcion     String
+  numeroLote      String?  @map("numero_lote")
+  codigo          String
+  cantidadGalones Decimal  @map("cantidad_galones") @db.Decimal(12, 3)
+  bultos          Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String   @map("created_by") @db.Uuid
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?  @map("updated_by") @db.Uuid
+
+  @@unique([desechoId, orden])
+  @@map("desecho_item")
+  @@schema("qhse")
+}
+
+model DesechoHistorial {
+  id               String         @id @db.Uuid
+  desechoId        String         @map("desecho_id") @db.Uuid
+  desecho          Desecho        @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  estadoAnteriorId String?        @map("estado_anterior_id") @db.Uuid
+  estadoAnterior   DesechoEstado? @relation("desechoEstadoAnterior", fields: [estadoAnteriorId], references: [id])
+  estadoNuevoId    String         @map("estado_nuevo_id") @db.Uuid
+  estadoNuevo      DesechoEstado  @relation("desechoEstadoNuevo", fields: [estadoNuevoId], references: [id])
+  actorId          String         @map("actor_id") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([desechoId, createdAt])
+  @@map("desecho_historial")
+  @@schema("qhse")
+}
+
+/// `catalogos.pozo`: solo lo necesario para mostrar dónde se generó un desecho.
+model CatPozo {
+  id             String    @id @db.Uuid
+  codigo         String
+  nombreCompleto String    @map("nombre_completo")
+  habilitado     Boolean
+  desechos       Desecho[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}

@@ -15,6 +15,9 @@ import { IpercCatalogosService } from './iperc/iperc-catalogos.service';
 import { IpercConsultaService } from './iperc/iperc-consulta.service';
 import { IpercController } from './iperc/iperc.controller';
 import { IpercService } from './iperc/iperc.service';
+import { DesechosConsultaService } from './desechos/desechos-consulta.service';
+import { DesechosController } from './desechos/desechos.controller';
+import { DesechosService } from './desechos/desechos.service';
 import { PrismaService } from './prisma/prisma.service';
 import { VerificadorFirmas, VerificadorFirmasHttp } from './documentos/verificador-firmas';
 import { SwaConsultaService } from './swa/swa-consulta.service';
@@ -44,6 +47,7 @@ import { PtwService } from './ptw/ptw.service';
     IpercController,
     StopController,
     InspeccionesController,
+    DesechosController,
   ],
   providers: [
     PrismaService,
@@ -64,6 +68,8 @@ import { PtwService } from './ptw/ptw.service';
     StopConsultaService,
     InspeccionesService,
     InspeccionesConsultaService,
+    DesechosService,
+    DesechosConsultaService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
@@ -75,6 +81,7 @@ import { PtwService } from './ptw/ptw.service';
     IpercService,
     StopService,
     InspeccionesService,
+    DesechosService,
   ],
 })
 export class QhseModule {}

@@ -595,6 +595,13 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     RoleCode.TECNICO_HSE,
     RoleCode.GERENTE_HSE,
   ]),
+  // ---- qhse: desechos (HSE-AMBIENTAL-001). Registrarlos es de cualquier trabajador (`qhse.eventos.reportar`); verlos y gestionarlos, del equipo HSE.
+  nuevo('qhse.desechos.ver', 'Ver los desechos, sus manifiestos y certificados', ModuleRoles.qhse),
+  nuevo(
+    'qhse.desechos.gestionar',
+    'Generar el manifiesto, registrar sus firmas y el certificado de disposición final',
+    ModuleRoles.qhse,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -722,6 +729,8 @@ export const Permission = {
   QHSE_INSPECCIONES_VER: 'qhse.inspecciones.ver',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
+  DESECHOS_VER: 'qhse.desechos.ver',
+  DESECHOS_GESTIONAR: 'qhse.desechos.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

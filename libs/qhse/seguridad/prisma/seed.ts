@@ -6,6 +6,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
+import { sembrarDesechos } from '../src/catalog/sembrar-desechos';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
@@ -30,6 +31,10 @@ async function main() {
     const swa = await sembrarSwa(prisma);
     console.log(
       `qhse: SWA con ${swa.tipos} tipos de peligro, ${swa.roles} roles de la cadena y ${swa.criterios} criterios de reinicio nuevos`,
+    );
+    const des = await sembrarDesechos(prisma);
+    console.log(
+      `qhse: desechos con ${des.caracteristicas} características CRETIB, ${des.contenedores} contenedores y ${des.estados} estados nuevos`,
     );
   } finally {
     await prisma.$disconnect();
