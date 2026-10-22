@@ -622,6 +622,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar una revisión nueva de los requisitos legales con su documento y vigencia',
     ModuleRoles.qhse,
   ),
+  // ---- qhse: objetivos ambientales. El Supervisor no entra.
+  nuevo(
+    'qhse.objetivos_ambientales.ver',
+    'Ver los objetivos ambientales, su plan de acción y su seguimiento',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.objetivos_ambientales.gestionar',
+    'Registrar y conducir un objetivo ambiental: plan de acción, seguimiento y cierre',
+    ModuleRoles.qhse,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -754,6 +765,8 @@ export const Permission = {
   INVESTIGACIONES_APROBAR: 'qhse.investigaciones.aprobar',
   LEGAL_VER: 'qhse.legal.ver',
   LEGAL_GESTIONAR: 'qhse.legal.gestionar',
+  OBJETIVOS_AMBIENTALES_VER: 'qhse.objetivos_ambientales.ver',
+  OBJETIVOS_AMBIENTALES_GESTIONAR: 'qhse.objetivos_ambientales.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

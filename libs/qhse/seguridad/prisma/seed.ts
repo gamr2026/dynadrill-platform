@@ -7,6 +7,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
+import { sembrarAmbiental } from '../src/catalog/sembrar-ambiental';
 import { sembrarInvestigacion } from '../src/catalog/sembrar-investigacion';
 import { sembrarRequisitosLegales } from '../src/catalog/sembrar-requisitos-legales';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
@@ -39,6 +40,8 @@ async function main() {
     );
     const legal = await sembrarRequisitosLegales(prisma);
     console.log(`qhse: requisitos legales con ${legal.tipos} tipos nuevos`);
+    const amb = await sembrarAmbiental(prisma);
+    console.log(`qhse: ambiental con ${amb.frecuencias} frecuencias de seguimiento nuevas`);
   } finally {
     await prisma.$disconnect();
   }

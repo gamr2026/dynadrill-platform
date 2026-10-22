@@ -1732,3 +1732,100 @@ model RequisitoLegal {
   @@map("requisito_legal")
   @@schema("qhse")
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Objetivos ambientales (ObjetivoAmbiental de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoObjetivoAmbiental {
+  en_curso
+  cumplido
+  no_cumplido
+
+  @@map("estado_objetivo_ambiental")
+  @@schema("qhse")
+}
+
+/// Frecuencias de seguimiento (catálogo): mensual, trimestral, semestral, anual.
+model FrecuenciaSeguimiento {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  accionesObjetivo ObjetivoAmbientalAccion[]
+
+  @@map("frecuencia_seguimiento")
+  @@schema("qhse")
+}
+
+/// Objetivo del Sistema de Gestión Ambiental. Se cierra como cumplido o no cumplido.
+model ObjetivoAmbiental {
+  id                   String                  @id @db.Uuid
+  numero               Int                     @unique @default(autoincrement())
+  titulo               String
+  objetivo             String
+  meta                 String
+  indicador            String
+  beneficioEmpresarial String?                 @map("beneficio_empresarial")
+  plazo                DateTime?               @db.Date
+  estado               EstadoObjetivoAmbiental @default(en_curso)
+  resultado            String?
+  evidencia            String?
+  cerradoAt            DateTime?               @map("cerrado_at") @db.Timestamptz(6)
+  cerradoPor           String?                 @map("cerrado_por") @db.Uuid
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String                  @map("created_by") @db.Uuid
+  updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?                 @map("updated_by") @db.Uuid
+
+  acciones     ObjetivoAmbientalAccion[]
+  seguimientos ObjetivoAmbientalSeguimiento[]
+
+  @@index([estado])
+  @@map("objetivo_ambiental")
+  @@schema("qhse")
+}
+
+/// Acción específica del plan de acción de un objetivo.
+model ObjetivoAmbientalAccion {
+  id                String                @id @db.Uuid
+  objetivoId        String                @map("objetivo_id") @db.Uuid
+  objetivo          ObjetivoAmbiental     @relation(fields: [objetivoId], references: [id])
+  orden             Int
+  accionEspecifica  String                @map("accion_especifica")
+  responsableId     String?               @map("responsable_id") @db.Uuid
+  indicador         String?
+  evidenciaEsperada String?               @map("evidencia_esperada")
+  frecuenciaId      String?               @map("frecuencia_id") @db.Uuid
+  frecuencia        FrecuenciaSeguimiento? @relation(fields: [frecuenciaId], references: [id])
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String                @map("created_by") @db.Uuid
+  updatedAt         DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String?               @map("updated_by") @db.Uuid
+
+  @@unique([objetivoId, orden])
+  @@map("objetivo_ambiental_accion")
+  @@schema("qhse")
+}
+
+/// Registro de seguimiento de un objetivo (inmutable).
+model ObjetivoAmbientalSeguimiento {
+  id               String            @id @db.Uuid
+  objetivoId       String            @map("objetivo_id") @db.Uuid
+  objetivo         ObjetivoAmbiental @relation(fields: [objetivoId], references: [id])
+  fecha            DateTime          @db.Date
+  avancePorcentaje Int               @map("avance_porcentaje") @db.SmallInt
+  observacion      String
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String            @map("created_by") @db.Uuid
+
+  @@index([objetivoId, fecha])
+  @@map("objetivo_ambiental_seguimiento")
+  @@schema("qhse")
+}
