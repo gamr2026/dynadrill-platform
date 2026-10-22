@@ -39,7 +39,7 @@ async function main() {
     );
     const der = await sembrarDerrames(prisma);
     console.log(
-      `qhse: derrames con ${der.ubicaciones} ubicaciones y ${der.bandas} bandas de volumen nuevas (bandas POR CONFIRMAR con Dynadrill)`,
+      `qhse: derrames con ${der.ubicaciones} ubicaciones, ${der.bandas} bandas de volumen y ${der.pasos} pasos de contención nuevos (bandas POR CONFIRMAR con Dynadrill)`,
     );
   } finally {
     await prisma.$disconnect();

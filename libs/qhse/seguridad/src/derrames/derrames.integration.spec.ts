@@ -222,7 +222,264 @@ run('QHSE: Derrames (base de datos real)', () => {
     expect((await t.http().get('/api/qhse/derrames?estado=otro').set(tecnico())).status).toBe(400);
   });
 
+  describe('contención y volumen real', () => {
+    const gestor = () =>
+      t.token(
+        'tecnico_hse',
+        TECNICO.nombre,
+        [P.QHSE_REPORTAR, P.DERRAMES_VER, P.DERRAMES_GESTIONAR],
+        TECNICO.id,
+      );
+    const detalle = async (id: string) =>
+      (await t.http().get(`/api/qhse/derrames/${id}`).set(tecnico())).body;
+    const paso = (id: string, itemId: string, quien = gestor()) =>
+      t.http().post(`/api/qhse/derrames/${id}/checklist`).set(quien).send({ itemId });
+    const contener = (id: string, quien = gestor()) =>
+      t.http().post(`/api/qhse/derrames/${id}/contener`).set(quien);
+    const volumen = (id: string, barriles: unknown, quien = gestor()) =>
+      t.http().post(`/api/qhse/derrames/${id}/volumen`).set(quien).send({ barriles });
+    const confirmarTodo = async (id: string) => {
+      for (const c of (await detalle(id)).checklist as Array<{
+        itemId: string;
+        confirmadoAt: string | null;
+      }>)
+        if (!c.confirmadoAt) expect((await paso(id, c.itemId)).status).toBe(201);
+    };
+
+    it('el checklist trae los 5 pasos de la contención y solo con todos confirmados se marca contenido', async () => {
+      const id = (await activar()).body.id as string;
+      const d0 = await detalle(id);
+      expect(d0.checklist.map((c: { codigo: string }) => c.codigo)).toEqual([
+        'detener_fuente',
+        'delimitar_area',
+        'evitar_drenajes',
+        'usar_epp',
+        'notificar_qhse',
+      ]);
+      expect(d0.checklistCompleto).toBe(false);
+      // permisos: quien solo ve o solo reporta no gestiona
+      expect((await paso(id, d0.checklist[0].itemId, tecnico())).status).toBe(403);
+      expect((await paso(id, d0.checklist[0].itemId, operador())).status).toBe(403);
+      // sin todos los pasos no se contiene, y el servicio dice cuál falta
+      const antes = await contener(id);
+      expect(antes.status).toBe(409);
+      expect(antes.body.detail).toMatch(/confirme todo el checklist.*Detener la fuente/s);
+
+      expect((await paso(id, d0.checklist[0].itemId)).status).toBe(201);
+      expect((await paso(id, d0.checklist[0].itemId)).status).toBe(409); // ya confirmado
+      expect((await paso(id, uuidv7())).status).toBe(400); // no es un paso
+      expect((await contener(id)).status).toBe(409);
+
+      await confirmarTodo(id); // el primero ya estaba: se confirman los demás
+      const d1 = await detalle(id);
+      expect(d1.checklistCompleto).toBe(true);
+      expect(d1.checklist[0]).toMatchObject({ confirmadoPor: TECNICO.nombre });
+      expect(d1.estado).toBe('activo');
+
+      const r = await contener(id);
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({ estado: 'contenido', contenidoPor: TECNICO.nombre });
+      expect(r.body.contencionMinutos).toEqual(expect.any(Number));
+      expect(r.body.historial.map((h: { estado: string }) => h.estado)).toEqual([
+        'activo',
+        'contenido',
+      ]);
+      const ev = await eventos('qhse.derrame.contenido', id);
+      expect(ev).toHaveLength(1);
+      expect(ev[0].datos.data).toMatchObject({ estado: 'contenido', plazoMinutos: 5 });
+      // ya contenido: no se confirman más pasos ni se contiene otra vez
+      expect((await contener(id)).status).toBe(409);
+      expect((await paso(id, d0.checklist[1].itemId)).status).toBe(409);
+    });
+
+    it('el plazo de 5 minutos se informa pero no bloquea: contener tarde también se puede', async () => {
+      const id = (await activar()).body.id as string;
+      // la alerta se activó hace 20 minutos (se atrasa directo en la base)
+      await sql(
+        "UPDATE qhse.derrame SET activado_at = now() - interval '20 minutes' WHERE id = $1",
+        [id],
+      );
+      await confirmarTodo(id);
+      const tarde = (await contener(id)).body;
+      expect(tarde.estado).toBe('contenido');
+      expect(tarde.contencionEnPlazo).toBe(false);
+      expect(tarde.contencionMinutos).toBeGreaterThanOrEqual(19);
+      expect((await eventos('qhse.derrame.contenido', id))[0].datos.data).toMatchObject({
+        contencionEnPlazo: false,
+      });
+
+      const rapido = (await activar()).body.id as string;
+      await confirmarTodo(rapido);
+      const enPlazo = (await contener(rapido)).body;
+      expect(enPlazo.contencionEnPlazo).toBe(true);
+      expect(enPlazo.contencionMinutos).toBeLessThan(5);
+    });
+
+    it('el volumen real se confirma solo después de contener, se puede corregir hasta cerrar y deja historial', async () => {
+      const id = (await activar()).body.id as string;
+      // activo: todavía no
+      const temprano = await volumen(id, 0.5);
+      expect(temprano.status).toBe(409);
+      expect(temprano.body.detail).toMatch(/después de contener/);
+      await confirmarTodo(id);
+      await contener(id);
+
+      expect((await volumen(id, 0.5, tecnico())).status).toBe(403);
+      expect((await volumen(id, -1)).status).toBe(400);
+      expect((await volumen(id, 'mucho')).status).toBe(400);
+      expect((await volumen(id, 99_999_999)).status).toBe(400);
+
+      const r = await volumen(id, 0.5);
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
+        volumenRealBarriles: 0.5,
+        volumenConfirmadoPor: TECNICO.nombre,
+        bandaReal: { codigo: 'menor' },
+        requiereNotificacionMae: false,
+      });
+      // corrección: ahora cae en la banda mayor y exige notificar al MAE y escalar, aunque se reportó «menor»
+      const mayor = await volumen(id, 7.25);
+      expect(mayor.body).toMatchObject({
+        volumenRealBarriles: 7.25,
+        bandaReal: { codigo: 'mayor' },
+        banda: { codigo: 'menor' },
+        requiereNotificacionMae: true,
+        escalaAEmergencia: true,
+      });
+      expect(mayor.body.volumenes.map((v: { barriles: number }) => v.barriles)).toEqual([
+        0.5, 7.25,
+      ]);
+      const ev = await eventos('qhse.derrame.volumen_confirmado', id);
+      expect(ev).toHaveLength(2);
+      expect(ev[1].datos.data).toMatchObject({
+        volumenConfirmadoBarriles: 7.25,
+        bandaReal: 'mayor',
+        requiereNotificacionMae: true,
+        escalaAEmergencia: true,
+      });
+      // la bandeja también lo refleja
+      const fila = (
+        (await t.http().get('/api/qhse/derrames?estado=contenido').set(tecnico())).body as Array<{
+          id: string;
+          requiereNotificacionMae: boolean;
+          volumenRealBarriles: number | null;
+        }>
+      ).find((x) => x.id === id);
+      expect(fila).toMatchObject({ requiereNotificacionMae: true, volumenRealBarriles: 7.25 });
+    });
+  });
+
   describe('reglas de la base', () => {
+    const insertarContenido = async () => {
+      const id = (await activar()).body.id as string;
+      await sql(
+        'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) SELECT $1, id, $2 FROM qhse.derrame_checklist_item WHERE activo',
+        [id, OPERADOR.id],
+      );
+      await sql(
+        "UPDATE qhse.derrame SET estado = 'contenido', contenido_at = now(), contenido_por = $2 WHERE id = $1",
+        [id, OPERADOR.id],
+      );
+      return id;
+    };
+
+    it('contener exige todo el checklist, y cada estado trae sus datos de contención', async () => {
+      const id = (await activar()).body.id as string;
+      await expect(
+        sql(
+          "UPDATE qhse.derrame SET estado = 'contenido', contenido_at = now(), contenido_por = $2 WHERE id = $1",
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/confirmar todo el checklist de contención/);
+      // contenido sin quién ni cuándo, o activo con datos de contención, no se acepta
+      await sql(
+        'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) SELECT $1, id, $2 FROM qhse.derrame_checklist_item WHERE activo',
+        [id, OPERADOR.id],
+      );
+      await expect(
+        sql("UPDATE qhse.derrame SET estado = 'contenido' WHERE id = $1", [id]),
+      ).rejects.toThrow(/derrame_contencion_check/);
+      await expect(
+        sql('UPDATE qhse.derrame SET contenido_at = now(), contenido_por = $2 WHERE id = $1', [
+          id,
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/derrame_contencion_check/);
+    });
+
+    it('los pasos se confirman con el derrame activo, una sola vez, y no se editan ni se borran', async () => {
+      const id = await insertarContenido();
+      const item = (await sql('SELECT id FROM qhse.derrame_checklist_item LIMIT 1')).rows[0].id;
+      await expect(
+        sql(
+          'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) VALUES ($1, $2, $3)',
+          [id, item, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_checklist_confirmacion_pkey|con el derrame activo/);
+      await expect(
+        t.prisma.derrameChecklistConfirmacion.deleteMany({ where: { derrameId: id } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.derrameChecklistConfirmacion.updateMany({
+          where: { derrameId: id },
+          data: { confirmadoPor: TECNICO.id },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      const activo = (await activar()).body.id as string;
+      await expect(
+        sql(
+          'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) VALUES ($1, $2, $3), ($1, $2, $3)',
+          [activo, item, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_checklist_confirmacion_pkey/);
+    });
+
+    it('el volumen real: completo, sin negativos, después de contener, y su historial es inmutable', async () => {
+      const activo = (await activar()).body.id as string;
+      await expect(
+        sql(
+          'UPDATE qhse.derrame SET volumen_real_barriles = 2, volumen_confirmado_por = $2, volumen_confirmado_at = now() WHERE id = $1',
+          [activo, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_volumen_check/);
+      await expect(
+        sql(
+          'INSERT INTO qhse.derrame_volumen_historial (id, derrame_id, volumen_barriles, actor_id) VALUES ($1, $2, 1, $3)',
+          [uuidv7(), activo, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/volumen real se confirma con el derrame contenido/);
+
+      const id = await insertarContenido();
+      await expect(
+        sql('UPDATE qhse.derrame SET volumen_real_barriles = 2 WHERE id = $1', [id]),
+      ).rejects.toThrow(/derrame_volumen_check/); // falta quién y cuándo
+      await expect(
+        sql(
+          'UPDATE qhse.derrame SET volumen_real_barriles = -1, volumen_confirmado_por = $2, volumen_confirmado_at = now() WHERE id = $1',
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_volumen_check/);
+      await expect(
+        sql(
+          'INSERT INTO qhse.derrame_volumen_historial (id, derrame_id, volumen_barriles, actor_id) VALUES ($1, $2, -3, $3)',
+          [uuidv7(), id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_volumen_historial_volumen_check/);
+      await sql(
+        'INSERT INTO qhse.derrame_volumen_historial (id, derrame_id, volumen_barriles, actor_id) VALUES ($1, $2, 2, $3)',
+        [uuidv7(), id, OPERADOR.id],
+      );
+      await expect(
+        t.prisma.derrameVolumenHistorial.deleteMany({ where: { derrameId: id } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.derrameVolumenHistorial.updateMany({
+          where: { derrameId: id },
+          data: { volumenBarriles: 9 },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
     const insertar = (extra: { estado?: string; ticket?: string | null } = {}) => {
       const id = uuidv7();
       return {
@@ -249,7 +506,14 @@ run('QHSE: Derrames (base de datos real)', () => {
       await expect(
         sql("UPDATE qhse.derrame SET estado = 'cerrado' WHERE id = $1", [id]),
       ).rejects.toThrow(/Cambio de estado no permitido/);
-      await sql("UPDATE qhse.derrame SET estado = 'contenido' WHERE id = $1", [id]);
+      await sql(
+        'INSERT INTO qhse.derrame_checklist_confirmacion (derrame_id, item_id, confirmado_por) SELECT $1, id, $2 FROM qhse.derrame_checklist_item WHERE activo',
+        [id, OPERADOR.id],
+      );
+      await sql(
+        "UPDATE qhse.derrame SET estado = 'contenido', contenido_at = now(), contenido_por = $2 WHERE id = $1",
+        [id, OPERADOR.id],
+      );
       await expect(
         sql("UPDATE qhse.derrame SET estado = 'activo' WHERE id = $1", [id]),
       ).rejects.toThrow(/Cambio de estado no permitido/);

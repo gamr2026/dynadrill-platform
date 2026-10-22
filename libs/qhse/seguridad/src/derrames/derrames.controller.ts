@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { DerramesContencionService } from './derrames-contencion.service';
 import { DerramesConsultaService } from './derrames-consulta.service';
 import { DerramesService } from './derrames.service';
 
@@ -22,6 +23,15 @@ export class ActivarDerrameDto {
   @IsOptional() @IsUUID() ticketId?: string;
 }
 
+export class ConfirmarPasoDto {
+  @IsUUID() itemId!: string;
+}
+
+export class ConfirmarVolumenDto {
+  /** Volumen real estimado tras la contención, en barriles. */
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) barriles!: number;
+}
+
 /**
  * Derrames. Ruta pública `/api/v2/qhse/derrames`. Activar la alerta es de cualquier usuario autenticado (`qhse.eventos.reportar`);
  * verlos y gestionarlos es del equipo HSE.
@@ -30,6 +40,7 @@ export class ActivarDerrameDto {
 export class DerramesController {
   constructor(
     private readonly derrames: DerramesService,
+    private readonly contencion: DerramesContencionService,
     private readonly consulta: DerramesConsultaService,
   ) {}
 
@@ -56,5 +67,34 @@ export class DerramesController {
   @Get(':id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
     return this.consulta.detalle(id);
+  }
+
+  /** Confirma un paso del checklist de contención (con el derrame activo). */
+  @RequirePermission(P.DERRAMES_GESTIONAR)
+  @Post(':id/checklist')
+  confirmarPaso(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmarPasoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.contencion.confirmarPaso(id, dto.itemId, actor);
+  }
+
+  /** Marca el derrame como contenido (exige todos los pasos); informa si se cumplió el plazo de 5 minutos. */
+  @RequirePermission(P.DERRAMES_GESTIONAR)
+  @Post(':id/contener')
+  contener(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.contencion.contener(id, actor);
+  }
+
+  /** Volumen real en barriles, confirmado después de contener (se puede corregir mientras no esté cerrado). */
+  @RequirePermission(P.DERRAMES_GESTIONAR)
+  @Post(':id/volumen')
+  confirmarVolumen(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ConfirmarVolumenDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.contencion.confirmarVolumen(id, dto.barriles, actor);
   }
 }

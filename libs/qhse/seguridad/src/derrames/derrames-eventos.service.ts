@@ -3,6 +3,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import type { Tx } from '../epi/epi-tipos';
 import {
+  DerramesConsultaService,
   codigoDerrame,
   escalaAEmergencia,
   requiereNotificacionMae,
@@ -11,7 +12,10 @@ import {
 /** Publica por el outbox (en la misma transacción que el cambio) los hechos del ciclo de un derrame, con ids estables para reportería y avisos. */
 @Injectable()
 export class DerramesEventosService {
-  constructor(private readonly bus: EventBus) {}
+  constructor(
+    private readonly bus: EventBus,
+    private readonly consulta: DerramesConsultaService,
+  ) {}
 
   async publicar(
     tx: Tx,
@@ -24,6 +28,8 @@ export class DerramesEventosService {
       where: { id: derrameId },
       include: { ubicacion: true, banda: true },
     });
+    const bandas = await this.consulta.bandasActivas(tx);
+    const reglas = this.consulta.reglas(d, bandas);
     const [ticket, activador] = await Promise.all([
       d.ticketId
         ? tx.ticketRef.findUnique({
@@ -54,8 +60,10 @@ export class DerramesEventosService {
           ubicacionNombre: d.ubicacion.nombre,
           banda: d.banda.codigo,
           bandaNombre: d.banda.nombre,
-          requiereNotificacionMae: requiereNotificacionMae(d),
-          escalaAEmergencia: escalaAEmergencia(d),
+          volumenRealBarriles:
+            d.volumenRealBarriles === null ? null : Number(d.volumenRealBarriles),
+          requiereNotificacionMae: requiereNotificacionMae(reglas),
+          escalaAEmergencia: escalaAEmergencia(reglas),
           ticketId: d.ticketId,
           ticketNumero: ticket?.ticketNumero ?? null,
           pedidoId: ticket?.pedidoId ?? null,

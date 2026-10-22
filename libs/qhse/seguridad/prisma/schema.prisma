@@ -1579,12 +1579,19 @@ model Derrame {
   ticketId        String?             @map("ticket_id") @db.Uuid
   activadoPor     String              @map("activado_por") @db.Uuid
   activadoAt      DateTime            @default(now()) @map("activado_at") @db.Timestamptz(6)
+  contenidoAt          DateTime?           @map("contenido_at") @db.Timestamptz(6)
+  contenidoPor         String?             @map("contenido_por") @db.Uuid
+  volumenRealBarriles  Decimal?            @map("volumen_real_barriles") @db.Decimal(10, 3)
+  volumenConfirmadoPor String?             @map("volumen_confirmado_por") @db.Uuid
+  volumenConfirmadoAt  DateTime?           @map("volumen_confirmado_at") @db.Timestamptz(6)
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy       String              @map("created_by") @db.Uuid
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy       String?             @map("updated_by") @db.Uuid
 
   historial DerrameHistorial[]
+  checklist DerrameChecklistConfirmacion[]
+  volumenes DerrameVolumenHistorial[]
 
   @@index([estado])
   @@index([ubicacionId])
@@ -1604,5 +1611,52 @@ model DerrameHistorial {
 
   @@index([derrameId, createdAt])
   @@map("derrame_historial")
+  @@schema("qhse")
+}
+
+/// Pasos de la contención en los primeros 5 minutos (catálogo).
+model DerrameChecklistItem {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  confirmaciones DerrameChecklistConfirmacion[]
+
+  @@map("derrame_checklist_item")
+  @@schema("qhse")
+}
+
+/// Quién confirmó cada paso y cuándo. Inmutable.
+model DerrameChecklistConfirmacion {
+  derrameId     String               @map("derrame_id") @db.Uuid
+  derrame       Derrame              @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  itemId        String               @map("item_id") @db.Uuid
+  item          DerrameChecklistItem @relation(fields: [itemId], references: [id])
+  confirmadoPor String               @map("confirmado_por") @db.Uuid
+  confirmadoAt  DateTime             @default(now()) @map("confirmado_at") @db.Timestamptz(6)
+
+  @@id([derrameId, itemId])
+  @@index([itemId])
+  @@map("derrame_checklist_confirmacion")
+  @@schema("qhse")
+}
+
+/// Cada confirmación del volumen real (el vigente está en `Derrame`). Inmutable.
+model DerrameVolumenHistorial {
+  id              String   @id @db.Uuid
+  derrameId       String   @map("derrame_id") @db.Uuid
+  derrame         Derrame  @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  volumenBarriles Decimal  @map("volumen_barriles") @db.Decimal(10, 3)
+  actorId         String   @map("actor_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([derrameId, createdAt])
+  @@map("derrame_volumen_historial")
   @@schema("qhse")
 }

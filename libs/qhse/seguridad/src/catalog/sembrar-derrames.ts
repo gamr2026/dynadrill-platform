@@ -60,10 +60,19 @@ export const BANDAS_VOLUMEN_DERRAME = [
   },
 ] as const;
 
+/** Checklist de contención de los primeros 5 minutos (HSE-AMBIENTAL-002). El derrame solo pasa a contenido con todos los pasos confirmados. */
+export const PASOS_CONTENCION_DERRAME = [
+  ['detener_fuente', 'Detener la fuente del derrame si es seguro hacerlo'],
+  ['delimitar_area', 'Delimitar el área con barreras o absorbentes'],
+  ['evitar_drenajes', 'Evitar que llegue a drenajes o cuerpos de agua'],
+  ['usar_epp', 'Usar el EPP adecuado antes de intervenir'],
+  ['notificar_qhse', 'Notificar a QHSE inmediatamente'],
+] as const;
+
 /** Idempotente: solo agrega lo que falta y no toca lo que QHSE ya ajustó (ni quita la marca «por confirmar» de una banda). */
 export async function sembrarDerrames(
   prisma: PrismaClient,
-): Promise<{ ubicaciones: number; bandas: number }> {
+): Promise<{ ubicaciones: number; bandas: number; pasos: number }> {
   let ubicaciones = 0;
   for (const [i, u] of UBICACIONES_DERRAME.entries()) {
     if (await prisma.derrameUbicacion.count({ where: { codigo: u.codigo } })) continue;
@@ -88,5 +97,13 @@ export async function sembrarDerrames(
     });
     bandas++;
   }
-  return { ubicaciones, bandas };
+  let pasos = 0;
+  for (const [i, [codigo, nombre]] of PASOS_CONTENCION_DERRAME.entries()) {
+    if (await prisma.derrameChecklistItem.count({ where: { codigo } })) continue;
+    await prisma.derrameChecklistItem.create({
+      data: { id: uuidv7(), codigo, nombre, orden: i + 1 },
+    });
+    pasos++;
+  }
+  return { ubicaciones, bandas, pasos };
 }
