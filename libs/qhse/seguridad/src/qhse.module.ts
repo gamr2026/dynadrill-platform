@@ -42,6 +42,9 @@ import { RequisitosLegalesService } from './legal/requisitos-legales.service';
 import { ObjetivosAmbientalesConsultaService } from './objetivos-ambientales/objetivos-ambientales-consulta.service';
 import { ObjetivosAmbientalesController } from './objetivos-ambientales/objetivos-ambientales.controller';
 import { ObjetivosAmbientalesService } from './objetivos-ambientales/objetivos-ambientales.service';
+import { AspectosAmbientalesConsultaService } from './aspectos-ambientales/aspectos-ambientales-consulta.service';
+import { AspectosAmbientalesController } from './aspectos-ambientales/aspectos-ambientales.controller';
+import { AspectosAmbientalesService } from './aspectos-ambientales/aspectos-ambientales.service';
 import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
@@ -68,6 +71,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     InvestigacionesCierreController,
     RequisitosLegalesController,
     ObjetivosAmbientalesController,
+    AspectosAmbientalesController,
   ],
   providers: [
     PrismaService,
@@ -100,6 +104,8 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     RequisitosLegalesConsultaService,
     ObjetivosAmbientalesService,
     ObjetivosAmbientalesConsultaService,
+    AspectosAmbientalesService,
+    AspectosAmbientalesConsultaService,
   ],
   exports: [
     EpiService,

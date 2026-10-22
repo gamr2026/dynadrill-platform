@@ -41,7 +41,9 @@ async function main() {
     const legal = await sembrarRequisitosLegales(prisma);
     console.log(`qhse: requisitos legales con ${legal.tipos} tipos nuevos`);
     const amb = await sembrarAmbiental(prisma);
-    console.log(`qhse: ambiental con ${amb.frecuencias} frecuencias de seguimiento nuevas`);
+    console.log(
+      `qhse: ambiental con ${amb.frecuencias} frecuencias, ${amb.etapas} etapas de ciclo de vida y ${amb.factores} factores ambientales nuevos`,
+    );
   } finally {
     await prisma.$disconnect();
   }

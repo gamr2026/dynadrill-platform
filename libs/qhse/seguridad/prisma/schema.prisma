@@ -1759,6 +1759,7 @@ model FrecuenciaSeguimiento {
   updatedBy String?  @map("updated_by") @db.Uuid
 
   accionesObjetivo ObjetivoAmbientalAccion[]
+  aspectos         AspectoAmbiental[]
 
   @@map("frecuencia_seguimiento")
   @@schema("qhse")
@@ -1827,5 +1828,161 @@ model ObjetivoAmbientalSeguimiento {
 
   @@index([objetivoId, fecha])
   @@map("objetivo_ambiental_seguimiento")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Aspectos ambientales (AspectoAmbiental de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum ClasificacionAspecto {
+  bajo
+  moderado
+  alto
+
+  @@map("clasificacion_aspecto")
+  @@schema("qhse")
+}
+
+enum CondicionOperacionAspecto {
+  normal
+  anormal
+  emergencia
+
+  @@map("condicion_operacion_aspecto")
+  @@schema("qhse")
+}
+
+enum TipoResponsabilidadAspecto {
+  directa
+  indirecta
+
+  @@map("tipo_responsabilidad_aspecto")
+  @@schema("qhse")
+}
+
+enum TipoImpactoAspecto {
+  positivo
+  negativo
+
+  @@map("tipo_impacto_aspecto")
+  @@schema("qhse")
+}
+
+enum EstadoControlAspecto {
+  pendiente
+  en_ejecucion
+  implementado
+
+  @@map("estado_control_aspecto")
+  @@schema("qhse")
+}
+
+enum EstadoAspecto {
+  vigente
+  dado_de_baja
+
+  @@map("estado_aspecto")
+  @@schema("qhse")
+}
+
+/// Etapas del ciclo de vida de un aspecto (catálogo).
+model AspectoEtapaCicloVida {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  aspectos AspectoAmbiental[]
+
+  @@map("aspecto_etapa_ciclo_vida")
+  @@schema("qhse")
+}
+
+/// Factores ambientales afectados (catálogo).
+model AspectoFactorAmbiental {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  aspectos AspectoAmbiental[]
+
+  @@map("aspecto_factor_ambiental")
+  @@schema("qhse")
+}
+
+/// Aspecto e impacto ambiental de una actividad (matriz). El nivel de riesgo (probabilidad × consecuencia) se calcula.
+model AspectoAmbiental {
+  id                       String                      @id @db.Uuid
+  numero                   Int                         @unique @default(autoincrement())
+  fecha                    DateTime                    @db.Date
+  etapaId                  String                      @map("etapa_id") @db.Uuid
+  etapa                    AspectoEtapaCicloVida       @relation(fields: [etapaId], references: [id])
+  procesoId                String                      @map("proceso_id") @db.Uuid
+  actividad                String
+  produccionDelAspecto     String?                     @map("produccion_del_aspecto")
+  riesgoGestion            String?                     @map("riesgo_gestion")
+  aspecto                  String
+  impacto                  String
+  factorId                 String?                     @map("factor_id") @db.Uuid
+  factor                   AspectoFactorAmbiental?     @relation(fields: [factorId], references: [id])
+  condicionOperacion       CondicionOperacionAspecto?  @map("condicion_operacion")
+  tipoResponsabilidad      TipoResponsabilidadAspecto? @map("tipo_responsabilidad")
+  tipoImpacto              TipoImpactoAspecto?         @map("tipo_impacto")
+  fechaValoracion          DateTime?                   @map("fecha_valoracion") @db.Date
+  probabilidad             Int                         @db.SmallInt
+  consecuencia             Int                         @db.SmallInt
+  clasificacion            ClasificacionAspecto
+  ncar                     String?
+  planAccionExistente      String?                     @map("plan_accion_existente")
+  planTratamiento          String?                     @map("plan_tratamiento")
+  responsableId            String?                     @map("responsable_id") @db.Uuid
+  presupuesto              Decimal?                    @db.Decimal(14, 2)
+  plazo                    DateTime?                   @db.Date
+  estadoControl            EstadoControlAspecto        @default(pendiente) @map("estado_control")
+  seguimientoIndicador     String?                     @map("seguimiento_indicador")
+  seguimientoResponsableId String?                     @map("seguimiento_responsable_id") @db.Uuid
+  seguimientoFrecuenciaId  String?                     @map("seguimiento_frecuencia_id") @db.Uuid
+  seguimientoFrecuencia    FrecuenciaSeguimiento?      @relation(fields: [seguimientoFrecuenciaId], references: [id])
+  estado                   EstadoAspecto               @default(vigente)
+  bajaAt                   DateTime?                   @map("baja_at") @db.Timestamptz(6)
+  bajaPor                  String?                     @map("baja_por") @db.Uuid
+  bajaMotivo               String?                     @map("baja_motivo")
+  createdAt                DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String                      @map("created_by") @db.Uuid
+  updatedAt                DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?                     @map("updated_by") @db.Uuid
+
+  seguimientos AspectoAmbientalSeguimiento[]
+
+  @@index([procesoId])
+  @@map("aspecto_ambiental")
+  @@schema("qhse")
+}
+
+/// Registro de seguimiento de un aspecto (inmutable).
+model AspectoAmbientalSeguimiento {
+  id          String           @id @db.Uuid
+  aspectoId   String           @map("aspecto_id") @db.Uuid
+  aspecto     AspectoAmbiental @relation(fields: [aspectoId], references: [id])
+  fecha       DateTime         @db.Date
+  eficaz      Boolean
+  observacion String
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String           @map("created_by") @db.Uuid
+
+  @@index([aspectoId, fecha])
+  @@map("aspecto_ambiental_seguimiento")
   @@schema("qhse")
 }

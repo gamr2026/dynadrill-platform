@@ -633,6 +633,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y conducir un objetivo ambiental: plan de acción, seguimiento y cierre',
     ModuleRoles.qhse,
   ),
+  // ---- qhse: matriz de aspectos e impactos ambientales. El Supervisor no entra.
+  nuevo(
+    'qhse.aspectos_ambientales.ver',
+    'Ver la matriz de aspectos e impactos ambientales, su control y su seguimiento',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.aspectos_ambientales.gestionar',
+    'Registrar, editar y dar de baja aspectos ambientales; dar seguimiento y ampliar sus catálogos',
+    ModuleRoles.qhse,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -767,6 +778,8 @@ export const Permission = {
   LEGAL_GESTIONAR: 'qhse.legal.gestionar',
   OBJETIVOS_AMBIENTALES_VER: 'qhse.objetivos_ambientales.ver',
   OBJETIVOS_AMBIENTALES_GESTIONAR: 'qhse.objetivos_ambientales.gestionar',
+  ASPECTOS_AMBIENTALES_VER: 'qhse.aspectos_ambientales.ver',
+  ASPECTOS_AMBIENTALES_GESTIONAR: 'qhse.aspectos_ambientales.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];
