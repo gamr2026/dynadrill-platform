@@ -65,4 +65,15 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/api/auth/me')).toBe(false);
     expect(isPublicPath('/api/auth/login/otro')).toBe(false);
   });
+
+  it('el formulario público de una encuesta (con su token) pasa sin sesión; el resto de encuestas no', () => {
+    const token = 'A'.repeat(43);
+    expect(isPublicPath(`/api/encuestas/publico/${token}`)).toBe(true);
+    expect(isPublicPath('/api/encuestas/publico/')).toBe(false);
+    expect(isPublicPath('/api/encuestas/publico/corto')).toBe(false);
+    expect(isPublicPath(`/api/encuestas/publico/${token}/otro`)).toBe(false);
+    expect(isPublicPath(`/api/encuestas/publico/${token}x/../../invitaciones`)).toBe(false);
+    expect(isPublicPath('/api/encuestas')).toBe(false);
+    expect(isPublicPath('/api/encuestas/invitaciones')).toBe(false);
+  });
 });

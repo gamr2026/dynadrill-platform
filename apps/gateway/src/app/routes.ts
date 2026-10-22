@@ -57,6 +57,14 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/api/auth/jwks',
 ];
 
+/**
+ * Rutas públicas con un tramo variable. El formulario de una encuesta lo abre el cliente con el enlace del correo, sin sesión: el
+ * token (de 43 caracteres, 256 bits) es lo que autoriza. Solo ese tramo; el resto de `/api/encuestas` exige token de sesión.
+ */
+export const PUBLIC_PATH_PATTERNS: readonly RegExp[] = [
+  /^\/api\/encuestas\/publico\/[A-Za-z0-9_-]{20,128}$/,
+];
+
 export type TargetUrls = Partial<Record<ContainerName, string>> & { legacy: string };
 
 export interface ResolvedTarget {
@@ -78,5 +86,5 @@ export function resolveTarget(pathname: string, urls: TargetUrls): ResolvedTarge
 }
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.includes(pathname);
+  return PUBLIC_PATHS.includes(pathname) || PUBLIC_PATH_PATTERNS.some((p) => p.test(pathname));
 }
