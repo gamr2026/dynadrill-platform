@@ -602,6 +602,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Generar el manifiesto, registrar sus firmas y el certificado de disposición final',
     ModuleRoles.qhse,
   ),
+  // ---- qhse: derrames (HSE-AMBIENTAL-002). Activar la alerta es de cualquier trabajador (`qhse.eventos.reportar`); verlos y gestionarlos, del equipo HSE.
+  nuevo(
+    'qhse.derrames.ver',
+    'Ver los derrames, su contención y su notificación al MAE',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.derrames.gestionar',
+    'Contener, confirmar el volumen, notificar al MAE y cerrar un derrame; generar su desecho',
+    ModuleRoles.qhse,
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -731,6 +742,8 @@ export const Permission = {
   SWA_GESTIONAR: 'qhse.swa.gestionar',
   DESECHOS_VER: 'qhse.desechos.ver',
   DESECHOS_GESTIONAR: 'qhse.desechos.gestionar',
+  DERRAMES_VER: 'qhse.derrames.ver',
+  DERRAMES_GESTIONAR: 'qhse.derrames.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

@@ -1508,3 +1508,101 @@ model DesechoAviso {
   @@map("desecho_aviso")
   @@schema("qhse")
 }
+
+// ---- Q4 Derrames (HSE-AMBIENTAL-002). Igual que Desechos: las columnas de personas y el ticket son FK reales en la base y se leen sin relación de
+// Prisma para no tocar los modelos compartidos (IdUsuario, TicketRef).
+
+enum EstadoDerrame {
+  activo
+  contenido
+  cerrado
+
+  @@map("estado_derrame")
+  @@schema("qhse")
+}
+
+/// Dónde cayó el derrame (catálogo). El comportamiento sale de las columnas, nunca del nombre.
+model DerrameUbicacion {
+  id                   String   @id @db.Uuid
+  codigo               String   @unique
+  nombre               String
+  orden                Int      @unique
+  exigeNotificacionMae Boolean  @default(false) @map("exige_notificacion_mae")
+  escalaAEmergencia    Boolean  @default(false) @map("escala_a_emergencia")
+  generaDesecho        Boolean  @default(false) @map("genera_desecho")
+  activo               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String?  @map("created_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?  @map("updated_by") @db.Uuid
+
+  derrames Derrame[]
+
+  @@map("derrame_ubicacion")
+  @@schema("qhse")
+}
+
+/// Bandas de volumen en barriles [desde, hasta), CONFIGURABLES. Los valores sembrados son un supuesto de la demo: `porConfirmar` hasta que Dynadrill los confirme.
+model DerrameBandaVolumen {
+  id                   String   @id @db.Uuid
+  codigo               String   @unique
+  nombre               String
+  orden                Int      @unique
+  desdeBarriles        Decimal  @map("desde_barriles") @db.Decimal(10, 3)
+  hastaBarriles        Decimal? @map("hasta_barriles") @db.Decimal(10, 3)
+  exigeNotificacionMae Boolean  @default(false) @map("exige_notificacion_mae")
+  escalaAEmergencia    Boolean  @default(false) @map("escala_a_emergencia")
+  porConfirmar         Boolean  @default(true) @map("por_confirmar")
+  activo               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String?  @map("created_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?  @map("updated_by") @db.Uuid
+
+  derrames Derrame[]
+
+  @@map("derrame_banda_volumen")
+  @@schema("qhse")
+}
+
+/// Derrame. Lo activa cualquier trabajador; las transiciones las garantiza el trigger `derrame_validar`.
+model Derrame {
+  id              String              @id @db.Uuid
+  numero          Int                 @unique @default(autoincrement())
+  estado          EstadoDerrame       @default(activo)
+  ubicacionId     String              @map("ubicacion_id") @db.Uuid
+  ubicacion       DerrameUbicacion    @relation(fields: [ubicacionId], references: [id])
+  bandaId         String              @map("banda_id") @db.Uuid
+  banda           DerrameBandaVolumen @relation(fields: [bandaId], references: [id])
+  descripcion     String
+  ubicacionFisica String?             @map("ubicacion_fisica")
+  ticketId        String?             @map("ticket_id") @db.Uuid
+  activadoPor     String              @map("activado_por") @db.Uuid
+  activadoAt      DateTime            @default(now()) @map("activado_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String              @map("created_by") @db.Uuid
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?             @map("updated_by") @db.Uuid
+
+  historial DerrameHistorial[]
+
+  @@index([estado])
+  @@index([ubicacionId])
+  @@index([bandaId])
+  @@map("derrame")
+  @@schema("qhse")
+}
+
+model DerrameHistorial {
+  id             String         @id @db.Uuid
+  derrameId      String         @map("derrame_id") @db.Uuid
+  derrame        Derrame        @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoDerrame? @map("estado_anterior")
+  estadoNuevo    EstadoDerrame  @map("estado_nuevo")
+  actorId        String         @map("actor_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([derrameId, createdAt])
+  @@map("derrame_historial")
+  @@schema("qhse")
+}

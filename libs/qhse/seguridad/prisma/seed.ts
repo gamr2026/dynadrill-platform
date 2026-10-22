@@ -6,6 +6,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
+import { sembrarDerrames } from '../src/catalog/sembrar-derrames';
 import { sembrarDesechos } from '../src/catalog/sembrar-desechos';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
@@ -35,6 +36,10 @@ async function main() {
     const des = await sembrarDesechos(prisma);
     console.log(
       `qhse: desechos con ${des.caracteristicas} características CRETIB, ${des.contenedores} contenedores y ${des.estados} estados nuevos`,
+    );
+    const der = await sembrarDerrames(prisma);
+    console.log(
+      `qhse: derrames con ${der.ubicaciones} ubicaciones y ${der.bandas} bandas de volumen nuevas (bandas POR CONFIRMAR con Dynadrill)`,
     );
   } finally {
     await prisma.$disconnect();
