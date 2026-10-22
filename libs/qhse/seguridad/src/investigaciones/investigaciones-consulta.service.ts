@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { EstadoInvestigacion } from '../generated/client';
+import { aDia, hoyEcuador, masMeses } from '../comun/fechas';
+import { EstadoAccionInvestigacion, EstadoInvestigacion } from '../generated/client';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { calcularPlazos, codigoInvestigacion } from './plazos';
@@ -114,6 +115,13 @@ export class InvestigacionesConsultaService {
           include: { categoria: { select: { codigo: true, nombre: true } } },
         },
         causas: { orderBy: [{ tipo: 'asc' }, { orden: 'asc' }] },
+        acciones: {
+          orderBy: { orden: 'asc' },
+          include: {
+            responsable: { select: { id: true, nombre: true } },
+            controles: { select: { nivel: true } },
+          },
+        },
       },
     });
     if (!i) throw new NotFoundException('La investigación no existe');
@@ -165,6 +173,26 @@ export class InvestigacionesConsultaService {
         descripcion: x.descripcion,
       })),
       causas: i.causas.map((x) => ({ tipo: x.tipo, orden: x.orden, descripcion: x.descripcion })),
+      acciones: i.acciones.map((x) => ({
+        id: x.id,
+        orden: x.orden,
+        descripcion: x.descripcion,
+        tipo: x.tipo,
+        estado: x.estado,
+        responsable: x.responsable,
+        plazo: aDia(x.plazo),
+        // una acción pendiente con el plazo cumplido está vencida
+        vencida: x.estado === EstadoAccionInvestigacion.pendiente && aDia(x.plazo) < hoyEcuador(),
+        controles: x.controles.map((c) => c.nivel),
+        implementadaAt: x.implementadaAt,
+        // el formato indica verificar la eficacia tres meses después de implementar (informativo: no bloquea)
+        verificableDesde: x.implementadaAt ? masMeses(aDia(x.implementadaAt), 3) : null,
+        fueEficaz: x.fueEficaz,
+        verificacionObservacion: x.verificacionObservacion,
+        verificadaAt: x.verificadaAt,
+        canceladaAt: x.canceladaAt,
+        cancelacionMotivo: x.cancelacionMotivo,
+      })),
       historial: i.historial.map((h) => ({
         id: h.id,
         estadoAnterior: h.estadoAnterior,

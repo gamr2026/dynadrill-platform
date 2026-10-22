@@ -1171,6 +1171,7 @@ model IdUsuario {
   investigacionHistorial   InvestigacionHistorial[] @relation("investigacionHistorialActor")
   investigacionesTrabajador InvestigacionTrabajador[] @relation("investigacionTrabajadorUsuario")
   investigacionesEquipo     InvestigacionEquipo[]     @relation("investigacionEquipoUsuario")
+  investigacionAcciones     InvestigacionAccion[]     @relation("investigacionAccionResponsable")
 
   @@map("usuario")
   @@schema("identidad")
@@ -1315,6 +1316,7 @@ model Investigacion {
   porques    InvestigacionPorque[]
   ishikawa   InvestigacionIshikawaCausa[]
   causas     InvestigacionCausa[]
+  acciones   InvestigacionAccion[]
 
   @@index([estado])
   @@index([fechaIncidente])
@@ -1566,5 +1568,97 @@ model InvestigacionCausa {
 
   @@unique([investigacionId, tipo, orden])
   @@map("investigacion_causa")
+  @@schema("qhse")
+}
+
+enum TipoAccionInvestigacion {
+  correctiva
+  preventiva
+
+  @@map("tipo_accion_investigacion")
+  @@schema("qhse")
+}
+
+enum EstadoAccionInvestigacion {
+  pendiente
+  implementada
+  verificada
+  cancelada
+
+  @@map("estado_accion_investigacion")
+  @@schema("qhse")
+}
+
+enum NivelControlAccion {
+  planeacion_diseno
+  fuente
+  medio
+  trabajador
+
+  @@map("nivel_control_accion")
+  @@schema("qhse")
+}
+
+/// Acción correctiva o preventiva de una investigación. Su seguimiento sigue después del cierre; no se borra, se cancela.
+model InvestigacionAccion {
+  id                      String                    @id @db.Uuid
+  investigacionId         String                    @map("investigacion_id") @db.Uuid
+  investigacion           Investigacion             @relation(fields: [investigacionId], references: [id])
+  orden                   Int
+  descripcion             String
+  tipo                    TipoAccionInvestigacion
+  responsableId           String                    @map("responsable_id") @db.Uuid
+  responsable             IdUsuario                 @relation("investigacionAccionResponsable", fields: [responsableId], references: [id])
+  plazo                   DateTime                  @db.Date
+  estado                  EstadoAccionInvestigacion @default(pendiente)
+  implementadaAt          DateTime?                 @map("implementada_at") @db.Timestamptz(6)
+  implementadaPor         String?                   @map("implementada_por") @db.Uuid
+  fueEficaz               Boolean?                  @map("fue_eficaz")
+  verificacionObservacion String?                   @map("verificacion_observacion")
+  verificadaAt            DateTime?                 @map("verificada_at") @db.Timestamptz(6)
+  verificadaPor           String?                   @map("verificada_por") @db.Uuid
+  canceladaAt             DateTime?                 @map("cancelada_at") @db.Timestamptz(6)
+  canceladaPor            String?                   @map("cancelada_por") @db.Uuid
+  cancelacionMotivo       String?                   @map("cancelacion_motivo")
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy               String                    @map("created_by") @db.Uuid
+  updatedAt               DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy               String?                   @map("updated_by") @db.Uuid
+
+  controles InvestigacionAccionControl[]
+  historial InvestigacionAccionHistorial[]
+
+  @@unique([investigacionId, orden])
+  @@index([investigacionId])
+  @@map("investigacion_accion")
+  @@schema("qhse")
+}
+
+/// Nivel de control (P/D, F, M, T) al que aplica una acción.
+model InvestigacionAccionControl {
+  accionId  String              @map("accion_id") @db.Uuid
+  accion    InvestigacionAccion @relation(fields: [accionId], references: [id])
+  nivel     NivelControlAccion
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String              @map("created_by") @db.Uuid
+
+  @@id([accionId, nivel])
+  @@map("investigacion_accion_control")
+  @@schema("qhse")
+}
+
+/// Rastro de estados de la acción: solo se agrega.
+model InvestigacionAccionHistorial {
+  id             String                     @id @db.Uuid
+  accionId       String                     @map("accion_id") @db.Uuid
+  accion         InvestigacionAccion        @relation(fields: [accionId], references: [id])
+  estadoAnterior EstadoAccionInvestigacion? @map("estado_anterior")
+  estadoNuevo    EstadoAccionInvestigacion  @map("estado_nuevo")
+  observacion    String?
+  actorId        String                     @map("actor_id") @db.Uuid
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([accionId, createdAt])
+  @@map("investigacion_accion_historial")
   @@schema("qhse")
 }
