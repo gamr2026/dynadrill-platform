@@ -18,6 +18,8 @@ import { PedidosController } from './controllers/pedidos.controller';
 import { SecuenciasController } from './controllers/secuencias.controller';
 import { DirectorioHttpAdapter } from './directorio/directorio-http.adapter';
 import { DirectorioPort } from './directorio/directorio.port';
+import { OperacionesHttpAdapter } from './directorio/operaciones-http.adapter';
+import { OperacionesPort } from './directorio/operaciones.port';
 import { PrismaService } from './prisma/prisma.service';
 import { ListasPreciosService } from './services/listas-precios.service';
 import { DocumentosOperativosService } from './services/documentos-operativos.service';
@@ -55,6 +57,7 @@ import { WorkflowService } from './workflow/workflow.service';
     SecuenciasService,
     WorkflowService,
     { provide: DirectorioPort, useClass: DirectorioHttpAdapter },
+    { provide: OperacionesPort, useClass: OperacionesHttpAdapter },
     PedidosService,
     ListasPreciosService,
     DocumentosOperativosService,
