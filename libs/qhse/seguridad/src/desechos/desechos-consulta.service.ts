@@ -1,9 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { aDia, diasHasta } from '../comun/fechas';
+import { aDia, diasHasta, masDias } from '../comun/fechas';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Consecutivo visible del desecho: DES-000001. */
 export const codigoDesecho = (numero: number): string => `DES-${String(numero).padStart(6, '0')}`;
+
+/** Plazo para tener el certificado de disposición final, contado desde el manifiesto. */
+export const PLAZO_CERTIFICADO_DIAS = 30;
+
+/** Las tres firmas del formato, en el orden en que se imprimen. */
+export const ROLES_FIRMA = ['despachado_por', 'transportado_por', 'recibido_por'] as const;
 
 export interface FiltroDesechos {
   estado?: string;
@@ -79,11 +85,25 @@ export class DesechosConsultaService {
           orderBy: { createdAt: 'asc' },
           include: { estadoNuevo: { select: { codigo: true, nombre: true } } },
         },
+        manifiesto: { include: { firmas: true } },
         _count: { select: { items: true } },
       },
     });
     if (!d) throw new NotFoundException('El desecho no existe');
-    const nombres = await this.nombres([d.createdBy, ...d.historial.map((h) => h.actorId)]);
+    const m = d.manifiesto;
+    const [nombres, cliente] = await Promise.all([
+      this.nombres([
+        d.createdBy,
+        ...d.historial.map((h) => h.actorId),
+        ...(m?.firmas.map((f) => f.registradoPor) ?? []),
+      ]),
+      m?.clienteId
+        ? this.prisma.catCliente.findUnique({
+            where: { id: m.clienteId },
+            select: { nombreComercial: true, identificacion: true },
+          })
+        : null,
+    ]);
     return {
       ...this.resumen(d),
       pozo: d.pozo ? { codigo: d.pozo.codigo, nombre: d.pozo.nombreCompleto } : null,
@@ -98,6 +118,40 @@ export class DesechosConsultaService {
         bultos: i.bultos,
       })),
       totalGalones: d.items.reduce((t, i) => t + Number(i.cantidadGalones), 0),
+      manifiesto: m
+        ? {
+            numero: m.numero,
+            fecha: aDia(m.fecha),
+            /** Plazo de 30 días desde el manifiesto para tener el certificado de disposición final. */
+            certificadoVenceEl: masDias(aDia(m.fecha), PLAZO_CERTIFICADO_DIAS),
+            gestorNombre: m.gestorNombre,
+            gestorLicenciaSuia: m.gestorLicenciaSuia,
+            cliente: cliente
+              ? { nombre: cliente.nombreComercial, identificacion: cliente.identificacion }
+              : null,
+            solicitadoPor: m.solicitadoPor,
+            transportista: {
+              compania: m.transportistaCompania,
+              conductor: m.conductorNombre,
+              cedulaConductor: m.conductorCedula,
+              vehiculo: m.vehiculo,
+              placas: m.placas,
+            },
+            horaSalida: m.horaSalida,
+            horaLlegada: m.horaLlegada,
+            firmas: ROLES_FIRMA.map((rol) => {
+              const f = m.firmas.find((x) => x.rol === rol);
+              return {
+                rol,
+                firmadoAt: f?.firmadoAt ?? null,
+                registradoPor: f ? (nombres.get(f.registradoPor) ?? null) : null,
+                firmanteNombre: f?.firmanteNombre ?? null,
+                firmanteCedula: f?.firmanteCedula ?? null,
+              };
+            }),
+            firmasCompletas: m.firmas.length === ROLES_FIRMA.length,
+          }
+        : null,
       historial: d.historial.map((h) => ({
         estado: h.estadoNuevo,
         actor: nombres.get(h.actorId) ?? null,

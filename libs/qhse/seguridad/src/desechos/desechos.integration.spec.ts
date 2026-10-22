@@ -34,9 +34,24 @@ run('QHSE: Desechos (base de datos real)', () => {
   const operador = () => t.token('operador', OPERADOR.nombre, [P.QHSE_REPORTAR], OPERADOR.id);
   const tecnico = () =>
     t.token('tecnico_hse', TECNICO.nombre, [P.QHSE_REPORTAR, P.DESECHOS_VER], TECNICO.id);
+  const gestor = () =>
+    t.token(
+      'tecnico_hse',
+      TECNICO.nombre,
+      [P.QHSE_REPORTAR, P.DESECHOS_VER, P.DESECHOS_GESTIONAR],
+      TECNICO.id,
+    );
 
-  const car = (codigo: string) => cat.caracteristicas.find((c) => c.codigo === codigo)!.id;
-  const cont = (codigo: string) => cat.contenedores.find((c) => c.codigo === codigo)!.id;
+  const car = (codigo: string): string => {
+    const c = cat.caracteristicas.find((x) => x.codigo === codigo);
+    if (!c) throw new Error(`Falta la característica ${codigo} en la semilla`);
+    return c.id;
+  };
+  const cont = (codigo: string): string => {
+    const c = cat.contenedores.find((x) => x.codigo === codigo);
+    if (!c) throw new Error(`Falta el contenedor ${codigo} en la semilla`);
+    return c.id;
+  };
   const linea = (extra: Record<string, unknown> = {}) => ({
     descripcion: 'Trapos con hidrocarburo',
     codigo: 'NE-03',
@@ -234,8 +249,9 @@ run('QHSE: Desechos (base de datos real)', () => {
       vencido: boolean;
       diasParaLimite: number | null;
     }>;
-    expect(todos.find((x) => x.id === viejo)).toMatchObject({ vencido: true });
-    expect(todos.find((x) => x.id === viejo)!.diasParaLimite).toBeLessThan(0);
+    const filaVieja = todos.find((x) => x.id === viejo);
+    expect(filaVieja).toMatchObject({ vencido: true });
+    expect(filaVieja?.diasParaLimite).toBeLessThan(0);
     expect(todos.find((x) => x.id === reciente)).toMatchObject({ vencido: false });
 
     const almacenados = (await t.http().get('/api/qhse/desechos?estado=almacenado').set(tecnico()))
@@ -248,6 +264,118 @@ run('QHSE: Desechos (base de datos real)', () => {
     const busqueda = (await t.http().get('/api/qhse/desechos?q=antiguo').set(tecnico()))
       .body as Array<{ id: string }>;
     expect(busqueda.some((x) => x.id === viejo)).toBe(true);
+  });
+
+  describe('manifiesto y firmas', () => {
+    const numeroUnico = () => `MAN-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+    const generar = (id: string, cuerpo: Record<string, unknown> = {}, quien = gestor()) =>
+      t
+        .http()
+        .post(`/api/qhse/desechos/${id}/manifiesto`)
+        .set(quien)
+        .send({
+          numero: numeroUnico(),
+          gestorNombre: 'Gestor Ambiental S.A.',
+          gestorLicenciaSuia: 'SUIA-2026-0457',
+          conductorNombre: 'Carlos Conductor',
+          vehiculo: 'Camión tanquero',
+          placas: 'PBA-1234',
+          ...cuerpo,
+        });
+    const firmar = (id: string, cuerpo: Record<string, unknown>, quien = gestor()) =>
+      t.http().post(`/api/qhse/desechos/${id}/manifiesto/firmas`).set(quien).send(cuerpo);
+    const patchGuia = (id: string, cuerpo: Record<string, unknown>) =>
+      t.http().patch(`/api/qhse/desechos/${id}/manifiesto`).set(gestor()).send(cuerpo);
+    const eventos = async (tipo: string, id: string) =>
+      (
+        await sql(
+          "SELECT datos FROM msg_qhse.outbox WHERE tipo = $1 AND datos->'data'->>'desechoId' = $2 ORDER BY ocurrido_at, id",
+          [tipo, id],
+        )
+      ).rows as Array<{ datos: { data: Record<string, unknown> } }>;
+
+    it('generar el manifiesto exige número, gestor y licencia SUIA, y pasa el desecho a con manifiesto', async () => {
+      const id = (await registrar()).body.id as string;
+      // permisos: quien solo reporta o solo ve no gestiona
+      expect((await generar(id, {}, operador())).status).toBe(403);
+      expect((await generar(id, {}, tecnico())).status).toBe(403);
+      for (const faltante of ['numero', 'gestorNombre', 'gestorLicenciaSuia'])
+        expect((await generar(id, { [faltante]: '   ' })).status).toBe(400);
+      expect((await generar(id, { clienteId: uuidv7() })).status).toBe(400);
+
+      const r = await generar(id, { horaSalida: '2026-10-24T08:00:00-05:00' });
+      expect(r.status).toBe(201);
+      expect(r.body.estado.codigo).toBe('con_manifiesto');
+      expect(r.body.manifiesto).toMatchObject({
+        gestorLicenciaSuia: 'SUIA-2026-0457',
+        transportista: { conductor: 'Carlos Conductor', placas: 'PBA-1234' },
+        firmasCompletas: false,
+      });
+      expect(r.body.manifiesto.firmas.map((f: { rol: string }) => f.rol)).toEqual([
+        'despachado_por',
+        'transportado_por',
+        'recibido_por',
+      ]);
+      // plazo de 30 días para el certificado de disposición final
+      const { fecha, certificadoVenceEl } = r.body.manifiesto;
+      expect((Date.parse(certificadoVenceEl) - Date.parse(fecha)) / 86_400_000).toBe(30);
+      expect(r.body.historial).toHaveLength(2);
+      expect((await eventos('qhse.desecho.manifiesto_generado', id))[0].datos.data).toMatchObject({
+        estado: 'con_manifiesto',
+        manifiestoNumero: r.body.manifiesto.numero,
+      });
+      // una sola vez, y con número único
+      expect((await generar(id)).status).toBe(409);
+      const otro = (await registrar()).body.id as string;
+      expect((await generar(otro, { numero: r.body.manifiesto.numero })).status).toBe(409);
+    });
+
+    it('las tres firmas: el despachador firma con su cuenta; transportista y gestor, con nombre y cédula; sin repetir', async () => {
+      const id = (await registrar()).body.id as string;
+      // sin manifiesto no hay qué firmar
+      expect((await firmar(id, { rol: 'despachado_por' })).status).toBe(404);
+      await generar(id);
+
+      expect((await firmar(id, { rol: 'despachado_por' }, operador())).status).toBe(403);
+      expect((await firmar(id, { rol: 'transportado_por' })).status).toBe(400);
+      expect(
+        (await firmar(id, { rol: 'recibido_por', firmanteNombre: 'Rosa Receptora' })).status,
+      ).toBe(400);
+
+      const a = await firmar(id, { rol: 'despachado_por', firmanteNombre: 'No aplica' });
+      expect(a.status).toBe(201);
+      const firmaA = a.body.manifiesto.firmas[0];
+      expect(firmaA).toMatchObject({ registradoPor: TECNICO.nombre, firmanteNombre: null });
+      expect(firmaA.firmadoAt).toEqual(expect.any(String));
+      expect((await firmar(id, { rol: 'despachado_por' })).status).toBe(409);
+
+      await firmar(id, {
+        rol: 'transportado_por',
+        firmanteNombre: 'Carlos Conductor',
+        firmanteCedula: '1712345678',
+      });
+      // aún no está completo: se puede completar la guía
+      const guia = await patchGuia(id, {
+        horaLlegada: '2026-10-24T14:00:00-05:00',
+        placas: 'PBA-9999',
+      });
+      expect(guia.status).toBe(200);
+      expect(guia.body.manifiesto.transportista.placas).toBe('PBA-9999');
+      // la llegada no puede ser anterior a la salida
+      expect((await patchGuia(id, { horaSalida: '2026-10-24T20:00:00-05:00' })).status).toBe(400);
+
+      const c = await firmar(id, {
+        rol: 'recibido_por',
+        firmanteNombre: 'Rosa Receptora',
+        firmanteCedula: '1798765432',
+      });
+      expect(c.body.manifiesto.firmasCompletas).toBe(true);
+      const ev = await eventos('qhse.desecho.firmado', id);
+      expect(ev.map((e) => e.datos.data['firmasRegistradas'])).toEqual([1, 2, 3]);
+      expect(ev[2].datos.data).toMatchObject({ rolFirma: 'recibido_por', firmasCompletas: true });
+      // con las tres firmas la guía ya no cambia
+      expect((await patchGuia(id, { placas: 'XXX-0000' })).status).toBe(409);
+    });
   });
 
   describe('reglas de la base', () => {
@@ -366,11 +494,28 @@ run('QHSE: Desechos (base de datos real)', () => {
 
     it('con el desecho fuera de almacenamiento no se agregan líneas, y uno dispuesto ya no cambia', async () => {
       const id = await insertarDirecto(1);
+      await sql(
+        "INSERT INTO qhse.desecho_manifiesto (id, desecho_id, numero, fecha, gestor_nombre, gestor_licencia_suia, created_by) VALUES ($1, $2, $3, CURRENT_DATE, 'G', 'S', $4)",
+        [uuidv7(), id, `M-${Date.now()}-e`, OPERADOR.id],
+      );
       await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
         id,
         await estadoId('con_manifiesto'),
       ]);
       await expect(sql(...item(id))).rejects.toThrow(/solo se completan con el desecho almacenado/);
+      // disponer exige las tres firmas del manifiesto
+      const manifiesto = (
+        await sql('SELECT id FROM qhse.desecho_manifiesto WHERE desecho_id = $1', [id])
+      ).rows[0].id as string;
+      for (const [rol, nombre, cedula] of [
+        ['despachado_por', null, null],
+        ['transportado_por', 'Carlos', '1712345678'],
+        ['recibido_por', 'Rosa', '1798765432'],
+      ])
+        await sql(
+          'INSERT INTO qhse.desecho_firma (id, manifiesto_id, rol, registrado_por, firmante_nombre, firmante_cedula) VALUES ($1, $2, $3::qhse.rol_firma_desecho, $4, $5, $6)',
+          [uuidv7(), manifiesto, rol, OPERADOR.id, nombre, cedula],
+        );
       await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
         id,
         await estadoId('dispuesto'),
@@ -381,6 +526,121 @@ run('QHSE: Desechos (base de datos real)', () => {
           await estadoId('almacenado'),
         ]),
       ).rejects.toThrow(/dispuesto ya no se modifica/);
+    });
+
+    it('el manifiesto y las firmas: número, horas y firmante lo exige la base; las firmas no se editan ni se borran', async () => {
+      const id = await insertarDirecto(1);
+      const manifiestoId = uuidv7();
+      const crear = (numero: string, horas: [string | null, string | null] = [null, null]) =>
+        sql(
+          `INSERT INTO qhse.desecho_manifiesto (id, desecho_id, numero, fecha, gestor_nombre, gestor_licencia_suia, hora_salida, hora_llegada, created_by)
+           VALUES ($1, $2, $3, CURRENT_DATE, 'Gestor', 'SUIA-1', $4, $5, $6)`,
+          [manifiestoId, id, numero, horas[0], horas[1], OPERADOR.id],
+        );
+      // pasar a con manifiesto sin manifiesto no se puede
+      await expect(
+        sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+          id,
+          await estadoId('con_manifiesto'),
+        ]),
+      ).rejects.toThrow(/hay que generar el manifiesto/);
+      await expect(crear('   ')).rejects.toThrow(/desecho_manifiesto_numero_check/);
+      await expect(
+        crear(`M-${Date.now()}`, ['2026-10-24T10:00:00Z', '2026-10-24T09:00:00Z']),
+      ).rejects.toThrow(/desecho_manifiesto_horas_check/);
+      await crear(`M-${Date.now()}-b`);
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        id,
+        await estadoId('con_manifiesto'),
+      ]);
+
+      const firma = (rol: string, nombre: string | null, cedula: string | null) =>
+        sql(
+          'INSERT INTO qhse.desecho_firma (id, manifiesto_id, rol, registrado_por, firmante_nombre, firmante_cedula) VALUES ($1, $2, $3::qhse.rol_firma_desecho, $4, $5, $6)',
+          [uuidv7(), manifiestoId, rol, OPERADOR.id, nombre, cedula],
+        );
+      await expect(firma('despachado_por', 'Alguien', '1700000000')).rejects.toThrow(
+        /desecho_firma_firmante_check/,
+      );
+      await expect(firma('transportado_por', null, null)).rejects.toThrow(
+        /desecho_firma_firmante_check/,
+      );
+      await expect(firma('recibido_por', 'Rosa', '   ')).rejects.toThrow(
+        /desecho_firma_firmante_check/,
+      );
+      await firma('despachado_por', null, null);
+      await expect(firma('despachado_por', null, null)).rejects.toThrow(/desecho_firma_unica_key/);
+
+      // disponer exige las tres firmas
+      await expect(
+        sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+          id,
+          await estadoId('dispuesto'),
+        ]),
+      ).rejects.toThrow(/necesita las tres firmas/);
+
+      await firma('transportado_por', 'Carlos', '1712345678');
+      await firma('recibido_por', 'Rosa', '1798765432');
+      // firmas inmutables para la aplicación; con las tres, el manifiesto ya no cambia
+      await expect(
+        t.prisma.desechoFirma.updateMany({
+          where: { manifiestoId },
+          data: { firmanteNombre: 'Otro' },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(t.prisma.desechoFirma.deleteMany({ where: { manifiestoId } })).rejects.toThrow(
+        /permission denied|denegado/i,
+      );
+      await expect(
+        t.prisma.desechoManifiesto.update({
+          where: { id: manifiestoId },
+          data: { numero: 'otro' },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.desechoManifiesto.delete({ where: { id: manifiestoId } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        sql('UPDATE qhse.desecho_manifiesto SET placas = $2 WHERE id = $1', [
+          manifiestoId,
+          'ZZZ-1',
+        ]),
+      ).rejects.toThrow(/ya tiene las tres firmas/);
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        id,
+        await estadoId('dispuesto'),
+      ]);
+      // dispuesto ya no admite firmas
+      await expect(firma('despachado_por', null, null)).rejects.toThrow();
+    });
+
+    it('un desecho solo tiene un manifiesto y no se genera uno con el desecho fuera de almacenamiento', async () => {
+      const id = await insertarDirecto(1);
+      const nuevo = (n: string) =>
+        sql(
+          "INSERT INTO qhse.desecho_manifiesto (id, desecho_id, numero, fecha, gestor_nombre, gestor_licencia_suia, created_by) VALUES ($1, $2, $3, CURRENT_DATE, 'G', 'S', $4)",
+          [uuidv7(), id, n, OPERADOR.id],
+        );
+      await nuevo(`M-${Date.now()}-c`);
+      await expect(nuevo(`M-${Date.now()}-d`)).rejects.toThrow(/desecho_manifiesto_desecho_key/);
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        id,
+        await estadoId('con_manifiesto'),
+      ]);
+      // con el desecho ya con manifiesto, el trigger rechaza antes que la clave única de otro desecho
+      const otro = await insertarDirecto(1);
+      await sql('UPDATE qhse.desecho SET estado_id = $2 WHERE id = $1', [
+        otro,
+        await estadoId('almacenado'),
+      ]);
+      await expect(
+        sql(
+          "INSERT INTO qhse.desecho_manifiesto (id, desecho_id, numero, fecha, gestor_nombre, gestor_licencia_suia, created_by) VALUES ($1, $2, 'M-dup', CURRENT_DATE, 'G', 'S', $3)",
+          [uuidv7(), id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(
+        /desecho_manifiesto_desecho_key|solo se genera|se genera con el desecho almacenado/,
+      );
     });
 
     it('un contenedor, un estado o un pozo inexistentes no pasan (FK)', async () => {

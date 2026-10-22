@@ -1231,6 +1231,7 @@ model CatCampo {
 model CatCliente {
   id              String        @id @db.Uuid
   nombreComercial String        @map("nombre_comercial")
+  identificacion  String
   stops           StopTarjeta[]
 
   @@map("cliente")
@@ -1329,6 +1330,7 @@ model Desecho {
   caracteristicas DesechoCaracteristicaAsignada[]
   items           DesechoItem[]
   historial       DesechoHistorial[]
+  manifiesto      DesechoManifiesto?
 
   @@index([estadoId])
   @@index([limiteAlmacenamientoHasta])
@@ -1396,4 +1398,58 @@ model CatPozo {
 
   @@map("pozo")
   @@schema("catalogos")
+}
+
+enum RolFirmaDesecho {
+  despachado_por
+  transportado_por
+  recibido_por
+
+  @@map("rol_firma_desecho")
+  @@schema("qhse")
+}
+
+/// Manifiesto único / guía de remisión (DYN-SGI-RE-063): uno por desecho. El cliente se lee de `catalogos.cliente` por `clienteId` (sin relación de Prisma).
+model DesechoManifiesto {
+  id                    String     @id @db.Uuid
+  desechoId             String     @unique @map("desecho_id") @db.Uuid
+  desecho               Desecho    @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  numero                String     @unique
+  fecha                 DateTime   @db.Date
+  gestorNombre          String     @map("gestor_nombre")
+  gestorLicenciaSuia    String     @map("gestor_licencia_suia")
+  clienteId             String?    @map("cliente_id") @db.Uuid
+  solicitadoPor         String?    @map("solicitado_por")
+  transportistaCompania String?    @map("transportista_compania")
+  conductorNombre       String?    @map("conductor_nombre")
+  conductorCedula       String?    @map("conductor_cedula")
+  vehiculo              String?
+  placas                String?
+  horaSalida            DateTime?  @map("hora_salida") @db.Timestamptz(6)
+  horaLlegada           DateTime?  @map("hora_llegada") @db.Timestamptz(6)
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String     @map("created_by") @db.Uuid
+  updatedAt             DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?    @map("updated_by") @db.Uuid
+
+  firmas DesechoFirma[]
+
+  @@map("desecho_manifiesto")
+  @@schema("qhse")
+}
+
+/// Firma «de una línea» del manifiesto (D6). Inmutable.
+model DesechoFirma {
+  id             String            @id @db.Uuid
+  manifiestoId   String            @map("manifiesto_id") @db.Uuid
+  manifiesto     DesechoManifiesto @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  rol            RolFirmaDesecho
+  registradoPor  String            @map("registrado_por") @db.Uuid
+  firmadoAt      DateTime          @default(now()) @map("firmado_at") @db.Timestamptz(6)
+  firmanteNombre String?           @map("firmante_nombre")
+  firmanteCedula String?           @map("firmante_cedula")
+
+  @@unique([manifiestoId, rol])
+  @@map("desecho_firma")
+  @@schema("qhse")
 }

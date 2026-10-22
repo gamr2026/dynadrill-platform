@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsIn,
+  IsISO8601,
   IsInt,
   IsNumber,
   IsOptional,
@@ -16,8 +17,9 @@ import {
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
-import { ClasificacionDesecho } from '../generated/client';
+import { ClasificacionDesecho, RolFirmaDesecho } from '../generated/client';
 import { DesechosConsultaService } from './desechos-consulta.service';
+import { DesechosManifiestoService } from './desechos-manifiesto.service';
 import { DesechosService } from './desechos.service';
 
 const P = Permission;
@@ -54,6 +56,31 @@ export class RegistrarDesechoDto {
   items!: LineaDesechoDto[];
 }
 
+/** Transporte y horas de la guía de remisión; todo opcional (un valor vacío limpia el campo). */
+export class GuiaDesechoDto {
+  @IsOptional() @IsUUID() clienteId?: string;
+  @IsOptional() @IsString() @MaxLength(200) solicitadoPor?: string;
+  @IsOptional() @IsString() @MaxLength(200) transportistaCompania?: string;
+  @IsOptional() @IsString() @MaxLength(200) conductorNombre?: string;
+  @IsOptional() @IsString() @MaxLength(20) conductorCedula?: string;
+  @IsOptional() @IsString() @MaxLength(100) vehiculo?: string;
+  @IsOptional() @IsString() @MaxLength(20) placas?: string;
+  @IsOptional() @IsISO8601() horaSalida?: string;
+  @IsOptional() @IsISO8601() horaLlegada?: string;
+}
+
+export class GenerarManifiestoDto extends GuiaDesechoDto {
+  @IsString() @MaxLength(60) numero!: string;
+  @IsString() @MaxLength(200) gestorNombre!: string;
+  @IsString() @MaxLength(100) gestorLicenciaSuia!: string;
+}
+
+export class FirmarManifiestoDto {
+  @IsIn(Object.values(RolFirmaDesecho)) rol!: RolFirmaDesecho;
+  @IsOptional() @IsString() @MaxLength(200) firmanteNombre?: string;
+  @IsOptional() @IsString() @MaxLength(20) firmanteCedula?: string;
+}
+
 /**
  * Desechos. Ruta pública `/api/v2/qhse/desechos`. Registrar es de cualquier usuario autenticado (`qhse.eventos.reportar`);
  * verlos y gestionarlos es del equipo HSE.
@@ -62,6 +89,7 @@ export class RegistrarDesechoDto {
 export class DesechosController {
   constructor(
     private readonly desechos: DesechosService,
+    private readonly manifiestos: DesechosManifiestoService,
     private readonly consulta: DesechosConsultaService,
   ) {}
 
@@ -88,5 +116,35 @@ export class DesechosController {
   @Get(':id')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
     return this.consulta.detalle(id);
+  }
+
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post(':id/manifiesto')
+  generarManifiesto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GenerarManifiestoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.manifiestos.generar(id, dto, actor);
+  }
+
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Patch(':id/manifiesto')
+  actualizarGuia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GuiaDesechoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.manifiestos.actualizarGuia(id, dto, actor);
+  }
+
+  @RequirePermission(P.DESECHOS_GESTIONAR)
+  @Post(':id/manifiesto/firmas')
+  firmar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FirmarManifiestoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.manifiestos.firmar(id, dto.rol, dto, actor);
   }
 }

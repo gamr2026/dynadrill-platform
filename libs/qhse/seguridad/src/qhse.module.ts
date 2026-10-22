@@ -17,6 +17,8 @@ import { IpercController } from './iperc/iperc.controller';
 import { IpercService } from './iperc/iperc.service';
 import { DesechosConsultaService } from './desechos/desechos-consulta.service';
 import { DesechosController } from './desechos/desechos.controller';
+import { DesechosEventosService } from './desechos/desechos-eventos.service';
+import { DesechosManifiestoService } from './desechos/desechos-manifiesto.service';
 import { DesechosService } from './desechos/desechos.service';
 import { PrismaService } from './prisma/prisma.service';
 import { VerificadorFirmas, VerificadorFirmasHttp } from './documentos/verificador-firmas';
@@ -70,6 +72,8 @@ import { PtwService } from './ptw/ptw.service';
     InspeccionesConsultaService,
     DesechosService,
     DesechosConsultaService,
+    DesechosEventosService,
+    DesechosManifiestoService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],

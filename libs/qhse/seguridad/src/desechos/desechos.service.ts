@@ -1,14 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { currentTraceparent, type AuthUser } from '@dyn/common';
-import { EventBus } from '@dyn/messaging';
+import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { aFecha, hoyEcuador, masMeses } from '../comun/fechas';
-import { texto, type Tx } from '../epi/epi-tipos';
+import { texto } from '../epi/epi-tipos';
 import { ClasificacionDesecho } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { DesechosConsultaService, codigoDesecho } from './desechos-consulta.service';
-
-const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
+import { codigoDesecho } from './desechos-consulta.service';
+import { DesechosEventosService } from './desechos-eventos.service';
 
 export interface LineaEntrada {
   descripcion: string;
@@ -37,7 +35,7 @@ export interface RegistrarDesechoEntrada {
 export class DesechosService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly bus: EventBus,
+    private readonly eventos: DesechosEventosService,
   ) {}
 
   /** Registra el desecho con sus características y las líneas de la guía. Devuelve lo mínimo (quien reporta puede no ver la bandeja). */
@@ -127,42 +125,8 @@ export class DesechosService {
       await tx.desechoHistorial.create({
         data: { id: uuidv7(), desechoId: id, estadoNuevoId: almacenado.id, actorId: actor.id },
       });
-      await this.publicar(tx, 'qhse.desecho.registrado', id, actor);
+      await this.eventos.publicar(tx, 'qhse.desecho.registrado', id, actor);
     });
     return { id, codigo: codigoDesecho(numero), estado: 'almacenado' };
-  }
-
-  /** Evento estable con ids (los KPI de HSE-MASTER-001 salen de reportería). */
-  private async publicar(tx: Tx, tipo: string, desechoId: string, actor: AuthUser) {
-    const d = await tx.desecho.findUniqueOrThrow({
-      where: { id: desechoId },
-      include: {
-        estado: { select: { codigo: true } },
-        contenedor: { select: { codigo: true } },
-        items: { select: { cantidadGalones: true } },
-        caracteristicas: { include: { caracteristica: { select: { codigo: true } } } },
-      },
-    });
-    await this.bus.publish(
-      tx,
-      this.bus.create({
-        type: tipo,
-        subject: { type: 'desecho', id: desechoId },
-        data: {
-          desechoId,
-          numero: d.numero,
-          codigo: codigoDesecho(d.numero),
-          estado: d.estado.codigo,
-          clasificacion: d.clasificacion,
-          cretib: d.caracteristicas.map((c) => c.caracteristica.codigo),
-          contenedor: d.contenedor.codigo,
-          pozoId: d.pozoId,
-          totalGalones: d.items.reduce((t, i) => t + Number(i.cantidadGalones), 0),
-          limiteAlmacenamientoHasta: d.limiteAlmacenamientoHasta.toISOString().slice(0, 10),
-        },
-        actor: enActor(actor),
-        traceparent: currentTraceparent(),
-      }),
-    );
   }
 }

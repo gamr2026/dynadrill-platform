@@ -22,3 +22,8 @@ export function masMeses(dia: string, meses: number): string {
 export function diasHasta(fecha: string, desde: string = hoyEcuador()): number {
   return Math.round((Date.parse(`${fecha}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS);
 }
+
+/** `fecha + n días` (AAAA-MM-DD). */
+export function masDias(dia: string, dias: number): string {
+  return new Date(Date.parse(`${dia}T00:00:00Z`) + dias * DIA_MS).toISOString().slice(0, 10);
+}
