@@ -12,6 +12,7 @@ import { TicketsController } from './controllers/tickets.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { CatalogosService } from './services/catalogos.service';
+import { DisponibilidadService } from './services/disponibilidad.service';
 import { ConfiguracionCodigosService } from './services/configuracion-codigos.service';
 import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
@@ -54,6 +55,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     PrismaService,
     TicketsService,
     AsignacionService,
+    DisponibilidadService,
     TipoOperadorService,
     CatalogosService,
     RequisitosService,

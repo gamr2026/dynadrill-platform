@@ -181,8 +181,8 @@ run(
         .expect(201);
 
     /** Lleva un ticket de venta hasta el paso de Asignación, tomado por `supervisor`. */
-    const hastaAsignacion = async () => {
-      const t = await crear();
+    const hastaAsignacion = async (data: Record<string, unknown> = {}) => {
+      const t = await crear(data);
       await avanzar(t.id, 'preparacion_herramientas').expect(201);
       await confirmarListado(t.id);
       await avanzar(t.id, 'asignacion').expect(201);
@@ -667,7 +667,11 @@ run(
       });
 
       it('solo el equipo del ticket asigna y solo desde el paso de Asignación; el supervisor ya asignado no lo cambia otro Supervisor', async () => {
-        const t = await hastaAsignacion();
+        // fechas propias: el operador no debe estar ocupado en otro ticket de estas pruebas
+        const t = await hastaAsignacion({
+          fechaInicioServicio: '2028-01-01',
+          fechaFinServicio: '2028-01-05',
+        });
         await asignar(t.id, { operadores: [{ usuarioId: OPERADOR.id }] }, otroSupervisor()).expect(
           403,
         );
@@ -690,7 +694,10 @@ run(
       });
 
       it('después de asignar, la reunión es del Supervisor del ticket y la ejecución solo del operador asignado', async () => {
-        const t = await hastaAsignacion();
+        const t = await hastaAsignacion({
+          fechaInicioServicio: '2028-02-01',
+          fechaFinServicio: '2028-02-05',
+        });
         await asignar(t.id, { operadores: [{ usuarioId: OPERADOR.id }] }).expect(201);
         // reunión operativa: la atiende el Supervisor del ticket y exige el acta
         await avanzar(t.id, 'ejecucion_operativa', otroSupervisor()).expect(403);
@@ -699,7 +706,7 @@ run(
         await http()
           .put(`/api/operaciones/fcr/tickets/${t.id}/reunion-operativa`)
           .set(supervisor())
-          .send({ fecha: '2026-11-05' })
+          .send({ fecha: '2028-02-01' })
           .expect(200);
         await avanzar(t.id, 'ejecucion_operativa', supervisor()).expect(201);
         // ejecución: el rol es operador FCR y además debe ser del equipo
@@ -719,6 +726,139 @@ run(
           .set(otroOperador())
           .expect(403);
         // el recorrido completo de la ejecución, el retorno y el cierre se prueba en fcr-ejecucion y fcr-cierre
+      });
+    });
+
+    describe('disponibilidad de operadores por rango', () => {
+      // cada prueba usa sus propias fechas: el operador asignado en una no debe estar ocupado en otra
+      const servicio = (mes: string) => ({
+        fechaInicioServicio: `2027-${mes}-01`,
+        fechaFinServicio: `2027-${mes}-05`,
+      });
+      const disponibles = (id: string, consulta = '', auth = supervisor()) =>
+        http()
+          .get(`/api/operaciones/fcr/tickets/${id}/operadores-disponibles${consulta}`)
+          .set(auth);
+      const asignar = (id: string, usuarioId: string) =>
+        http()
+          .post(`/api/operaciones/fcr/tickets/${id}/asignar`)
+          .set(supervisor())
+          .send({ operadores: [{ usuarioId }] });
+      interface Estado {
+        usuarioId: string;
+        disponible: boolean;
+        detalle: string;
+        ocupaciones: Array<{ ticketId: string }>;
+      }
+      const de = (cuerpo: { operadores: Estado[] }, id: string): Estado => {
+        const o = cuerpo.operadores.find((x) => x.usuarioId === id);
+        if (!o) throw new Error(`El operador ${id} no está en la lista`);
+        return o;
+      };
+
+      it('lista solo a los operadores FCR activos, todos disponibles si nadie está asignado en esas fechas', async () => {
+        const t = await hastaAsignacion(servicio('02'));
+        const r = await disponibles(t.id).expect(200);
+        expect(r.body).toMatchObject({ desde: '2027-02-01', hasta: '2027-02-05' });
+        const ids = r.body.operadores.map((o: { usuarioId: string }) => o.usuarioId);
+        expect(ids).toEqual(expect.arrayContaining([OPERADOR.id, OTRO_OPERADOR.id, INSPECTOR.id]));
+        expect(ids).not.toContain(SUPERVISOR.id);
+        expect(ids).not.toContain(OPERADOR_PUMPING.id);
+        expect(de(r.body, OPERADOR.id)).toMatchObject({
+          disponible: true,
+          detalle: 'Disponible todo el rango',
+          ocupaciones: [],
+        });
+      });
+
+      it('marca ✗ a quien ya está en otro ticket abierto que se cruza, con la frase de la demo, y ✓ a los demás', async () => {
+        const a = await hastaAsignacion(servicio('03'));
+        const b = await hastaAsignacion(servicio('03'));
+        await asignar(a.id, OPERADOR.id).expect(201);
+        const r = await disponibles(b.id).expect(200);
+        const ocupado = de(r.body, OPERADOR.id);
+        expect(ocupado).toMatchObject({
+          disponible: false,
+          detalle: 'Ocupado todo el rango (hasta 05/03)',
+        });
+        expect(ocupado.ocupaciones).toEqual([
+          expect.objectContaining({ ticketId: a.id, desde: '2027-03-01', hasta: '2027-03-05' }),
+        ]);
+        expect(de(r.body, OTRO_OPERADOR.id)).toMatchObject({ disponible: true });
+        // el ticket al que ya está asignado no cuenta contra sí mismo
+        expect(de((await disponibles(a.id).expect(200)).body, OPERADOR.id)).toMatchObject({
+          disponible: true,
+        });
+      });
+
+      it('con otro rango distingue: libre, ocupado todo el rango, se ocupa a mitad y se libera a mitad', async () => {
+        const a = await hastaAsignacion(servicio('06'));
+        const b = await hastaAsignacion(servicio('06'));
+        await asignar(a.id, OPERADOR.id).expect(201);
+        const frase = async (consulta: string) =>
+          de((await disponibles(b.id, consulta).expect(200)).body, OPERADOR.id).detalle;
+        expect(await frase('?desde=2027-06-06&hasta=2027-06-09')).toBe('Disponible todo el rango');
+        expect(await frase('?desde=2027-06-02&hasta=2027-06-03')).toBe(
+          'Ocupado todo el rango (hasta 05/06)',
+        );
+        expect(await frase('?desde=2027-05-30&hasta=2027-06-03')).toBe(
+          'Disponible al inicio, sale del rango el 01/06',
+        );
+        expect(await frase('?desde=2027-06-04&hasta=2027-06-08')).toBe(
+          'Ocupado al inicio, se incorpora el 06/06',
+        );
+        // solo `desde`: el rango es ese día
+        expect(await frase('?desde=2027-06-05')).toBe('Ocupado todo el rango (hasta 05/06)');
+        expect(await frase('?desde=2027-06-06')).toBe('Disponible todo el rango');
+      });
+
+      it('un ticket sin fecha de fin ocupa a su equipo hasta que se cierre', async () => {
+        const abierto = await hastaAsignacion({
+          fechaInicioServicio: '2027-04-01',
+          fechaFinServicio: null,
+        });
+        const b = await hastaAsignacion({
+          fechaInicioServicio: '2027-04-10',
+          fechaFinServicio: '2027-04-12',
+        });
+        await asignar(abierto.id, OTRO_OPERADOR.id).expect(201);
+        expect(de((await disponibles(b.id).expect(200)).body, OTRO_OPERADOR.id).detalle).toMatch(
+          /hasta que se cierre el ticket/,
+        );
+      });
+
+      it('rechaza asignar a un operador ocupado en las fechas del servicio y no deja el ticket a medias', async () => {
+        const a = await hastaAsignacion(servicio('07'));
+        const b = await hastaAsignacion(servicio('07'));
+        await asignar(a.id, OPERADOR.id).expect(201);
+        const r = await asignar(b.id, OPERADOR.id).expect(409);
+        expect(r.body.code).toBe('PERSONAL_OCUPADO');
+        expect(r.body.detail ?? r.body.message).toMatch(/Ya están asignados a otro ticket/);
+        expect((await detalle(b.id)).paso.codigo).toBe('asignacion');
+        expect(
+          await prisma.ticketPersona.count({ where: { ticketId: b.id, rol: 'operador' } }),
+        ).toBe(0);
+        // otro operador libre sí se puede asignar
+        await asignar(b.id, INSPECTOR.id).expect(201);
+      });
+
+      it('permite asignar al mismo operador a un ticket con fechas que no se cruzan', async () => {
+        const a = await hastaAsignacion(servicio('08'));
+        const b = await hastaAsignacion({
+          fechaInicioServicio: '2027-05-10',
+          fechaFinServicio: '2027-05-12',
+        });
+        await asignar(a.id, INSPECTOR.id).expect(201);
+        await asignar(b.id, INSPECTOR.id).expect(201);
+      });
+
+      it('valida las fechas y los permisos', async () => {
+        const t = await hastaAsignacion(servicio('09'));
+        await disponibles(t.id, '?desde=01-03-2027').expect(400);
+        await disponibles(t.id, '?desde=2027-13-45').expect(400);
+        await disponibles(t.id, '?desde=2027-03-05&hasta=2027-03-01').expect(400);
+        await disponibles(uuidv7()).expect(404);
+        await disponibles(t.id, '', sinPermiso()).expect(403);
       });
     });
 

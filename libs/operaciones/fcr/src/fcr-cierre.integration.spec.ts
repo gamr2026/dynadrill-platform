@@ -132,6 +132,12 @@ run(
     };
 
     /** Ticket de venta en la ejecución, con un cepillo y un magneto recibidos, asignado al operador, con el acta confirmada. */
+    /** Quita al operador de los demás tickets de la prueba (datos de esta suite), para que la asignación no lo vea ocupado. */
+    const liberarOperador = (ticketId: string) =>
+      admin.query('DELETE FROM fcr.ticket_persona WHERE usuario_id = $1 AND ticket_id <> $2', [
+        OPERADOR.id,
+        ticketId,
+      ]);
     const enEjecucion = async (fechas = { inicio: '2026-11-05', fin: '2026-11-12' }) => {
       const codigo = `SH-EJ-${n}-${cods++}`;
       await http()
@@ -223,6 +229,8 @@ run(
         .set(supervisor())
         .send({ hacia: 'asignacion' })
         .expect(201);
+      // cada prueba arma su ticket con las mismas fechas: el equipo de los tickets anteriores de la prueba ya terminó su servicio
+      await liberarOperador(id);
       await http()
         .post(`${base(id)}/asignar`)
         .set(supervisor())
