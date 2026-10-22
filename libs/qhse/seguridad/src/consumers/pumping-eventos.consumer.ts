@@ -8,9 +8,17 @@ const esUuid = (v: unknown): v is string =>
   typeof v === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
+/** Tipos de evento que abren casos de QHSE: los de Pumping y los de FCR llevan la misma forma (ticket, pedido, asignados). */
+const TIPOS = [
+  'operaciones.pumping.ticket_creado',
+  'operaciones.pumping.asignacion_realizada',
+  'operaciones.fcr.ticket_creado',
+  'operaciones.fcr.asignacion_realizada',
+] as const;
+
 /**
- * Recibe de Pumping (contenedor operaciones) los hechos que abren casos de QHSE (contratos 4.6 y 3):
- *  - `ticket_creado`: QHSE conoce el ticket (para preparar el PTW y referenciarlo);
+ * Recibe de Pumping y de FCR (contenedor operaciones) los hechos que abren casos de QHSE (contratos 4.6 y 3):
+ *  - `ticket_creado`: QHSE conoce el ticket (para preparar el PTW, cargar sus documentos y referenciarlo);
  *  - `asignacion_realizada`: guarda los operadores asignados (la solicitud de EPI la hace el equipo de Pumping desde el ticket).
  * Un evento al que le faltan datos se ignora sin error.
  */
@@ -27,18 +35,14 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
   async onApplicationBootstrap(): Promise<void> {
     await this.bus.subscribe({
       source: 'operaciones',
-      patterns: ['operaciones.pumping.ticket_creado', 'operaciones.pumping.asignacion_realizada'],
+      patterns: [...TIPOS],
       handler: (e) => this.consumir(e),
     });
   }
 
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
-    if (
-      event.type !== 'operaciones.pumping.ticket_creado' &&
-      event.type !== 'operaciones.pumping.asignacion_realizada'
-    )
-      return;
+    if (!(TIPOS as readonly string[]).includes(event.type)) return;
     await runInEventSpan(`consume ${event.type}`, event.traceparent, async () => {
       await this.prisma.$transaction(async (tx) => {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
@@ -115,7 +119,7 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
               this.logger.log(`Ticket ${datos.ticketNumero ?? ticketId}: PTW del ${dia} abierto`);
           }
 
-          if (event.type !== 'operaciones.pumping.asignacion_realizada') return;
+          if (!event.type.endsWith('.asignacion_realizada')) return;
 
           // los operadores asignados (cuentas existentes y activas) reemplazan a los anteriores. El EPI ya no se abre solo: lo pide el equipo de
           // Pumping desde el ticket y QHSE lo atiende (EpiService.solicitarParaTicket); aquí solo se guarda quién es operador del ticket.

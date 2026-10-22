@@ -376,6 +376,29 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       supervisorId: SUPERVISOR.id,
       cliente: 'Cliente X',
     });
+    // los tickets de FCR llegan con sus propios eventos y quedan igual de conocidos para QHSE (documentos, Acta, PTW)
+    const fcrId = uuidv7();
+    await consumidor.consumir({
+      id: uuidv7(),
+      type: 'operaciones.fcr.ticket_creado',
+      version: 1,
+      occurredAt: new Date().toISOString(),
+      source: 'operaciones',
+      subject: { type: 'fcr_ticket', id: fcrId },
+      data: {
+        ticketId: fcrId,
+        pedidoId: uuidv7(),
+        ticketNumero: 955_002,
+        pedidoCodigo: `PED-DOCF${n}`,
+        cliente: 'Cliente F',
+      },
+    } as never);
+    expect(
+      await t.prisma.ticketRef.findUniqueOrThrow({ where: { ticketId: fcrId } }),
+    ).toMatchObject({
+      pedidoCodigo: `PED-DOCF${n}`,
+      cliente: 'Cliente F',
+    });
     // la bandeja muestra el cliente, campo y pozo
     const r = await t
       .http()
