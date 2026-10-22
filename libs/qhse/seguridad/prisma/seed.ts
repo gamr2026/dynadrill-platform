@@ -8,6 +8,7 @@ import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
 import { sembrarDerrames } from '../src/catalog/sembrar-derrames';
 import { sembrarDesechos } from '../src/catalog/sembrar-desechos';
+import { sembrarEmergencias } from '../src/catalog/sembrar-emergencias';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
@@ -41,6 +42,8 @@ async function main() {
     console.log(
       `qhse: derrames con ${der.ubicaciones} ubicaciones, ${der.bandas} bandas de volumen y ${der.pasos} pasos de contención nuevos (bandas POR CONFIRMAR con Dynadrill)`,
     );
+    const eme = await sembrarEmergencias(prisma);
+    console.log(`qhse: emergencias con ${eme.tipos} tipos nuevos`);
   } finally {
     await prisma.$disconnect();
   }

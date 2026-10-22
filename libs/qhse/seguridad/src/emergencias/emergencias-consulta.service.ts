@@ -1,0 +1,184 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+/** Consecutivo visible de la emergencia: EME-000001. */
+export const codigoEmergencia = (numero: number): string =>
+  `EME-${String(numero).padStart(6, '0')}`;
+
+const codigoSwa = (numero: number) => `SWA-${String(numero).padStart(6, '0')}`;
+const codigoDerrame = (numero: number) => `DER-${String(numero).padStart(6, '0')}`;
+
+export interface FiltroEmergencias {
+  estado?: 'activa' | 'controlada' | 'cerrada';
+  ticketId?: string;
+  q?: string;
+}
+
+/** Lectura de emergencias: catálogos del formulario, bandeja y detalle con el cronómetro. */
+@Injectable()
+export class EmergenciasConsultaService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** Catálogos del formulario de activación (los usa quien reporta, aunque no vea la bandeja). */
+  async catalogos() {
+    const [tipos, tickets] = await Promise.all([
+      this.prisma.emergenciaTipo.findMany({
+        where: { activo: true },
+        orderBy: { orden: 'asc' },
+        select: { id: true, codigo: true, nombre: true },
+      }),
+      this.prisma.ticketRef.findMany({
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+        select: {
+          ticketId: true,
+          ticketNumero: true,
+          pedidoCodigo: true,
+          cliente: true,
+          pozo: true,
+        },
+      }),
+    ]);
+    return { tipos, tickets };
+  }
+
+  async listar(filtro: FiltroEmergencias = {}) {
+    const q = filtro.q?.trim();
+    const filas = await this.prisma.emergencia.findMany({
+      where: {
+        ...(filtro.estado ? { estado: filtro.estado } : {}),
+        ...(filtro.ticketId ? { ticketId: filtro.ticketId } : {}),
+        ...(q
+          ? {
+              OR: [
+                { descripcion: { contains: q, mode: 'insensitive' } },
+                { ubicacion: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { numero: 'desc' },
+      include: { tipo: { select: { codigo: true, nombre: true } } },
+      take: 300,
+    });
+    const tickets = await this.tickets(filas.map((f) => f.ticketId));
+    return filas.map((e) => ({
+      id: e.id,
+      numero: e.numero,
+      codigo: codigoEmergencia(e.numero),
+      estado: e.estado,
+      tipo: e.tipo,
+      descripcion: e.descripcion,
+      ubicacion: e.ubicacion,
+      origen: e.swaId ? 'swa' : e.derrameId ? 'derrame' : null,
+      ticketId: e.ticketId,
+      ticketNumero: e.ticketId ? (tickets.get(e.ticketId)?.ticketNumero ?? null) : null,
+      pedidoCodigo: e.ticketId ? (tickets.get(e.ticketId)?.pedidoCodigo ?? null) : null,
+      activadoAt: e.activadoAt,
+    }));
+  }
+
+  async detalle(id: string) {
+    const e = await this.prisma.emergencia.findUnique({
+      where: { id },
+      include: {
+        tipo: { select: { codigo: true, nombre: true } },
+        lineas: { orderBy: [{ at: 'asc' }, { id: 'asc' }] },
+        historial: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!e) throw new NotFoundException('La emergencia no existe');
+    const [tickets, swa, derrame] = await Promise.all([
+      this.tickets([e.ticketId]),
+      e.swaId
+        ? this.prisma.swa.findUnique({
+            where: { id: e.swaId },
+            select: { id: true, numero: true, estado: true },
+          })
+        : null,
+      e.derrameId
+        ? this.prisma.derrame.findUnique({
+            where: { id: e.derrameId },
+            select: { id: true, numero: true, estado: true },
+          })
+        : null,
+    ]);
+    const nombres = await this.nombres([
+      e.activadoPor,
+      ...e.lineas.map((l) => l.actorId),
+      ...e.historial.map((h) => h.actorId),
+    ]);
+    const t = e.ticketId ? tickets.get(e.ticketId) : undefined;
+    return {
+      id: e.id,
+      numero: e.numero,
+      codigo: codigoEmergencia(e.numero),
+      estado: e.estado,
+      tipo: e.tipo,
+      descripcion: e.descripcion,
+      ubicacion: e.ubicacion,
+      /** De dónde escaló (una SWA o un derrame mayor); nulo si se activó directo. */
+      origen: swa
+        ? { tipo: 'swa' as const, id: swa.id, codigo: codigoSwa(swa.numero), estado: swa.estado }
+        : derrame
+          ? {
+              tipo: 'derrame' as const,
+              id: derrame.id,
+              codigo: codigoDerrame(derrame.numero),
+              estado: derrame.estado,
+            }
+          : null,
+      ticketId: e.ticketId,
+      ticketNumero: t?.ticketNumero ?? null,
+      pedidoCodigo: t?.pedidoCodigo ?? null,
+      cliente: t?.cliente ?? null,
+      campo: t?.campo ?? null,
+      pozo: t?.pozo ?? null,
+      activadoPor: nombres.get(e.activadoPor) ?? null,
+      activadoAt: e.activadoAt,
+      /** Cronómetro: cada línea con los minutos transcurridos desde la activación. */
+      cronometro: e.lineas.map((l) => ({
+        at: l.at,
+        minutos: Math.max(
+          0,
+          Math.round(((l.at.getTime() - e.activadoAt.getTime()) / 60_000) * 10) / 10,
+        ),
+        texto: l.texto,
+        automatica: l.automatica,
+        actor: nombres.get(l.actorId) ?? null,
+      })),
+      historial: e.historial.map((h) => ({
+        estado: h.estadoNuevo,
+        actor: nombres.get(h.actorId) ?? null,
+        at: h.createdAt,
+      })),
+    };
+  }
+
+  private async tickets(ids: Array<string | null>) {
+    const lista = [...new Set(ids.filter((x): x is string => !!x))];
+    const filas = lista.length
+      ? await this.prisma.ticketRef.findMany({
+          where: { ticketId: { in: lista } },
+          select: {
+            ticketId: true,
+            ticketNumero: true,
+            pedidoCodigo: true,
+            cliente: true,
+            campo: true,
+            pozo: true,
+          },
+        })
+      : [];
+    return new Map(filas.map((f) => [f.ticketId, f]));
+  }
+
+  /** Nombre de cada cuenta (las columnas de personas no tienen relación de Prisma: ver schema.prisma). */
+  private async nombres(ids: string[]): Promise<Map<string, string>> {
+    const filas = await this.prisma.idUsuario.findMany({
+      where: { id: { in: [...new Set(ids)] } },
+      select: { id: true, nombre: true },
+    });
+    return new Map(filas.map((f) => [f.id, f.nombre]));
+  }
+}

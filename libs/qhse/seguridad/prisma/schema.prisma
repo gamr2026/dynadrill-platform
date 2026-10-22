@@ -1668,3 +1668,90 @@ model DerrameVolumenHistorial {
   @@map("derrame_volumen_historial")
   @@schema("qhse")
 }
+
+// ---- Q5 Emergencias / MEDEVAC (HSE-TRIAGE-001). Las columnas de personas y los orígenes (swa_id, derrame_id, ticket_id) son FK reales en la base y se
+// leen sin relación de Prisma para no tocar los modelos compartidos (IdUsuario, TicketRef, Swa).
+
+enum EstadoEmergencia {
+  activa
+  controlada
+  cerrada
+
+  @@map("estado_emergencia")
+  @@schema("qhse")
+}
+
+/// Tipo de emergencia (catálogo editable por QHSE).
+model EmergenciaTipo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  emergencias Emergencia[]
+
+  @@map("emergencia_tipo")
+  @@schema("qhse")
+}
+
+/// Emergencia / MEDEVAC. Las transiciones las garantiza el trigger `emergencia_validar`.
+model Emergencia {
+  id          String           @id @db.Uuid
+  numero      Int              @unique @default(autoincrement())
+  estado      EstadoEmergencia @default(activa)
+  tipoId      String           @map("tipo_id") @db.Uuid
+  tipo        EmergenciaTipo   @relation(fields: [tipoId], references: [id])
+  descripcion String
+  ubicacion   String?
+  ticketId    String?          @map("ticket_id") @db.Uuid
+  swaId       String?          @map("swa_id") @db.Uuid
+  derrameId   String?          @map("derrame_id") @db.Uuid
+  activadoPor String           @map("activado_por") @db.Uuid
+  activadoAt  DateTime         @default(now()) @map("activado_at") @db.Timestamptz(6)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String           @map("created_by") @db.Uuid
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?          @map("updated_by") @db.Uuid
+
+  lineas    EmergenciaLinea[]
+  historial EmergenciaHistorial[]
+
+  @@index([estado])
+  @@index([tipoId])
+  @@map("emergencia")
+  @@schema("qhse")
+}
+
+/// Cronómetro del evento: una línea por acción con la hora del servidor. Solo se agrega.
+model EmergenciaLinea {
+  id           String     @id @db.Uuid
+  emergenciaId String     @map("emergencia_id") @db.Uuid
+  emergencia   Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  at           DateTime   @default(now()) @db.Timestamptz(6)
+  texto        String
+  automatica   Boolean    @default(false)
+  actorId      String     @map("actor_id") @db.Uuid
+
+  @@index([emergenciaId, at])
+  @@map("emergencia_linea")
+  @@schema("qhse")
+}
+
+model EmergenciaHistorial {
+  id             String            @id @db.Uuid
+  emergenciaId   String            @map("emergencia_id") @db.Uuid
+  emergencia     Emergencia        @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoEmergencia? @map("estado_anterior")
+  estadoNuevo    EstadoEmergencia  @map("estado_nuevo")
+  actorId        String            @map("actor_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_historial")
+  @@schema("qhse")
+}

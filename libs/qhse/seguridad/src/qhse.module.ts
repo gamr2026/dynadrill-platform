@@ -30,6 +30,10 @@ import { DerramesConsultaService } from './derrames/derrames-consulta.service';
 import { DerramesController } from './derrames/derrames.controller';
 import { DerramesEventosService } from './derrames/derrames-eventos.service';
 import { DerramesService } from './derrames/derrames.service';
+import { EmergenciasConsultaService } from './emergencias/emergencias-consulta.service';
+import { EmergenciasController } from './emergencias/emergencias.controller';
+import { EmergenciasEventosService } from './emergencias/emergencias-eventos.service';
+import { EmergenciasService } from './emergencias/emergencias.service';
 import { PrismaService } from './prisma/prisma.service';
 import { VerificadorFirmas, VerificadorFirmasHttp } from './documentos/verificador-firmas';
 import { SwaConsultaService } from './swa/swa-consulta.service';
@@ -61,6 +65,7 @@ import { PtwService } from './ptw/ptw.service';
     InspeccionesController,
     DesechosController,
     DerramesController,
+    EmergenciasController,
   ],
   providers: [
     PrismaService,
@@ -94,6 +99,9 @@ import { PtwService } from './ptw/ptw.service';
     DerramesMaeService,
     DerramesDesechoService,
     DerramesBandasService,
+    EmergenciasService,
+    EmergenciasConsultaService,
+    EmergenciasEventosService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
@@ -107,6 +115,7 @@ import { PtwService } from './ptw/ptw.service';
     InspeccionesService,
     DesechosService,
     DerramesService,
+    EmergenciasService,
   ],
 })
 export class QhseModule {}

@@ -1,5 +1,6 @@
 import { PLANTILLAS_QHSE_DERRAMES } from './qhse-derrames';
 import { PLANTILLAS_QHSE_DESECHOS } from './qhse-desechos';
+import { PLANTILLAS_QHSE_EMERGENCIAS } from './qhse-emergencias';
 import { FILA, type PlantillaDef } from './tipos';
 
 const DATOS =
@@ -153,4 +154,5 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   inspeccionRechazada('gerente_hse'),
   ...PLANTILLAS_QHSE_DESECHOS,
   ...PLANTILLAS_QHSE_DERRAMES,
+  ...PLANTILLAS_QHSE_EMERGENCIAS,
 ];
