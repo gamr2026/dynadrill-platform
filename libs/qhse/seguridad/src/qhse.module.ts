@@ -15,6 +15,28 @@ import { IpercCatalogosService } from './iperc/iperc-catalogos.service';
 import { IpercConsultaService } from './iperc/iperc-consulta.service';
 import { IpercController } from './iperc/iperc.controller';
 import { IpercService } from './iperc/iperc.service';
+import { DesechosAvisosService } from './desechos/desechos-avisos.service';
+import { DesechosConsultaService } from './desechos/desechos-consulta.service';
+import { DesechosController } from './desechos/desechos.controller';
+import { DesechosDocumentosService } from './desechos/desechos-documentos.service';
+import { DesechosEventosService } from './desechos/desechos-eventos.service';
+import { DesechosManifiestoService } from './desechos/desechos-manifiesto.service';
+import { DesechosService } from './desechos/desechos.service';
+import { DerramesBandasService } from './derrames/derrames-bandas.service';
+import { DerramesDesechoService } from './derrames/derrames-desecho.service';
+import { DerramesMaeService } from './derrames/derrames-mae.service';
+import { DerramesContencionService } from './derrames/derrames-contencion.service';
+import { DerramesConsultaService } from './derrames/derrames-consulta.service';
+import { DerramesController } from './derrames/derrames.controller';
+import { DerramesEventosService } from './derrames/derrames-eventos.service';
+import { DerramesService } from './derrames/derrames.service';
+import { EmergenciasCierreService } from './emergencias/emergencias-cierre.service';
+import { EmergenciasHeridosService } from './emergencias/emergencias-heridos.service';
+import { EmergenciasPlanService } from './emergencias/emergencias-plan.service';
+import { EmergenciasConsultaService } from './emergencias/emergencias-consulta.service';
+import { EmergenciasController } from './emergencias/emergencias.controller';
+import { EmergenciasEventosService } from './emergencias/emergencias-eventos.service';
+import { EmergenciasService } from './emergencias/emergencias.service';
 import { PrismaService } from './prisma/prisma.service';
 import { VerificadorFirmas, VerificadorFirmasHttp } from './documentos/verificador-firmas';
 import { SwaConsultaService } from './swa/swa-consulta.service';
@@ -44,6 +66,9 @@ import { PtwService } from './ptw/ptw.service';
     IpercController,
     StopController,
     InspeccionesController,
+    DesechosController,
+    DerramesController,
+    EmergenciasController,
   ],
   providers: [
     PrismaService,
@@ -64,6 +89,25 @@ import { PtwService } from './ptw/ptw.service';
     StopConsultaService,
     InspeccionesService,
     InspeccionesConsultaService,
+    DesechosService,
+    DesechosConsultaService,
+    DesechosEventosService,
+    DesechosManifiestoService,
+    DesechosDocumentosService,
+    DesechosAvisosService,
+    DerramesService,
+    DerramesConsultaService,
+    DerramesEventosService,
+    DerramesContencionService,
+    DerramesMaeService,
+    DerramesDesechoService,
+    DerramesBandasService,
+    EmergenciasService,
+    EmergenciasConsultaService,
+    EmergenciasEventosService,
+    EmergenciasPlanService,
+    EmergenciasHeridosService,
+    EmergenciasCierreService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],
@@ -75,6 +119,9 @@ import { PtwService } from './ptw/ptw.service';
     IpercService,
     StopService,
     InspeccionesService,
+    DesechosService,
+    DerramesService,
+    EmergenciasService,
   ],
 })
 export class QhseModule {}

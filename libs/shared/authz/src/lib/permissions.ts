@@ -469,6 +469,17 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Autorizar o rechazar un Gerenciamiento de Viaje de riesgo ALTO (y cualquier otro nivel)',
     [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
   ),
+  // ---- qhse: emergencias / MEDEVAC (HSE-TRIAGE-001). Activar es de cualquier trabajador (`qhse.eventos.reportar`); verlas y gestionarlas, del equipo HSE.
+  nuevo(
+    'qhse.emergencias.ver',
+    'Ver las emergencias, su cronómetro, el personal, los heridos y el MEDEVAC',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.emergencias.gestionar',
+    'Gestionar una emergencia: cronómetro, nivel, conteo de personal, notificaciones, heridos y MEDEVAC, Reporte Flash y cierre',
+    ModuleRoles.qhse,
+  ),
   // mantenimiento
   def(
     'maintenance',
@@ -595,6 +606,29 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     RoleCode.TECNICO_HSE,
     RoleCode.GERENTE_HSE,
   ]),
+  // ---- qhse: desechos (HSE-AMBIENTAL-001). Registrarlos es de cualquier trabajador (`qhse.eventos.reportar`); verlos y gestionarlos, del equipo HSE.
+  nuevo('qhse.desechos.ver', 'Ver los desechos, sus manifiestos y certificados', ModuleRoles.qhse),
+  nuevo(
+    'qhse.desechos.gestionar',
+    'Generar el manifiesto, registrar sus firmas y el certificado de disposición final',
+    ModuleRoles.qhse,
+  ),
+  // ---- qhse: derrames (HSE-AMBIENTAL-002). Activar la alerta es de cualquier trabajador (`qhse.eventos.reportar`); verlos y gestionarlos, del equipo HSE.
+  nuevo(
+    'qhse.derrames.ver',
+    'Ver los derrames, su contención y su notificación al MAE',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.derrames.gestionar',
+    'Contener, confirmar el volumen, notificar al MAE y cerrar un derrame; generar su desecho',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.derrames.configurar',
+    'Configurar las bandas de volumen de los derrames (umbrales de notificación al MAE y de escalada)',
+    [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  ),
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -722,6 +756,13 @@ export const Permission = {
   QHSE_INSPECCIONES_VER: 'qhse.inspecciones.ver',
   SWA_VER: 'qhse.swa.ver',
   SWA_GESTIONAR: 'qhse.swa.gestionar',
+  DESECHOS_VER: 'qhse.desechos.ver',
+  DESECHOS_GESTIONAR: 'qhse.desechos.gestionar',
+  DERRAMES_VER: 'qhse.derrames.ver',
+  DERRAMES_GESTIONAR: 'qhse.derrames.gestionar',
+  DERRAMES_CONFIGURAR: 'qhse.derrames.configurar',
+  EMERGENCIAS_VER: 'qhse.emergencias.ver',
+  EMERGENCIAS_GESTIONAR: 'qhse.emergencias.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

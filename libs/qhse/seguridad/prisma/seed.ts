@@ -6,6 +6,9 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { loadDotenv } from '@dyn/config';
 import { toPgConnectionString } from '@dyn/messaging';
+import { sembrarDerrames } from '../src/catalog/sembrar-derrames';
+import { sembrarDesechos } from '../src/catalog/sembrar-desechos';
+import { sembrarEmergencias } from '../src/catalog/sembrar-emergencias';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
@@ -30,6 +33,18 @@ async function main() {
     const swa = await sembrarSwa(prisma);
     console.log(
       `qhse: SWA con ${swa.tipos} tipos de peligro, ${swa.roles} roles de la cadena y ${swa.criterios} criterios de reinicio nuevos`,
+    );
+    const des = await sembrarDesechos(prisma);
+    console.log(
+      `qhse: desechos con ${des.caracteristicas} características CRETIB, ${des.contenedores} contenedores y ${des.estados} estados nuevos`,
+    );
+    const der = await sembrarDerrames(prisma);
+    console.log(
+      `qhse: derrames con ${der.ubicaciones} ubicaciones, ${der.bandas} bandas de volumen y ${der.pasos} pasos de contención nuevos (bandas POR CONFIRMAR con Dynadrill)`,
+    );
+    const eme = await sembrarEmergencias(prisma);
+    console.log(
+      `qhse: emergencias con ${eme.tipos} tipos y ${eme.pasos} pasos de la cascada nuevos`,
     );
   } finally {
     await prisma.$disconnect();

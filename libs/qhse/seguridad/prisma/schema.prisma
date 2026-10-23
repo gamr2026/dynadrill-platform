@@ -1231,8 +1231,736 @@ model CatCampo {
 model CatCliente {
   id              String        @id @db.Uuid
   nombreComercial String        @map("nombre_comercial")
+  identificacion  String
   stops           StopTarjeta[]
 
   @@map("cliente")
   @@schema("catalogos")
+}
+
+// ---- Q4 Desechos (HSE-AMBIENTAL-001). Las columnas de auditoría y de personas (created_by, updated_by, actor_id) son FK reales a
+// identidad.usuario en la base; aquí se leen sin relación de Prisma para no tocar el modelo compartido IdUsuario.
+
+enum ClasificacionDesecho {
+  peligroso
+  no_peligroso
+
+  @@map("clasificacion_desecho")
+  @@schema("qhse")
+}
+
+/// Característica CRETIB de un desecho peligroso (catálogo).
+model DesechoCaracteristica {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  asignadas DesechoCaracteristicaAsignada[]
+
+  @@map("desecho_caracteristica")
+  @@schema("qhse")
+}
+
+/// Contenedor por color (convención interna de Dynadrill).
+model DesechoContenedor {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  uso       String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  desechos Desecho[]
+
+  @@map("desecho_contenedor")
+  @@schema("qhse")
+}
+
+/// Estado del ciclo del desecho: almacenado, con_manifiesto, dispuesto (los triggers deciden por `codigo`).
+model DesechoEstado {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  desechos       Desecho[]
+  historialAntes DesechoHistorial[] @relation("desechoEstadoAnterior")
+  historialAhora DesechoHistorial[] @relation("desechoEstadoNuevo")
+
+  @@map("desecho_estado")
+  @@schema("qhse")
+}
+
+/// Desecho generado en operación. Límite de almacenamiento de 12 meses (AM 142) garantizado por CHECK.
+model Desecho {
+  id                        String               @id @db.Uuid
+  numero                    Int                  @unique @default(autoincrement())
+  clasificacion             ClasificacionDesecho
+  contenedorId              String               @map("contenedor_id") @db.Uuid
+  contenedor                DesechoContenedor    @relation(fields: [contenedorId], references: [id])
+  estadoId                  String               @map("estado_id") @db.Uuid
+  estado                    DesechoEstado        @relation(fields: [estadoId], references: [id])
+  descripcion               String
+  pozoId                    String?              @map("pozo_id") @db.Uuid
+  pozo                      CatPozo?             @relation(fields: [pozoId], references: [id])
+  ubicacion                 String?
+  derrameId                 String?              @unique @map("derrame_id") @db.Uuid
+  derrame                   Derrame?             @relation(fields: [derrameId], references: [id])
+  registradoAt              DateTime             @default(now()) @map("registrado_at") @db.Timestamptz(6)
+  registradoEl              DateTime             @map("registrado_el") @db.Date
+  limiteAlmacenamientoHasta DateTime             @map("limite_almacenamiento_hasta") @db.Date
+  createdAt                 DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                 String               @map("created_by") @db.Uuid
+  updatedAt                 DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                 String?              @map("updated_by") @db.Uuid
+
+  caracteristicas DesechoCaracteristicaAsignada[]
+  items           DesechoItem[]
+  historial       DesechoHistorial[]
+  manifiesto      DesechoManifiesto?
+  documentos      DesechoDocumento[]
+  avisos          DesechoAviso[]
+
+  @@index([estadoId])
+  @@index([limiteAlmacenamientoHasta])
+  @@index([contenedorId])
+  @@map("desecho")
+  @@schema("qhse")
+}
+
+model DesechoCaracteristicaAsignada {
+  desechoId        String                @map("desecho_id") @db.Uuid
+  desecho          Desecho               @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  caracteristicaId String                @map("caracteristica_id") @db.Uuid
+  caracteristica   DesechoCaracteristica @relation(fields: [caracteristicaId], references: [id])
+
+  @@id([desechoId, caracteristicaId])
+  @@index([caracteristicaId])
+  @@map("desecho_caracteristica_asignada")
+  @@schema("qhse")
+}
+
+/// Línea de la guía de remisión (DYN-SGI-RE-063).
+model DesechoItem {
+  id              String   @id @db.Uuid
+  desechoId       String   @map("desecho_id") @db.Uuid
+  desecho         Desecho  @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  orden           Int
+  descripcion     String
+  numeroLote      String?  @map("numero_lote")
+  codigo          String
+  cantidadGalones Decimal  @map("cantidad_galones") @db.Decimal(12, 3)
+  bultos          Int      @default(0)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String   @map("created_by") @db.Uuid
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?  @map("updated_by") @db.Uuid
+
+  @@unique([desechoId, orden])
+  @@map("desecho_item")
+  @@schema("qhse")
+}
+
+model DesechoHistorial {
+  id               String         @id @db.Uuid
+  desechoId        String         @map("desecho_id") @db.Uuid
+  desecho          Desecho        @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  estadoAnteriorId String?        @map("estado_anterior_id") @db.Uuid
+  estadoAnterior   DesechoEstado? @relation("desechoEstadoAnterior", fields: [estadoAnteriorId], references: [id])
+  estadoNuevoId    String         @map("estado_nuevo_id") @db.Uuid
+  estadoNuevo      DesechoEstado  @relation("desechoEstadoNuevo", fields: [estadoNuevoId], references: [id])
+  actorId          String         @map("actor_id") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([desechoId, createdAt])
+  @@map("desecho_historial")
+  @@schema("qhse")
+}
+
+/// `catalogos.pozo`: solo lo necesario para mostrar dónde se generó un desecho.
+model CatPozo {
+  id             String    @id @db.Uuid
+  codigo         String
+  nombreCompleto String    @map("nombre_completo")
+  habilitado     Boolean
+  desechos       Desecho[]
+
+  @@map("pozo")
+  @@schema("catalogos")
+}
+
+enum RolFirmaDesecho {
+  despachado_por
+  transportado_por
+  recibido_por
+
+  @@map("rol_firma_desecho")
+  @@schema("qhse")
+}
+
+/// Manifiesto único / guía de remisión (DYN-SGI-RE-063): uno por desecho. El cliente se lee de `catalogos.cliente` por `clienteId` (sin relación de Prisma).
+model DesechoManifiesto {
+  id                    String     @id @db.Uuid
+  desechoId             String     @unique @map("desecho_id") @db.Uuid
+  desecho               Desecho    @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  numero                String     @unique
+  fecha                 DateTime   @db.Date
+  gestorNombre          String     @map("gestor_nombre")
+  gestorLicenciaSuia    String     @map("gestor_licencia_suia")
+  clienteId             String?    @map("cliente_id") @db.Uuid
+  solicitadoPor         String?    @map("solicitado_por")
+  transportistaCompania String?    @map("transportista_compania")
+  conductorNombre       String?    @map("conductor_nombre")
+  conductorCedula       String?    @map("conductor_cedula")
+  vehiculo              String?
+  placas                String?
+  horaSalida            DateTime?  @map("hora_salida") @db.Timestamptz(6)
+  horaLlegada           DateTime?  @map("hora_llegada") @db.Timestamptz(6)
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String     @map("created_by") @db.Uuid
+  updatedAt             DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?    @map("updated_by") @db.Uuid
+
+  firmas DesechoFirma[]
+
+  @@map("desecho_manifiesto")
+  @@schema("qhse")
+}
+
+/// Firma «de una línea» del manifiesto (D6). Inmutable.
+model DesechoFirma {
+  id             String            @id @db.Uuid
+  manifiestoId   String            @map("manifiesto_id") @db.Uuid
+  manifiesto     DesechoManifiesto @relation(fields: [manifiestoId], references: [id], onDelete: Cascade)
+  rol            RolFirmaDesecho
+  registradoPor  String            @map("registrado_por") @db.Uuid
+  firmadoAt      DateTime          @default(now()) @map("firmado_at") @db.Timestamptz(6)
+  firmanteNombre String?           @map("firmante_nombre")
+  firmanteCedula String?           @map("firmante_cedula")
+
+  @@unique([manifiestoId, rol])
+  @@map("desecho_firma")
+  @@schema("qhse")
+}
+
+enum TipoDocumentoDesecho {
+  manifiesto_firmado
+  certificado_disposicion
+
+  @@map("tipo_documento_desecho")
+  @@schema("qhse")
+}
+
+/// Manifiesto firmado y certificado de disposición final. `archivoId` es FK real a `archivos.archivo` (sin relación de Prisma: no se toca ArchivoRef).
+model DesechoDocumento {
+  id                   String               @id @db.Uuid
+  desechoId            String               @map("desecho_id") @db.Uuid
+  desecho              Desecho              @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  tipo                 TipoDocumentoDesecho
+  archivoId            String               @unique @map("archivo_id") @db.Uuid
+  emitidoEl            DateTime?            @map("emitido_el") @db.Date
+  referencia           String?
+  verificacion         VerificacionFirma    @default(no_verificada)
+  verificacionConfianza Decimal?            @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt       DateTime?            @map("verificacion_at") @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String               @map("created_by") @db.Uuid
+  updatedAt            DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?              @map("updated_by") @db.Uuid
+
+  @@unique([desechoId, tipo])
+  @@map("desecho_documento")
+  @@schema("qhse")
+}
+
+enum TipoAvisoDesecho {
+  limite_proximo
+  limite_vencido
+  certificado_vencido
+
+  @@map("tipo_aviso_desecho")
+  @@schema("qhse")
+}
+
+/// Aviso de vencimiento ya emitido de un desecho (uno de cada tipo). Inmutable.
+model DesechoAviso {
+  id         String           @id @db.Uuid
+  desechoId  String           @map("desecho_id") @db.Uuid
+  desecho    Desecho          @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  tipo       TipoAvisoDesecho
+  emitidoAt  DateTime         @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  emitidoPor String           @map("emitido_por") @db.Uuid
+
+  @@unique([desechoId, tipo])
+  @@map("desecho_aviso")
+  @@schema("qhse")
+}
+
+// ---- Q4 Derrames (HSE-AMBIENTAL-002). Igual que Desechos: las columnas de personas y el ticket son FK reales en la base y se leen sin relación de
+// Prisma para no tocar los modelos compartidos (IdUsuario, TicketRef).
+
+enum EstadoDerrame {
+  activo
+  contenido
+  cerrado
+
+  @@map("estado_derrame")
+  @@schema("qhse")
+}
+
+/// Dónde cayó el derrame (catálogo). El comportamiento sale de las columnas, nunca del nombre.
+model DerrameUbicacion {
+  id                   String   @id @db.Uuid
+  codigo               String   @unique
+  nombre               String
+  orden                Int      @unique
+  exigeNotificacionMae Boolean  @default(false) @map("exige_notificacion_mae")
+  escalaAEmergencia    Boolean  @default(false) @map("escala_a_emergencia")
+  generaDesecho        Boolean  @default(false) @map("genera_desecho")
+  activo               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String?  @map("created_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?  @map("updated_by") @db.Uuid
+
+  derrames Derrame[]
+
+  @@map("derrame_ubicacion")
+  @@schema("qhse")
+}
+
+/// Bandas de volumen en barriles [desde, hasta), CONFIGURABLES. Los valores sembrados son un supuesto de la demo: `porConfirmar` hasta que Dynadrill los confirme.
+model DerrameBandaVolumen {
+  id                   String   @id @db.Uuid
+  codigo               String   @unique
+  nombre               String
+  orden                Int      @unique
+  desdeBarriles        Decimal  @map("desde_barriles") @db.Decimal(10, 3)
+  hastaBarriles        Decimal? @map("hasta_barriles") @db.Decimal(10, 3)
+  exigeNotificacionMae Boolean  @default(false) @map("exige_notificacion_mae")
+  escalaAEmergencia    Boolean  @default(false) @map("escala_a_emergencia")
+  porConfirmar         Boolean  @default(true) @map("por_confirmar")
+  activo               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String?  @map("created_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?  @map("updated_by") @db.Uuid
+
+  derrames Derrame[]
+
+  @@map("derrame_banda_volumen")
+  @@schema("qhse")
+}
+
+/// Derrame. Lo activa cualquier trabajador; las transiciones las garantiza el trigger `derrame_validar`.
+model Derrame {
+  id              String              @id @db.Uuid
+  numero          Int                 @unique @default(autoincrement())
+  estado          EstadoDerrame       @default(activo)
+  ubicacionId     String              @map("ubicacion_id") @db.Uuid
+  ubicacion       DerrameUbicacion    @relation(fields: [ubicacionId], references: [id])
+  bandaId         String              @map("banda_id") @db.Uuid
+  banda           DerrameBandaVolumen @relation(fields: [bandaId], references: [id])
+  descripcion     String
+  ubicacionFisica String?             @map("ubicacion_fisica")
+  ticketId        String?             @map("ticket_id") @db.Uuid
+  activadoPor     String              @map("activado_por") @db.Uuid
+  activadoAt      DateTime            @default(now()) @map("activado_at") @db.Timestamptz(6)
+  contenidoAt          DateTime?           @map("contenido_at") @db.Timestamptz(6)
+  contenidoPor         String?             @map("contenido_por") @db.Uuid
+  volumenRealBarriles  Decimal?            @map("volumen_real_barriles") @db.Decimal(10, 3)
+  volumenConfirmadoPor String?             @map("volumen_confirmado_por") @db.Uuid
+  volumenConfirmadoAt  DateTime?           @map("volumen_confirmado_at") @db.Timestamptz(6)
+  notificadoMaeAt      DateTime?           @map("notificado_mae_at") @db.Timestamptz(6)
+  notificadoMaePor     String?             @map("notificado_mae_por") @db.Uuid
+  maeReferencia        String?             @map("mae_referencia")
+  cerradoAt            DateTime?           @map("cerrado_at") @db.Timestamptz(6)
+  cerradoPor           String?             @map("cerrado_por") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String              @map("created_by") @db.Uuid
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?             @map("updated_by") @db.Uuid
+
+  historial DerrameHistorial[]
+  desecho   Desecho?
+  checklist DerrameChecklistConfirmacion[]
+  volumenes DerrameVolumenHistorial[]
+
+  @@index([estado])
+  @@index([ubicacionId])
+  @@index([bandaId])
+  @@map("derrame")
+  @@schema("qhse")
+}
+
+model DerrameHistorial {
+  id             String         @id @db.Uuid
+  derrameId      String         @map("derrame_id") @db.Uuid
+  derrame        Derrame        @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoDerrame? @map("estado_anterior")
+  estadoNuevo    EstadoDerrame  @map("estado_nuevo")
+  actorId        String         @map("actor_id") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([derrameId, createdAt])
+  @@map("derrame_historial")
+  @@schema("qhse")
+}
+
+/// Pasos de la contención en los primeros 5 minutos (catálogo).
+model DerrameChecklistItem {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  confirmaciones DerrameChecklistConfirmacion[]
+
+  @@map("derrame_checklist_item")
+  @@schema("qhse")
+}
+
+/// Quién confirmó cada paso y cuándo. Inmutable.
+model DerrameChecklistConfirmacion {
+  derrameId     String               @map("derrame_id") @db.Uuid
+  derrame       Derrame              @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  itemId        String               @map("item_id") @db.Uuid
+  item          DerrameChecklistItem @relation(fields: [itemId], references: [id])
+  confirmadoPor String               @map("confirmado_por") @db.Uuid
+  confirmadoAt  DateTime             @default(now()) @map("confirmado_at") @db.Timestamptz(6)
+
+  @@id([derrameId, itemId])
+  @@index([itemId])
+  @@map("derrame_checklist_confirmacion")
+  @@schema("qhse")
+}
+
+/// Cada confirmación del volumen real (el vigente está en `Derrame`). Inmutable.
+model DerrameVolumenHistorial {
+  id              String   @id @db.Uuid
+  derrameId       String   @map("derrame_id") @db.Uuid
+  derrame         Derrame  @relation(fields: [derrameId], references: [id], onDelete: Cascade)
+  volumenBarriles Decimal  @map("volumen_barriles") @db.Decimal(10, 3)
+  actorId         String   @map("actor_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([derrameId, createdAt])
+  @@map("derrame_volumen_historial")
+  @@schema("qhse")
+}
+
+// ---- Q5 Emergencias / MEDEVAC (HSE-TRIAGE-001). Las columnas de personas y los orígenes (swa_id, derrame_id, ticket_id) son FK reales en la base y se
+// leen sin relación de Prisma para no tocar los modelos compartidos (IdUsuario, TicketRef, Swa).
+
+enum EstadoEmergencia {
+  activa
+  controlada
+  cerrada
+
+  @@map("estado_emergencia")
+  @@schema("qhse")
+}
+
+/// Tipo de emergencia (catálogo editable por QHSE).
+model EmergenciaTipo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  emergencias Emergencia[]
+
+  @@map("emergencia_tipo")
+  @@schema("qhse")
+}
+
+/// Emergencia / MEDEVAC. Las transiciones las garantiza el trigger `emergencia_validar`.
+model Emergencia {
+  id          String           @id @db.Uuid
+  numero      Int              @unique @default(autoincrement())
+  estado      EstadoEmergencia @default(activa)
+  tipoId      String           @map("tipo_id") @db.Uuid
+  tipo        EmergenciaTipo   @relation(fields: [tipoId], references: [id])
+  descripcion String
+  ubicacion   String?
+  ticketId    String?          @map("ticket_id") @db.Uuid
+  swaId       String?          @map("swa_id") @db.Uuid
+  derrameId   String?          @map("derrame_id") @db.Uuid
+  activadoPor String           @map("activado_por") @db.Uuid
+  activadoAt  DateTime         @default(now()) @map("activado_at") @db.Timestamptz(6)
+  nivel              Int?             @db.SmallInt
+  nivelDeclaradoPor  String?          @map("nivel_declarado_por") @db.Uuid
+  nivelDeclaradoAt   DateTime?        @map("nivel_declarado_at") @db.Timestamptz(6)
+  totalEnLocacion    Int?             @map("total_en_locacion")
+  evacuados          Int?
+  conteoPor          String?          @map("conteo_por") @db.Uuid
+  conteoAt           DateTime?        @map("conteo_at") @db.Timestamptz(6)
+  controladaAt       DateTime?        @map("controlada_at") @db.Timestamptz(6)
+  controladaPor      String?          @map("controlada_por") @db.Uuid
+  cerradaAt          DateTime?        @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor         String?          @map("cerrada_por") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String           @map("created_by") @db.Uuid
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String?          @map("updated_by") @db.Uuid
+
+  lineas    EmergenciaLinea[]
+  historial EmergenciaHistorial[]
+  notificaciones EmergenciaNotificacion[]
+  niveles        EmergenciaNivelHistorial[]
+  conteos        EmergenciaConteoHistorial[]
+  heridos        Herido[]
+  reporteFlash   EmergenciaReporteFlash?
+
+  @@index([estado])
+  @@index([tipoId])
+  @@map("emergencia")
+  @@schema("qhse")
+}
+
+/// Cronómetro del evento: una línea por acción con la hora del servidor. Solo se agrega.
+model EmergenciaLinea {
+  id           String     @id @db.Uuid
+  emergenciaId String     @map("emergencia_id") @db.Uuid
+  emergencia   Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  at           DateTime   @default(now()) @db.Timestamptz(6)
+  texto        String
+  automatica   Boolean    @default(false)
+  actorId      String     @map("actor_id") @db.Uuid
+
+  @@index([emergenciaId, at])
+  @@map("emergencia_linea")
+  @@schema("qhse")
+}
+
+model EmergenciaHistorial {
+  id             String            @id @db.Uuid
+  emergenciaId   String            @map("emergencia_id") @db.Uuid
+  emergencia     Emergencia        @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  estadoAnterior EstadoEmergencia? @map("estado_anterior")
+  estadoNuevo    EstadoEmergencia  @map("estado_nuevo")
+  actorId        String            @map("actor_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_historial")
+  @@schema("qhse")
+}
+
+/// Paso de la cascada de notificación (HSE-TRIAGE-001): origen, destino y plazo en minutos desde la activación.
+model EmergenciaPasoNotificacion {
+  id           String   @id @db.Uuid
+  orden        Int      @unique
+  desde        String
+  hacia        String
+  plazoMinutos Int      @map("plazo_minutos")
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?  @map("created_by") @db.Uuid
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?  @map("updated_by") @db.Uuid
+
+  notificaciones EmergenciaNotificacion[]
+
+  @@map("emergencia_paso_notificacion")
+  @@schema("qhse")
+}
+
+/// Cada paso ya notificado (quién y cuándo). Inmutable.
+model EmergenciaNotificacion {
+  emergenciaId  String                     @map("emergencia_id") @db.Uuid
+  emergencia    Emergencia                 @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  pasoId        String                     @map("paso_id") @db.Uuid
+  paso          EmergenciaPasoNotificacion @relation(fields: [pasoId], references: [id])
+  notificadoPor String                     @map("notificado_por") @db.Uuid
+  notificadoAt  DateTime                   @default(now()) @map("notificado_at") @db.Timestamptz(6)
+
+  @@id([emergenciaId, pasoId])
+  @@index([pasoId])
+  @@map("emergencia_notificacion")
+  @@schema("qhse")
+}
+
+/// Cada declaración de nivel (el vigente está en `Emergencia`). Inmutable.
+model EmergenciaNivelHistorial {
+  id           String     @id @db.Uuid
+  emergenciaId String     @map("emergencia_id") @db.Uuid
+  emergencia   Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  nivel        Int        @db.SmallInt
+  actorId      String     @map("actor_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_nivel_historial")
+  @@schema("qhse")
+}
+
+/// Cada conteo de personal (el vigente está en `Emergencia`). Inmutable.
+model EmergenciaConteoHistorial {
+  id              String     @id @db.Uuid
+  emergenciaId    String     @map("emergencia_id") @db.Uuid
+  emergencia      Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  totalEnLocacion Int        @map("total_en_locacion")
+  evacuados       Int
+  actorId         String     @map("actor_id") @db.Uuid
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([emergenciaId, createdAt])
+  @@map("emergencia_conteo_historial")
+  @@schema("qhse")
+}
+
+enum TriageColor {
+  rojo
+  amarillo
+  verde
+  negro
+
+  @@map("triage_color")
+  @@schema("qhse")
+}
+
+enum MedioTransporteMedevac {
+  ambulancia
+  lancha
+  helicoptero
+
+  @@map("medio_transporte_medevac")
+  @@schema("qhse")
+}
+
+/// Escala de cuatro valores (alerta, responde a la voz, responde al dolor, inconsciente).
+enum NivelConsciencia {
+  alerta
+  voz
+  dolor
+  inconsciente
+
+  @@map("nivel_consciencia")
+  @@schema("qhse")
+}
+
+/// Hospital al que se evacúa (catálogo editable por QHSE; sin duplicados por nombre y ciudad).
+model EmergenciaHospital {
+  id        String   @id @db.Uuid
+  nombre    String
+  ciudad    String
+  telefono  String?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  heridos Herido[]
+
+  @@map("emergencia_hospital")
+  @@schema("qhse")
+}
+
+/// Herido de una emergencia: triage, lesiones y evacuación MEDEVAC (el orden de los hitos lo exige la base).
+model Herido {
+  id                    String                  @id @db.Uuid
+  emergenciaId          String                  @map("emergencia_id") @db.Uuid
+  emergencia            Emergencia              @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  nombreCompleto        String                  @map("nombre_completo")
+  cedula                String?
+  triage                TriageColor
+  mecanismoLesion       String                  @map("mecanismo_lesion")
+  lesiones              String?
+  tratamientoCampo      String?                 @map("tratamiento_campo")
+  medevacAt             DateTime?               @map("medevac_at") @db.Timestamptz(6)
+  medevacPor            String?                 @map("medevac_por") @db.Uuid
+  medioTransporte       MedioTransporteMedevac? @map("medio_transporte")
+  hospitalId            String?                 @map("hospital_id") @db.Uuid
+  hospital              EmergenciaHospital?     @relation(fields: [hospitalId], references: [id])
+  etaMinutos            Int?                    @map("eta_minutos")
+  hospitalNotificadoAt  DateTime?               @map("hospital_notificado_at") @db.Timestamptz(6)
+  hospitalNotificadoPor String?                 @map("hospital_notificado_por") @db.Uuid
+  transferidoAt         DateTime?               @map("transferido_at") @db.Timestamptz(6)
+  transferidoPor        String?                 @map("transferido_por") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String                  @map("created_by") @db.Uuid
+  updatedAt             DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?                 @map("updated_by") @db.Uuid
+
+  signos   HeridoSignosVitales[]
+  triajes  HeridoTriageHistorial[]
+
+  @@index([emergenciaId])
+  @@map("herido")
+  @@schema("qhse")
+}
+
+/// Cada triage asignado a un herido (el vigente está en `Herido`). Inmutable.
+model HeridoTriageHistorial {
+  id        String      @id @db.Uuid
+  heridoId  String      @map("herido_id") @db.Uuid
+  herido    Herido      @relation(fields: [heridoId], references: [id], onDelete: Cascade)
+  triage    TriageColor
+  actorId   String      @map("actor_id") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([heridoId, createdAt])
+  @@map("herido_triage_historial")
+  @@schema("qhse")
+}
+
+/// Cada toma de signos vitales (la presión en dos columnas). Inmutable.
+model HeridoSignosVitales {
+  id                String            @id @db.Uuid
+  heridoId          String            @map("herido_id") @db.Uuid
+  herido            Herido            @relation(fields: [heridoId], references: [id], onDelete: Cascade)
+  registradoAt      DateTime          @default(now()) @map("registrado_at") @db.Timestamptz(6)
+  registradoPor     String            @map("registrado_por") @db.Uuid
+  pulso             Int?
+  presionSistolica  Int?              @map("presion_sistolica")
+  presionDiastolica Int?              @map("presion_diastolica")
+  respiracion       Int?
+  consciencia       NivelConsciencia?
+
+  @@index([heridoId, registradoAt])
+  @@map("herido_signos_vitales")
+  @@schema("qhse")
+}
+
+/// Reporte Flash: se emite una sola vez, completo, y es inmutable. Plazo de 2 horas desde la activación (se informa, no bloquea).
+model EmergenciaReporteFlash {
+  emergenciaId     String     @id @map("emergencia_id") @db.Uuid
+  emergencia       Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  resumenEjecutivo String     @map("resumen_ejecutivo")
+  personalAfectado String     @map("personal_afectado")
+  accionesTomadas  String     @map("acciones_tomadas")
+  estadoActual     String     @map("estado_actual")
+  proximosPasos    String     @map("proximos_pasos")
+  emitidoAt        DateTime   @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  emitidoPor       String     @map("emitido_por") @db.Uuid
+
+  @@map("emergencia_reporte_flash")
+  @@schema("qhse")
 }

@@ -125,6 +125,14 @@ export const MODULOS_ARCHIVO = [
     tiposMime: DOCUMENTOS,
     tamanoMaxMb: 25,
   },
+  {
+    codigo: 'qhse_desecho_documento',
+    nombre: 'Manifiesto firmado y certificado de disposición final de un desecho',
+    permisoSubir: 'qhse.desechos.gestionar',
+    permisoVer: 'qhse.desechos.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
 ];
 
 /** Idempotente: solo agrega los que faltan; no pisa lo que un administrador haya ajustado. */

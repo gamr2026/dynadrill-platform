@@ -104,6 +104,10 @@ export class SwaConsultaService {
       },
     });
     if (!s) throw new NotFoundException('La SWA no existe');
+    const emergencia = await this.prisma.emergencia.findFirst({
+      where: { swaId: id },
+      select: { id: true, numero: true, estado: true },
+    });
     const [cadena, criterios] = await Promise.all([
       this.prisma.swaRolCadena.findMany({
         where: { activo: true },
@@ -166,6 +170,16 @@ export class SwaConsultaService {
       reanudadoPor: s.reanudador?.nombre ?? null,
       reanudadoAt: s.reanudadoAt,
       heroeSeguridad: s.heroeSeguridad,
+      /** Emergencia a la que escaló (HSE-MASTER-001); nulo mientras no escale. */
+      emergencia: emergencia
+        ? {
+            id: emergencia.id,
+            codigo: `EME-${String(emergencia.numero).padStart(6, '0')}`,
+            estado: emergencia.estado,
+          }
+        : null,
+      /** Una SWA que no esté cerrada y aún no tenga emergencia puede escalar. */
+      puedeEscalarAEmergencia: s.estado !== 'cerrado' && !emergencia,
       historial: s.historial.map((h) => ({
         estadoAnterior: h.estadoAnterior,
         estadoNuevo: h.estadoNuevo,
