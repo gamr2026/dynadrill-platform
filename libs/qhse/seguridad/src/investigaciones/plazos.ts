@@ -43,6 +43,19 @@ export function calcularPlazos(
   };
 }
 
+/** Día (AAAA-MM-DD, hora de Ecuador) de un momento: así se muestran los plazos en los avisos. */
+export const diaEcuador = (d: Date): string =>
+  d.toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
+
+/** Fechas límite de inicio y del informe final de una investigación, ya como día, para el texto de los avisos. */
+export function limitesParaAviso(
+  fechaIncidente: Date,
+  plazos: PlazosDelResultado,
+): { inicioLimite: string; finalLimite: string } {
+  const p = calcularPlazos(fechaIncidente, plazos, null, false);
+  return { inicioLimite: diaEcuador(p.inicioLimite), finalLimite: diaEcuador(p.finalLimite) };
+}
+
 /** Consecutivo visible de la investigación: INV-000001. */
 export const codigoInvestigacion = (numero: number): string =>
   `INV-${String(numero).padStart(6, '0')}`;

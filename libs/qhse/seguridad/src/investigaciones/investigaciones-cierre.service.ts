@@ -16,7 +16,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { faltaParaCierre, faltaParaRevision } from './cierre';
 import { InvestigacionesConsultaService } from './investigaciones-consulta.service';
-import { codigoInvestigacion } from './plazos';
+import { codigoInvestigacion, limitesParaAviso } from './plazos';
 
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
 
@@ -238,7 +238,16 @@ export class InvestigacionesCierreService {
     const i = await tx.investigacion.findUniqueOrThrow({
       where: { id },
       include: {
-        resultado: { select: { codigo: true, involucraLesionado: true } },
+        resultado: {
+          select: {
+            codigo: true,
+            nombre: true,
+            involucraLesionado: true,
+            inicioHoras: true,
+            preliminarHoras: true,
+            finalDias: true,
+          },
+        },
         detalle: { select: { totalDiasIncapacidad: true } },
       },
     });
@@ -253,6 +262,8 @@ export class InvestigacionesCierreService {
           codigo: codigoInvestigacion(i.numero),
           estado: i.estado,
           resultado: i.resultado.codigo,
+          resultadoNombre: i.resultado.nombre,
+          ...limitesParaAviso(i.fechaIncidente, i.resultado),
           involucraLesionado: i.resultado.involucraLesionado,
           fechaIncidente: i.fechaIncidente.toISOString(),
           conclusion: i.conclusion,

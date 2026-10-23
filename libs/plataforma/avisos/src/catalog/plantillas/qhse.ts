@@ -1,3 +1,4 @@
+import { PLANTILLAS_QHSE_VENCIMIENTOS } from './qhse-vencimientos';
 import { FILA, type PlantillaDef } from './tipos';
 
 const DATOS =
@@ -149,4 +150,5 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   stopConHallazgos,
   inspeccionRechazada('tecnico_hse'),
   inspeccionRechazada('gerente_hse'),
+  ...PLANTILLAS_QHSE_VENCIMIENTOS,
 ];

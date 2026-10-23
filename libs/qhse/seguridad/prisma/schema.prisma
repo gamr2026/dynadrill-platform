@@ -1986,3 +1986,20 @@ model AspectoAmbientalSeguimiento {
   @@map("aspecto_ambiental_seguimiento")
   @@schema("qhse")
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Avisos por vencimiento (emisor programado de QHSE), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Hecho por vencimiento ya avisado (clave = tipo + entidad + fecha límite). Solo se agrega.
+model AvisoProgramado {
+  clave       String    @id
+  tipo        String
+  entidadId   String    @map("entidad_id") @db.Uuid
+  fechaLimite DateTime? @map("fecha_limite") @db.Date
+  emitidoAt   DateTime  @default(now()) @map("emitido_at") @db.Timestamptz(6)
+
+  @@index([tipo, entidadId])
+  @@map("aviso_programado")
+  @@schema("qhse")
+}

@@ -12,7 +12,7 @@ import { texto, type Tx } from '../epi/epi-tipos';
 import { EstadoInvestigacion } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvestigacionesConsultaService } from './investigaciones-consulta.service';
-import { codigoInvestigacion } from './plazos';
+import { codigoInvestigacion, limitesParaAviso } from './plazos';
 
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
 
@@ -143,7 +143,18 @@ export class InvestigacionesService {
   private async publicar(tx: Tx, tipo: string, investigacionId: string, actor: AuthUser) {
     const i = await tx.investigacion.findUniqueOrThrow({
       where: { id: investigacionId },
-      include: { resultado: { select: { codigo: true, involucraLesionado: true } } },
+      include: {
+        resultado: {
+          select: {
+            codigo: true,
+            nombre: true,
+            involucraLesionado: true,
+            inicioHoras: true,
+            preliminarHoras: true,
+            finalDias: true,
+          },
+        },
+      },
     });
     await this.bus.publish(
       tx,
@@ -156,6 +167,9 @@ export class InvestigacionesService {
           codigo: codigoInvestigacion(i.numero),
           estado: i.estado,
           resultado: i.resultado.codigo,
+          // texto y fechas que usan las plantillas de avisos
+          resultadoNombre: i.resultado.nombre,
+          ...limitesParaAviso(i.fechaIncidente, i.resultado),
           involucraLesionado: i.resultado.involucraLesionado,
           fechaIncidente: i.fechaIncidente.toISOString(),
           origenEmergenciaId: i.origenEmergenciaId,
