@@ -21,6 +21,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -48,8 +49,8 @@ export class LineaDesechoDto {
   @IsString() @MaxLength(500) descripcion!: string;
   @IsOptional() @IsString() @MaxLength(100) numeroLote?: string;
   @IsString() @MaxLength(100) codigo!: string;
-  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) cantidadGalones!: number;
-  @IsOptional() @IsInt() @Min(0) bultos?: number;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(999_999_999) cantidadGalones!: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1_000_000) bultos?: number;
 }
 
 export class RegistrarDesechoDto {

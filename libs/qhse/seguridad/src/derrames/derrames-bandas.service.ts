@@ -75,6 +75,7 @@ export class DerramesBandasService {
             updatedBy: actor.id,
           },
         });
+        await this.exigirCobertura(tx);
         await this.bus.publish(
           tx,
           this.bus.create({
@@ -101,6 +102,31 @@ export class DerramesBandasService {
         );
       throw error;
     }
+  }
+
+  /**
+   * Las bandas activas cubren todos los volúmenes desde 0, sin huecos y la última sin tope. Si quedara un hueco, un derrame con ese volumen real
+   * no caería en ninguna banda y se cerraría sin notificar al MAE ni escalar a emergencia.
+   */
+  private async exigirCobertura(tx: Pick<PrismaService, 'derrameBandaVolumen'>) {
+    const activas = await tx.derrameBandaVolumen.findMany({
+      where: { activo: true },
+      orderBy: { desdeBarriles: 'asc' },
+    });
+    let esperado = 0;
+    let completo = activas.length > 0;
+    for (const b of activas) {
+      if (Number(b.desdeBarriles) !== esperado) completo = false;
+      if (b.hastaBarriles === null) {
+        esperado = Number.POSITIVE_INFINITY;
+        break;
+      }
+      esperado = Number(b.hastaBarriles);
+    }
+    if (!completo || esperado !== Number.POSITIVE_INFINITY)
+      throw new ConflictException(
+        'Las bandas activas deben cubrir todos los volúmenes desde 0 barriles, sin huecos, y la última sin tope: así ningún derrame queda sin banda',
+      );
   }
 
   private vista(b: {

@@ -151,7 +151,9 @@ export class EmergenciasConsultaService {
     const t = e.ticketId ? tickets.get(e.ticketId) : undefined;
     const flash = e.reporteFlash;
     const flashMinutos = flash ? minutosEntre(e.activadoAt, flash.emitidoAt) : null;
-    const requiereInvestigacion = e.nivel !== null && e.nivel >= 2;
+    // manda el nivel MÁS ALTO declarado (bajarlo antes de cerrar no evita la investigación)
+    const nivelMaximo = Math.max(e.nivel ?? 0, ...e.niveles.map((n) => n.nivel));
+    const requiereInvestigacion = nivelMaximo >= 2;
     const investigacion = requiereInvestigacion
       ? await this.tieneInvestigacion(this.prisma, id)
       : null;

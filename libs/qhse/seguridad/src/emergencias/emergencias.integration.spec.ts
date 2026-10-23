@@ -1463,6 +1463,159 @@ run('QHSE: Emergencias (base de datos real)', () => {
       ).rejects.toThrow(/emergencia_reporte_flash_pkey|está cerrada y ya no recibe registros/);
     });
 
+    it('revisión S1: el nivel y el conteo no se aceptan a medias (CHECK con columnas nulas), y el cronómetro cerrado solo admite la línea automática del cierre', async () => {
+      const id = (await activar()).body.id as string;
+      const actualizar = (set: string, params: unknown[] = []) =>
+        sql(`UPDATE qhse.emergencia SET ${set} WHERE id = $1`, [id, ...params]);
+      await expect(
+        actualizar('nivel_declarado_por = $2, nivel_declarado_at = now()', [OPERADOR.id]),
+      ).rejects.toThrow(/emergencia_nivel_check/);
+      await expect(
+        actualizar('evacuados = 5, conteo_por = $2, conteo_at = now()', [OPERADOR.id]),
+      ).rejects.toThrow(/emergencia_conteo_check/);
+      await expect(
+        actualizar('total_en_locacion = 5, conteo_por = $2, conteo_at = now()', [OPERADOR.id]),
+      ).rejects.toThrow(/emergencia_conteo_check/);
+      // I3: cerrada, el cronómetro solo recibe líneas automáticas
+      await cerrarDirecto(id);
+      const linea = (automatica: boolean) =>
+        sql(
+          "INSERT INTO qhse.emergencia_linea (id, emergencia_id, texto, automatica, actor_id) VALUES ($1, $2, 'x', $3, $4)",
+          [uuidv7(), id, automatica, OPERADOR.id],
+        );
+      await expect(linea(false)).rejects.toThrow(/cerrada ya no recibe líneas del cronómetro/);
+      await linea(true);
+    });
+
+    it('revisión S1: bajar el nivel antes de cerrar no evita la investigación; y el hospital notificado ya no cambia', async () => {
+      const id = (await activar()).body.id as string;
+      const post = (ruta: string, cuerpo: Record<string, unknown> = {}) =>
+        t.http().post(`/api/qhse/emergencias/${id}/${ruta}`).set(gestor()).send(cuerpo);
+      await post('nivel', { nivel: 3 });
+      await post('nivel', { nivel: 1 });
+      await post('controlar');
+      await post('reporte-flash', {
+        resumenEjecutivo: 'a',
+        personalAfectado: 'b',
+        accionesTomadas: 'c',
+        estadoActual: 'd',
+        proximosPasos: 'e',
+      });
+      const d = await detalle(id);
+      expect(d.nivel.valor).toBe(1);
+      expect(d.requiereInvestigacion).toBe(true); // manda el nivel más alto declarado
+      const instalada =
+        (await sql("SELECT to_regclass('qhse.investigacion') AS r")).rows[0].r !== null;
+      if (instalada) {
+        expect((await post('cerrar')).status).toBe(409);
+        await expect(
+          sql(
+            "UPDATE qhse.emergencia SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE id = $1",
+            [id, OPERADOR.id],
+          ),
+        ).rejects.toThrow(/llegó al nivel 2 o 3 no se cierra sin su investigación/);
+      }
+
+      // hospital notificado: el hospital y el medio ya no cambian (el ETA sí)
+      const h = (
+        await t.http().post(`/api/qhse/emergencias/${id}/heridos`).set(gestor()).send({
+          nombreCompleto: 'Mario Ruiz',
+          triage: 'rojo',
+          mecanismoLesion: 'Quemadura',
+        })
+      ).body.heridos[0].id as string;
+      const hospitalA = (
+        await t
+          .http()
+          .post('/api/qhse/emergencias/hospitales')
+          .set(gestor())
+          .send({ nombre: `Hospital Prueba ${n} A`, ciudad: 'Quito' })
+      ).body.id as string;
+      const hospitalB = (
+        await t
+          .http()
+          .post('/api/qhse/emergencias/hospitales')
+          .set(gestor())
+          .send({ nombre: `Hospital Prueba ${n} B`, ciudad: 'Quito' })
+      ).body.id as string;
+      const base = `/api/qhse/emergencias/${id}/heridos/${h}`;
+      await t.http().post(`${base}/medevac`).set(gestor());
+      await t
+        .http()
+        .put(`${base}/medevac`)
+        .set(gestor())
+        .send({ medioTransporte: 'ambulancia', hospitalId: hospitalA, etaMinutos: 60 });
+      // los valores no se pueden vaciar
+      expect(
+        (await t.http().put(`${base}/medevac`).set(gestor()).send({ hospitalId: null })).status,
+      ).toBe(400);
+      expect(
+        (await t.http().put(`${base}/medevac`).set(gestor()).send({ medioTransporte: null }))
+          .status,
+      ).toBe(400);
+      expect((await t.http().post(`${base}/hospital-notificado`).set(gestor())).status).toBe(201);
+      const cambio = await t
+        .http()
+        .put(`${base}/medevac`)
+        .set(gestor())
+        .send({ hospitalId: hospitalB });
+      expect(cambio.status).toBe(409);
+      expect(cambio.body.detail).toMatch(/hospital ya fue notificado/);
+      expect(
+        (
+          await t
+            .http()
+            .put(`${base}/medevac`)
+            .set(gestor())
+            .send({ medioTransporte: 'helicoptero' })
+        ).status,
+      ).toBe(409);
+      expect(
+        (await t.http().put(`${base}/medevac`).set(gestor()).send({ etaMinutos: 20 })).status,
+      ).toBe(200);
+      await expect(
+        sql('UPDATE qhse.herido SET hospital_id = $2 WHERE id = $1', [h, hospitalB]),
+      ).rejects.toThrow(/hospital ya fue notificado/);
+      await expect(
+        sql('UPDATE qhse.herido SET medevac_por = $2 WHERE id = $1', [h, OPERADOR.id]),
+      ).rejects.toThrow(/hito del MEDEVAC ya registrado no se cambia/);
+    });
+
+    it('revisión S1: dos peticiones simultáneas sobre el mismo hito dan una sola respuesta de éxito y un 409, nunca un 500', async () => {
+      const id = (await activar()).body.id as string;
+      const h = (
+        await t.http().post(`/api/qhse/emergencias/${id}/heridos`).set(gestor()).send({
+          nombreCompleto: 'Rosa Vera',
+          triage: 'amarillo',
+          mecanismoLesion: 'Caída',
+        })
+      ).body.heridos[0].id as string;
+      const medevac = () =>
+        t.http().post(`/api/qhse/emergencias/${id}/heridos/${h}/medevac`).set(gestor());
+      const [a, b] = await Promise.all([medevac(), medevac()]);
+      expect([a.status, b.status].sort()).toEqual([201, 409]);
+      const hospital = (
+        await t
+          .http()
+          .post('/api/qhse/emergencias/hospitales')
+          .set(gestor())
+          .send({ nombre: `Hospital Prueba ${n} carrera`, ciudad: 'Quito' })
+      ).body.id as string;
+      await t
+        .http()
+        .put(`/api/qhse/emergencias/${id}/heridos/${h}/medevac`)
+        .set(gestor())
+        .send({ medioTransporte: 'lancha', hospitalId: hospital });
+      const notificar = () =>
+        t.http().post(`/api/qhse/emergencias/${id}/heridos/${h}/hospital-notificado`).set(gestor());
+      const [c, d] = await Promise.all([notificar(), notificar()]);
+      expect([c.status, d.status].sort()).toEqual([201, 409]);
+      const transferir = () =>
+        t.http().post(`/api/qhse/emergencias/${id}/heridos/${h}/transferir`).set(gestor());
+      const [e, f] = await Promise.all([transferir(), transferir()]);
+      expect([e.status, f.status].sort()).toEqual([201, 409]);
+    });
+
     it('la descripción no puede estar vacía y el tipo, el ticket y los orígenes deben existir (FK)', async () => {
       const vacia = insertar();
       vacia.params[2] = tipo('otro');

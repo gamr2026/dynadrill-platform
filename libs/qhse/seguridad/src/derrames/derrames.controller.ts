@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -27,7 +28,7 @@ import { DerramesService } from './derrames.service';
 const P = Permission;
 
 export class ResumenDerramesDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(2000) anio?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(2000) @Max(2200) anio?: number;
 }
 
 export class ListarDerramesDto {
@@ -49,8 +50,8 @@ export class LineaDesechoDerrameDto {
   @IsString() @MaxLength(500) descripcion!: string;
   @IsOptional() @IsString() @MaxLength(100) numeroLote?: string;
   @IsString() @MaxLength(100) codigo!: string;
-  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) cantidadGalones!: number;
-  @IsOptional() @IsInt() @Min(0) bultos?: number;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(999_999_999) cantidadGalones!: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1_000_000) bultos?: number;
 }
 
 export class GenerarDesechoDto {
@@ -71,9 +72,10 @@ export class GenerarDesechoDto {
 
 export class ActualizarBandaDto {
   @IsOptional() @IsString() @MaxLength(100) nombre?: string;
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) desdeBarriles?: number;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(9_999_999) desdeBarriles?: number;
   /** `null` = sin tope. */
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) hastaBarriles?: number | null;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(9_999_999) hastaBarriles?:
+    number | null;
   @IsOptional() @IsBoolean() exigeNotificacionMae?: boolean;
   @IsOptional() @IsBoolean() escalaAEmergencia?: boolean;
   @IsOptional() @IsBoolean() porConfirmar?: boolean;

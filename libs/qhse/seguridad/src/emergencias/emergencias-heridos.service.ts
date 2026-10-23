@@ -41,9 +41,9 @@ export interface SignosEntrada {
 }
 
 export interface DatosMedevacEntrada {
-  medioTransporte?: MedioTransporteMedevac;
-  hospitalId?: string;
-  etaMinutos?: number;
+  medioTransporte?: MedioTransporteMedevac | null;
+  hospitalId?: string | null;
+  etaMinutos?: number | null;
 }
 
 const ETIQUETA_TRIAGE: Record<TriageColor, string> = {
@@ -226,10 +226,12 @@ export class EmergenciasHeridosService {
       if (h.triage === TriageColor.negro)
         throw new ConflictException('Un fallecido (triage negro) no se evacúa por MEDEVAC');
       if (h.medevacAt) throw new ConflictException('El MEDEVAC de este herido ya está activado');
-      await tx.herido.update({
-        where: { id: heridoId },
+      const cambio = await tx.herido.updateMany({
+        where: { id: heridoId, medevacAt: null },
         data: { medevacAt: new Date(), medevacPor: actor.id, updatedBy: actor.id },
       });
+      if (cambio.count !== 1)
+        throw new ConflictException('El MEDEVAC de este herido ya está activado');
       await this.eventos.linea(tx, id, 'MEDEVAC activado para un herido', actor);
       await this.eventos.publicar(tx, 'qhse.emergencia.medevac_activado', id, actor, {
         heridoId,
@@ -243,12 +245,25 @@ export class EmergenciasHeridosService {
   async datosMedevac(id: string, heridoId: string, e: DatosMedevacEntrada, actor: AuthUser) {
     if (e.medioTransporte === undefined && e.hospitalId === undefined && e.etaMinutos === undefined)
       throw new BadRequestException('No hay nada que actualizar');
+    if (e.medioTransporte === null || e.hospitalId === null || e.etaMinutos === null)
+      throw new BadRequestException(
+        'El medio de transporte, el hospital y el ETA no se pueden vaciar: indique el valor nuevo',
+      );
     await this.prisma.$transaction(async (tx) => {
       await this.abierta(tx, id);
       const h = await this.herido(tx, id, heridoId);
       if (!h.medevacAt) throw new ConflictException('Primero active el MEDEVAC de este herido');
       if (h.transferidoAt)
         throw new ConflictException('El herido ya fue transferido: su destino no se cambia');
+      // tras notificar al hospital, el hospital y el medio de transporte ya no cambian (el ETA sí puede ajustarse)
+      if (
+        h.hospitalNotificadoAt &&
+        ((e.hospitalId !== undefined && e.hospitalId !== h.hospitalId) ||
+          (e.medioTransporte !== undefined && e.medioTransporte !== h.medioTransporte))
+      )
+        throw new ConflictException(
+          'El hospital ya fue notificado: el hospital y el medio de transporte no se cambian',
+        );
       if (e.hospitalId) {
         const hospital = await tx.emergenciaHospital.findUnique({ where: { id: e.hospitalId } });
         if (!hospital?.activo)
@@ -280,14 +295,16 @@ export class EmergenciasHeridosService {
         );
       if (h.hospitalNotificadoAt)
         throw new ConflictException('El hospital ya fue notificado de este herido');
-      await tx.herido.update({
-        where: { id: heridoId },
+      const cambio = await tx.herido.updateMany({
+        where: { id: heridoId, hospitalNotificadoAt: null },
         data: {
           hospitalNotificadoAt: new Date(),
           hospitalNotificadoPor: actor.id,
           updatedBy: actor.id,
         },
       });
+      if (cambio.count !== 1)
+        throw new ConflictException('El hospital ya fue notificado de este herido');
       const hospital = await tx.emergenciaHospital.findUniqueOrThrow({
         where: { id: h.hospitalId },
       });
@@ -316,10 +333,11 @@ export class EmergenciasHeridosService {
       if (!h.hospitalNotificadoAt)
         throw new ConflictException('Para transferir al herido notifique antes al hospital');
       if (h.transferidoAt) throw new ConflictException('Este herido ya fue transferido');
-      await tx.herido.update({
-        where: { id: heridoId },
+      const cambio = await tx.herido.updateMany({
+        where: { id: heridoId, transferidoAt: null },
         data: { transferidoAt: new Date(), transferidoPor: actor.id, updatedBy: actor.id },
       });
+      if (cambio.count !== 1) throw new ConflictException('Este herido ya fue transferido');
       await this.eventos.linea(tx, id, 'Herido transferido al hospital', actor);
       await this.eventos.publicar(tx, 'qhse.emergencia.herido_transferido', id, actor, {
         heridoId,

@@ -91,7 +91,7 @@ export class AgregarHospitalDto {
 }
 
 export class ResumenEmergenciasDto {
-  @IsOptional() @Type(() => Number) @IsInt() @Min(2000) anio?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(2000) @Max(2200) anio?: number;
 }
 
 export class ReporteFlashDto {

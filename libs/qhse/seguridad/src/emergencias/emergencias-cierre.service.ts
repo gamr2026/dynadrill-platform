@@ -129,7 +129,12 @@ export class EmergenciasCierreService {
         throw new ConflictException('Para cerrar la emergencia emita antes el Reporte Flash');
       if (e.nivel === null)
         throw new ConflictException('Para cerrar la emergencia declare antes su nivel');
-      const requiere = e.nivel >= 2;
+      // manda el nivel MÁS ALTO declarado: bajarlo antes de cerrar no evita la investigación
+      const maximo = await tx.emergenciaNivelHistorial.aggregate({
+        where: { emergenciaId: id },
+        _max: { nivel: true },
+      });
+      const requiere = Math.max(e.nivel, maximo._max.nivel ?? 0) >= 2;
       if (requiere && !(await this.consulta.tieneInvestigacion(tx, id)))
         throw new ConflictException(
           'Una emergencia de nivel 2 o 3 no se cierra sin su investigación de incidentes (HSE-TRIAGE-002): ábrala antes de cerrar',

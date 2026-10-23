@@ -1124,6 +1124,20 @@ run('QHSE: Desechos (base de datos real)', () => {
       ]);
     });
 
+    it('revisión S1: a un desecho no peligroso no se le agregan características CRETIB después, y las cantidades desmedidas se rechazan con 400', async () => {
+      const id = await insertarDirecto(1); // no peligroso, almacenado
+      await expect(
+        sql(
+          'INSERT INTO qhse.desecho_caracteristica_asignada (desecho_id, caracteristica_id) SELECT $1, id FROM qhse.desecho_caracteristica LIMIT 1',
+          [id],
+        ),
+      ).rejects.toThrow(/no peligroso no lleva características CRETIB/);
+      expect(
+        (await registrar({ items: [linea({ cantidadGalones: 10_000_000_000 })] })).status,
+      ).toBe(400);
+      expect((await registrar({ items: [linea({ bultos: 99_999_999_999 })] })).status).toBe(400);
+    });
+
     it('un contenedor, un estado o un pozo inexistentes no pasan (FK)', async () => {
       const c = await cabecera();
       c.params[2] = uuidv7();

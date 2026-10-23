@@ -655,6 +655,40 @@ run('QHSE: Derrames (base de datos real)', () => {
         }
       });
 
+      it('revisión S1: las bandas activas no pueden dejar huecos, y los valores fuera de rango se rechazan con 400', async () => {
+        const bandas = (await t.http().get('/api/qhse/derrames/bandas').set(tecnico()))
+          .body as Array<{
+          id: string;
+          codigo: string;
+          hastaBarriles: number | null;
+          desdeBarriles: number;
+        }>;
+        const moderado = bandas.find((b) => b.codigo === 'moderado');
+        const mayor = bandas.find((b) => b.codigo === 'mayor');
+        if (!moderado || !mayor) throw new Error('Faltan las bandas sembradas');
+        const put = (id: string, cuerpo: Record<string, unknown>) =>
+          t.http().put(`/api/qhse/derrames/bandas/${id}`).set(gerente()).send(cuerpo);
+        // recortar «moderado» deja un hueco antes de «mayor»; desactivar «mayor» deja el final sin tope
+        const hueco = await put(moderado.id, { hastaBarriles: 4 });
+        expect(hueco.status).toBe(409);
+        expect(hueco.body.detail).toMatch(/cubrir todos los volúmenes desde 0/);
+        expect((await put(mayor.id, { activo: false })).status).toBe(409);
+        expect((await put(mayor.id, { hastaBarriles: 100 })).status).toBe(409); // la última banda debe quedar sin tope
+        // nada cambió (se deshizo la transacción)
+        const despues = (await t.http().get('/api/qhse/derrames/bandas').set(tecnico()))
+          .body as typeof bandas;
+        expect(despues.find((b) => b.codigo === 'moderado')?.hastaBarriles).toBe(5);
+        expect(despues.find((b) => b.codigo === 'mayor')).toMatchObject({
+          activo: true,
+          hastaBarriles: null,
+        });
+        // valores fuera de rango
+        expect((await put(moderado.id, { hastaBarriles: 99_999_999 })).status).toBe(400);
+        const dc = (await t.http().get('/api/qhse/derrames/resumen?anio=99999').set(tecnico()))
+          .status;
+        expect(dc).toBe(400);
+      });
+
       it('el tablero suma el volumen real del año y cuenta la contención dentro del plazo y los MAE pendientes', async () => {
         const resumen = async () =>
           (await t.http().get('/api/qhse/derrames/resumen').set(tecnico())).body;
@@ -996,6 +1030,87 @@ run('QHSE: Derrames (base de datos real)', () => {
       await expect(
         t.prisma.derrameUbicacion.deleteMany({ where: { codigo: 'suelo' } }),
       ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
+    it('revisión S1: el volumen no puede confirmarse sin valor, un derrame cerrado no cambia y lo registrado no se reescribe', async () => {
+      const id = await insertarContenido();
+      // C1: «confirmado por alguien» sin volumen no pasa (el CHECK ya no se evalúa a NULL)
+      await expect(
+        sql(
+          'UPDATE qhse.derrame SET volumen_confirmado_por = $2, volumen_confirmado_at = now() WHERE id = $1',
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/derrame_volumen_check/);
+      // lo registrado de la contención no se reescribe
+      await expect(
+        sql("UPDATE qhse.derrame SET contenido_at = now() + interval '1 minute' WHERE id = $1", [
+          id,
+        ]),
+      ).rejects.toThrow(/no se reescribe/);
+      await expect(
+        sql('UPDATE qhse.derrame SET contenido_por = $2 WHERE id = $1', [id, TECNICO.id]),
+      ).rejects.toThrow(/no se reescribe/);
+      // I1: cerrado ya no se modifica (ni el volumen, que movería la regla del MAE y el KPI anual)
+      await sql(
+        "UPDATE qhse.derrame SET estado = 'cerrado', cerrado_at = now(), cerrado_por = $2 WHERE id = $1",
+        [id, OPERADOR.id],
+      );
+      await expect(
+        sql(
+          'UPDATE qhse.derrame SET volumen_real_barriles = 50, volumen_confirmado_por = $2, volumen_confirmado_at = now() WHERE id = $1',
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/cerrado ya no se modifica/);
+      await expect(
+        sql('UPDATE qhse.derrame SET cerrado_por = $2 WHERE id = $1', [id, TECNICO.id]),
+      ).rejects.toThrow(/cerrado ya no se modifica/);
+    });
+
+    it('revisión S1: sin pasos de contención activos no se marca contenido', async () => {
+      const id = (await activar()).body.id as string;
+      await sql('UPDATE qhse.derrame_checklist_item SET activo = false');
+      try {
+        await expect(
+          sql(
+            "UPDATE qhse.derrame SET estado = 'contenido', contenido_at = now(), contenido_por = $2 WHERE id = $1",
+            [id, OPERADOR.id],
+          ),
+        ).rejects.toThrow(/No hay pasos de contención activos/);
+      } finally {
+        await sql('UPDATE qhse.derrame_checklist_item SET activo = true');
+      }
+    });
+
+    it('revisión S1: los catálogos que deciden el comportamiento no se reescriben desde la aplicación', async () => {
+      await expect(
+        t.prisma.derrameUbicacion.updateMany({
+          where: { codigo: 'cuerpo_agua' },
+          data: { exigeNotificacionMae: false },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.derrameBandaVolumen.updateMany({
+          where: { codigo: 'mayor' },
+          data: { codigo: 'otra' },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.derrameChecklistItem.updateMany({ data: { codigo: 'x' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.desechoEstado.updateMany({
+          where: { codigo: 'almacenado' },
+          data: { codigo: 'x' },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.emergenciaPasoNotificacion.updateMany({ data: { desde: 'otro' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      // lo que sí se ajusta (nombre, orden, activo) funciona
+      await t.prisma.derrameChecklistItem.updateMany({
+        where: { codigo: 'usar_epp' },
+        data: { nombre: 'Usar el EPP adecuado antes de intervenir' },
+      });
     });
 
     it('la descripción no puede estar vacía y el ticket, la ubicación y la banda deben existir (FK)', async () => {

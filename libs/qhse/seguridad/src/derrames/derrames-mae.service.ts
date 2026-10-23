@@ -32,8 +32,8 @@ export class DerramesMaeService {
         );
       if (d.notificadoMaeAt)
         throw new ConflictException('La notificación al MAE ya está registrada');
-      await tx.derrame.update({
-        where: { id },
+      const cambio = await tx.derrame.updateMany({
+        where: { id, notificadoMaeAt: null, estado: { not: EstadoDerrame.cerrado } },
         data: {
           notificadoMaeAt: new Date(),
           notificadoMaePor: actor.id,
@@ -41,6 +41,10 @@ export class DerramesMaeService {
           updatedBy: actor.id,
         },
       });
+      if (cambio.count !== 1)
+        throw new ConflictException(
+          'La notificación al MAE ya está registrada o el derrame cambió',
+        );
       await this.eventos.publicar(tx, 'qhse.derrame.mae_notificado', id, actor, {
         maeReferencia: texto(entrada.referencia),
       });
