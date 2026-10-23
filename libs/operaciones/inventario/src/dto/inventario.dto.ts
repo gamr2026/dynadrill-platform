@@ -97,6 +97,21 @@ export class ConsultarStockDto {
   @IsOptional() @IsUUID() bodegaId?: string;
 }
 
+export class ListarMinimosDto {
+  @IsOptional() @IsUUID() articuloId?: string;
+  @IsOptional() @IsUUID() bodegaId?: string;
+  /** `true`: solo los que hoy están por debajo de su mínimo. */
+  @IsOptional() @IsIn(['true', 'false']) bajoMinimo?: 'true' | 'false';
+}
+
+export class FijarMinimoDto {
+  /** Existencia mínima deseada: mayor que cero, hasta 3 decimales. */
+  @IsNumber({ maxDecimalPlaces: 3, allowNaN: false, allowInfinity: false })
+  @Min(0.001)
+  @Max(99_999_999_999)
+  minimo!: number;
+}
+
 export class ParteDto {
   @IsString() @MinLength(1) @MaxLength(20) item!: string;
   @IsString() @MinLength(1) @MaxLength(60) codigo!: string;

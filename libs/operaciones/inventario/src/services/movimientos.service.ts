@@ -14,6 +14,7 @@ import {
   type BalanceTicketArticulo,
   type EntradaKardex,
 } from './kardex';
+import { MinimosService } from './minimos.service';
 
 /** Quién registra: basta el id y el rol (así lo pueden llamar otros módulos del contenedor con su propio actor). */
 export type ActorInventario = Pick<AuthUser, 'id' | 'roleCode'>;
@@ -105,6 +106,8 @@ const EVENTO_POR_ORIGEN: Partial<Record<OrigenMovimiento, string>> = {
   devolucion_ticket: 'operaciones.inventario.devolucion_registrada',
 };
 const EVENTO_GENERICO = 'operaciones.inventario.movimiento_registrado';
+/** IN4: una salida dejó el saldo de un artículo en una bodega por debajo de su mínimo (se publica al cruzarlo, no en cada movimiento). */
+export const EVENTO_BAJO_MINIMO = 'operaciones.inventario.stock.bajo_minimo';
 
 /**
  * Kardex de Inventario. Es la puerta de entrada de los demás módulos del contenedor: cada método recibe la transacción de quien
@@ -115,6 +118,7 @@ export class MovimientosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly minimos: MinimosService,
   ) {}
 
   /** Registra el movimiento y publica su evento, dentro de la transacción recibida. */
@@ -149,6 +153,33 @@ export class MovimientosService {
         traceparent: currentTraceparent(),
       }),
     );
+    // IN4: si la salida dejó el saldo por debajo del mínimo (viniendo de estar en él o encima), se avisa una sola vez
+    const cruce = await this.minimos.cruzo(tx, m);
+    if (cruce) {
+      const bodega = await tx.catBodega.findUnique({
+        where: { id: m.bodegaId },
+        select: { nombre: true },
+      });
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: EVENTO_BAJO_MINIMO,
+          subject: { type: 'inventario_articulo', id: m.articuloId },
+          data: {
+            articuloId: m.articuloId,
+            articuloCodigo: articulo.codigo,
+            bodegaId: m.bodegaId,
+            bodega: bodega?.nombre ?? null,
+            saldo: cruce.saldo,
+            minimo: cruce.minimo,
+            movimientoId: m.id,
+            ticketId: m.ticketPumpingId,
+          },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
+      );
+    }
     return m;
   }
 
@@ -522,17 +553,30 @@ export class MovimientosService {
       throw new NotFoundException('El artículo no existe');
     }
     const saldos = await saldosPorBodega(this.prisma, articuloId);
+    const minimos = await this.minimos.deArticulo(articuloId);
+    // una bodega con mínimo y sin movimientos también cuenta: tiene 0 y está por debajo
+    const filas = [
+      ...saldos,
+      ...[...minimos.keys()]
+        .filter((id) => !saldos.some((s) => s.bodegaId === id))
+        .map((bodegaId) => ({ bodegaId, saldo: 0 })),
+    ];
     const bodegas = await this.prisma.catBodega.findMany({
-      where: { id: { in: saldos.map((s) => s.bodegaId) } },
+      where: { id: { in: filas.map((s) => s.bodegaId) } },
     });
     return {
       articuloId,
       total: saldos.reduce((t, s) => t + s.saldo, 0),
-      porBodega: saldos.map((s) => ({
-        bodegaId: s.bodegaId,
-        bodega: bodegas.find((b) => b.id === s.bodegaId)?.nombre ?? '',
-        stock: s.saldo,
-      })),
+      porBodega: filas.map((s) => {
+        const minimo = minimos.get(s.bodegaId) ?? null;
+        return {
+          bodegaId: s.bodegaId,
+          bodega: bodegas.find((b) => b.id === s.bodegaId)?.nombre ?? '',
+          stock: s.saldo,
+          minimo,
+          bajoMinimo: minimo !== null && s.saldo < minimo,
+        };
+      }),
     };
   }
 

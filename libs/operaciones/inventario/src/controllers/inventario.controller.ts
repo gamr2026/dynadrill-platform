@@ -18,6 +18,8 @@ import {
   ActualizarSubcategoriaDto,
   CategoriaDto,
   ConsultarStockDto,
+  FijarMinimoDto,
+  ListarMinimosDto,
   CrearArticuloDto,
   ListarArticulosDto,
   ListarDespachosDto,
@@ -32,6 +34,7 @@ import {
 import { ArticulosService } from '../services/articulos.service';
 import { DespachosService } from '../services/despachos.service';
 import { CatalogosService } from '../services/catalogos.service';
+import { MinimosService } from '../services/minimos.service';
 import { MovimientosService } from '../services/movimientos.service';
 import { PartesService } from '../services/partes.service';
 
@@ -46,6 +49,7 @@ export class InventarioController {
   constructor(
     private readonly articulos: ArticulosService,
     private readonly movimientos: MovimientosService,
+    private readonly minimos: MinimosService,
     private readonly partes: PartesService,
     private readonly catalogos: CatalogosService,
     private readonly despachos: DespachosService,
@@ -116,6 +120,38 @@ export class InventarioController {
     return q.bodegaId
       ? { ...s, porBodega: s.porBodega.filter((b) => b.bodegaId === q.bodegaId) }
       : s;
+  }
+
+  // --- mínimos de stock por artículo y bodega (IN4) ---
+  @RequirePermission(P.ARTICULOS_VER)
+  @Get('minimos')
+  listarMinimos(@Query() q: ListarMinimosDto) {
+    return this.minimos.listar({
+      articuloId: q.articuloId,
+      bodegaId: q.bodegaId,
+      bajoMinimo: q.bajoMinimo === 'true',
+    });
+  }
+
+  @RequirePermission(P.ARTICULOS_GESTIONAR)
+  @Put('articulos/:id/minimos/:bodegaId')
+  fijarMinimo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('bodegaId', ParseUUIDPipe) bodegaId: string,
+    @Body() dto: FijarMinimoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.minimos.fijar(id, bodegaId, dto.minimo, actor.id);
+  }
+
+  @RequirePermission(P.ARTICULOS_GESTIONAR)
+  @Delete('articulos/:id/minimos/:bodegaId')
+  async quitarMinimo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('bodegaId', ParseUUIDPipe) bodegaId: string,
+  ) {
+    await this.minimos.quitar(id, bodegaId);
+    return { ok: true };
   }
 
   @RequirePermission(P.ARTICULOS_GESTIONAR)

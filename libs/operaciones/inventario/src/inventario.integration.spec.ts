@@ -249,6 +249,9 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       [[TICKET_A, TICKET_B]],
     );
     if (articulos.length) {
+      await admin.query('DELETE FROM inventario.stock_minimo WHERE articulo_id = ANY($1::uuid[])', [
+        articulos,
+      ]);
       await admin.query('DELETE FROM inventario.movimiento WHERE articulo_id = ANY($1::uuid[])', [
         articulos,
       ]);
@@ -753,6 +756,203 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         (await http().get(`/api/operaciones/inventario/articulos/${uuidv7()}/partes`).set(lector()))
           .status,
       ).toBe(404);
+    });
+  });
+
+  describe('mínimos de stock por artículo y bodega (IN4)', () => {
+    const url = (articuloId: string, bodegaId: string) =>
+      `/api/operaciones/inventario/articulos/${articuloId}/minimos/${bodegaId}`;
+    const fijar = (articuloId: string, bodegaId: string, minimo: unknown, auth = bodeguero()) =>
+      http().put(url(articuloId, bodegaId)).set(auth).send({ minimo });
+    const alertas = async (articuloId: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.stock.bajo_minimo' AND datos->'data'->>'articuloId' = $1 ORDER BY ocurrido_at, id",
+          [articuloId],
+        )
+      ).rows.map((r: { d: Record<string, unknown> }) => r.d);
+
+    it('se fija, se cambia y se quita por artículo y bodega; la lectura es de quien ve artículos y la escritura, de Bodega', async () => {
+      const a = await crearArticulo('IN4A');
+      const r = await fijar(a.id, BODEGA_A.id, 20).expect(200);
+      expect(r.body).toMatchObject({
+        articuloId: a.id,
+        articuloCodigo: a.codigo,
+        bodegaId: BODEGA_A.id,
+        bodega: BODEGA_A.nombre,
+        minimo: 20,
+        stock: 0,
+        bajoMinimo: true,
+        faltante: 20,
+      });
+      // cambiarlo no duplica la fila
+      await fijar(a.id, BODEGA_A.id, 25.5).expect(200);
+      await fijar(a.id, BODEGA_B.id, 5).expect(200);
+      const lista = await http()
+        .get(`/api/operaciones/inventario/minimos?articuloId=${a.id}`)
+        .set(lector())
+        .expect(200);
+      expect(
+        lista.body.map((x: { bodega: string; minimo: number }) => [x.bodega, x.minimo]),
+      ).toEqual(
+        [
+          [BODEGA_A.nombre, 25.5],
+          [BODEGA_B.nombre, 5],
+        ].sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+      );
+      expect(
+        (
+          await http()
+            .get(`/api/operaciones/inventario/minimos?articuloId=${a.id}&bodegaId=${BODEGA_B.id}`)
+            .set(lector())
+            .expect(200)
+        ).body,
+      ).toHaveLength(1);
+      // la lectura no escribe; quien no tiene permisos no entra
+      await fijar(a.id, BODEGA_A.id, 3, lector()).expect(403);
+      await http().delete(url(a.id, BODEGA_A.id)).set(lector()).expect(403);
+      await http().get('/api/operaciones/inventario/minimos').set(sinPermisos()).expect(403);
+      // quitar uno deja el otro, y quitar dos veces es un 404
+      await http().delete(url(a.id, BODEGA_A.id)).set(bodeguero()).expect(200);
+      await http().delete(url(a.id, BODEGA_A.id)).set(bodeguero()).expect(404);
+      expect(
+        (
+          await http()
+            .get(`/api/operaciones/inventario/minimos?articuloId=${a.id}`)
+            .set(lector())
+            .expect(200)
+        ).body.map((x: { bodega: string }) => x.bodega),
+      ).toEqual([BODEGA_B.nombre]);
+    });
+
+    it('valida el mínimo y que existan el artículo y la bodega', async () => {
+      const a = await crearArticulo('IN4B');
+      for (const malo of [0, -1, 0.0004, 1.2345, 'mucho', null, 1e12]) {
+        await fijar(a.id, BODEGA_A.id, malo).expect(400);
+      }
+      await fijar(uuidv7(), BODEGA_A.id, 5).expect(404);
+      await fijar(a.id, uuidv7(), 5).expect(400);
+      await http()
+        .put(url('no-es-uuid', BODEGA_A.id))
+        .set(bodeguero())
+        .send({ minimo: 5 })
+        .expect(400);
+      expect(
+        (
+          await http()
+            .get(`/api/operaciones/inventario/minimos?articuloId=${a.id}`)
+            .set(lector())
+            .expect(200)
+        ).body,
+      ).toEqual([]);
+    });
+
+    it('el stock muestra el mínimo de cada bodega y si está por debajo, incluso una bodega sin movimientos', async () => {
+      const a = await crearArticulo('IN4C');
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 50).expect(201);
+      await fijar(a.id, BODEGA_A.id, 40).expect(200);
+      await fijar(a.id, BODEGA_B.id, 10).expect(200); // sin existencias en B
+      const s = await stockDe(a.id);
+      expect(s.total).toBe(50);
+      const de = (b: { id: string }) =>
+        s.porBodega.find((x: { bodegaId: string }) => x.bodegaId === b.id);
+      expect(de(BODEGA_A)).toMatchObject({ stock: 50, minimo: 40, bajoMinimo: false });
+      expect(de(BODEGA_B)).toMatchObject({ stock: 0, minimo: 10, bajoMinimo: true });
+      // el listado de alertas trae solo lo que está por debajo
+      const bajo = await http()
+        .get(`/api/operaciones/inventario/minimos?articuloId=${a.id}&bajoMinimo=true`)
+        .set(lector())
+        .expect(200);
+      expect(bajo.body.map((x: { bodegaId: string }) => x.bodegaId)).toEqual([BODEGA_B.id]);
+      // un artículo sin mínimos sigue como antes: sin bandera
+      const sin = await crearArticulo('IN4D');
+      await mover(sin.id, BODEGA_A.id, ids.motivoCompra, 5).expect(201);
+      expect((await stockDe(sin.id)).porBodega[0]).toMatchObject({
+        minimo: null,
+        bajoMinimo: false,
+      });
+    });
+
+    it('publica stock.bajo_minimo una sola vez al cruzar el mínimo hacia abajo, y otra vez si vuelve a subir y cruza', async () => {
+      const a = await crearArticulo('IN4E');
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 50).expect(201);
+      await fijar(a.id, BODEGA_A.id, 20).expect(200);
+      // quedarse por encima, o justo en el mínimo, no avisa
+      await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 20).expect(201); // 30
+      await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 10).expect(201); // 20: justo en el mínimo
+      expect(await alertas(a.id)).toEqual([]);
+      // la salida que lo deja por debajo avisa, con los datos para actuar
+      const cruce = (await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 5).expect(201)).body; // 15
+      const primera = await alertas(a.id);
+      expect(primera).toHaveLength(1);
+      expect(primera[0]).toMatchObject({
+        articuloId: a.id,
+        articuloCodigo: a.codigo,
+        bodegaId: BODEGA_A.id,
+        bodega: BODEGA_A.nombre,
+        saldo: 15,
+        minimo: 20,
+        movimientoId: cruce.id,
+      });
+      // seguir bajando no repite el aviso; una entrada tampoco lo da
+      await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 5).expect(201); // 10
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 5).expect(201); // 15
+      expect(await alertas(a.id)).toHaveLength(1);
+      // sube por encima y vuelve a cruzar: otro aviso
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 25).expect(201); // 40
+      await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 25).expect(201); // 15
+      const todas = await alertas(a.id);
+      expect(todas).toHaveLength(2);
+      expect(todas[1]).toMatchObject({ saldo: 15, minimo: 20 });
+    });
+
+    it('no avisa donde no hay mínimo, ni por el de otra bodega, ni al quitarlo', async () => {
+      const a = await crearArticulo('IN4F');
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 50).expect(201);
+      await mover(a.id, BODEGA_B.id, ids.motivoCompra, 50).expect(201);
+      await fijar(a.id, BODEGA_A.id, 40).expect(200);
+      await mover(a.id, BODEGA_B.id, ids.motivoFaltante, 45).expect(201); // B no tiene mínimo
+      expect(await alertas(a.id)).toEqual([]);
+      await http().delete(url(a.id, BODEGA_A.id)).set(bodeguero()).expect(200);
+      await mover(a.id, BODEGA_A.id, ids.motivoFaltante, 45).expect(201); // ya no hay mínimo en A
+      expect(await alertas(a.id)).toEqual([]);
+    });
+
+    it('con salidas simultáneas cruza una sola vez: el kardex las serializa por artículo', async () => {
+      const a = await crearArticulo('IN4G');
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 30).expect(201);
+      await fijar(a.id, BODEGA_A.id, 20).expect(200);
+      const rs = await Promise.all(
+        [1, 2, 3, 4, 5].map(() => mover(a.id, BODEGA_A.id, ids.motivoFaltante, 4)),
+      );
+      expect(rs.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]); // 30 → 10
+      const avisos = await alertas(a.id);
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]).toMatchObject({ minimo: 20 });
+      expect(Number(avisos[0]['saldo'])).toBeLessThan(20);
+    });
+
+    it('la base exige un mínimo mayor que cero, uno por artículo y bodega, y artículo, bodega y autor reales', async () => {
+      const a = await crearArticulo('IN4H');
+      const insertar = (o: { articulo?: string; bodega?: string; minimo?: number; por?: string }) =>
+        admin.query(
+          'INSERT INTO inventario.stock_minimo (id, articulo_id, bodega_id, minimo, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $5)',
+          [
+            uuidv7(),
+            o.articulo ?? a.id,
+            o.bodega ?? BODEGA_B.id,
+            o.minimo ?? 5,
+            o.por ?? BODEGUERO.id,
+          ],
+        );
+      await expect(insertar({ minimo: 0 })).rejects.toThrow(/stock_minimo_minimo_check/);
+      await expect(insertar({ minimo: -3 })).rejects.toThrow(/stock_minimo_minimo_check/);
+      await expect(insertar({ articulo: uuidv7() })).rejects.toThrow(/stock_minimo_articulo_fkey/);
+      await expect(insertar({ bodega: uuidv7() })).rejects.toThrow(/stock_minimo_bodega_fkey/);
+      await expect(insertar({ por: uuidv7() })).rejects.toThrow(/stock_minimo_created_by_fkey/);
+      await insertar({});
+      await expect(insertar({})).rejects.toThrow(/stock_minimo_articulo_bodega_key/);
+      await admin.query('DELETE FROM inventario.stock_minimo WHERE articulo_id = $1', [a.id]);
     });
   });
 

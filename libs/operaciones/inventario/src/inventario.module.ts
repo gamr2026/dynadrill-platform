@@ -5,6 +5,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { ArticulosService } from './services/articulos.service';
 import { CatalogosService } from './services/catalogos.service';
 import { DespachosService } from './services/despachos.service';
+import { MinimosService } from './services/minimos.service';
 import { MovimientosService } from './services/movimientos.service';
 import { PartesService } from './services/partes.service';
 
@@ -23,6 +24,7 @@ import { PartesService } from './services/partes.service';
     CatalogosService,
     DespachosService,
     MovimientosService,
+    MinimosService,
     PartesService,
     DespachosConsumer,
   ],

@@ -130,6 +130,27 @@ model MotivoMovimiento {
   @@schema("inventario")
 }
 
+/// Mínimo de existencias de un artículo en una bodega (IN4). El saldo no se guarda: sale del kardex.
+model StockMinimo {
+  id         String    @id @db.Uuid
+  articuloId String    @map("articulo_id") @db.Uuid
+  articulo   Articulo  @relation(fields: [articuloId], references: [id])
+  bodegaId   String    @map("bodega_id") @db.Uuid
+  bodega     CatBodega @relation(fields: [bodegaId], references: [id])
+  minimo     Decimal   @db.Decimal(14, 3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  createdBy  String    @map("created_by") @db.Uuid
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  updatedBy  String    @map("updated_by") @db.Uuid
+
+  @@unique([articuloId, bodegaId])
+  @@index([bodegaId])
+  @@map("stock_minimo")
+  @@schema("inventario")
+}
+
 model Articulo {
   id                   String                @id @db.Uuid
   codigo               String                @unique
@@ -163,6 +184,7 @@ model Articulo {
   equivalencias ArticuloEquivalencia[]
   partes        ArticuloParte[]
   movimientos   Movimiento[]
+  minimos       StockMinimo[]
   consumos      ConsumoTicket[]
 
   @@index([categoriaId])
@@ -344,10 +366,11 @@ model SalidaMantenimiento {
 // ---------------------------------------------------------------------------------------------------------------
 
 model CatBodega {
-  id          String       @id @db.Uuid
+  id          String        @id @db.Uuid
   nombre      String
   habilitado  Boolean
   movimientos Movimiento[]
+  minimos     StockMinimo[]
 
   @@map("bodega")
   @@schema("catalogos")
