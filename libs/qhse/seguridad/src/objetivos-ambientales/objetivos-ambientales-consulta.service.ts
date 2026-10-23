@@ -83,8 +83,6 @@ export class ObjetivosAmbientalesConsultaService {
     return {
       ...this.resumen(o),
       objetivo: o.objetivo,
-      meta: o.meta,
-      indicador: o.indicador,
       beneficioEmpresarial: o.beneficioEmpresarial,
       resultado: o.resultado,
       evidencia: o.evidencia,
@@ -122,6 +120,8 @@ export class ObjetivosAmbientalesConsultaService {
       numero: o.numero,
       codigo: codigoObjetivo(o.numero),
       titulo: o.titulo,
+      meta: o.meta,
+      indicador: o.indicador,
       estado: o.estado,
       plazo,
       // el plazo solo corre mientras el objetivo está en curso
