@@ -642,6 +642,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'qhse.derrames.configurar',
     'Configurar las bandas de volumen de los derrames (umbrales de notificación al MAE y de escalada)',
     [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  ),
   // ---- qhse: investigación de incidentes (DYN-SGI-RE-034). Aprobar el informe y cerrar es solo del Gerente HSE; el Supervisor no entra.
   nuevo(
     'qhse.investigaciones.ver',
