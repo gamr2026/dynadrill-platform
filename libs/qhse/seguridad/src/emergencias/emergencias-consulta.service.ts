@@ -66,7 +66,10 @@ export class EmergenciasConsultaService {
           : {}),
       },
       orderBy: { numero: 'desc' },
-      include: { tipo: { select: { codigo: true, nombre: true } } },
+      include: {
+        tipo: { select: { codigo: true, nombre: true } },
+        reporteFlash: { select: { emitidoAt: true } },
+      },
       take: 300,
     });
     const tickets = await this.tickets(filas.map((f) => f.ticketId));
@@ -79,6 +82,14 @@ export class EmergenciasConsultaService {
       descripcion: e.descripcion,
       ubicacion: e.ubicacion,
       origen: e.swaId ? 'swa' : e.derrameId ? 'derrame' : null,
+      /** Nivel declarado por Base HSE (1 a 3); nulo hasta declararlo. */
+      nivel: e.nivel,
+      reporteFlashEmitido: e.reporteFlash !== null,
+      /** Sin emitir y con el plazo de 2 horas ya vencido (solo mientras la emergencia siga abierta). */
+      reporteFlashVencido:
+        e.reporteFlash === null &&
+        e.estado !== 'cerrada' &&
+        Date.now() > e.activadoAt.getTime() + PLAZO_REPORTE_FLASH_MINUTOS * 60_000,
       ticketId: e.ticketId,
       ticketNumero: e.ticketId ? (tickets.get(e.ticketId)?.ticketNumero ?? null) : null,
       pedidoCodigo: e.ticketId ? (tickets.get(e.ticketId)?.pedidoCodigo ?? null) : null,

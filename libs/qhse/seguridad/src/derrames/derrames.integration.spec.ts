@@ -210,6 +210,7 @@ run('QHSE: Derrames (base de datos real)', () => {
       ticketNumero: number | null;
     }>;
     expect(lista.find((x) => x.id === a.body.id)?.ticketNumero).toEqual(expect.any(Number));
+    expect(lista.find((x) => x.id === a.body.id)).toMatchObject({ notificadoMae: false });
     const porTicket = (await t.http().get(`/api/qhse/derrames?ticketId=${ticketId}`).set(tecnico()))
       .body as Array<{ id: string }>;
     expect(porTicket.map((x) => x.id)).toEqual([a.body.id]);

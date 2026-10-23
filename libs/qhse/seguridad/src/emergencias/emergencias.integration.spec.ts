@@ -376,6 +376,19 @@ run('QHSE: Emergencias (base de datos real)', () => {
     const fila = lista.find((x) => x.id === a.body.id);
     expect(fila?.ticketNumero).toEqual(expect.any(Number));
     expect(fila?.origen).toBeNull();
+    // la bandeja trae lo que muestra la tarjeta: nivel (vacío hasta declararlo) y estado del Reporte Flash
+    expect(fila).toMatchObject({
+      nivel: null,
+      reporteFlashEmitido: false,
+      reporteFlashVencido: false,
+    });
+    await sql("UPDATE qhse.emergencia SET activado_at = now() - interval '3 hours' WHERE id = $1", [
+      a.body.id,
+    ]);
+    const vencida = (
+      await t.http().get(`/api/qhse/emergencias?ticketId=${ticketId}`).set(tecnico())
+    ).body[0];
+    expect(vencida.reporteFlashVencido).toBe(true);
     const porTicket = (
       await t.http().get(`/api/qhse/emergencias?ticketId=${ticketId}`).set(tecnico())
     ).body as Array<{ id: string }>;

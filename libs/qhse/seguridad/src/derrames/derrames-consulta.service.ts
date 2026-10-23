@@ -174,6 +174,8 @@ export class DerramesConsultaService {
         ubicacion: { codigo: d.ubicacion.codigo, nombre: d.ubicacion.nombre },
         banda: { codigo: d.banda.codigo, nombre: d.banda.nombre },
         volumenRealBarriles: d.volumenRealBarriles === null ? null : Number(d.volumenRealBarriles),
+        /** La notificación al MAE ya se registró. */
+        notificadoMae: d.notificadoMaeAt !== null,
         requiereNotificacionMae: requiereNotificacionMae(reglas),
         escalaAEmergencia: escalaAEmergencia(reglas),
         ticketId: d.ticketId,
