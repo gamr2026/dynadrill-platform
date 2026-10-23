@@ -3,7 +3,8 @@ import type { AuthUser } from '@dyn/common';
 import type { Tx } from '../epi/epi-tipos';
 import { EstadoIperc } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { aDia, diasHasta } from '../comun/fechas';
+import { aDia, aFecha, diasHasta, hoyEcuador } from '../comun/fechas';
+import { requisitosIperc } from '../ptw/ptw-iperc';
 import { valorar } from './gtc45';
 
 /** Consecutivo visible de la matriz: IPERC-000001. */
@@ -216,6 +217,17 @@ export class IpercConsultaService {
   }
 
   /** Cobertura: para cada tipo de servicio, las actividades de la matriz maestra que exige. */
+  /**
+   * Cobertura IPERC de un ticket (para el banner del ticket de FCR): por cada actividad que exigen los tipos de servicio del ticket, la matriz
+   * aprobada y vigente el día indicado (hoy por defecto) o por qué falta. Un ticket sin tipos de servicio con cobertura devuelve lista vacía
+   * y `coberturaOk = true`. El ticket es de otro contenedor: se conoce por sus servicios (`ticket_servicio`), sin FK.
+   */
+  async coberturaDeTicket(ticketId: string, diaTexto?: string) {
+    const dia = diaTexto ?? hoyEcuador();
+    const requisitos = await requisitosIperc(this.prisma, ticketId, aFecha(dia));
+    return { ticketId, dia, requisitos, coberturaOk: requisitos.every((r) => r.falta === null) };
+  }
+
   async cobertura() {
     const filas = await this.prisma.ipercCobertura.findMany({
       include: { actividad: { select: { id: true, nombre: true } } },
