@@ -176,7 +176,11 @@ export class RabbitMqTransport implements EventTransport {
       ch.ack(msg);
     } catch (e) {
       this.logger.error(`No se pudo reprogramar ${event.id}: ${(e as Error).message}`);
-      ch.nack(msg, false, true);
+      try {
+        ch.nack(msg, false, true);
+      } catch {
+        // canal ya cerrado (apagado del proceso): el broker devuelve el mensaje a la cola al perder el consumidor
+      }
     }
   }
 
