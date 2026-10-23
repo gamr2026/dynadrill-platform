@@ -222,34 +222,34 @@ export class TrasladoSalidaController {
   }
 
   @RequirePermission(P.PUMPING_OPERAR)
-  @Get('tickets/:id/reportes-unidad/:vehiculoId')
+  @Get('tickets/:id/reportes-unidad/:unidadId')
   reporte(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
   ) {
-    return this.reportes.obtener(id, vehiculoId);
+    return this.reportes.obtener(id, unidadId);
   }
 
   @RequirePermission(P.PUMPING_OPERAR)
-  @Put('tickets/:id/reportes-unidad/:vehiculoId/salida')
+  @Put('tickets/:id/reportes-unidad/:unidadId/salida')
   guardarSalida(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
     @Body() dto: GuardarSalidaDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.reportes.guardarSalida(id, vehiculoId, dto, actor);
+    return this.reportes.guardarSalida(id, unidadId, dto, actor);
   }
 
   @RequirePermission(P.PUMPING_OPERAR)
-  @Put('tickets/:id/reportes-unidad/:vehiculoId/llegada')
+  @Put('tickets/:id/reportes-unidad/:unidadId/llegada')
   guardarLlegada(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
     @Body() dto: GuardarLlegadaDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.reportes.guardarLlegada(id, vehiculoId, dto, actor);
+    return this.reportes.guardarLlegada(id, unidadId, dto, actor);
   }
 
   // ---- formalización de la ejecución (Supervisor)

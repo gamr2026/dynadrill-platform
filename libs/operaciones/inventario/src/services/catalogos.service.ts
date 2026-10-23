@@ -6,7 +6,6 @@ import type {
   CategoriaDto,
   ListarMotivosDto,
   SubcategoriaDto,
-  UnidadStockDto,
 } from '../dto/inventario.dto';
 import { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -149,28 +148,18 @@ export class CatalogosService {
     );
   }
 
-  unidades() {
-    return this.prisma.unidadStock.findMany({
-      orderBy: { nombre: 'asc' },
-      select: { id: true, nombre: true, simbolo: true, activo: true },
-    });
-  }
-
-  crearUnidad(dto: UnidadStockDto, actorId: string) {
-    return sinDuplicar(
-      () =>
-        this.prisma.unidadStock.create({
-          data: {
-            id: uuidv7(),
-            nombre: dto.nombre.trim(),
-            simbolo: dto.simbolo.trim(),
-            createdBy: actorId,
-            updatedBy: actorId,
-          },
-          select: { id: true, nombre: true, simbolo: true, activo: true },
-        }),
-      'Ya existe una unidad con ese nombre',
-    );
+  /**
+   * Las unidades de medida son un catálogo compartido de la plataforma (IN9): aquí solo se leen, para el selector del artículo. Se crean
+   * y editan en `/api/v2/catalogos/unidades-medida`. `activo` se conserva por compatibilidad con la pantalla (= `habilitado`).
+   */
+  async unidades() {
+    const filas = await this.prisma.catUnidadMedida.findMany({ orderBy: { nombre: 'asc' } });
+    return filas.map((u) => ({
+      id: u.id,
+      nombre: u.nombre,
+      simbolo: u.simbolo,
+      activo: u.habilitado,
+    }));
   }
 
   motivos(f: ListarMotivosDto) {

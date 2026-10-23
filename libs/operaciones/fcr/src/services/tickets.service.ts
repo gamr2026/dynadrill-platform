@@ -135,6 +135,8 @@ export interface MoverOpciones {
   exigirRequisitos?: boolean;
   /** Si no se indica, el rol con el que actúa la cuenta. */
   origen?: 'manual' | 'sistema';
+  /** Solo al cerrar: el correo del cliente al que se envía la encuesta de satisfacción. */
+  correoCliente?: string;
 }
 
 /**
@@ -320,7 +322,13 @@ export class TicketsService {
   }
 
   /** Pasa el ticket al siguiente paso. Solo los roles del paso actual (y Superadmin) pueden hacerlo. */
-  async avanzar(id: string, hacia: string, actor: AuthUser, motivo?: string) {
+  async avanzar(
+    id: string,
+    hacia: string,
+    actor: AuthUser,
+    motivo?: string,
+    correoCliente?: string,
+  ) {
     await this.prisma.$transaction(async (tx) => {
       const t = await this.cargarEnTx(tx, id);
       this.exigirActuar(t, actor);
@@ -333,9 +341,24 @@ export class TicketsService {
       await this.moverPaso(tx, t, hacia, actor, {
         motivo,
         exigirRequisitos: salida.exigeRequisitos,
+        ...(hacia === 'cerrado' ? { correoCliente: this.correoDelCliente(correoCliente) } : {}),
       });
     });
     return this.detalle(id, actor);
+  }
+
+  /** Al cerrar se pide el correo del cliente: la encuesta de satisfacción se le envía a esa dirección. */
+  private correoDelCliente(correo?: string): string {
+    const c = correo?.trim().toLowerCase();
+    if (!c) {
+      throw new BadRequestException(
+        'Escriba el correo del cliente: a esa dirección se enviará la encuesta de satisfacción',
+      );
+    }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c)) {
+      throw new BadRequestException('El correo del cliente no es válido');
+    }
+    return c;
   }
 
   /** El rol del paso y el equipo asignado: lo que cualquier acción sobre el ticket debe comprobar primero. */
@@ -420,12 +443,24 @@ export class TicketsService {
     }
     // el cierre del servicio: Comercial genera la prefactura con lo que el ticket dejó (contrato 4.10)
     if (hacia === 'cerrado') {
+      const n = await tx.ticket.findUniqueOrThrow({
+        where: { id: t.id },
+        include: { cliente: true, pozo: true },
+      });
       await this.bus.publish(
         tx,
         this.bus.create({
           type: 'operaciones.fcr.cerrado',
           subject: { type: 'fcr_ticket', id: t.id },
-          data: { ticketId: t.id, ticketNumero: t.ticketNumero, pedidoId: t.pedidoId },
+          data: {
+            ticketId: t.id,
+            ticketNumero: t.ticketNumero,
+            pedidoId: t.pedidoId,
+            // a este correo del cliente se envía la encuesta de satisfacción (plataforma); FCR no lo guarda: viaja solo en el evento
+            correoCliente: o.correoCliente ?? null,
+            cliente: nombreDe(n.cliente),
+            pozo: n.pozo?.nombreCompleto ?? null,
+          },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),
         }),

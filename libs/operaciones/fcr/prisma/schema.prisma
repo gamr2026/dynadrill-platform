@@ -313,6 +313,7 @@ model Ticket {
 
   tiposServicio  TicketTipoServicio[]
   historial      TicketHistorial[]
+  observaciones  TicketObservacion[]
   personas       TicketPersona[]
   requisitos     TicketRequisito[]
   lineas         TicketLinea[]
@@ -359,6 +360,25 @@ model TicketHistorial {
 
   @@index([ticketId, createdAt])
   @@map("ticket_historial")
+  @@schema("fcr")
+}
+
+/// Observaciones del ticket, con autor y fecha. Inmutables.
+model TicketObservacion {
+  id        String     @id @db.Uuid
+  ticketId  String     @map("ticket_id") @db.Uuid
+  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  mensaje   String
+  /// Rol con el que escribió (dato histórico: la cuenta puede cambiar de rol después).
+  autorRol  String     @map("autor_rol")
+  rol       IdRol      @relation(fields: [autorRol], references: [codigo])
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String     @map("created_by") @db.Uuid
+  autor     IdUsuario  @relation("observacionAutor", fields: [createdBy], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@index([createdBy])
+  @@map("ticket_observacion")
   @@schema("fcr")
 }
 
@@ -986,6 +1006,7 @@ model IdRol {
   usuarios IdUsuario[]
   pasos    PasoRol[]
   firmas   FirmaRolPermitido[]
+  observaciones TicketObservacion[]
 
   @@map("rol")
   @@schema("identidad")
@@ -1006,6 +1027,7 @@ model IdUsuario {
   inspecciones          Ticket[]                  @relation("ticketInspector")
   creados               Ticket[]                  @relation("ticketCreador")
   editados              Ticket[]                  @relation("ticketEditor")
+  observaciones         TicketObservacion[]       @relation("observacionAutor")
   herramientaEventos    TicketHerramientaEvento[] @relation("herramientaEventoActor")
   inspeccionesEnviadas  InspeccionHerramienta[]   @relation("inspeccionEnviador")
   inspeccionesDecididas InspeccionHerramienta[]   @relation("inspeccionDecisor")

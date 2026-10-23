@@ -8,10 +8,13 @@ import { EjecucionController } from './controllers/ejecucion.controller';
 import { DocumentosController } from './controllers/documentos.controller';
 import { HerramientasController } from './controllers/herramientas.controller';
 import { InspeccionesController } from './controllers/inspecciones.controller';
+import { ObservacionesController } from './controllers/observaciones.controller';
+import { ObservacionesService } from './services/observaciones.service';
 import { TicketsController } from './controllers/tickets.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { CatalogosService } from './services/catalogos.service';
+import { DisponibilidadService } from './services/disponibilidad.service';
 import { ConfiguracionCodigosService } from './services/configuracion-codigos.service';
 import { RetornoService } from './services/retorno.service';
 import { BitacoraService } from './services/bitacora.service';
@@ -49,11 +52,14 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     EjecucionController,
     RetornoController,
     CambiosItemsController,
+    ObservacionesController,
   ],
   providers: [
     PrismaService,
     TicketsService,
     AsignacionService,
+    DisponibilidadService,
+    ObservacionesService,
     TipoOperadorService,
     CatalogosService,
     RequisitosService,

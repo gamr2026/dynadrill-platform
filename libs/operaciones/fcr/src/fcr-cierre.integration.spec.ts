@@ -91,11 +91,22 @@ run(
     const supervisor = () => tok(SUPERVISOR);
     const operador = () => tok(OPERADOR);
     const bodega = () => tok(BODEGUERO, [P.FCR_OPERAR, P.FCR_HERRAMIENTAS_PREPARAR]);
-    const avanzar = (id: string, hacia: string, auth = supervisor(), motivo?: string) =>
+    /** Al cerrar se pide el correo del cliente (a él va la encuesta de satisfacción): por defecto uno de prueba. */
+    const avanzar = (
+      id: string,
+      hacia: string,
+      auth = supervisor(),
+      motivo?: string,
+      correoCliente: string | undefined = hacia === 'cerrado' ? 'cliente@empresa.test' : undefined,
+    ) =>
       http()
         .post(`${base(id)}/avanzar`)
         .set(auth)
-        .send({ hacia, ...(motivo ? { motivo } : {}) });
+        .send({
+          hacia,
+          ...(motivo ? { motivo } : {}),
+          ...(correoCliente !== undefined ? { correoCliente } : {}),
+        });
     const ventas = () => tok(VENTAS, [P.FCR_VER, P.FCR_CONFIGURACION_GESTIONAR]);
 
     const pedidos: string[] = [];
@@ -132,6 +143,12 @@ run(
     };
 
     /** Ticket de venta en la ejecución, con un cepillo y un magneto recibidos, asignado al operador, con el acta confirmada. */
+    /** Quita al operador de los demás tickets de la prueba (datos de esta suite), para que la asignación no lo vea ocupado. */
+    const liberarOperador = (ticketId: string) =>
+      admin.query('DELETE FROM fcr.ticket_persona WHERE usuario_id = $1 AND ticket_id <> $2', [
+        OPERADOR.id,
+        ticketId,
+      ]);
     const enEjecucion = async (fechas = { inicio: '2026-11-05', fin: '2026-11-12' }) => {
       const codigo = `SH-EJ-${n}-${cods++}`;
       await http()
@@ -223,6 +240,8 @@ run(
         .set(supervisor())
         .send({ hacia: 'asignacion' })
         .expect(201);
+      // cada prueba arma su ticket con las mismas fechas: el equipo de los tickets anteriores de la prueba ya terminó su servicio
+      await liberarOperador(id);
       await http()
         .post(`${base(id)}/asignar`)
         .set(supervisor())
@@ -308,7 +327,7 @@ run(
       );
       for (const a of [CEPILLO, MAGNETO]) {
         await admin.query(
-          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id) VALUES ($1, $2, $3, $4, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id) VALUES ($1, $2, $3, $4, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1))`,
           [a.id, a.codigo, `Herramienta ${a.codigo}`, CAT],
         );
       }
@@ -507,11 +526,70 @@ run(
         await avanzar(t.id, 'cerrado').expect(409);
         await avanzar(t.id, 'cierre').expect(409);
         await guardar(t.id, '2026-11-06').expect(409);
+        // las observaciones se leen, pero un ticket cerrado ya no admite nuevas
+        await http()
+          .post(`${base(t.id)}/observaciones`)
+          .set(supervisor())
+          .send({ mensaje: 'Nota tardía' })
+          .expect(409);
+        await http()
+          .get(`${base(t.id)}/observaciones`)
+          .set(supervisor())
+          .expect(200);
         await http()
           .post(`${base(t.id)}/herramientas`)
           .set(supervisor())
           .send({ articuloId: CEPILLO.id })
           .expect(409);
+      });
+
+      it('al cerrar pide el correo del cliente, lo normaliza y lo lleva en el evento sin guardarlo en FCR', async () => {
+        const t = await hastaCierre();
+        await actaConsumer.consumir(eventoQhse('qhse.acta_entrega.cargada', t.id));
+        // sin correo, en blanco o inválido: no cierra y el ticket sigue en el cierre
+        for (const malo of [undefined, '', '   ', 'sin-arroba', 'a@b', 'dos@@x.com']) {
+          const r = await http()
+            .post(`${base(t.id)}/avanzar`)
+            .set(supervisor())
+            .send({ hacia: 'cerrado', ...(malo !== undefined ? { correoCliente: malo } : {}) })
+            .expect(400);
+          expect(q(r)).toMatch(/correo del cliente/);
+        }
+        const aun = await http().get(base(t.id)).set(supervisor()).expect(200);
+        expect(aun.body.paso.codigo).toBe('cierre');
+        expect(await salidas(t.pedidoId, 'operaciones.fcr.cerrado')).toHaveLength(0);
+        // con correo: se normaliza y viaja en el evento junto con el cliente y el pozo
+        await avanzar(t.id, 'cerrado', supervisor(), undefined, '  Cliente@Empresa.COM ').expect(
+          201,
+        );
+        const cierre = await salidas(t.pedidoId, 'operaciones.fcr.cerrado');
+        expect(cierre).toHaveLength(1);
+        expect(cierre[0].d).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          correoCliente: 'cliente@empresa.com',
+          cliente: expect.any(String),
+        });
+        // FCR no lo guarda: ninguna tabla del schema tiene una columna de correo
+        const columnas = await admin.query(
+          "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'fcr' AND (column_name ILIKE '%correo%' OR column_name ILIKE '%email%')",
+        );
+        expect(columnas.rows).toEqual([]);
+      });
+
+      it('los demás pasos no piden el correo del cliente', async () => {
+        const t = await enRetorno();
+        await devolver(t.id).expect(201);
+        // pasar al cierre no lo pide; si se envía en otro paso, se ignora: no lo lleva ningún evento
+        const r = await avanzar(t.id, 'cierre', bodega(), undefined, 'otro@cliente.test').expect(
+          201,
+        );
+        expect(r.body.paso.codigo).toBe('cierre');
+        const fugas = await admin.query(
+          "SELECT 1 FROM msg_operaciones.outbox WHERE datos->'data'->>'pedidoId' = $1 AND datos::text ILIKE '%otro@cliente.test%'",
+          [t.pedidoId],
+        );
+        expect(fugas.rowCount).toBe(0);
       });
 
       it('el puente temporal confirma el Acta con motivo mientras QHSE no la publica', async () => {

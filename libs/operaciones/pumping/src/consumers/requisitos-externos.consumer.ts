@@ -5,13 +5,14 @@ import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from '../services/requisitos.service';
 import { nombreDe } from '../services/tickets.service';
+import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from '../services/unidad-etiqueta';
 
 interface Regla {
   /** Código del requisito; si depende de los datos del evento (p. ej. el viaje de salida o de retorno), una función que lo calcula (`null` = ignorar). */
   codigo: string | ((data: Record<string, unknown>) => string | null);
   accion: 'cumplir' | 'reabrir';
   /** Qué trae el evento para ubicar la fila: la cuenta del operador, la unidad o nada más que el ticket. */
-  por: 'usuarioId' | 'vehiculoId' | 'ticket';
+  por: 'usuarioId' | 'unidadId' | 'ticket';
 }
 
 /** `tipo` del evento de gerenciamiento de viaje → requisito. */
@@ -46,33 +47,33 @@ export const REGLAS_EXTERNAS: Record<string, Regla> = {
   'flota.inspeccion_vehiculo.realizada': {
     codigo: REQ.inspeccionRealizada,
     accion: 'cumplir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
   'flota.inspeccion_vehiculo.anulada': {
     codigo: REQ.inspeccionRealizada,
     accion: 'reabrir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
   'flota.inspeccion_vehiculo.aprobada': {
     codigo: REQ.inspeccionAprobada,
     accion: 'cumplir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
   'flota.inspeccion_vehiculo.rechazada': {
     codigo: REQ.inspeccionAprobada,
     accion: 'reabrir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
   // Flota: gerenciamiento de viaje (lo solicita el Conductor; su aprobación es condición para salir de la revisión de salida y del control de retorno)
   'flota.gerenciamiento_viaje.aprobado': {
     codigo: requisitoDeViaje,
     accion: 'cumplir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
   'flota.gerenciamiento_viaje.rechazado': {
     codigo: requisitoDeViaje,
     accion: 'reabrir',
-    por: 'vehiculoId',
+    por: 'unidadId',
   },
 };
 
@@ -133,7 +134,7 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
   private async avisarSupervisor(
     tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
     ticketId: string,
-    vehiculoId: string,
+    unidadId: string,
     causa: EventEnvelope,
   ): Promise<void> {
     const t = await tx.ticket.findUnique({
@@ -144,7 +145,7 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
         pozo: true,
         taladro: true,
         personas: true,
-        unidades: { include: { vehiculo: true } },
+        unidades: { include: { unidad: UNIDAD_CON_PLACA } },
       },
     });
     const supervisor = t?.personas.find((p) => p.rol === 'supervisor');
@@ -167,7 +168,10 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
           campo: t.campo?.nombre ?? null,
           pozo: t.pozo?.nombreCompleto ?? null,
           taladro: t.rigless ? 'RIGLESS' : (t.taladro?.nombre ?? null),
-          unidad: t.unidades.find((u) => u.vehiculoId === vehiculoId)?.vehiculo.placa ?? null,
+          unidad: (() => {
+            const u = t.unidades.find((x) => x.unidadId === unidadId);
+            return u ? etiquetaDeUnidad(u.unidad) : null;
+          })(),
           realizadaPor: quien?.nombre ?? null,
           asignados: [{ usuarioId: supervisor.usuarioId, rolCodigo: 'supervisor' }],
         },

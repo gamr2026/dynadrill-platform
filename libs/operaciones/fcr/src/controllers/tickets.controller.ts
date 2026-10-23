@@ -15,6 +15,7 @@ import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AsignacionService } from '../services/asignacion.service';
 import { CatalogosService } from '../services/catalogos.service';
+import { DisponibilidadService } from '../services/disponibilidad.service';
 import { RequisitosService } from '../services/requisitos.service';
 import { TicketsService } from '../services/tickets.service';
 import { TipoOperadorService } from '../services/tipo-operador.service';
@@ -24,6 +25,8 @@ const P = Permission;
 export class AvanzarTicketDto {
   @IsString() @MinLength(1) @MaxLength(60) hacia!: string;
   @IsOptional() @IsString() @MaxLength(500) motivo?: string;
+  /** Obligatorio al cerrar (`hacia = 'cerrado'`): el correo del cliente al que se envía la encuesta de satisfacción. */
+  @IsOptional() @IsString() @MaxLength(254) correoCliente?: string;
 }
 
 export class ListarTicketsDto {
@@ -56,6 +59,13 @@ export class AsignarTicketDto {
   operadores!: OperadorAsignadoDto[];
 }
 
+export class DisponibilidadQueryDto {
+  /** Inicio del rango (AAAA-MM-DD). Sin él se usa el servicio del ticket. */
+  @IsOptional() @IsString() @MaxLength(10) desde?: string;
+  /** Fin del rango (AAAA-MM-DD). Con solo `desde`, el rango es de ese día. */
+  @IsOptional() @IsString() @MaxLength(10) hasta?: string;
+}
+
 export class CumplirRequisitoDto {
   @IsString() @MinLength(5) @MaxLength(500) motivo!: string;
 }
@@ -69,6 +79,7 @@ export class TicketsController {
     private readonly tipoOperador: TipoOperadorService,
     private readonly catalogos: CatalogosService,
     private readonly requisitos: RequisitosService,
+    private readonly disponibilidad: DisponibilidadService,
   ) {}
 
   /** Tipos de operador, de completación, de trabajo y de picker. */
@@ -101,7 +112,7 @@ export class TicketsController {
     @Body() dto: AvanzarTicketDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.tickets.avanzar(id, dto.hacia, actor, dto.motivo);
+    return this.tickets.avanzar(id, dto.hacia, actor, dto.motivo, dto.correoCliente);
   }
 
   /** Entrada SERVICIOS: el Supervisor elige el tipo de operador y quién repara e inspecciona. */
@@ -113,6 +124,16 @@ export class TicketsController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.tipoOperador.definir(id, dto.tipoOperadorId, dto.inspectorId, actor);
+  }
+
+  /** Cada operador con ✓/✗ frente al rango (por defecto, el servicio del ticket), para la pantalla de asignación. */
+  @RequirePermission(P.FCR_OPERAR)
+  @Get('tickets/:id/operadores-disponibles')
+  operadoresDisponibles(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() q: DisponibilidadQueryDto,
+  ) {
+    return this.disponibilidad.operadores(id, q.desde, q.hasta);
   }
 
   /** El Supervisor asigna a los operadores; el ticket pasa a la reunión operativa. */

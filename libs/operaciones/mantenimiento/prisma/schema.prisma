@@ -272,7 +272,8 @@ model PumpingReporteUnidad {
   id                       String        @id @db.Uuid
   ticketId                 String        @map("ticket_id") @db.Uuid
   ticket                   PumpingTicket @relation(fields: [ticketId], references: [id])
-  vehiculoId               String        @map("vehiculo_id") @db.Uuid
+  /// Unidad de Flota del reporte de Pumping (D2: FK real en la base, mismo contenedor).
+  unidadId                 String        @map("unidad_id") @db.Uuid
   origen                   String?
   destino                  String?
   llegadaFecha             DateTime?     @map("llegada_fecha") @db.Date

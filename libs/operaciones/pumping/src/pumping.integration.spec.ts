@@ -73,8 +73,22 @@ const POZO_BANDEJA = {
   campoId: CAMPO.id,
   bloqueId: BLOQUE.id,
 };
-const VEHICULO = { id: uuidv7(), placa: `IT${String(n).slice(-5)}P` };
-const VEHICULO_2 = { id: uuidv7(), placa: `IT${String(n).slice(-5)}Q` };
+// Pumping asigna unidades de Flota (D2): cada vehículo de prueba del catálogo tiene su unidad enlazada (`flota.unidad.vehiculo_id`)
+const VEHICULO = {
+  id: uuidv7(),
+  placa: `IT${String(n).slice(-5)}P`,
+  unidadId: uuidv7(),
+  unidadCodigo: `IT-UP-${n}`,
+};
+const VEHICULO_2 = {
+  id: uuidv7(),
+  placa: `IT${String(n).slice(-5)}Q`,
+  unidadId: uuidv7(),
+  unidadCodigo: `IT-UQ-${n}`,
+};
+/** Unidades de Flota sin vehículo del catálogo y una inactiva: para lo que la asignación debe aceptar y rechazar. */
+const UNIDAD_SIN_VEHICULO = { id: uuidv7(), codigo: `IT-US-${n}` };
+const UNIDAD_INACTIVA = { id: uuidv7(), codigo: `IT-UI-${n}` };
 const BODEGA = { id: uuidv7(), nombre: `BODEGA-PU ${n}` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
@@ -163,6 +177,23 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
   beforeAll(async () => {
     await sembrarMaestros(admin, MAESTROS);
+    for (const v of [VEHICULO, VEHICULO_2]) {
+      await admin.query(
+        `INSERT INTO flota.unidad (id, codigo, nombre, tipo, vehiculo_id, predeterminada, activa)
+         VALUES ($1, $2, $3, 'servicio', $4, false, true)`,
+        [v.unidadId, v.unidadCodigo, `Unidad de prueba ${v.placa}`, v.id],
+      );
+    }
+    for (const [u, activa] of [
+      [UNIDAD_SIN_VEHICULO, true],
+      [UNIDAD_INACTIVA, false],
+    ] as const) {
+      await admin.query(
+        `INSERT INTO flota.unidad (id, codigo, nombre, tipo, predeterminada, activa)
+         VALUES ($1, $2, $3, 'servicio', false, $4)`,
+        [u.id, u.codigo, `Unidad de prueba ${u.codigo}`, activa],
+      );
+    }
     await admin.query(
       "INSERT INTO catalogos.persona_contacto (id, tipo, nombre) VALUES ($1, 'representante_campo', $2)",
       [COMPANY_MAN.id, COMPANY_MAN.nombre],
@@ -228,6 +259,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     ]);
     if (pedidos.length)
       await admin.query('DELETE FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
+    await admin.query('DELETE FROM flota.unidad WHERE id = ANY($1::uuid[])', [
+      [VEHICULO.unidadId, VEHICULO_2.unidadId, UNIDAD_SIN_VEHICULO.id, UNIDAD_INACTIVA.id],
+    ]);
     await admin.query('DELETE FROM catalogos.persona_contacto WHERE id = $1', [COMPANY_MAN.id]);
     await admin.query(
       "DELETE FROM inventario.movimiento WHERE articulo_id IN (SELECT id FROM inventario.articulo WHERE codigo LIKE '%-PU-' || $1)",
@@ -442,12 +476,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   const cuerpoAsignacion = {
     supervisorId: SUPERVISORA.id,
     operadores: [
-      { usuarioId: OP1.id, vehiculoId: VEHICULO.id },
-      { usuarioId: OP2.id, vehiculoId: VEHICULO_2.id },
+      { usuarioId: OP1.id, unidadId: VEHICULO.unidadId },
+      { usuarioId: OP2.id, unidadId: VEHICULO_2.unidadId },
     ],
     conductores: [
-      { usuarioId: CO1.id, vehiculoId: VEHICULO.id },
-      { usuarioId: CO2.id, vehiculoId: VEHICULO_2.id },
+      { usuarioId: CO1.id, unidadId: VEHICULO.unidadId },
+      { usuarioId: CO2.id, unidadId: VEHICULO_2.unidadId },
     ],
   };
   const base = '/api/operaciones/pumping';
@@ -490,13 +524,13 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     (
       await prisma.ticketRequisito.findMany({
         where: { ticketId },
-        include: { vehiculo: true, usuario: true },
+        include: { unidad: { include: { vehiculo: true } }, usuario: true },
       })
     ).map((r) => ({
       codigo: r.requisitoCodigo,
       estado: r.estado,
       origen: r.origen,
-      para: r.vehiculo?.placa ?? r.usuario?.nombre ?? null,
+      para: r.unidad ? (r.unidad.vehiculo?.placa ?? r.unidad.codigo) : (r.usuario?.nombre ?? null),
       id: r.id,
     }));
   /** Cumple lo que exige el traslado de salida salvo el reporte de unidad: términos, EPI e inspección de vehículos (el checklist de ingreso es de la ejecución). */
@@ -507,7 +541,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await externos.consumir(externo('qhse.epi.despachada', { ticketId: id, usuarioId: o.id }));
     for (const v of [VEHICULO, VEHICULO_2]) {
       await externos.consumir(
-        externo('flota.inspeccion_vehiculo.realizada', { ticketId: id, vehiculoId: v.id }, 'flota'),
+        externo(
+          'flota.inspeccion_vehiculo.realizada',
+          { ticketId: id, unidadId: v.unidadId },
+          'flota',
+        ),
       );
     }
     // QHSE abrió el PTW del primer día de operación (y no hay SWA activa: ese requisito nace cumplido)
@@ -522,10 +560,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ? { diaOperacion: t.fechaInicioServicio.toISOString().slice(0, 10) }
       : {};
   };
-  const salidaValida = async (id: string, vehiculoId: string) => {
+  const salidaValida = async (id: string, unidadId: string) => {
     const r = (
       await http()
-        .get(`${base}/tickets/${id}/reportes-unidad/${vehiculoId}`)
+        .get(`${base}/tickets/${id}/reportes-unidad/${unidadId}`)
         .set(supervisora())
         .expect(200)
     ).body;
@@ -561,7 +599,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .set(jefe())
       .send({
         ...cuerpoAsignacion,
-        operadores: [{ usuarioId: SUPERVISORA.id, vehiculoId: VEHICULO.id }],
+        operadores: [{ usuarioId: SUPERVISORA.id, unidadId: VEHICULO.unidadId }],
       })
       .expect(400); // el supervisor no es operador
     await http()
@@ -580,14 +618,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await http()
       .post(url)
       .set(jefe())
-      .send({ ...cuerpoAsignacion, operadores: [{ usuarioId: OP1.id, vehiculoId: uuidv7() }] })
+      .send({ ...cuerpoAsignacion, operadores: [{ usuarioId: OP1.id, unidadId: uuidv7() }] })
       .expect(400); // unidad inexistente
     await http()
       .post(url)
       .set(jefe())
       .send({
         ...cuerpoAsignacion,
-        operadores: [{ usuarioId: SIN_ROL_OPERADOR.id, vehiculoId: VEHICULO.id }],
+        operadores: [{ usuarioId: SIN_ROL_OPERADOR.id, unidadId: VEHICULO.unidadId }],
       })
       .expect(400); // no es operador
     await http()
@@ -596,7 +634,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({
         ...cuerpoAsignacion,
         supervisorId: OP1.id,
-        operadores: [{ usuarioId: OP2.id, vehiculoId: VEHICULO.id }],
+        operadores: [{ usuarioId: OP2.id, unidadId: VEHICULO.unidadId }],
       })
       .expect(400); // un operador no es supervisor
 
@@ -617,7 +655,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ...cuerpoAsignacion,
         conductores: [
           cuerpoAsignacion.conductores[0],
-          { usuarioId: SIN_ROL_OPERADOR.id, vehiculoId: VEHICULO_2.id },
+          { usuarioId: SIN_ROL_OPERADOR.id, unidadId: VEHICULO_2.unidadId },
         ],
       })
       .expect(400); // no es conductor
@@ -625,16 +663,40 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const r = await http().post(url).set(jefe()).send(cuerpoAsignacion).expect(201);
     expect(r.body.paso).toMatchObject({ codigo: 'traslado_salida' });
     expect(r.body.asignacion.conductores).toEqual([
-      { usuarioId: CO1.id, nombre: CO1.nombre, vehiculoId: VEHICULO.id, placa: VEHICULO.placa },
-      { usuarioId: CO2.id, nombre: CO2.nombre, vehiculoId: VEHICULO_2.id, placa: VEHICULO_2.placa },
+      {
+        usuarioId: CO1.id,
+        nombre: CO1.nombre,
+        unidadId: VEHICULO.unidadId,
+        codigo: VEHICULO.unidadCodigo,
+        placa: VEHICULO.placa,
+      },
+      {
+        usuarioId: CO2.id,
+        nombre: CO2.nombre,
+        unidadId: VEHICULO_2.unidadId,
+        codigo: VEHICULO_2.unidadCodigo,
+        placa: VEHICULO_2.placa,
+      },
     ]);
     expect(r.body.asignacion.supervisor).toEqual({
       usuarioId: SUPERVISORA.id,
       nombre: SUPERVISORA.nombre,
     });
     expect(r.body.asignacion.operadores).toEqual([
-      { usuarioId: OP2.id, nombre: OP2.nombre, vehiculoId: VEHICULO_2.id, placa: VEHICULO_2.placa },
-      { usuarioId: OP1.id, nombre: OP1.nombre, vehiculoId: VEHICULO.id, placa: VEHICULO.placa },
+      {
+        usuarioId: OP2.id,
+        nombre: OP2.nombre,
+        unidadId: VEHICULO_2.unidadId,
+        codigo: VEHICULO_2.unidadCodigo,
+        placa: VEHICULO_2.placa,
+      },
+      {
+        usuarioId: OP1.id,
+        nombre: OP1.nombre,
+        unidadId: VEHICULO.unidadId,
+        codigo: VEHICULO.unidadCodigo,
+        placa: VEHICULO.placa,
+      },
     ]);
     expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa).sort()).toEqual(
       [VEHICULO.placa, VEHICULO_2.placa].sort(),
@@ -684,16 +746,133 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // el conductor de cada unidad es el responsable de su inspección (Flota abre el caso a su nombre)
     expect(d.conductoresUnidades).toEqual(
       expect.arrayContaining([
-        { usuarioId: CO1.id, vehiculoId: VEHICULO.id },
-        { usuarioId: CO2.id, vehiculoId: VEHICULO_2.id },
+        { usuarioId: CO1.id, unidadId: VEHICULO.unidadId, vehiculoId: VEHICULO.id },
+        { usuarioId: CO2.id, unidadId: VEHICULO_2.unidadId, vehiculoId: VEHICULO_2.id },
       ]),
     );
     expect(d.operadoresUnidades).toEqual(
       expect.arrayContaining([
-        { usuarioId: OP1.id, vehiculoId: VEHICULO.id },
-        { usuarioId: OP2.id, vehiculoId: VEHICULO_2.id },
+        { usuarioId: OP1.id, unidadId: VEHICULO.unidadId, vehiculoId: VEHICULO.id },
+        { usuarioId: OP2.id, unidadId: VEHICULO_2.unidadId, vehiculoId: VEHICULO_2.id },
       ]),
     );
+  });
+
+  it('D2: solo se asignan unidades de Flota activas; una sin vehículo se nombra por su código; el evento lleva la unidad y el vehículo enlazado (o nulo)', async () => {
+    const t = await ticketEnAsignacion();
+    const url = `${t.url}/asignar`;
+    const con = (unidadId: string) => ({
+      supervisorId: SUPERVISORA.id,
+      operadores: [{ usuarioId: OP1.id, unidadId }],
+      conductores: [{ usuarioId: CO1.id, unidadId }],
+    });
+    // una unidad inactiva no se asigna, y el id de un vehículo del catálogo ya no es una unidad
+    const inactiva = await http().post(url).set(jefe()).send(con(UNIDAD_INACTIVA.id)).expect(400);
+    expect(inactiva.body.detail ?? inactiva.body.message).toMatch(
+      /no existe o no está activa en Flota/,
+    );
+    await http().post(url).set(jefe()).send(con(VEHICULO.id)).expect(400);
+    await http().post(url).set(jefe()).send(con(uuidv7())).expect(400);
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { id: t.id } })).pasoCodigo).toBe(
+      'asignacion',
+    );
+    expect(await prisma.ticketUnidad.count({ where: { ticketId: t.id } })).toBe(0);
+
+    // una unidad de Flota sin vehículo del catálogo sí se asigna: sin placa, se nombra por su código
+    const r = await http().post(url).set(jefe()).send(con(UNIDAD_SIN_VEHICULO.id)).expect(201);
+    expect(r.body.asignacion.unidades).toEqual([
+      {
+        unidadId: UNIDAD_SIN_VEHICULO.id,
+        codigo: UNIDAD_SIN_VEHICULO.codigo,
+        nombre: `Unidad de prueba ${UNIDAD_SIN_VEHICULO.codigo}`,
+        placa: null,
+        descripcion: `Unidad de prueba ${UNIDAD_SIN_VEHICULO.codigo}`,
+      },
+    ]);
+    expect(r.body.asignacion.operadores).toEqual([
+      expect.objectContaining({ unidadId: UNIDAD_SIN_VEHICULO.id, placa: null }),
+    ]);
+    const req = await requisitosDe(t.id);
+    expect(req.filter((x) => x.codigo === 'reporte_unidad_salida').map((x) => x.para)).toEqual([
+      UNIDAD_SIN_VEHICULO.codigo,
+    ]);
+    const evento = (
+      await admin.query(
+        "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.asignacion_realizada' AND datos->'data'->>'pedidoId' = $1",
+        [t.pedidoId],
+      )
+    ).rows[0].d;
+    expect(evento.operadoresUnidades).toEqual([
+      { usuarioId: OP1.id, unidadId: UNIDAD_SIN_VEHICULO.id, vehiculoId: null },
+    ]);
+    expect(evento.conductoresUnidades).toEqual([
+      { usuarioId: CO1.id, unidadId: UNIDAD_SIN_VEHICULO.id, vehiculoId: null },
+    ]);
+    expect(evento.unidades).toBe(UNIDAD_SIN_VEHICULO.codigo);
+    expect(evento.operadores).toBe(`${OP1.nombre} (${UNIDAD_SIN_VEHICULO.codigo})`);
+  });
+
+  it('D2: las reglas de la base sobre la unidad: FK a Flota, la unidad solo donde está asignada al ticket y una sola vez', async () => {
+    const t = await ticketEnTraslado();
+    const otro = await ticketEnAsignacion(); // sin unidades asignadas
+    const intenta = (sql: string, params: unknown[], patron: RegExp) =>
+      expect(admin.query(sql, params)).rejects.toThrow(patron);
+
+    // una unidad que no existe en Flota
+    await intenta(
+      'INSERT INTO pumping.ticket_unidad (ticket_id, unidad_id) VALUES ($1, $2)',
+      [otro.id, uuidv7()],
+      /ticket_unidad_unidad_id_fkey/,
+    );
+    // la misma unidad dos veces en el ticket
+    await intenta(
+      'INSERT INTO pumping.ticket_unidad (ticket_id, unidad_id) VALUES ($1, $2)',
+      [t.id, VEHICULO.unidadId],
+      /ticket_unidad_pkey/,
+    );
+    // una persona, un requisito o un reporte con una unidad que NO está asignada a ese ticket
+    await intenta(
+      "INSERT INTO pumping.ticket_persona (ticket_id, usuario_id, rol, unidad_id) VALUES ($1, $2, 'operador', $3)",
+      [otro.id, OP1.id, VEHICULO.unidadId],
+      /ticket_persona_unidad_fkey/,
+    );
+    await intenta(
+      "INSERT INTO pumping.ticket_requisito (id, ticket_id, requisito_codigo, unidad_id) VALUES ($1, $2, 'reporte_unidad_salida', $3)",
+      [uuidv7(), otro.id, VEHICULO.unidadId],
+      /ticket_requisito_unidad_fkey/,
+    );
+    await intenta(
+      'INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id) VALUES ($1, $2, $3)',
+      [uuidv7(), otro.id, VEHICULO.unidadId],
+      /reporte_unidad_unidad_fkey/,
+    );
+    // un requisito es de una unidad o de un operador, no de ambos
+    await intenta(
+      "INSERT INTO pumping.ticket_requisito (id, ticket_id, requisito_codigo, unidad_id, usuario_id) VALUES ($1, $2, 'reporte_unidad_salida', $3, $4)",
+      [uuidv7(), t.id, VEHICULO.unidadId, OP1.id],
+      /ticket_requisito_ambito_check|ticket_requisito_unico_key/,
+    );
+    // un reporte por ticket y unidad
+    await admin.query(
+      'INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id) VALUES ($1, $2, $3)',
+      [uuidv7(), t.id, VEHICULO.unidadId],
+    );
+    await intenta(
+      'INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id) VALUES ($1, $2, $3)',
+      [uuidv7(), t.id, VEHICULO.unidadId],
+      /reporte_unidad_ticket_unidad_key/,
+    );
+    // una unidad en uso por un ticket no se borra de Flota
+    await intenta(
+      'DELETE FROM flota.unidad WHERE id = $1',
+      [VEHICULO.unidadId],
+      /ticket_unidad_unidad_id_fkey/,
+    );
+    // y ya no existe el vehículo del catálogo como columna de estas tablas
+    const columnas = await admin.query(
+      "SELECT table_name FROM information_schema.columns WHERE table_schema = 'pumping' AND column_name = 'vehiculo_id'",
+    );
+    expect(columnas.rows).toEqual([]);
   });
 
   it('un supervisor de Pumping también puede ser el supervisor del servicio', async () => {
@@ -785,8 +964,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({
         ...cuerpoAsignacion,
         supervisorId: SUPERVISOR_PUMPING.id,
-        operadores: [{ usuarioId: OP1.id, vehiculoId: VEHICULO.id }],
-        conductores: [{ usuarioId: CO1.id, vehiculoId: VEHICULO.id }],
+        operadores: [{ usuarioId: OP1.id, unidadId: VEHICULO.unidadId }],
+        conductores: [{ usuarioId: CO1.id, unidadId: VEHICULO.unidadId }],
       })
       .expect(409);
 
@@ -816,7 +995,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         supervisor: { id: string; nombre: string } | null;
         paso: { codigo: string };
         tiposViaje: string[];
-        unidades: { vehiculoId: string; placa: string }[];
+        unidades: { unidadId: string; placa: string }[];
         destino: { pozo: { id: string } | null };
         serviciosPrincipales: { codigo: string; nombre: string }[];
       }[];
@@ -843,11 +1022,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // el conductor ve solo su unidad y el gerenciamiento de salida que le toca (el ticket está en Traslado de salida)
     expect(v.paso.codigo).toBe('traslado_salida');
     expect(v.tiposViaje).toEqual(['salida']);
-    expect(v.unidades).toEqual([{ vehiculoId: VEHICULO.id, placa: VEHICULO.placa }]);
+    expect(v.unidades).toEqual([
+      { unidadId: VEHICULO.unidadId, codigo: VEHICULO.unidadCodigo, placa: VEHICULO.placa },
+    ]);
     const viajeConductor = (await lista(como('conductor', CO1.id, CO1.nombre, permiso))).find(
       (x) => x.ticketId === t.id,
     )!;
-    expect(viajeConductor.unidades).toEqual([{ vehiculoId: VEHICULO.id, placa: VEHICULO.placa }]);
+    expect(viajeConductor.unidades).toEqual([
+      { unidadId: VEHICULO.unidadId, codigo: VEHICULO.unidadCodigo, placa: VEHICULO.placa },
+    ]);
     // otro operador (no asignado) no ve el ticket; el supervisor tampoco (no es operador del ticket)
     expect(
       (await lista(como('operador', uuidv7(), 'Otro', permiso))).map((x) => x.ticketId),
@@ -1025,7 +1208,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await externos.consumir(
       externo(
         'flota.inspeccion_vehiculo.realizada',
-        { ticketId: t.id, vehiculoId: VEHICULO.id },
+        { ticketId: t.id, unidadId: VEHICULO.unidadId },
         'flota',
       ),
     );
@@ -1051,14 +1234,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await externos.consumir(
       externo(
         'flota.gerenciamiento_viaje.aprobado',
-        { ticketId: t.id, tipo: 'salida', vehiculoId: VEHICULO.id },
+        { ticketId: t.id, tipo: 'salida', unidadId: VEHICULO.unidadId },
         'flota',
       ),
     );
     await externos.consumir(
       externo(
         'flota.gerenciamiento_viaje.aprobado',
-        { ticketId: t.id, tipo: 'otro', vehiculoId: VEHICULO.id },
+        { ticketId: t.id, tipo: 'otro', unidadId: VEHICULO.unidadId },
         'flota',
       ),
     ); // tipo desconocido: se ignora
@@ -1072,7 +1255,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await externos.consumir(
       externo(
         'flota.gerenciamiento_viaje.rechazado',
-        { ticketId: t.id, tipo: 'salida', vehiculoId: VEHICULO.id },
+        { ticketId: t.id, tipo: 'salida', unidadId: VEHICULO.unidadId },
         'flota',
       ),
     );
@@ -1276,14 +1459,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(lista).toEqual(
       [
         {
-          vehiculoId: VEHICULO.id,
+          unidadId: VEHICULO.unidadId,
+          codigo: VEHICULO.unidadCodigo,
+          nombre: `Unidad de prueba ${VEHICULO.placa}`,
           placa: VEHICULO.placa,
           operador: { usuarioId: OP1.id, nombre: OP1.nombre },
           salidaFirmada: false,
           salidaFirmadaAt: null,
         },
         {
-          vehiculoId: VEHICULO_2.id,
+          unidadId: VEHICULO_2.unidadId,
+          codigo: VEHICULO_2.unidadCodigo,
+          nombre: `Unidad de prueba ${VEHICULO_2.placa}`,
           placa: VEHICULO_2.placa,
           operador: { usuarioId: OP2.id, nombre: OP2.nombre },
           salidaFirmada: false,
@@ -1293,9 +1480,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     );
 
     // sin los demás requisitos no se puede firmar
-    const cuerpo1 = await salidaValida(t.id, VEHICULO.id);
+    const cuerpo1 = await salidaValida(t.id, VEHICULO.unidadId);
     const bloqueado = await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send(cuerpo1)
       .expect(409);
@@ -1304,32 +1491,32 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
     // validaciones del cuerpo y de quién firma
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, fecha: '05/11/2026' })
       .expect(400);
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, origen: '  ' })
       .expect(400);
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, combustible: -1 })
       .expect(400);
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, hubodometros: [...cuerpo1.hubodometros, cuerpo1.hubodometros[0]] })
       .expect(400);
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, inspecciones: [{ itemId: uuidv7(), resultado: 'conforme' }] })
       .expect(400);
-    await http().put(reporteUrl(VEHICULO_2.id)).set(op1()).send(cuerpo1).expect(403); // la unidad del otro operador
-    await http().put(reporteUrl(VEHICULO.id)).set(operador()).send(cuerpo1).expect(403); // un operador que no es del ticket
+    await http().put(reporteUrl(VEHICULO_2.unidadId)).set(op1()).send(cuerpo1).expect(403); // la unidad del otro operador
+    await http().put(reporteUrl(VEHICULO.unidadId)).set(operador()).send(cuerpo1).expect(403); // un operador que no es del ticket
     await http().put(reporteUrl(uuidv7())).set(op1()).send(cuerpo1).expect(404);
     // todavía no puede salir: faltan los reportes
     await http()
@@ -1338,8 +1525,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'revision_reportes_salida' })
       .expect(409);
 
-    const firmado = (await http().put(reporteUrl(VEHICULO.id)).set(op1()).send(cuerpo1).expect(200))
-      .body;
+    const firmado = (
+      await http().put(reporteUrl(VEHICULO.unidadId)).set(op1()).send(cuerpo1).expect(200)
+    ).body;
     expect(firmado).toMatchObject({
       placa: VEHICULO.placa,
       origen: 'Base Dynadrill',
@@ -1366,13 +1554,13 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     ).toHaveLength(3);
     // se puede volver a guardar mientras siga en el paso (vuelve a firmar)
     await http()
-      .put(reporteUrl(VEHICULO.id))
+      .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
       .send({ ...cuerpo1, combustible: 70 })
       .expect(200);
     expect(
-      (await http().get(`${t.url}/reportes-unidad/${VEHICULO.id}`).set(op1()).expect(200)).body
-        .salida.combustible,
+      (await http().get(`${t.url}/reportes-unidad/${VEHICULO.unidadId}`).set(op1()).expect(200))
+        .body.salida.combustible,
     ).toBe(70);
 
     // falta el de la otra unidad
@@ -1383,8 +1571,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .expect(409);
     expect(aunFalta.body.detail).toContain(`Reporte de unidad de salida (${VEHICULO_2.placa})`);
     expect(aunFalta.body.detail).not.toContain(VEHICULO.placa);
-    const cuerpo2 = await salidaValida(t.id, VEHICULO_2.id);
-    await http().put(reporteUrl(VEHICULO_2.id)).set(op2()).send(cuerpo2).expect(200);
+    const cuerpo2 = await salidaValida(t.id, VEHICULO_2.unidadId);
+    await http().put(reporteUrl(VEHICULO_2.unidadId)).set(op2()).send(cuerpo2).expect(200);
 
     // todo cumplido: sale del traslado hacia la revisión de reportes de salida
     const r = await http()
@@ -1409,7 +1597,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       puedeActuar: false,
     });
     // y no se puede volver a firmar la salida
-    await http().put(reporteUrl(VEHICULO.id)).set(op1()).send(cuerpo1).expect(409);
+    await http().put(reporteUrl(VEHICULO.unidadId)).set(op1()).send(cuerpo1).expect(409);
 
     // en la revisión de salida falta aprobar la inspección de cada unidad (requisito de Mantenimiento)
     const falta = await http()
@@ -1436,9 +1624,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       [VEHICULO, op1()],
       [VEHICULO_2, op2()],
     ] as const) {
-      const cuerpoSalida = await salidaValida(t.id, v.id);
+      const cuerpoSalida = await salidaValida(t.id, v.unidadId);
       await http()
-        .put(`${t.url}/reportes-unidad/${v.id}/salida`)
+        .put(`${t.url}/reportes-unidad/${v.unidadId}/salida`)
         .set(o)
         .send(cuerpoSalida)
         .expect(200);
@@ -1461,7 +1649,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await externos.consumir(
         externo(
           'flota.inspeccion_vehiculo.aprobada',
-          { ticketId: t.id, vehiculoId: v.id },
+          { ticketId: t.id, unidadId: v.unidadId },
           'flota',
         ),
       );
@@ -1470,7 +1658,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await externos.consumir(
         externo(
           'flota.gerenciamiento_viaje.aprobado',
-          { ticketId: t.id, tipo: 'salida', vehiculoId: v.id },
+          { ticketId: t.id, tipo: 'salida', unidadId: v.unidadId },
           'flota',
         ),
       );
@@ -1515,7 +1703,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await externos.consumir(
         externo(
           'flota.gerenciamiento_viaje.aprobado',
-          { ticketId: t.id, tipo: 'retorno', vehiculoId: v.id },
+          { ticketId: t.id, tipo: 'retorno', unidadId: v.unidadId },
           'flota',
         ),
       );
@@ -1532,9 +1720,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .set(op1())
       .send({ hacia: 'revision_reportes_llegada' })
       .expect(409);
-    const llegada = async (vehiculoId: string, extra: object = {}) => {
+    const llegada = async (unidadId: string, extra: object = {}) => {
       const r = (
-        await http().get(`${t.url}/reportes-unidad/${vehiculoId}`).set(supervisora()).expect(200)
+        await http().get(`${t.url}/reportes-unidad/${unidadId}`).set(supervisora()).expect(200)
       ).body;
       return {
         fecha: '2026-11-09',
@@ -1551,13 +1739,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     };
     const urlLlegada = (v: string) => `${t.url}/reportes-unidad/${v}/llegada`;
     // la unidad de otro operador, y la interrupción exige su detalle
-    const cuerpoLlegada2 = await llegada(VEHICULO_2.id);
-    await http().put(urlLlegada(VEHICULO_2.id)).set(op1()).send(cuerpoLlegada2).expect(403);
-    const interrumpida = await llegada(VEHICULO.id, { operacionInterrumpida: true });
-    const conNovedad = await llegada(VEHICULO.id, { novedadesMecanica: 'Ruido en el eje trasero' });
-    await http().put(urlLlegada(VEHICULO.id)).set(op1()).send(interrumpida).expect(400);
-    const l1 = (await http().put(urlLlegada(VEHICULO.id)).set(op1()).send(conNovedad).expect(200))
-      .body;
+    const cuerpoLlegada2 = await llegada(VEHICULO_2.unidadId);
+    await http().put(urlLlegada(VEHICULO_2.unidadId)).set(op1()).send(cuerpoLlegada2).expect(403);
+    const interrumpida = await llegada(VEHICULO.unidadId, { operacionInterrumpida: true });
+    const conNovedad = await llegada(VEHICULO.unidadId, {
+      novedadesMecanica: 'Ruido en el eje trasero',
+    });
+    await http().put(urlLlegada(VEHICULO.unidadId)).set(op1()).send(interrumpida).expect(400);
+    const l1 = (
+      await http().put(urlLlegada(VEHICULO.unidadId)).set(op1()).send(conNovedad).expect(200)
+    ).body;
     expect(l1.llegada).toMatchObject({
       fecha: '2026-11-09',
       combustible: 20,
@@ -1584,13 +1775,24 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(aunFaltaLlegada.body.detail).toContain(
       `Reporte de unidad de llegada (${VEHICULO_2.placa})`,
     );
-    await http().put(urlLlegada(VEHICULO_2.id)).set(op2()).send(cuerpoLlegada2).expect(200);
+    await http().put(urlLlegada(VEHICULO_2.unidadId)).set(op2()).send(cuerpoLlegada2).expect(200);
     const eventosLlegada = await admin.query(
       "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_unidad_llegada' AND datos->'data'->>'ticketId' = $1",
       [t.id],
     );
     expect(eventosLlegada.rows).toHaveLength(2);
     expect(eventosLlegada.rows.map((x) => x.d.hayNovedades).sort()).toEqual([false, true]);
+    // D2: el evento lleva la unidad de Flota y, mientras algún consumidor lo lea, el vehículo del catálogo enlazado
+    expect(
+      eventosLlegada.rows
+        .map((x) => [x.d.unidadId, x.d.vehiculoId])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual(
+      [
+        [VEHICULO.unidadId, VEHICULO.id],
+        [VEHICULO_2.unidadId, VEHICULO_2.id],
+      ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
     await http()
       .post(`${t.url}/avanzar`)
       .set(op1())
@@ -1682,7 +1884,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ] as const) {
         await admin.query(
           `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
-           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1))`,
           [a.id, a.codigo, categoria],
         );
       }
@@ -1873,49 +2075,49 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   });
 
   describe('revisión de reportes de salida: el Supervisor aprueba la inspección de cada unidad (P2)', () => {
-    const aprobar = (t: { url: string }, vehiculoId: string, h = supervisora()) =>
-      http().post(`${t.url}/revision-salida/inspecciones/${vehiculoId}/aprobar`).set(h);
-    const inspeccion = async (id: string, vehiculoId: string) =>
+    const aprobar = (t: { url: string }, unidadId: string, h = supervisora()) =>
+      http().post(`${t.url}/revision-salida/inspecciones/${unidadId}/aprobar`).set(h);
+    const inspeccion = async (id: string, unidadId: string) =>
       (
         await admin.query(
-          "SELECT estado, origen, motivo, cumplido_por FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND vehiculo_id = $2",
-          [id, vehiculoId],
+          "SELECT estado, origen, motivo, cumplido_por FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND unidad_id = $2",
+          [id, unidadId],
         )
       ).rows[0];
 
     it('solo en su paso, por el Supervisor del equipo, una sola vez por unidad y dejando constancia', async () => {
       const t = await ticketEnTraslado();
       // fuera de su paso
-      expect((await aprobar(t, VEHICULO.id)).status).toBe(409);
+      expect((await aprobar(t, VEHICULO.unidadId)).status).toBe(409);
 
       await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
         t.id,
         'revision_reportes_salida',
       ]);
-      expect((await aprobar(t, VEHICULO.id, op1())).status).toBe(403); // el operador no aprueba
+      expect((await aprobar(t, VEHICULO.unidadId, op1())).status).toBe(403); // el operador no aprueba
       expect((await aprobar(t, uuidv7())).status).toBe(404); // una unidad que no es del ticket
 
-      const ok = await aprobar(t, VEHICULO.id);
+      const ok = await aprobar(t, VEHICULO.unidadId);
       expect(ok.status).toBe(201);
-      expect(await inspeccion(t.id, VEHICULO.id)).toMatchObject({
+      expect(await inspeccion(t.id, VEHICULO.unidadId)).toMatchObject({
         estado: 'cumplido',
         origen: 'manual_temporal',
         cumplido_por: SUPERVISORA.id,
       });
-      expect((await inspeccion(t.id, VEHICULO.id)).motivo).toContain('Supervisor');
+      expect((await inspeccion(t.id, VEHICULO.unidadId)).motivo).toContain('Supervisor');
       // la otra unidad sigue pendiente
-      expect((await inspeccion(t.id, VEHICULO_2.id)).estado).toBe('pendiente');
-      expect((await aprobar(t, VEHICULO.id)).status).toBe(409); // ya aprobada
+      expect((await inspeccion(t.id, VEHICULO_2.unidadId)).estado).toBe('pendiente');
+      expect((await aprobar(t, VEHICULO.unidadId)).status).toBe(409); // ya aprobada
 
       // el evento de Flota, cuando exista, no choca con la aprobación ya hecha
       await externos.consumir(
         externo(
           'flota.inspeccion_vehiculo.aprobada',
-          { ticketId: t.id, vehiculoId: VEHICULO.id },
+          { ticketId: t.id, unidadId: VEHICULO.unidadId },
           'flota',
         ),
       );
-      expect((await inspeccion(t.id, VEHICULO.id)).origen).toBe('manual_temporal');
+      expect((await inspeccion(t.id, VEHICULO.unidadId)).origen).toBe('manual_temporal');
     });
   });
 

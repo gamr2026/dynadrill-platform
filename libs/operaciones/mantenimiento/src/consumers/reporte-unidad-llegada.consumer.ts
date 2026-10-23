@@ -9,7 +9,7 @@ export const EVENTO_LLEGADA_PUMPING = 'operaciones.pumping.reporte_unidad_llegad
 
 /**
  * Recibe el reporte de unidad de llegada de Pumping y, si trae novedades, lo deja en la bandeja de clasificación. Lleva `ticketId`,
- * `vehiculoId`, `reporteUnidadId` y `hayNovedades`; el contenido se lee del reporte de Pumping (mismo contenedor), no del evento.
+ * `unidadId` (la unidad de Flota; el evento conserva también `vehiculoId`, el del catálogo enlazado, o nulo), `reporteUnidadId` y `hayNovedades`; el contenido se lee del reporte de Pumping (mismo contenedor), no del evento.
  * Idempotente (inbox) y tolerante: un evento al que le falta algo se ignora sin error.
  */
 @Injectable()

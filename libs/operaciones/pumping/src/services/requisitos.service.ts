@@ -8,14 +8,15 @@ import { uuidv7 } from '@dyn/utils';
 import type { OrigenCumplimiento, Prisma } from '../generated/client';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
+import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
 export interface ClaveRequisito {
   ticketId: string;
   codigo: string;
-  /** Unidad (requisitos de ámbito `unidad`). */
-  vehiculoId?: string | null;
+  /** Unidad de Flota (requisitos de ámbito `unidad`). */
+  unidadId?: string | null;
   /** Operador (requisitos de ámbito `operador`). */
   usuarioId?: string | null;
 }
@@ -47,7 +48,7 @@ export class RequisitosService {
     });
     const unidades = await tx.ticketUnidad.findMany({
       where: { ticketId },
-      select: { vehiculoId: true },
+      select: { unidadId: true },
     });
     const operadores = await tx.ticketPersona.findMany({
       where: { ticketId, rol: 'operador' },
@@ -59,7 +60,7 @@ export class RequisitosService {
       const base = { id: '', ticketId, requisitoCodigo: r.codigo };
       if (r.ambito === 'ticket') data.push({ ...base, id: uuidv7() });
       if (r.ambito === 'unidad')
-        for (const u of unidades) data.push({ ...base, id: uuidv7(), vehiculoId: u.vehiculoId });
+        for (const u of unidades) data.push({ ...base, id: uuidv7(), unidadId: u.unidadId });
       if (r.ambito === 'operador')
         for (const o of operadores) data.push({ ...base, id: uuidv7(), usuarioId: o.usuarioId });
     }
@@ -93,7 +94,7 @@ export class RequisitosService {
         ? { estado, cumplidoAt: new Date(), cumplidoPor: actorId ?? null, origen, motivo: null }
         : { estado, cumplidoAt: null, cumplidoPor: null, origen: null, motivo: null };
     const r = await db.ticketRequisito.updateMany({
-      where: { ticketId, requisitoCodigo: codigo, vehiculoId: null, usuarioId: null },
+      where: { ticketId, requisitoCodigo: codigo, unidadId: null, usuarioId: null },
       data: datos,
     });
     if (r.count === 0) {
@@ -115,7 +116,7 @@ export class RequisitosService {
       where: {
         ticketId: k.ticketId,
         requisitoCodigo: k.codigo,
-        vehiculoId: k.vehiculoId ?? null,
+        unidadId: k.unidadId ?? null,
         usuarioId: k.usuarioId ?? null,
         estado: 'pendiente',
       },
@@ -136,7 +137,7 @@ export class RequisitosService {
       where: {
         ticketId: k.ticketId,
         requisitoCodigo: k.codigo,
-        vehiculoId: k.vehiculoId ?? null,
+        unidadId: k.unidadId ?? null,
         usuarioId: k.usuarioId ?? null,
         estado: 'cumplido',
       },
@@ -165,11 +166,11 @@ export class RequisitosService {
         requisito: { pasos: { some: { pasoCodigo } } },
         ...(excepto.length ? { requisitoCodigo: { notIn: excepto } } : {}),
       },
-      include: { requisito: true, vehiculo: true, usuario: true },
+      include: { requisito: true, unidad: UNIDAD_CON_PLACA, usuario: true },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
     });
     return filas.map((f) => {
-      const para = f.vehiculo?.placa ?? f.usuario?.nombre ?? null;
+      const para = (f.unidad ? etiquetaDeUnidad(f.unidad) : null) ?? f.usuario?.nombre ?? null;
       return {
         id: f.id,
         codigo: f.requisitoCodigo,
@@ -204,7 +205,7 @@ export class RequisitosService {
       where: { ticketId },
       include: {
         requisito: { include: { pasos: { include: { paso: true } } } },
-        vehiculo: true,
+        unidad: UNIDAD_CON_PLACA,
         usuario: true,
       },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
@@ -219,8 +220,8 @@ export class RequisitosService {
         ambito: f.requisito.ambito,
         paso: f.requisito.pasos[0]?.pasoCodigo ?? null,
         pasoOrden: f.requisito.pasos[0]?.paso.orden ?? 0,
-        para: f.vehiculo?.placa ?? f.usuario?.nombre ?? null,
-        vehiculoId: f.vehiculoId,
+        para: (f.unidad ? etiquetaDeUnidad(f.unidad) : null) ?? f.usuario?.nombre ?? null,
+        unidadId: f.unidadId,
         usuarioId: f.usuarioId,
         estado: f.estado,
         cumplidoAt: f.cumplidoAt,

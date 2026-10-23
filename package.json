@@ -47,6 +47,8 @@
     "db:migrate:firmas": "cd libs/plataforma/firmas && prisma migrate deploy",
     "db:seed:firmas": "tsx --tsconfig tsconfig.base.json libs/plataforma/firmas/prisma/seed.ts",
     "db:seed:avisos": "tsx --tsconfig tsconfig.base.json libs/plataforma/avisos/prisma/seed.ts",
+    "db:migrate:encuestas": "cd libs/plataforma/encuestas && prisma migrate deploy",
+    "db:seed:encuestas": "tsx --tsconfig tsconfig.base.json libs/plataforma/encuestas/prisma/seed.ts",
     "db:seed:pumping": "tsx --tsconfig tsconfig.base.json libs/operaciones/pumping/prisma/seed.ts",
     "db:migrate:fcr": "cd libs/operaciones/fcr && prisma migrate deploy",
     "db:seed:fcr": "tsx --tsconfig tsconfig.base.json libs/operaciones/fcr/prisma/seed.ts",

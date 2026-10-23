@@ -26,7 +26,7 @@ export class RevisionSalidaService {
     private readonly requisitos: RequisitosService,
   ) {}
 
-  async aprobarInspeccion(ticketId: string, vehiculoId: string, actor: AuthUser) {
+  async aprobarInspeccion(ticketId: string, unidadId: string, actor: AuthUser) {
     await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({
         where: { id: ticketId },
@@ -49,7 +49,7 @@ export class RevisionSalidaService {
         throw new ForbiddenException('Solo el equipo asignado a este ticket puede hacerlo');
       }
       const fila = await tx.ticketRequisito.findFirst({
-        where: { ticketId, requisitoCodigo: REQ.inspeccionAprobada, vehiculoId },
+        where: { ticketId, requisitoCodigo: REQ.inspeccionAprobada, unidadId },
       });
       if (!fila)
         throw new NotFoundException(
@@ -60,7 +60,7 @@ export class RevisionSalidaService {
       }
       await this.requisitos.marcar(
         tx,
-        { ticketId, codigo: REQ.inspeccionAprobada, vehiculoId },
+        { ticketId, codigo: REQ.inspeccionAprobada, unidadId },
         'manual_temporal',
         actor.id,
         MOTIVO,

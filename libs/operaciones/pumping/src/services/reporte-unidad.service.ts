@@ -17,6 +17,7 @@ import type {
 } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from './requisitos.service';
+import { UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 const PASO = 'traslado_salida';
 const PASO_LLEGADA = 'traslado_llegada';
@@ -67,8 +68,8 @@ export class ReporteUnidadService {
     const [unidades, personas, reportes] = await Promise.all([
       this.prisma.ticketUnidad.findMany({
         where: { ticketId },
-        include: { vehiculo: true },
-        orderBy: { vehiculo: { placa: 'asc' } },
+        include: { unidad: UNIDAD_CON_PLACA },
+        orderBy: { unidad: { codigo: 'asc' } },
       }),
       this.prisma.ticketPersona.findMany({
         where: { ticketId, rol: 'operador' },
@@ -77,11 +78,14 @@ export class ReporteUnidadService {
       this.prisma.reporteUnidad.findMany({ where: { ticketId } }),
     ]);
     return unidades.map((u) => {
-      const r = reportes.find((x) => x.vehiculoId === u.vehiculoId);
-      const o = personas.find((p) => p.vehiculoId === u.vehiculoId);
+      const r = reportes.find((x) => x.unidadId === u.unidadId);
+      const o = personas.find((p) => p.unidadId === u.unidadId);
       return {
-        vehiculoId: u.vehiculoId,
-        placa: u.vehiculo.placa,
+        unidadId: u.unidadId,
+        codigo: u.unidad.codigo,
+        nombre: u.unidad.nombre,
+        // la placa del vehículo enlazado a la unidad (nula si no tiene); para nombrarla en pantalla: `placa ?? codigo`
+        placa: u.unidad.vehiculo?.placa ?? null,
         operador: o ? { usuarioId: o.usuarioId, nombre: o.usuario.nombre } : null,
         salidaFirmada: !!r?.salidaFirmadaAt,
         salidaFirmadaAt: r?.salidaFirmadaAt ?? null,
@@ -90,15 +94,15 @@ export class ReporteUnidadService {
   }
 
   /** El reporte de una unidad (vacío si todavía no se llenó) con todos los ítems del formulario. */
-  async obtener(ticketId: string, vehiculoId: string) {
+  async obtener(ticketId: string, unidadId: string) {
     const unidad = await this.prisma.ticketUnidad.findUnique({
-      where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
-      include: { vehiculo: true },
+      where: { ticketId_unidadId: { ticketId, unidadId } },
+      include: { unidad: UNIDAD_CON_PLACA },
     });
     if (!unidad) throw new NotFoundException('Esa unidad no está asignada al ticket');
     const [reporte, items, firmante] = await Promise.all([
       this.prisma.reporteUnidad.findUnique({
-        where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
+        where: { ticketId_unidadId: { ticketId, unidadId } },
         include: {
           hubodometros: { orderBy: [{ eje: 'asc' }, { punto: 'asc' }] },
           llantas: true,
@@ -110,7 +114,7 @@ export class ReporteUnidadService {
         orderBy: [{ seccion: 'asc' }, { orden: 'asc' }],
       }),
       this.prisma.ticketPersona.findFirst({
-        where: { ticketId, vehiculoId, rol: 'operador' },
+        where: { ticketId, unidadId, rol: 'operador' },
         include: { usuario: true },
       }),
     ]);
@@ -125,8 +129,10 @@ export class ReporteUnidadService {
       : null;
     return {
       ticketId,
-      vehiculoId,
-      placa: unidad.vehiculo.placa,
+      unidadId,
+      codigo: unidad.unidad.codigo,
+      nombre: unidad.unidad.nombre,
+      placa: unidad.unidad.vehiculo?.placa ?? null,
       operador: firmante
         ? { usuarioId: firmante.usuarioId, nombre: firmante.usuario.nombre }
         : null,
@@ -170,7 +176,7 @@ export class ReporteUnidadService {
     };
   }
 
-  async guardarSalida(ticketId: string, vehiculoId: string, e: SalidaEntrada, actor: AuthUser) {
+  async guardarSalida(ticketId: string, unidadId: string, e: SalidaEntrada, actor: AuthUser) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(e.fecha) || Number.isNaN(Date.parse(`${e.fecha}T00:00:00Z`))) {
       throw new BadRequestException('La fecha de salida no es válida');
     }
@@ -189,12 +195,12 @@ export class ReporteUnidadService {
           'El reporte de salida se registra en el paso de Traslado de salida',
         );
       const unidad = await tx.ticketUnidad.findUnique({
-        where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
+        where: { ticketId_unidadId: { ticketId, unidadId } },
       });
       if (!unidad) throw new NotFoundException('Esa unidad no está asignada al ticket');
       if (actor.roleCode !== 'superadmin') {
         const op = await tx.ticketPersona.findFirst({
-          where: { ticketId, vehiculoId, usuarioId: actor.id, rol: 'operador' },
+          where: { ticketId, unidadId, usuarioId: actor.id, rol: 'operador' },
         });
         if (!op)
           throw new ForbiddenException(
@@ -246,8 +252,8 @@ export class ReporteUnidadService {
         salidaFirmadaAt: new Date(),
       };
       const reporte = await tx.reporteUnidad.upsert({
-        where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
-        create: { id: uuidv7(), ticketId, vehiculoId, ...datos },
+        where: { ticketId_unidadId: { ticketId, unidadId } },
+        create: { id: uuidv7(), ticketId, unidadId, ...datos },
         update: datos,
       });
       await tx.reporteUnidadHubodometro.deleteMany({ where: { reporteId: reporte.id } });
@@ -277,12 +283,12 @@ export class ReporteUnidadService {
       });
       await this.requisitos.marcar(
         tx,
-        { ticketId, codigo: REQ.reporteSalida, vehiculoId },
+        { ticketId, codigo: REQ.reporteSalida, unidadId },
         'sistema',
         actor.id,
       );
     });
-    return this.obtener(ticketId, vehiculoId);
+    return this.obtener(ticketId, unidadId);
   }
 
   /**
@@ -291,7 +297,7 @@ export class ReporteUnidadService {
    * publica `operaciones.pumping.reporte_unidad_llegada` (contrato 4.2) en la misma transacción, para que Mantenimiento reciba
    * el reporte si hay novedades.
    */
-  async guardarLlegada(ticketId: string, vehiculoId: string, e: LlegadaEntrada, actor: AuthUser) {
+  async guardarLlegada(ticketId: string, unidadId: string, e: LlegadaEntrada, actor: AuthUser) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(e.fecha) || Number.isNaN(Date.parse(`${e.fecha}T00:00:00Z`))) {
       throw new BadRequestException('La fecha de llegada no es válida');
     }
@@ -308,15 +314,14 @@ export class ReporteUnidadService {
         throw new ConflictException(
           'El reporte de llegada se registra en el paso de Traslado de llegada',
         );
-      if (
-        !(await tx.ticketUnidad.findUnique({
-          where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
-        }))
-      )
-        throw new NotFoundException('Esa unidad no está asignada al ticket');
+      const asignada = await tx.ticketUnidad.findUnique({
+        where: { ticketId_unidadId: { ticketId, unidadId } },
+        include: { unidad: { select: { vehiculoId: true } } },
+      });
+      if (!asignada) throw new NotFoundException('Esa unidad no está asignada al ticket');
       if (actor.roleCode !== 'superadmin') {
         const op = await tx.ticketPersona.findFirst({
-          where: { ticketId, vehiculoId, usuarioId: actor.id, rol: 'operador' },
+          where: { ticketId, unidadId, usuarioId: actor.id, rol: 'operador' },
         });
         if (!op)
           throw new ForbiddenException(
@@ -324,7 +329,7 @@ export class ReporteUnidadService {
           );
       }
       const previo = await tx.reporteUnidad.findUnique({
-        where: { ticketId_vehiculoId: { ticketId, vehiculoId } },
+        where: { ticketId_unidadId: { ticketId, unidadId } },
       });
       if (!previo?.salidaFirmadaAt)
         throw new ConflictException('La unidad no tiene un reporte de salida firmado');
@@ -385,7 +390,7 @@ export class ReporteUnidadService {
       }
       await this.requisitos.marcar(
         tx,
-        { ticketId, codigo: REQ.reporteLlegada, vehiculoId },
+        { ticketId, codigo: REQ.reporteLlegada, unidadId },
         'sistema',
         actor.id,
       );
@@ -403,12 +408,20 @@ export class ReporteUnidadService {
         this.bus.create({
           type: 'operaciones.pumping.reporte_unidad_llegada',
           subject: { type: 'pumping_ticket', id: ticketId },
-          data: { ticketId, vehiculoId, reporteUnidadId: reporte.id, hayNovedades },
+          // `unidadId` es la unidad de Flota (D2); `vehiculoId`, el vehículo del catálogo enlazado a ella (nulo si no tiene), se conserva
+          // mientras algún consumidor aún lo lea
+          data: {
+            ticketId,
+            unidadId,
+            vehiculoId: asignada.unidad.vehiculoId,
+            reporteUnidadId: reporte.id,
+            hayNovedades,
+          },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),
         }),
       );
     });
-    return this.obtener(ticketId, vehiculoId);
+    return this.obtener(ticketId, unidadId);
   }
 }

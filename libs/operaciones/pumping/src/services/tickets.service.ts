@@ -11,6 +11,7 @@ import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from './requisitos.service';
+import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 /** Lo que `comercial` publica al abrir un pedido (`comercial.pedido.abierto`) y este módulo necesita. */
 export interface PedidoAbiertoData {
@@ -73,10 +74,13 @@ const INCLUDE_DETALLE = {
   },
   tiposServicio: true,
   historial: { include: { actor: true }, orderBy: { createdAt: 'asc' } },
-  personas: { include: { usuario: true, vehiculo: true }, orderBy: { usuario: { nombre: 'asc' } } },
+  personas: {
+    include: { usuario: true, unidad: UNIDAD_CON_PLACA },
+    orderBy: { usuario: { nombre: 'asc' } },
+  },
   unidades: {
-    include: { vehiculo: { include: { tipoVehiculo: true } } },
-    orderBy: { vehiculo: { placa: 'asc' } },
+    include: { unidad: { include: { vehiculo: { include: { tipoVehiculo: true } } } } },
+    orderBy: { unidad: { codigo: 'asc' } },
   },
 } as const;
 type TicketLista = Prisma.TicketGetPayload<{ include: typeof INCLUDE_LISTA }>;
@@ -273,7 +277,7 @@ export class TicketsService {
         tiposServicio: true,
         personas: {
           where: { OR: [{ rol: 'supervisor' }, { usuarioId }] },
-          include: { usuario: true, vehiculo: true },
+          include: { usuario: true, unidad: UNIDAD_CON_PLACA },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -299,8 +303,12 @@ export class TicketsService {
       paso: { codigo: t.pasoCodigo, nombre: t.paso.nombre },
       /** Las unidades que lleva esta cuenta en el ticket (cada conductor lleva la suya). */
       unidades: t.personas
-        .filter((p) => p.usuarioId === usuarioId && p.vehiculoId)
-        .map((p) => ({ vehiculoId: p.vehiculoId as string, placa: p.vehiculo?.placa ?? '' })),
+        .filter((p) => p.usuarioId === usuarioId && p.unidadId)
+        .map((p) => ({
+          unidadId: p.unidadId as string,
+          codigo: p.unidad?.codigo ?? '',
+          placa: p.unidad?.vehiculo?.placa ?? null,
+        })),
       /** Gerenciamientos de viaje que le tocan en este momento del servicio: el de salida desde el traslado, el de retorno desde la ejecución. */
       tiposViaje: [
         ...(t.paso.orden >= ORDEN_TRASLADO_SALIDA ? ['salida'] : []),
@@ -393,7 +401,7 @@ export class TicketsService {
               pozo: t.pozo?.nombreCompleto ?? null,
               taladro: t.rigless ? 'RIGLESS' : (t.taladro?.nombre ?? null),
               reportadoPor: actor.name,
-              unidades: t.unidades.map((u) => u.vehiculo.placa).join(', '),
+              unidades: t.unidades.map((u) => etiquetaDeUnidad(u.unidad)).join(', '),
               asignados: supervisor
                 ? [{ usuarioId: supervisor.usuarioId, rolCodigo: 'supervisor' }]
                 : [],
@@ -446,21 +454,26 @@ export class TicketsService {
           .map((p) => ({
             usuarioId: p.usuarioId,
             nombre: p.usuario.nombre,
-            vehiculoId: p.vehiculoId,
-            placa: p.vehiculo?.placa ?? null,
+            unidadId: p.unidadId,
+            codigo: p.unidad?.codigo ?? null,
+            placa: p.unidad?.vehiculo?.placa ?? null,
           })),
         conductores: t.personas
           .filter((p) => p.rol === 'conductor')
           .map((p) => ({
             usuarioId: p.usuarioId,
             nombre: p.usuario.nombre,
-            vehiculoId: p.vehiculoId,
-            placa: p.vehiculo?.placa ?? null,
+            unidadId: p.unidadId,
+            codigo: p.unidad?.codigo ?? null,
+            placa: p.unidad?.vehiculo?.placa ?? null,
           })),
         unidades: t.unidades.map((u) => ({
-          vehiculoId: u.vehiculoId,
-          placa: u.vehiculo.placa,
-          descripcion: descripcionVehiculo(u.vehiculo),
+          unidadId: u.unidadId,
+          codigo: u.unidad.codigo,
+          nombre: u.unidad.nombre,
+          placa: u.unidad.vehiculo?.placa ?? null,
+          // tipo, marca y modelo del vehículo enlazado; sin vehículo, el nombre de la unidad
+          descripcion: u.unidad.vehiculo ? descripcionVehiculo(u.unidad.vehiculo) : u.unidad.nombre,
         })),
       },
       historial: t.historial.map((h) => ({

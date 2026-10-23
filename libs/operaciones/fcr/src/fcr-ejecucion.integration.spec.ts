@@ -126,6 +126,12 @@ run(
     };
 
     /** Ticket de venta en la ejecución, con un cepillo y un magneto recibidos, asignado al operador, con el acta confirmada. */
+    /** Quita al operador de los demás tickets de la prueba (datos de esta suite), para que la asignación no lo vea ocupado. */
+    const liberarOperador = (ticketId: string) =>
+      admin.query('DELETE FROM fcr.ticket_persona WHERE usuario_id = $1 AND ticket_id <> $2', [
+        OPERADOR.id,
+        ticketId,
+      ]);
     const enEjecucion = async (
       fechas = { inicio: '2026-11-05', fin: '2026-11-12' },
       opciones: { lineas?: Array<Record<string, unknown>>; precargado?: boolean } = {},
@@ -250,6 +256,8 @@ run(
         .set(supervisor())
         .send({ hacia: 'asignacion' })
         .expect(201);
+      // cada prueba arma su ticket con las mismas fechas: el equipo de los tickets anteriores de la prueba ya terminó su servicio
+      await liberarOperador(id);
       await http()
         .post(`${base(id)}/asignar`)
         .set(supervisor())
@@ -349,7 +357,7 @@ run(
       );
       for (const a of [CEPILLO, MAGNETO]) {
         await admin.query(
-          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id) VALUES ($1, $2, $3, $4, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+          `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id) VALUES ($1, $2, $3, $4, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1))`,
           [a.id, a.codigo, `Herramienta ${a.codigo}`, CAT],
         );
       }
@@ -1316,7 +1324,7 @@ run(
             nombre: 'Ítem de prueba',
             unidad: 'día',
             cantidad: 1,
-            usos: [{ fecha: '2026-11-05', estado: 'operacion' }],
+            usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 1 }],
           },
           {
             listaPreciosItemId: expect.any(String),
@@ -1324,7 +1332,7 @@ run(
             nombre: 'Movilización livianas',
             unidad: 'km',
             cantidad: 115,
-            usos: [],
+            usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 115 }],
           },
           {
             listaPreciosItemId: expect.any(String),
@@ -1334,11 +1342,18 @@ run(
             serie: 'DY-RT-415',
             cantidad: 2,
             usos: [
-              { fecha: '2026-11-05', estado: 'daily_charge' },
-              { fecha: '2026-11-06', estado: 'daily_charge' },
+              { fecha: '2026-11-05', estado: 'daily_charge', cantidad: 1 },
+              { fecha: '2026-11-06', estado: 'daily_charge', cantidad: 1 },
             ],
           },
         ]);
+        // la suma de las cantidades de los días es la cantidad de la fila (Comercial lo exige)
+        for (const h of ev[0].d['herramientas'] as Array<{
+          cantidad: number;
+          usos: Array<{ cantidad: number }>;
+        }>) {
+          expect(h.usos.reduce((a, u) => a + u.cantidad, 0)).toBeCloseTo(h.cantidad, 3);
+        }
         expect(filas).toHaveLength(1); // antes de agregar, solo la fila que dejó enEjecucion
         // el operador ya no corrige
         await guardar(t.id, '2026-11-06').expect(409);

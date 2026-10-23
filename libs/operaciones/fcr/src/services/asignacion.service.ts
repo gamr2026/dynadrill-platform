@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { PrismaService } from '../prisma/prisma.service';
+import { DisponibilidadService } from './disponibilidad.service';
 import { RequisitosService } from './requisitos.service';
 import { nombreDe, ROL_SUPERVISOR, TicketsService } from './tickets.service';
 
@@ -30,6 +31,7 @@ export class AsignacionService {
     private readonly bus: EventBus,
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
+    private readonly disponibilidad: DisponibilidadService,
   ) {}
 
   async asignar(id: string, entrada: AsignacionEntrada, actor: AuthUser) {
@@ -82,6 +84,8 @@ export class AsignacionService {
         ...o,
         persona: persona(o.usuarioId, 'operador', ROLES_OPERADOR),
       }));
+      // quien ya está en otro ticket sin cerrar con fechas que se cruzan no puede asignarse hasta que se libere
+      await this.disponibilidad.exigirLibres(tx, id, operadorIds);
       // se reemplaza el equipo anterior
       await tx.ticketPersona.deleteMany({ where: { ticketId: id } });
       await tx.ticketPersona.createMany({

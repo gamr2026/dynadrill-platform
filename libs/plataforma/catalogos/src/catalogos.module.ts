@@ -8,6 +8,7 @@ import {
   PersonasController,
   PozosController,
   TaladrosController,
+  UnidadesMedidaController,
   ZonasController,
 } from './controllers/catalogos.controllers';
 import { PrismaService } from './prisma/prisma.service';
@@ -27,6 +28,7 @@ import { ClientesService } from './services/clientes.service';
 import { PersonasService } from './services/personas.service';
 import { PozosService } from './services/pozos.service';
 import { TaladrosService } from './services/taladros.service';
+import { UnidadesMedidaService } from './services/unidades-medida.service';
 import { ZonasService } from './services/zonas.service';
 
 /**
@@ -45,6 +47,7 @@ import { ZonasService } from './services/zonas.service';
     ZonasController,
     BodegasController,
     CondicionesPagoController,
+    UnidadesMedidaController,
     TransportistasController,
     TiposVehiculoController,
     VehiculosController,
@@ -60,6 +63,7 @@ import { ZonasService } from './services/zonas.service';
     BodegasService,
     TransporteService,
     CondicionesPagoService,
+    UnidadesMedidaService,
     PozosService,
     ClientesService,
     PersonasService,

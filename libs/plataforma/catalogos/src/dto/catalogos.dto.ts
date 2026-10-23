@@ -47,6 +47,15 @@ export class CreateCatalogoSimpleDto {
 }
 export class UpdateCatalogoSimpleDto extends PartialType(CreateCatalogoSimpleDto) {}
 
+// ----------------------------------------- Unidades de medida
+export class CreateUnidadMedidaDto {
+  @IsString() @MinLength(1) @MaxLength(60) nombre!: string;
+  /** Abreviatura que se imprime junto a las cantidades (kg, gal, und). */
+  @IsString() @MinLength(1) @MaxLength(10) simbolo!: string;
+  @IsOptional() @IsBoolean() habilitado?: boolean;
+}
+export class UpdateUnidadMedidaDto extends PartialType(CreateUnidadMedidaDto) {}
+
 // ----------------------------------------- Bodegas y condiciones de pago
 export class CreateCatalogoAs2Dto {
   @IsString() @MinLength(1) @MaxLength(120) nombre!: string;

@@ -81,7 +81,7 @@ export async function cargarDatosReales(
       });
   if (!responsable)
     throw new Error('No hay una cuenta responsable para los movimientos (Superadmin)');
-  const unidad = await prisma.unidadStock.findUniqueOrThrow({
+  const unidad = await prisma.catUnidadMedida.findUniqueOrThrow({
     where: { nombre: UNIDAD_POR_DEFECTO },
   });
   const motivoSaldo = await prisma.motivoMovimiento.findUniqueOrThrow({

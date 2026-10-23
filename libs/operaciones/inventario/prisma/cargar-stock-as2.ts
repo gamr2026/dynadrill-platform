@@ -79,7 +79,7 @@ export async function cargarStockAs2(
   const motivoSobrante = await motivo('Ajuste por conteo físico (sobrante)');
   const motivoFaltante = await motivo('Ajuste por conteo físico (faltante)');
 
-  const unidades = new Map((await prisma.unidadStock.findMany()).map((u) => [u.nombre, u.id]));
+  const unidades = new Map((await prisma.catUnidadMedida.findMany()).map((u) => [u.nombre, u.id]));
   const bodegas = new Map((await prisma.catBodega.findMany()).map((b) => [b.nombre, b.id]));
   const articulos = new Map(
     (
