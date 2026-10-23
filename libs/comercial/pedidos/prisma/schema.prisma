@@ -301,10 +301,6 @@ model Pedido {
   /// prefactura al abrir el pedido por primera vez; la prefactura, cuando exista, lleva este mismo número.
   ticketNumero     Int?    @unique @map("ticket_numero")
   ticketEmisionId  String? @map("ticket_emision_id") @db.Uuid
-  /// Factura de AS2 con la que se cerró el pedido.
-  facturaNumero String?   @map("factura_numero")
-  facturadoAt   DateTime? @map("facturado_at") @db.Timestamptz(6)
-  facturadoPor  String?   @map("facturado_por") @db.Uuid
   despachoSolicitadoAt     DateTime? @map("despacho_solicitado_at") @db.Timestamptz(6)
   despachoSolicitadoPor    String?   @map("despacho_solicitado_por") @db.Uuid
   despachoSolicitante      IdUsuario? @relation("pedidoDespachoSolicitado", fields: [despachoSolicitadoPor], references: [id])
@@ -776,6 +772,8 @@ model DocumentoOperativoUso {
   herramienta   DocumentoOperativoHerramienta @relation(fields: [herramientaId], references: [id], onDelete: Cascade)
   fecha         DateTime                      @db.Date
   estado        EstadoUsoHerramienta
+  /// Cantidad aplicada ese día: 1 en las filas por día (marca) y el valor del día en las demás.
+  cantidad      Decimal                       @default(1) @db.Decimal(14, 3)
 
   @@unique([herramientaId, fecha])
   @@map("documento_operativo_uso")

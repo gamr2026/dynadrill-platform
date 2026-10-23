@@ -35,7 +35,9 @@
       "@dyn/flota": ["./libs/operaciones/flota/src/index.ts"],
       "@dyn/mantenimiento": ["./libs/operaciones/mantenimiento/src/index.ts"],
       "@dyn/inventario": ["./libs/operaciones/inventario/src/index.ts"],
-      "@dyn/avisos": ["./libs/plataforma/avisos/src/index.ts"]
+      "@dyn/avisos": ["./libs/plataforma/avisos/src/index.ts"],
+      "@dyn/auditoria": ["./libs/plataforma/auditoria/src/index.ts"],
+      "@dyn/firmas": ["./libs/plataforma/firmas/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp", "dist"]

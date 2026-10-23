@@ -7,6 +7,7 @@ import {
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { DirectorioPort } from '../directorio/directorio.port';
+import { OperacionesPort } from '../directorio/operaciones.port';
 import { CargarDocumentoFirmadoDto } from '../dto/prefacturas.dto';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -28,6 +29,7 @@ export class DocumentosFirmadosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly directorio: DirectorioPort,
+    private readonly operaciones: OperacionesPort,
   ) {}
 
   async listar(pedidoId: string) {
@@ -59,13 +61,13 @@ export class DocumentosFirmadosService {
   async cargar(pedidoId: string, dto: CargarDocumentoFirmadoDto, actor: AuthUser, token: string) {
     const pedido = await this.prisma.pedido.findUnique({
       where: { id: pedidoId },
-      select: { estado: true, ticketOperativo: { select: { origen: true } } },
+      select: { estado: true, ticketOperativo: { select: { origen: true, ticketId: true } } },
     });
     if (!pedido) throw new NotFoundException('El pedido no existe');
     if (pedido.estado === 'borrador' || pedido.estado === 'anulado') {
       throw new ConflictException('Este pedido no admite documentos firmados');
     }
-    if (pedido.ticketOperativo?.origen !== 'pumping') {
+    if (!pedido.ticketOperativo || pedido.ticketOperativo.origen !== 'pumping') {
       throw new ConflictException('El pedido no tiene un ticket de Pumping con estos documentos');
     }
     if (dto.tipo === 'monitoreo') {
@@ -75,6 +77,7 @@ export class DocumentosFirmadosService {
     } else if (dto.fecha) {
       throw new BadRequestException('La mezcla química no lleva fecha');
     }
+    await this.exigirDocumentoDelTicket(pedido.ticketOperativo.ticketId, dto, token);
     const archivo = await this.directorio.archivo(dto.archivoId, token);
     if (!archivo) throw new BadRequestException('El archivo indicado no existe');
     if (archivo.modulo !== 'documento_respaldo_firmado') {
@@ -110,6 +113,35 @@ export class DocumentosFirmadosService {
     // la lectura de la firma tarda unos segundos: no retrasa ni condiciona la carga
     void this.verificar(id, archivo.id, token);
     return this.listar(pedidoId);
+  }
+
+  /**
+   * El `documentoTicketId` es un documento de Pumping (otro contenedor, sin FK): se comprueba contra el ticket del pedido que lo tiene
+   * y que sea del tipo y del día que se declara, para que nadie firme un documento de otro ticket.
+   */
+  private async exigirDocumentoDelTicket(
+    ticketId: string,
+    dto: CargarDocumentoFirmadoDto,
+    token: string,
+  ): Promise<void> {
+    const documentos = await this.operaciones.documentosDeTicketPumping(ticketId, token);
+    if (!documentos) {
+      throw new ConflictException('El ticket de Pumping de este pedido ya no existe');
+    }
+    const doc = documentos.find((d) => d.id === dto.documentoTicketId);
+    if (!doc) {
+      throw new BadRequestException('El documento indicado no pertenece al ticket de este pedido');
+    }
+    if (doc.tipo !== dto.tipo) {
+      throw new BadRequestException(
+        `El documento indicado es ${doc.tipo === 'monitoreo' ? 'un monitoreo' : 'la mezcla química'} del ticket, no ${dto.tipo === 'monitoreo' ? 'un monitoreo' : 'la mezcla química'}`,
+      );
+    }
+    if (doc.tipo === 'monitoreo' && doc.fecha !== dto.fecha) {
+      throw new BadRequestException(
+        `El monitoreo indicado es del día ${doc.fecha ?? 'sin fecha'}, no del ${dto.fecha}`,
+      );
+    }
   }
 
   /** Vuelve a leer la firma de un documento ya cargado. */

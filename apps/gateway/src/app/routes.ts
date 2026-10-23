@@ -26,6 +26,8 @@ export const ROUTE_RULES: RouteRule[] = [
       '/api/integraciones',
       '/api/archivos',
       '/api/avisos',
+      '/api/auditoria',
+      '/api/firmas',
       // Catálogos del contenedor nuevo (ids UUID). `/api/catalogos` sigue siendo el de la demo (ids numéricos) y el
       // gateway reescribe este prefijo a `/api/catalogos` al reenviarlo (ver PATH_REWRITE).
       '/api/v2/catalogos',

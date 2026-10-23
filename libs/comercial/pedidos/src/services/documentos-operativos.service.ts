@@ -13,6 +13,7 @@ import {
   CorregirDiaOperativoDto,
   HerramientaOperativaDto,
   RecibirDocumentoOperativoDto,
+  UsoHerramientaDto,
 } from '../dto/documentos-operativos.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PedidoEstadoService } from './pedido-estado.service';
@@ -247,7 +248,11 @@ export class DocumentosOperativosService {
         codigo: h.codigo,
         unidad: h.unidad,
         cantidad: h.cantidad === null ? null : Number(h.cantidad),
-        usos: h.usos.map((u) => ({ fecha: aDia(u.fecha), estado: u.estado })),
+        usos: h.usos.map((u) => ({
+          fecha: aDia(u.fecha),
+          estado: u.estado,
+          cantidad: Number(u.cantidad),
+        })),
       })),
     }));
   }
@@ -482,6 +487,8 @@ export class DocumentosOperativosService {
     h: HerramientaOperativaDto,
     orden: number,
   ) {
+    const unicos = new Map(h.usos.map((u) => [u.fecha.slice(0, 10), u]));
+    this.exigirCantidadesCoherentes(h, [...unicos.values()]);
     const id = uuidv7();
     await tx.documentoOperativoHerramienta.create({
       data: {
@@ -495,16 +502,30 @@ export class DocumentosOperativosService {
         cantidad: h.cantidad ?? null,
       },
     });
-    const unicos = new Map(h.usos.map((u) => [u.fecha.slice(0, 10), u.estado]));
     if (unicos.size) {
       await tx.documentoOperativoUso.createMany({
-        data: [...unicos].map(([f, estado]) => ({
+        data: [...unicos].map(([f, u]) => ({
           id: uuidv7(),
           herramientaId: id,
           fecha: dia(f),
-          estado,
+          estado: u.estado,
+          cantidad: u.cantidad ?? 1,
         })),
       });
+    }
+  }
+
+  /**
+   * La cantidad del ítem es la suma de sus celdas por día. Si el reporte trae cantidades por día y un total, deben coincidir: de lo
+   * contrario la hoja de Facturación mostraría un total distinto de lo que se factura.
+   */
+  private exigirCantidadesCoherentes(h: HerramientaOperativaDto, usos: UsoHerramientaDto[]): void {
+    if (h.cantidad === undefined || !usos.some((u) => u.cantidad !== undefined)) return;
+    const suma = usos.reduce((acc, u) => acc + (u.cantidad ?? 1), 0);
+    if (Math.abs(suma - h.cantidad) > 0.0005) {
+      throw new BadRequestException(
+        `La herramienta «${h.nombre}» suma ${suma} entre sus días pero su cantidad total es ${h.cantidad}`,
+      );
     }
   }
 

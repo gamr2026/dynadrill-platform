@@ -788,6 +788,111 @@ run('documentos operativos (base de datos real)', () => {
         expect.objectContaining({ estado: 'stand_by' }),
       ]);
     });
+    describe('cantidad por día del Reporte de Herramientas', () => {
+      const reporte = (herramientas: unknown[]) => ({ herramientas });
+
+      it('cada celda ítem × día conserva su cantidad y la lectura la devuelve junto al total', async () => {
+        const id = await pedido('fcr');
+        await reporteDiario.consumir(
+          deFcr(
+            'operaciones.fcr.reporte_herramientas_completado',
+            id,
+            reporte([
+              {
+                nombre: 'Movilización',
+                codigo: 'MV0001',
+                unidad: 'KM',
+                cantidad: 120.5,
+                usos: [
+                  { fecha: '2026-11-01', estado: 'operacion', cantidad: 80 },
+                  { fecha: '2026-11-02', estado: 'operacion', cantidad: 40.5 },
+                ],
+              },
+            ]),
+          ),
+        );
+        const h = (await docs(id)).find((d: { tipo: string }) => d.tipo === 'reporte_herramientas');
+        expect(h.herramientas[0]).toMatchObject({ cantidad: 120.5, unidad: 'KM' });
+        expect(h.herramientas[0].usos).toEqual([
+          expect.objectContaining({ fecha: '2026-11-01', cantidad: 80 }),
+          expect.objectContaining({ fecha: '2026-11-02', cantidad: 40.5 }),
+        ]);
+      });
+
+      it('un uso sin cantidad es una marca y vale 1', async () => {
+        const id = await pedido('fcr');
+        await reporteDiario.consumir(
+          deFcr(
+            'operaciones.fcr.reporte_herramientas_completado',
+            id,
+            reporte([
+              {
+                nombre: 'Cargo básico',
+                codigo: 'CT5104',
+                cantidad: 2,
+                usos: [
+                  { fecha: '2026-11-01', estado: 'operacion' },
+                  { fecha: '2026-11-02', estado: 'daily_charge' },
+                ],
+              },
+            ]),
+          ),
+        );
+        const h = (await docs(id)).find((d: { tipo: string }) => d.tipo === 'reporte_herramientas');
+        expect(h.herramientas[0].usos.map((u: { cantidad: number }) => u.cantidad)).toEqual([1, 1]);
+      });
+
+      it('si las cantidades por día no suman el total del ítem, el reporte se rechaza y no queda guardado', async () => {
+        const id = await pedido('fcr');
+        await reporteDiario.consumir(
+          deFcr(
+            'operaciones.fcr.reporte_herramientas_completado',
+            id,
+            reporte([
+              {
+                nombre: 'Movilización',
+                codigo: 'MV0001',
+                cantidad: 100,
+                usos: [
+                  { fecha: '2026-11-01', estado: 'operacion', cantidad: 80 },
+                  { fecha: '2026-11-02', estado: 'operacion', cantidad: 40 },
+                ],
+              },
+            ]),
+          ),
+        );
+        const lista = await docs(id);
+        expect(
+          lista.filter((d: { tipo: string }) => d.tipo === 'reporte_herramientas'),
+        ).toHaveLength(0);
+      });
+
+      it('la base rechaza una cantidad de uso menor o igual a cero', async () => {
+        const id = await pedido('fcr');
+        await reporteDiario.consumir(
+          deFcr(
+            'operaciones.fcr.reporte_herramientas_completado',
+            id,
+            reporte([
+              {
+                nombre: 'Cargo',
+                codigo: 'CT1',
+                cantidad: 1,
+                usos: [{ fecha: '2026-11-01', estado: 'operacion' }],
+              },
+            ]),
+          ),
+        );
+        await expect(
+          admin.query(
+            `UPDATE comercial.documento_operativo_uso SET cantidad = 0
+             WHERE herramienta_id IN (SELECT h.id FROM comercial.documento_operativo_herramienta h
+               JOIN comercial.documento_operativo d ON d.id = h.documento_id WHERE d.pedido_id = $1)`,
+            [id],
+          ),
+        ).rejects.toThrow(/cantidad_positiva/);
+      });
+    });
   });
 
   describe('cambio de ítems del pedido que aprueba el Supervisor de Pumping (evento de Operaciones)', () => {

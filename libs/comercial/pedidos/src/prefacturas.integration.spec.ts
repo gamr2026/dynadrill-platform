@@ -3,7 +3,7 @@
  * Crea su propio cliente, lista de precios y pedidos (`it_<n>`) y los elimina al final con dyn_migrator.
  *   RUN_INTEGRATION=1 npx nx test pedidos
  */
-import { INestApplication, Module } from '@nestjs/common';
+import { INestApplication, Module, ServiceUnavailableException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { generateKeyPairSync } from 'node:crypto';
@@ -24,6 +24,7 @@ import { PedidosModule } from './index';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
+import { OperacionesPort, type DocumentoTicketPumpingRef } from './directorio/operaciones.port';
 import { PrismaService } from './prisma/prisma.service';
 import {
   emitirGuiaDePrueba,
@@ -185,6 +186,15 @@ run('prefactura (base de datos real)', () => {
   const FIRMADO_2 = { ...FIRMADO_1, id: uuidv7(), nombre: 'monitoreo firmado v2.pdf' };
   // los archivos que se guardan de verdad (los otros se rechazan antes de guardarse)
   MAESTROS.archivos = [ARCHIVO_OK, ARCHIVO_2, ARCHIVO_CM, ARCHIVO_NUEVO, FIRMADO_1, FIRMADO_2];
+  /** Los documentos que Pumping tiene en cada ticket (la consulta real va por HTTP a otro contenedor). */
+  const ticketsPumping = new Map<string, DocumentoTicketPumpingRef[]>();
+  const operaciones = { caido: false };
+  const operacionesFalso = {
+    documentosDeTicketPumping: async (ticketId: string) => {
+      if (operaciones.caido) throw new ServiceUnavailableException('Pumping no responde');
+      return ticketsPumping.get(ticketId) ?? null;
+    },
+  };
   const directorioFalso = {
     archivo: async (i: string) =>
       [
@@ -341,6 +351,8 @@ run('prefactura (base de datos real)', () => {
     const mod = await Test.createTestingModule({ imports: [TestAppModule] })
       .overrideProvider(DirectorioPort)
       .useValue(directorioFalso)
+      .overrideProvider(OperacionesPort)
+      .useValue(operacionesFalso)
       .compile();
     app = mod.createNestApplication();
     configureApp(app, { corsOrigins: ['http://localhost:4200'] });
@@ -625,11 +637,13 @@ run('prefactura (base de datos real)', () => {
     };
     // sin ticket de Pumping el pedido no tiene estos documentos
     await http().post(base).set(fact()).send(cuerpo).expect(409);
+    const ticket = uuidv7();
+    ticketsPumping.set(ticket, [{ id: doc, tipo: 'monitoreo', fecha: '2026-11-01' }]);
     await prisma.pedidoTicketOperativo.create({
       data: {
         pedidoId: id,
         origen: 'pumping',
-        ticketId: uuidv7(),
+        ticketId: ticket,
         pasoCodigo: 'ejecucion_operativa',
       },
     });
@@ -688,6 +702,63 @@ run('prefactura (base de datos real)', () => {
     expect(lista[0]).toMatchObject({ archivoId: FIRMADO_2.id, verificacion: 'firma_detectada' });
     // la versión anterior se conserva como historia
     expect(await prisma.documentoRespaldoFirmado.count({ where: { pedidoId: id } })).toBe(2);
+  });
+
+  it('el documento firmado debe ser un documento del ticket de Pumping del pedido, del tipo y del día que se declara', async () => {
+    const id = await pedidoListo();
+    const base = `/api/comercial/pedidos/${id}/documentos-firmados`;
+    const monitoreo = uuidv7();
+    const mezcla = uuidv7();
+    const deOtroTicket = uuidv7();
+    const ticket = uuidv7();
+    ticketsPumping.set(ticket, [
+      { id: monitoreo, tipo: 'monitoreo', fecha: '2026-11-01' },
+      { id: mezcla, tipo: 'mezcla_quimica', fecha: null },
+    ]);
+    ticketsPumping.set(uuidv7(), [{ id: deOtroTicket, tipo: 'monitoreo', fecha: '2026-11-01' }]);
+    await prisma.pedidoTicketOperativo.create({
+      data: {
+        pedidoId: id,
+        origen: 'pumping',
+        ticketId: ticket,
+        pasoCodigo: 'ejecucion_operativa',
+      },
+    });
+    const cuerpo = {
+      tipo: 'monitoreo',
+      documentoTicketId: monitoreo,
+      fecha: '2026-11-01',
+      archivoId: FIRMADO_1.id,
+    };
+    const rechaza = async (c: object, mensaje: RegExp) => {
+      const r = await http().post(base).set(fact()).send(c).expect(400);
+      expect(r.body.detail ?? r.body.message).toMatch(mensaje);
+    };
+    // un documento de otro ticket, o que no existe, no se puede firmar aquí
+    await rechaza({ ...cuerpo, documentoTicketId: deOtroTicket }, /no pertenece al ticket/);
+    await rechaza({ ...cuerpo, documentoTicketId: uuidv7() }, /no pertenece al ticket/);
+    // el tipo debe coincidir (la mezcla no es un monitoreo) y el día del monitoreo también
+    await rechaza({ ...cuerpo, documentoTicketId: mezcla }, /es la mezcla química/);
+    await rechaza({ ...cuerpo, fecha: '2026-11-02' }, /es del día 2026-11-01, no del 2026-11-02/);
+    await rechaza(
+      { tipo: 'mezcla_quimica', documentoTicketId: monitoreo, archivoId: FIRMADO_1.id },
+      /es un monitoreo/,
+    );
+    expect(await prisma.documentoRespaldoFirmado.count({ where: { pedidoId: id } })).toBe(0);
+    // si Pumping no responde no se acepta nada a ciegas
+    operaciones.caido = true;
+    try {
+      await http().post(base).set(fact()).send(cuerpo).expect(503);
+    } finally {
+      operaciones.caido = false;
+    }
+    // un ticket que Pumping ya no tiene
+    ticketsPumping.delete(ticket);
+    await http().post(base).set(fact()).send(cuerpo).expect(409);
+    // y con el documento correcto sí se acepta
+    ticketsPumping.set(ticket, [{ id: monitoreo, tipo: 'monitoreo', fecha: '2026-11-01' }]);
+    ocr.respuesta = { resultado: 'firma_detectada', confianza: 0.9, nombreCoincide: null };
+    await http().post(base).set(fact()).send(cuerpo).expect(201);
   });
 
   it('con el Reporte de Herramientas por ítem la prefactura toma la cantidad REAL del reporte (menor que la cotizada) y lo cotizado no se factura', async () => {

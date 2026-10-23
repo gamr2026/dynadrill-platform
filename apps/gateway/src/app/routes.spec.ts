@@ -24,6 +24,8 @@ describe('resolveTarget', () => {
     ['/api/comercial/secuencias', 'comercial'],
     ['/api/facturacion/pedidos', 'legacy'], // hasta el corte de Pedidos
     ['/api/avisos', 'plataforma'],
+    ['/api/auditoria', 'plataforma'],
+    ['/api/firmas', 'plataforma'],
     ['/api/operaciones/pumping/tickets', 'operaciones'],
     ['/api/operations/pumping/tickets', 'legacy'],
     ['/api/unidades', 'legacy'],
