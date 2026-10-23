@@ -138,6 +138,12 @@ run('QHSE: investigación de incidentes, acciones (base de datos real)', () => {
       });
       expect([...d.acciones[0].controles].sort()).toEqual(['fuente', 'medio']);
       expect(d.acciones[1]).toMatchObject({ tipo: 'preventiva', controles: [] });
+      // la bandeja muestra cuántas acciones siguen pendientes de cada investigación y las suma en el KPI
+      const bandeja = (await t.http().get('/api/qhse/investigaciones').set(soloVer())).body;
+      expect(bandeja.items.find((x: { id: string }) => x.id === id)).toMatchObject({
+        accionesPendientes: 2,
+      });
+      expect(bandeja.kpi.accionesPendientes).toBeGreaterThanOrEqual(2);
       const ev = await eventos('qhse.investigacion.accion_registrada', a1.id);
       expect(ev).toHaveLength(1);
       expect(ev[0].datos.data).toMatchObject({

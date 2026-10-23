@@ -72,17 +72,32 @@ export class InvestigacionesConsultaService {
       take: 500,
       include: CON_DATOS,
     });
-    const items = filas.map((i) => this.resumen(i));
+    // acciones por implementar de cada investigación (la bandeja las muestra y las suma)
+    const pendientes = await this.prisma.investigacionAccion.groupBy({
+      by: ['investigacionId'],
+      where: {
+        investigacionId: { in: filas.map((i) => i.id) },
+        estado: EstadoAccionInvestigacion.pendiente,
+      },
+      _count: { _all: true },
+    });
+    const porInvestigacion = new Map(pendientes.map((p) => [p.investigacionId, p._count._all]));
+    const items = filas.map((i) => ({
+      ...this.resumen(i),
+      accionesPendientes: porInvestigacion.get(i.id) ?? 0,
+    }));
+    // un plazo vencido cuenta si el informe final venció o si no se inició a tiempo y sigue sin iniciarse
+    const conPlazoVencido = (i: (typeof items)[number]) =>
+      i.estado !== EstadoInvestigacion.cerrada &&
+      (i.plazos.finalVencido ||
+        (i.estado === EstadoInvestigacion.abierta && i.plazos.inicioVencido));
     return {
       items,
       kpi: {
         total: items.length,
         abiertas: items.filter((i) => i.estado !== EstadoInvestigacion.cerrada).length,
-        conPlazoVencido: items.filter(
-          (i) =>
-            i.estado !== EstadoInvestigacion.cerrada &&
-            (i.plazos.inicioVencido || i.plazos.finalVencido),
-        ).length,
+        conPlazoVencido: items.filter(conPlazoVencido).length,
+        accionesPendientes: items.reduce((suma, i) => suma + i.accionesPendientes, 0),
       },
     };
   }
