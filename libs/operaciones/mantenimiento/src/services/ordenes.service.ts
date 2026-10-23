@@ -230,13 +230,11 @@ export class OrdenesService {
 
   /**
    * Las órdenes de mantenimiento de las unidades que lleva un ticket de Pumping (no solo las que el ticket originó): alimenta la
-   * tarjeta «Mantenimientos» del ticket. La unidad del ticket es un vehículo del catálogo; la de Mantenimiento, su unidad de Flota
-   * (enlazada por `flota.unidad.vehiculo_id`, decisión D2).
+   * tarjeta «Mantenimientos» del ticket. La unidad del ticket es la unidad de Flota (D2), la misma que usa Mantenimiento.
    */
   async ordenesDeTicket(ticketId: string) {
     const unidades = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      SELECT u.id FROM flota.unidad u
-        JOIN pumping.ticket_unidad tu ON tu.vehiculo_id = u.vehiculo_id
+      SELECT tu.unidad_id AS id FROM pumping.ticket_unidad tu
        WHERE tu.ticket_id = ${ticketId}::uuid`;
     if (!unidades.length) return [];
     const ordenes = await this.prisma.orden.findMany({

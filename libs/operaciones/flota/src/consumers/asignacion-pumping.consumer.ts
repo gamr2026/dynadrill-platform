@@ -7,16 +7,23 @@ import { PrismaService } from '../prisma/prisma.service';
 /** Evento de Pumping al asignar el equipo de un ticket (contrato 4.7). */
 export const EVENTO_ASIGNACION_PUMPING = 'operaciones.pumping.asignacion_realizada';
 
+/**
+ * Una cuenta con su unidad. Pumping asigna unidades de Flota (D2) y manda `unidadId`; el evento conserva `vehiculoId` (el del catálogo
+ * enlazado a la unidad, o nulo). Los eventos anteriores a D2 solo traen `vehiculoId`: se siguen aceptando.
+ */
 interface Emparejamiento {
   usuarioId: string;
-  vehiculoId: string;
+  unidadId?: string | null;
+  vehiculoId?: string | null;
 }
+
+const esTexto = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
 
 const esEmparejamiento = (x: unknown): x is Emparejamiento =>
   typeof x === 'object' &&
   x !== null &&
-  typeof (x as Emparejamiento).usuarioId === 'string' &&
-  typeof (x as Emparejamiento).vehiculoId === 'string';
+  esTexto((x as Emparejamiento).usuarioId) &&
+  (esTexto((x as Emparejamiento).unidadId) || esTexto((x as Emparejamiento).vehiculoId));
 
 /**
  * Abre el caso de inspección de vehículos de cada unidad de transporte que Pumping asigna a un ticket (decisión D8: las demás
@@ -76,8 +83,13 @@ export class AsignacionPumpingConsumer implements OnApplicationBootstrap {
           );
           const vigentes: string[] = [];
           for (const par of pares) {
+            // la unidad de Flota manda; el vehículo del catálogo solo sirve para los eventos anteriores a D2
             const unidad = await tx.unidad.findFirst({
-              where: { vehiculoId: par.vehiculoId, tipo: 'transporte', activa: true },
+              where: {
+                ...(esTexto(par.unidadId) ? { id: par.unidadId } : { vehiculoId: par.vehiculoId }),
+                tipo: 'transporte',
+                activa: true,
+              },
               select: { id: true },
             });
             if (!unidad) continue; // no es una unidad de transporte de Flota: no hay inspección que abrir

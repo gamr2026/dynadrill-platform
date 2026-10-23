@@ -54,8 +54,9 @@ const MECANICO_INACTIVO = { id: uuidv7(), nombre: 'Inés Inactiva' };
 const OPERADOR = { id: uuidv7(), nombre: 'Oscar Operador' };
 const SUPERVISOR = { id: uuidv7(), nombre: 'Sara Supervisora' };
 const VEHICULO = { id: uuidv7(), placa: `MT${String(n).slice(-5)}A` };
-const VEHICULO_SIN_UNIDAD = { id: uuidv7(), placa: `MT${String(n).slice(-5)}B` };
 const UNIDAD = { id: uuidv7(), codigo: `IT-${n}` };
+/** Otra unidad de Flota (sin vehículo del catálogo): para probar lo que no debe verse en la unidad principal. */
+const UNIDAD_2 = { id: uuidv7(), codigo: `IT2-${n}` };
 const BODEGA = { id: uuidv7(), nombre: `BODEGA-MT ${n}` };
 const CATEGORIA = uuidv7();
 const ARTICULO = { id: uuidv7(), codigo: `REP-MT-${n}` };
@@ -74,7 +75,7 @@ const MAESTROS: MaestrosDePrueba = {
     { id: OPERADOR.id, nombre: OPERADOR.nombre, rol: 'operador' },
     { id: SUPERVISOR.id, nombre: SUPERVISOR.nombre, rol: 'supervisor' },
   ],
-  vehiculos: [VEHICULO, VEHICULO_SIN_UNIDAD],
+  vehiculos: [VEHICULO],
   bodegas: [BODEGA],
 };
 
@@ -122,32 +123,32 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       instrumentacion?: string | null;
       operaciones?: string | null;
       firmado?: boolean;
-      vehiculoId?: string;
+      unidadId?: string;
     } = {},
   ) => {
     const ticketId = uuidv7();
     const reporteId = uuidv7();
-    const vehiculoId = opciones.vehiculoId ?? VEHICULO.id;
+    const unidadId = opciones.unidadId ?? UNIDAD.id;
     tickets.push(ticketId);
     await admin.query(
       `INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo, ticket_numero)
        VALUES ($1, $2, $3, 'revision_inicial', $4)`,
       [ticketId, uuidv7(), `PED-MT${n}`, 700_000 + tickets.length + (n % 10_000) * 10],
     );
-    await admin.query(
-      'INSERT INTO pumping.ticket_unidad (ticket_id, vehiculo_id) VALUES ($1, $2)',
-      [ticketId, vehiculoId],
-    );
+    await admin.query('INSERT INTO pumping.ticket_unidad (ticket_id, unidad_id) VALUES ($1, $2)', [
+      ticketId,
+      unidadId,
+    ]);
     const firmado = opciones.firmado ?? true;
     await admin.query(
       `INSERT INTO pumping.reporte_unidad
-         (id, ticket_id, vehiculo_id, origen, destino, llegada_fecha, novedades_mecanica, novedades_instrumentacion,
+         (id, ticket_id, unidad_id, origen, destino, llegada_fecha, novedades_mecanica, novedades_instrumentacion,
           novedades_operaciones, unidad_lista, operacion_interrumpida, llegada_firmada_por, llegada_firmada_at)
        VALUES ($1, $2, $3, 'Base', 'Pozo X', '2026-11-06', $4, $5, $6, false, false, $7, $8)`,
       [
         reporteId,
         ticketId,
-        vehiculoId,
+        unidadId,
         'mecanica' in opciones ? opciones.mecanica : 'Fuga de aceite en el motor',
         opciones.instrumentacion ?? null,
         opciones.operaciones ?? null,
@@ -176,7 +177,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
   /** Recibe un reporte de Pumping con novedades y devuelve el reporte de Mantenimiento ya creado. */
   const recibido = async () => {
     const { reporteId, ticketId } = await reportePumping();
-    await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
+    await consumer.consumir(
+      evento(reporteId, { ticketId, unidadId: UNIDAD.id, vehiculoId: VEHICULO.id }),
+    );
     return prisma.reporteRecibido.findUniqueOrThrow({
       where: { pumpingReporteUnidadId: reporteId },
     });
@@ -188,6 +191,11 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       `INSERT INTO flota.unidad (id, codigo, nombre, tipo, vehiculo_id, predeterminada, activa)
        VALUES ($1, $2, 'Unidad de prueba', 'transporte', $3, false, true)`,
       [UNIDAD.id, UNIDAD.codigo, VEHICULO.id],
+    );
+    await admin.query(
+      `INSERT INTO flota.unidad (id, codigo, nombre, tipo, predeterminada, activa)
+       VALUES ($1, $2, 'Otra unidad de prueba', 'transporte', false, true)`,
+      [UNIDAD_2.id, UNIDAD_2.codigo],
     );
     await admin.query(
       'INSERT INTO inventario.categoria_articulo (id, nombre, es_repuesto) VALUES ($1, $2, true)',
@@ -258,12 +266,13 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       'ALTER TABLE mantenimiento.suborden_repuesto DISABLE TRIGGER suborden_repuesto_con_salida',
     );
     await admin.query(
-      'DELETE FROM mantenimiento.orden WHERE reporte_id IN (SELECT id FROM mantenimiento.reporte_recibido WHERE unidad_id = $1)',
-      [UNIDAD.id],
+      'DELETE FROM mantenimiento.orden WHERE reporte_id IN (SELECT id FROM mantenimiento.reporte_recibido WHERE unidad_id = ANY($1::uuid[]))',
+      [[UNIDAD.id, UNIDAD_2.id]],
     );
-    await admin.query('DELETE FROM mantenimiento.reporte_recibido WHERE unidad_id = $1', [
-      UNIDAD.id,
-    ]);
+    await admin.query(
+      'DELETE FROM mantenimiento.reporte_recibido WHERE unidad_id = ANY($1::uuid[])',
+      [[UNIDAD.id, UNIDAD_2.id]],
+    );
     await admin.query(
       'ALTER TABLE mantenimiento.suborden_repuesto ENABLE TRIGGER suborden_repuesto_con_salida',
     );
@@ -284,7 +293,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     await admin.query("DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'unidadId' = $1", [
       UNIDAD.id,
     ]);
-    await admin.query('DELETE FROM flota.unidad WHERE id = $1', [UNIDAD.id]);
+    await admin.query('DELETE FROM flota.unidad WHERE id = ANY($1::uuid[])', [
+      [UNIDAD.id, UNIDAD_2.id],
+    ]);
     if (eventos.length) {
       await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [eventos]);
     }
@@ -361,18 +372,29 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       ).toBe(1);
     });
 
-    it('ignora sin error el evento al que le falta el reporte, uno de otro tipo y un vehículo sin unidad en Flota', async () => {
+    it('ignora sin error el evento al que le falta el reporte, uno de otro tipo y uno de un reporte que no existe', async () => {
       await expect(consumer.consumir(evento('', {}))).resolves.toBeUndefined();
       await expect(
         consumer.consumir({ ...evento(uuidv7()), type: 'operaciones.pumping.salida_reportada' }),
       ).resolves.toBeUndefined();
-      const huerfano = await reportePumping({ vehiculoId: VEHICULO_SIN_UNIDAD.id });
-      await expect(consumer.consumir(evento(huerfano.reporteId))).resolves.toBeUndefined();
-      expect(
-        await prisma.reporteRecibido.count({
-          where: { pumpingReporteUnidadId: huerfano.reporteId },
-        }),
-      ).toBe(0);
+      await expect(consumer.consumir(evento(uuidv7()))).resolves.toBeUndefined();
+    });
+
+    it('D2: recibe el reporte con la unidad de Flota que Pumping le asignó, haya o no vehículo del catálogo enlazado', async () => {
+      const r = await reportePumping({ unidadId: UNIDAD_2.id });
+      // el evento puede traer `vehiculoId` nulo (la unidad no tiene vehículo): Mantenimiento no lo necesita
+      await consumer.consumir(evento(r.reporteId, { unidadId: UNIDAD_2.id, vehiculoId: null }));
+      const recibido = await prisma.reporteRecibido.findUniqueOrThrow({
+        where: { pumpingReporteUnidadId: r.reporteId },
+      });
+      expect(recibido).toMatchObject({ origen: 'pumping', unidadId: UNIDAD_2.id });
+      // y la base no deja un reporte de Pumping de una unidad que no existe en Flota
+      await expect(
+        admin.query(
+          'INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id) VALUES ($1, $2, $3)',
+          [uuidv7(), r.ticketId, uuidv7()],
+        ),
+      ).rejects.toThrow(/reporte_unidad_unidad_fkey/);
     });
 
     it('publica el aviso de reporte recibido con ids y códigos (sin nombres de personas)', async () => {
@@ -906,7 +928,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       const { reporteId, ticketId } = await reportePumping({
         instrumentacion: 'Monitor sin lectura',
       });
-      await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
+      await consumer.consumir(
+        evento(reporteId, { ticketId, unidadId: UNIDAD.id, vehiculoId: VEHICULO.id }),
+      );
       const r = await prisma.reporteRecibido.findUniqueOrThrow({
         where: { pumpingReporteUnidadId: reporteId },
       });
@@ -1245,7 +1269,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
 
     it('las órdenes de las unidades de un ticket salen por el ticket, aunque no las haya originado él', async () => {
       const { reporteId, ticketId } = await reportePumping();
-      await consumer.consumir(evento(reporteId, { ticketId, vehiculoId: VEHICULO.id }));
+      await consumer.consumir(
+        evento(reporteId, { ticketId, unidadId: UNIDAD.id, vehiculoId: VEHICULO.id }),
+      );
       const reporte = await prisma.reporteRecibido.findUniqueOrThrow({
         where: { pumpingReporteUnidadId: reporteId },
       });
@@ -1259,7 +1285,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       expect(r.body.map((x: { id: string }) => x.id)).toContain(o.body.id);
       expect(r.body.every((x: { unidad: { id: string } }) => x.unidad.id === UNIDAD.id)).toBe(true);
       // otro ticket sin esa unidad no la ve; sin permiso, no entra
-      const otro = await reportePumping({ vehiculoId: VEHICULO_SIN_UNIDAD.id });
+      const otro = await reportePumping({ unidadId: UNIDAD_2.id });
       expect(
         (await http().get(`${base}/tickets/${otro.ticketId}/ordenes`).set(jefe())).body,
       ).toEqual([]);

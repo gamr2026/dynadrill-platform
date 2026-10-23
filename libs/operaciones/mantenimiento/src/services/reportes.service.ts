@@ -89,14 +89,8 @@ export class ReportesService {
     });
     if (ya) return ya.id;
 
-    // La unidad de Flota que corresponde al vehículo del catálogo con que Pumping armó el reporte (D2)
-    const unidad = await tx.flotaUnidad.findFirst({ where: { vehiculoId: origen.vehiculoId } });
-    if (!unidad) {
-      this.logger.warn(
-        `Reporte de unidad ${reporteUnidadId}: el vehículo ${origen.vehiculoId} no tiene unidad en Flota; no se puede recibir`,
-      );
-      return null;
-    }
+    // Pumping arma el reporte con la unidad de Flota (D2): la FK de la base garantiza que existe
+    const unidad = await tx.flotaUnidad.findUniqueOrThrow({ where: { id: origen.unidadId } });
 
     const id = uuidv7();
     const codigo = await this.siguienteCodigo(tx);

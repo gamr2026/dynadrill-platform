@@ -116,7 +116,9 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       itemId: i.id,
       resultado: i.codigo === 'cinturones' ? resultado : 'cumple',
     }));
-  const asignacion = (pares: Array<{ usuarioId: string; vehiculoId: string }>) => {
+  const asignacion = (
+    pares: Array<{ usuarioId: string; vehiculoId?: string | null; unidadId?: string | null }>,
+  ) => {
     const e = createEvent({
       type: 'operaciones.pumping.asignacion_realizada',
       source: 'operaciones',
@@ -431,6 +433,45 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
         { usuarioId: OPERADOR.id, vehiculoId: VEHICULO_2.id },
       ]);
       expect(await casos()).toHaveLength(2);
+    });
+
+    it('D2: Pumping manda la unidad de Flota: abre el caso aunque no tenga vehículo enlazado, prefiere la unidad al vehículo y ignora lo que no es transporte activo', async () => {
+      const crearUnidad = async (extra: Record<string, unknown>) => {
+        const r = await http()
+          .post(`${base}/unidades`)
+          .set(jefe())
+          .send({
+            codigo: `INS-D2-${String(n).slice(-6)}${unidades.length}`,
+            nombre: 'Unidad de prueba D2',
+            ...extra,
+          })
+          .expect(201);
+        unidades.push(r.body.id);
+        return r.body.id as string;
+      };
+      const sinVehiculo = await crearUnidad({
+        tipo: 'transporte',
+        categoriaPeso: 'liviano',
+        lecturaInicial: 1000,
+      });
+      const deServicio = await crearUnidad({ tipo: 'servicio' });
+      const unidadesDeCasos = async () => (await casos()).map((x) => x.unidad.id).sort();
+
+      // una unidad de transporte sin vehículo del catálogo: el evento trae `vehiculoId` nulo y alcanza con la unidad
+      await asignacion([{ usuarioId: OPERADOR.id, unidadId: sinVehiculo, vehiculoId: null }]);
+      expect(await unidadesDeCasos()).toEqual([sinVehiculo]);
+      // con la unidad y el vehículo a la vez, manda la unidad (aunque el vehículo sea de otra)
+      await asignacion([{ usuarioId: OPERADOR.id, unidadId: unidad2Id, vehiculoId: VEHICULO.id }]);
+      expect(await unidadesDeCasos()).toEqual([unidad2Id]);
+      // una unidad de servicio o que no existe no abre caso; la de transporte del mismo evento, sí
+      await asignacion([
+        { usuarioId: OPERADOR.id, unidadId: deServicio, vehiculoId: null },
+        { usuarioId: OPERADOR.id, unidadId: uuidv7(), vehiculoId: null },
+        { usuarioId: CONDUCTOR.id, unidadId, vehiculoId: VEHICULO.id },
+      ]);
+      expect(await unidadesDeCasos()).toEqual([unidadId]);
+      // un par sin unidad ni vehículo se ignora sin error
+      await expect(asignacion([{ usuarioId: OPERADOR.id }])).resolves.toBeUndefined();
     });
 
     it('si la asignación trae conductor por unidad, él es el responsable del caso (no el operador)', async () => {
