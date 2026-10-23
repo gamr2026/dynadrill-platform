@@ -82,6 +82,7 @@ run('QHSE: investigación de incidentes, núcleo (base de datos real)', () => {
     const ids = [TECNICO.id, LIDER.id, OPERADOR.id];
     await sql('DELETE FROM qhse.investigacion_historial WHERE actor_id = ANY($1::uuid[])', [ids]);
     await sql('DELETE FROM qhse.investigacion WHERE created_by = ANY($1::uuid[])', [ids]);
+    await sql('DELETE FROM qhse.emergencia WHERE created_by = ANY($1::uuid[])', [ids]);
     await sql(
       "DELETE FROM msg_qhse.outbox WHERE tipo LIKE 'qhse.investigacion.%' AND datos->'actor'->>'userId' = ANY($1::text[])",
       [ids],
@@ -157,7 +158,12 @@ run('QHSE: investigación de incidentes, núcleo (base de datos real)', () => {
     });
 
     it('una emergencia origina a lo sumo una investigación', async () => {
+      // la FK a emergencia es real: la emergencia de origen tiene que existir
       const emergencia = uuidv7();
+      await sql(
+        "INSERT INTO qhse.emergencia (id, tipo_id, descripcion, activado_por, created_by) SELECT $1, id, 'origen de investigación', $2, $2 FROM qhse.emergencia_tipo WHERE codigo = 'otro'",
+        [emergencia, OPERADOR.id],
+      );
       await abierta({ origenEmergenciaId: emergencia });
       const otra = await abrir({ origenEmergenciaId: emergencia });
       expect(otra.status).toBe(409);
