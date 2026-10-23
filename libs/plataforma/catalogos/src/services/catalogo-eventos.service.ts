@@ -12,6 +12,7 @@ export type Catalogo =
   | 'zona'
   | 'bodega'
   | 'condicion_pago'
+  | 'unidad_medida'
   | 'transportista'
   | 'tipo_vehiculo'
   | 'vehiculo'

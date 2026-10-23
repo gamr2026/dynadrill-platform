@@ -143,11 +143,6 @@ export class ActualizarSubcategoriaDto {
   @IsOptional() @IsBoolean() activo?: boolean;
 }
 
-export class UnidadStockDto {
-  @IsString() @MinLength(1) @MaxLength(60) nombre!: string;
-  @IsString() @MinLength(1) @MaxLength(12) simbolo!: string;
-}
-
 export class ListarMotivosDto {
   /** Solo los que la pantalla permite elegir. */
   @IsOptional() @Transform(aBooleano) @IsBoolean() manual?: boolean;

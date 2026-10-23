@@ -208,7 +208,9 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
 
     // catálogos de la prueba
     await sembrarCatalogos(prisma);
-    ids.unidad = (await prisma.unidadStock.findUniqueOrThrow({ where: { nombre: 'Galón' } })).id;
+    ids.unidad = (
+      await prisma.catUnidadMedida.findUniqueOrThrow({ where: { nombre: 'Galón' } })
+    ).id;
     const motivo = async (nombre: string) =>
       (await prisma.motivoMovimiento.findUniqueOrThrow({ where: { nombre } })).id;
     ids.motivoCompra = await motivo('Compra');
@@ -282,7 +284,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [
       eventosEnviados,
     ]);
-    await admin.query('DELETE FROM inventario.unidad_stock WHERE nombre LIKE $1', [`IT-%${n}`]);
+    await admin.query('DELETE FROM catalogos.unidad_medida WHERE nombre LIKE $1', [`IT-%${n}`]);
     await quitarMaestros(admin, MAESTROS);
     await admin.end();
     await app.close();
@@ -965,11 +967,12 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       const nombres = motivos.body.map((m: { nombre: string }) => m.nombre);
       expect(nombres).toContain('Compra');
       expect(nombres).not.toContain('Saldo inicial');
-      const unidad = await http()
-        .post('/api/operaciones/inventario/unidades')
-        .set(bodeguero())
-        .send({ nombre: `IT-Cubeta ${n}`, simbolo: 'cbt' });
-      expect(unidad.status).toBe(201);
+      // las unidades son de la plataforma: aquí solo se leen
+      const unidades = await http().get('/api/operaciones/inventario/unidades').set(lector());
+      expect(unidades.status).toBe(200);
+      expect(unidades.body).toEqual(
+        expect.arrayContaining([{ id: ids.unidad, nombre: 'Galón', simbolo: 'gal', activo: true }]),
+      );
       const bodegas = await http().get('/api/operaciones/inventario/bodegas').set(lector());
       expect(bodegas.body.map((b: { id: string }) => b.id)).toEqual(
         expect.arrayContaining([BODEGA_A.id, BODEGA_B.id]),
@@ -977,6 +980,76 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       const cats = await http().get('/api/operaciones/inventario/categorias').set(lector());
       const mia = cats.body.find((c: { id: string }) => c.id === ids.categoria);
       expect(mia.subcategorias.map((s: { id: string }) => s.id)).toEqual([ids.subcategoria]);
+    });
+  });
+
+  describe('unidad de medida compartida (IN9)', () => {
+    const crearUnidad = async (sufijo: string, habilitado = true) => {
+      const id = uuidv7();
+      await admin.query(
+        'INSERT INTO catalogos.unidad_medida (id, nombre, simbolo, habilitado) VALUES ($1, $2, $3, $4)',
+        [id, `IT-${sufijo} ${n}`, 'itu', habilitado],
+      );
+      return id;
+    };
+    const articuloCon = (sufijo: string, unidadStockId: string) =>
+      http()
+        .post('/api/operaciones/inventario/articulos')
+        .set(bodeguero())
+        .send({
+          codigo: `IT${n}${sufijo}`,
+          nombre: `Artículo ${sufijo}`,
+          categoriaId: ids.categoria,
+          unidadStockId,
+        });
+
+    it('el artículo usa una unidad del catálogo compartido y Inventario ya no las crea', async () => {
+      const unidad = await crearUnidad('Cubeta');
+      const r = await articuloCon('U1', unidad).expect(201);
+      articulos.push(r.body.id);
+      expect(r.body.unidadStock).toMatchObject({
+        id: unidad,
+        nombre: `IT-Cubeta ${n}`,
+        simbolo: 'itu',
+      });
+      const lista = await http()
+        .get('/api/operaciones/inventario/unidades')
+        .set(lector())
+        .expect(200);
+      expect(lista.body.map((u: { id: string }) => u.id)).toContain(unidad);
+      // crear unidades es del catálogo de la plataforma (`/api/v2/catalogos/unidades-medida`), no de Inventario
+      await http()
+        .post('/api/operaciones/inventario/unidades')
+        .set(bodeguero())
+        .send({ nombre: `IT-Nueva ${n}`, simbolo: 'nv' })
+        .expect(404);
+    });
+
+    it('rechaza una unidad que no existe o está inhabilitada', async () => {
+      const inhabilitada = await crearUnidad('Inhabilitada', false);
+      for (const unidad of [inhabilitada, uuidv7()]) {
+        const r = await articuloCon('U2', unidad).expect(409);
+        expect(r.body.code).toBe('UNIDAD_INVALIDA');
+      }
+    });
+
+    it('la base exige la unidad real, y una unidad en uso no se puede borrar ni cambiar de id', async () => {
+      const unidad = await crearUnidad('EnUso');
+      const a = await articuloCon('U3', unidad).expect(201);
+      articulos.push(a.body.id);
+      await expect(
+        admin.query('UPDATE inventario.articulo SET unidad_stock_id = $2 WHERE id = $1', [
+          a.body.id,
+          uuidv7(),
+        ]),
+      ).rejects.toThrow(/articulo_unidad_stock_id_fkey/);
+      await expect(
+        admin.query('DELETE FROM catalogos.unidad_medida WHERE id = $1', [unidad]),
+      ).rejects.toThrow(/articulo_unidad_stock_id_fkey/);
+      // y la tabla propia de Inventario ya no existe
+      expect(
+        (await admin.query("SELECT to_regclass('inventario.unidad_stock') AS t")).rows[0].t,
+      ).toBeNull();
     });
   });
 
@@ -1637,7 +1710,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
 
     it('cada artículo con saldo queda con la unidad real de AS2 y los ajustes quedan como movimientos con su motivo (el kardex no se edita)', async () => {
       const u = await admin.query(
-        `SELECT u.nombre FROM inventario.articulo a JOIN inventario.unidad_stock u ON u.id = a.unidad_stock_id WHERE a.codigo = 'DYACET-100'`,
+        `SELECT u.nombre FROM inventario.articulo a JOIN catalogos.unidad_medida u ON u.id = a.unidad_stock_id WHERE a.codigo = 'DYACET-100'`,
       );
       expect(u.rows[0].nombre).toBe('Galón');
       const m = await admin.query(

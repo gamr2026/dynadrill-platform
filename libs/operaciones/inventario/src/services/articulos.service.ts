@@ -376,10 +376,11 @@ export class ArticulosService {
         });
       }
     }
-    const unidad = await this.prisma.unidadStock.findUnique({ where: { id: unidadStockId } });
-    if (!unidad || !unidad.activo) {
+    // la unidad es la de medida compartida de la plataforma (catalogos.unidad_medida)
+    const unidad = await this.prisma.catUnidadMedida.findUnique({ where: { id: unidadStockId } });
+    if (!unidad || !unidad.habilitado) {
       throw new ConflictException({
-        message: 'La unidad de stock no existe o está inactiva',
+        message: 'La unidad de medida no existe o está inhabilitada',
         code: 'UNIDAD_INVALIDA',
       });
     }

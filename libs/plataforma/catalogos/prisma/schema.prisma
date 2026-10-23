@@ -54,7 +54,7 @@ model PersonaContacto {
   nombre String
   /// Cédula del Company Man (a pedido del cliente, para buscarlo por cédula además de por nombre).
   cedula String?
-  activo Boolean @default(true)
+  activo Boolean     @default(true)
 
   @@unique([tipo, nombre])
   @@index([tipo])
@@ -110,11 +110,11 @@ model Campo {
   /// TRANSICIÓN: id numérico en el backend demo.
   legacyId Int? @unique @map("legacy_id")
 
-  nombre String @unique
+  nombre     String  @unique
   /// Región comercial (ZONA OESTE/ESTE/NORTE/LITORAL/MACHALA...): catálogo propio. Va en el Campo, no en el Bloque.
-  zonaId            String?          @map("zona_id") @db.Uuid
-  zona              Zona?            @relation(fields: [zonaId], references: [id])
-  habilitado        Boolean          @default(true)
+  zonaId     String? @map("zona_id") @db.Uuid
+  zona       Zona?   @relation(fields: [zonaId], references: [id])
+  habilitado Boolean @default(true)
 
   pozos Pozo[]
 
@@ -158,7 +158,7 @@ model Taladro {
   /// TRANSICIÓN: id numérico en el backend demo.
   legacyId Int? @unique @map("legacy_id")
 
-  nombre String @unique
+  nombre         String  @unique
   /// "RIG CONTRACTUAL": solo lo traen los taladros de contratista.
   rigContractual String? @map("rig_contractual")
   habilitado     Boolean @default(true)
@@ -180,6 +180,23 @@ model Bodega {
   habilitado Boolean @default(true)
 
   @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// Unidades de medida (galón, kilogramo, día...), catálogo compartido (IN9). Hoy las usa Inventario (la unidad en que se lleva el stock de un
+/// artículo); las listas de precios y AS2 traen la unidad como texto y se enlazan cuando Asinfo confirme la equivalencia (consulta C11).
+model UnidadMedida {
+  id        String   @id @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  nombre     String  @unique
+  simbolo    String
+  habilitado Boolean @default(true)
+
+  @@map("unidad_medida")
   @@schema("catalogos")
 }
 
@@ -265,16 +282,16 @@ model Vehiculo {
   updatedBy String?  @map("updated_by") @db.Uuid
 
   /// Placa en mayúsculas y sin espacios ni guiones (`GSI6538`).
-  placa           String        @unique
+  placa           String         @unique
   marca           String?
   modelo          String?
   anio            Int?
-  tipoVehiculoId  String?       @map("tipo_vehiculo_id") @db.Uuid
-  tipoVehiculo    TipoVehiculo? @relation(fields: [tipoVehiculoId], references: [id])
+  tipoVehiculoId  String?        @map("tipo_vehiculo_id") @db.Uuid
+  tipoVehiculo    TipoVehiculo?  @relation(fields: [tipoVehiculoId], references: [id])
   /// A quién pertenece (el "responsable" de AS2).
-  transportistaId String?       @map("transportista_id") @db.Uuid
+  transportistaId String?        @map("transportista_id") @db.Uuid
   transportista   Transportista? @relation(fields: [transportistaId], references: [id])
-  habilitado      Boolean       @default(true)
+  habilitado      Boolean        @default(true)
 
   @@index([transportistaId])
   @@map("vehiculo")

@@ -232,7 +232,7 @@ run(
       ] as const) {
         await admin.query(
           `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id, activo)
-         VALUES ($1, $2, $3, $4, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1), $5)`,
+         VALUES ($1, $2, $3, $4, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1), $5)`,
           [a.id, a.codigo, `Herramienta ${a.codigo}`, cat, activo],
         );
       }

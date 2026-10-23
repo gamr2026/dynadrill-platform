@@ -13,10 +13,13 @@ import { Permission } from '@dyn/authz';
 import { ZonasService } from '../services/zonas.service';
 import { BodegasService } from '../services/bodegas.service';
 import { CondicionesPagoService } from '../services/condiciones-pago.service';
+import { UnidadesMedidaService } from '../services/unidades-medida.service';
 import { AnyAuthenticated, AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import {
   CreateCatalogoAs2Dto,
   CreateCatalogoSimpleDto,
+  CreateUnidadMedidaDto,
+  UpdateUnidadMedidaDto,
   UpdateCatalogoAs2Dto,
   UpdateCatalogoSimpleDto,
   CreateBloqueDto,
@@ -403,6 +406,47 @@ export class CondicionesPagoController {
   }
 
   @RequirePermission(Permission.UBICACION_INACTIVAR)
+  @Delete(':id')
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    await this.service.inactivar(id, actor);
+    return { ok: true };
+  }
+}
+
+/** Unidades de medida compartidas (IN9). La lectura es de cualquier cuenta; escribir exige su permiso. */
+@Controller('catalogos/unidades-medida')
+export class UnidadesMedidaController {
+  constructor(private readonly service: UnidadesMedidaService) {}
+
+  @AnyAuthenticated()
+  @Get()
+  findAll() {
+    return this.service.findAll();
+  }
+
+  @AnyAuthenticated()
+  @Get(':id')
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.service.findOne(id);
+  }
+
+  @RequirePermission(Permission.UNIDADES_MEDIDA_CREAR)
+  @Post()
+  create(@Body() dto: CreateUnidadMedidaDto, @CurrentUser() actor: AuthUser) {
+    return this.service.create(dto, actor);
+  }
+
+  @RequirePermission(Permission.UNIDADES_MEDIDA_EDITAR)
+  @Put(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateUnidadMedidaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.service.update(id, dto, actor);
+  }
+
+  @RequirePermission(Permission.UNIDADES_MEDIDA_INACTIVAR)
   @Delete(':id')
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     await this.service.inactivar(id, actor);

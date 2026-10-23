@@ -203,7 +203,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     );
     await admin.query(
       `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
-       VALUES ($1, $2, 'Filtro de aceite de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+       VALUES ($1, $2, 'Filtro de aceite de prueba', $3, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1))`,
       [ARTICULO.id, ARTICULO.codigo, CATEGORIA],
     );
     contadorInicial = (

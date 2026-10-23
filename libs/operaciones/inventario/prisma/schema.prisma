@@ -94,20 +94,18 @@ model SubcategoriaArticulo {
   @@schema("inventario")
 }
 
-model UnidadStock {
-  id        String   @id @db.Uuid
-  nombre    String   @unique
-  simbolo   String
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
+/// `catalogos.unidad_medida`: unidad de medida compartida de la plataforma (IN9), de solo lectura aquí. En Inventario es la unidad en que se
+/// lleva el stock de un artículo.
+model CatUnidadMedida {
+  id         String  @id @db.Uuid
+  nombre     String  @unique
+  simbolo    String
+  habilitado Boolean
 
   articulos Articulo[]
 
-  @@map("unidad_stock")
-  @@schema("inventario")
+  @@map("unidad_medida")
+  @@schema("catalogos")
 }
 
 /// El motivo fija el tipo y el origen del movimiento; `manual` indica si la pantalla permite elegirlo.
@@ -161,7 +159,7 @@ model Articulo {
   subcategoriaId       String?               @map("subcategoria_id") @db.Uuid
   subcategoria         SubcategoriaArticulo? @relation(fields: [subcategoriaId], references: [id])
   unidadStockId        String                @map("unidad_stock_id") @db.Uuid
-  unidadStock          UnidadStock           @relation(fields: [unidadStockId], references: [id])
+  unidadStock          CatUnidadMedida       @relation(fields: [unidadStockId], references: [id])
   nota                 String?
   informacionAdicional String?               @map("informacion_adicional")
   /// Costo interno de Dynadrill (no es precio de venta).

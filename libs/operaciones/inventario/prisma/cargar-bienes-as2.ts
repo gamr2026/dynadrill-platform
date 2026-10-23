@@ -53,7 +53,7 @@ export async function cargarBienesAs2(prisma: PrismaClient): Promise<ResumenBien
   const datos = JSON.parse(
     readFileSync(join(__dirname, 'data', 'as2-bienes.json'), 'utf8'),
   ) as ArchivoBienes;
-  const unidad = await prisma.unidadStock.findUniqueOrThrow({
+  const unidad = await prisma.catUnidadMedida.findUniqueOrThrow({
     where: { nombre: UNIDAD_POR_DEFECTO },
   });
   const r: ResumenBienes = {

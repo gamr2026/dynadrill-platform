@@ -79,12 +79,20 @@ describe('catálogo de permisos', () => {
       'catalogos.ubicacion.crear',
       'catalogos.ubicacion.editar',
       'catalogos.ubicacion.inactivar',
+      'catalogos.unidades_medida.crear',
+      'catalogos.unidades_medida.editar',
+      'catalogos.unidades_medida.inactivar',
     ]);
     expect(cat.some((p) => p.accion === 'ver')).toBe(false); // lectura abierta, sin permiso
     for (const p of cat.filter((x) => x.recurso === 'ubicacion'))
       expect(p.matrixKey).toBe('catalogosWrite');
     // el transporte (guía de remisión) lo opera Facturación: tiene sus propios roles, no los de personas
-    for (const p of cat.filter((x) => x.recurso !== 'ubicacion' && x.recurso !== 'transporte'))
+    // las unidades de medida (IN9) las administra quien administra los artículos: la matriz de Inventario
+    for (const p of cat.filter((x) => x.recurso === 'unidades_medida'))
+      expect(p.matrixKey).toBe('inventario');
+    for (const p of cat.filter(
+      (x) => !['ubicacion', 'transporte', 'unidades_medida'].includes(x.recurso),
+    ))
       expect(p.matrixKey).toBe('personasWrite');
   });
 

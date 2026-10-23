@@ -23,6 +23,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { sembrarUnidadesMedida } from './catalog/sembrar-unidades-medida';
 import { CatalogosModule } from './index';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -127,7 +128,8 @@ run('catalogos (base de datos real)', () => {
          UNION ALL SELECT id::text FROM catalogos.bloque WHERE nombre LIKE $1
          UNION ALL SELECT id::text FROM catalogos.taladro WHERE nombre LIKE $1
          UNION ALL SELECT id::text FROM catalogos.cliente WHERE identificacion LIKE $1
-         UNION ALL SELECT id::text FROM catalogos.persona_contacto WHERE nombre LIKE $1)`,
+         UNION ALL SELECT id::text FROM catalogos.persona_contacto WHERE nombre LIKE $1
+         UNION ALL SELECT id::text FROM catalogos.unidad_medida WHERE nombre LIKE $1)`,
       [like],
     );
     await admin.query('DELETE FROM catalogos.pozo WHERE codigo LIKE $1', [like]);
@@ -141,6 +143,7 @@ run('catalogos (base de datos real)', () => {
     await admin.query('DELETE FROM catalogos.transportista WHERE nombre_fiscal LIKE $1', [like]);
     await admin.query('DELETE FROM catalogos.tipo_vehiculo WHERE nombre LIKE $1', [like]);
     await admin.query('DELETE FROM catalogos.bodega WHERE nombre LIKE $1', [like]);
+    await admin.query('DELETE FROM catalogos.unidad_medida WHERE nombre LIKE $1', [like]);
     await admin.query('DELETE FROM catalogos.condicion_pago WHERE nombre LIKE $1', [like]);
     await admin.query('DELETE FROM catalogos.bloque WHERE nombre LIKE $1', [like]);
     await admin.query('DELETE FROM catalogos.taladro WHERE nombre LIKE $1', [like]);
@@ -811,6 +814,154 @@ run('catalogos (base de datos real)', () => {
           [uuidv7(), `${tag}-check`],
         ),
       ).rejects.toThrow(/invalid input value for enum .*tipo_persona/);
+    });
+  });
+
+  describe('unidades de medida compartidas (IN9)', () => {
+    const url = '/api/catalogos/unidades-medida';
+    const TODOS_UNIDADES = [
+      P.UNIDADES_MEDIDA_CREAR,
+      P.UNIDADES_MEDIDA_EDITAR,
+      P.UNIDADES_MEDIDA_INACTIVAR,
+    ];
+    const adm = () => bearer(token(TODOS_UNIDADES));
+    const crear = (sufijo: string, simbolo = 'itu') =>
+      http()
+        .post(url)
+        .set(adm())
+        .send({ nombre: `${tag}-${sufijo}`, simbolo });
+    const eventos = async (id: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_plataforma.outbox WHERE tipo = 'plataforma.catalogo.actualizado' AND datos->'data'->>'id' = $1 ORDER BY ocurrido_at, id",
+          [id],
+        )
+      ).rows.map((r: { d: { catalogo: string; cambio: string } }) => [r.d.catalogo, r.d.cambio]);
+
+    it('se crea, se lee por cualquier cuenta, se edita y publica el evento del catálogo', async () => {
+      const r = await crear('Cubeta', 'cbt').expect(201);
+      expect(r.body).toEqual({
+        id: expect.any(String),
+        nombre: `${tag}-Cubeta`,
+        simbolo: 'cbt',
+        habilitado: true,
+      });
+      // la lectura es de cualquier cuenta autenticada (los formularios la necesitan para sus selectores)
+      const lista = await http().get(url).set(bearer(token())).expect(200);
+      expect(lista.body.map((u: { id: string }) => u.id)).toContain(r.body.id);
+      expect(
+        (await http().get(`${url}/${r.body.id}`).set(bearer(token())).expect(200)).body.simbolo,
+      ).toBe('cbt');
+      await http().get(`${url}/${uuidv7()}`).set(bearer(token())).expect(404);
+      await http().get(url).expect(401);
+      const e = await http()
+        .put(`${url}/${r.body.id}`)
+        .set(adm())
+        .send({ nombre: `${tag}-Cubeta grande`, simbolo: ' cbg ' })
+        .expect(200);
+      expect(e.body).toMatchObject({ nombre: `${tag}-Cubeta grande`, simbolo: 'cbg' });
+      expect(await eventos(r.body.id)).toEqual([
+        ['unidad_medida', 'creado'],
+        ['unidad_medida', 'actualizado'],
+      ]);
+    });
+
+    it('cada escritura exige su permiso, y dejar de habilitar una unidad exige el de inactivar', async () => {
+      const sinPermiso = bearer(token());
+      await http()
+        .post(url)
+        .set(sinPermiso)
+        .send({ nombre: `${tag}-x`, simbolo: 'x' })
+        .expect(403);
+      const u = (await crear('Permisos').expect(201)).body;
+      await http().put(`${url}/${u.id}`).set(sinPermiso).send({ simbolo: 'y' }).expect(403);
+      await http().delete(`${url}/${u.id}`).set(sinPermiso).expect(403);
+      const soloEditar = bearer(token([P.UNIDADES_MEDIDA_EDITAR]));
+      // editar no sirve para saltarse «inactivar»
+      await http().put(`${url}/${u.id}`).set(soloEditar).send({ habilitado: false }).expect(403);
+      await http().delete(`${url}/${u.id}`).set(adm()).expect(200);
+      expect((await http().get(`${url}/${u.id}`).set(sinPermiso).expect(200)).body.habilitado).toBe(
+        false,
+      );
+      // reactivar solo exige editar
+      await http().put(`${url}/${u.id}`).set(soloEditar).send({ habilitado: true }).expect(200);
+      expect(await eventos(u.id)).toEqual([
+        ['unidad_medida', 'creado'],
+        ['unidad_medida', 'inactivado'],
+        ['unidad_medida', 'actualizado'],
+      ]);
+      // inactivar dos veces no repite el evento
+      await http().delete(`${url}/${u.id}`).set(adm()).expect(200);
+      await http().delete(`${url}/${u.id}`).set(adm()).expect(200);
+      expect((await eventos(u.id)).filter((x) => x[1] === 'inactivado')).toHaveLength(2);
+    });
+
+    it('rechaza el nombre repetido (sin importar mayúsculas ni espacios) y los datos vacíos o demasiado largos', async () => {
+      const a = (await crear('Repetida').expect(201)).body;
+      const repetido = await http()
+        .post(url)
+        .set(adm())
+        .send({ nombre: `  ${tag}-REPETIDA `, simbolo: 'r' })
+        .expect(409);
+      expect(repetido.body.detail ?? repetido.body.message).toMatch(
+        /Ya existe una unidad de medida/,
+      );
+      const b = (await crear('Otra').expect(201)).body;
+      await http()
+        .put(`${url}/${b.id}`)
+        .set(adm())
+        .send({ nombre: `${tag}-repetida` })
+        .expect(409);
+      // renombrarse a sí misma con otras mayúsculas sí se puede
+      await http()
+        .put(`${url}/${a.id}`)
+        .set(adm())
+        .send({ nombre: `${tag}-REPETIDA` })
+        .expect(200);
+      for (const malo of [
+        { nombre: '', simbolo: 'x' },
+        { nombre: `${tag}-v`, simbolo: '' },
+        { nombre: `${tag}-v`, simbolo: 'demasiado largo' },
+        { nombre: 'n'.repeat(61), simbolo: 'x' },
+        { simbolo: 'x' },
+      ]) {
+        await http().post(url).set(adm()).send(malo).expect(400);
+      }
+    });
+
+    it('la base lo garantiza: nombre único sin importar mayúsculas, textos no vacíos y sin borrado desde la aplicación', async () => {
+      const u = (await crear('Base').expect(201)).body;
+      await expect(
+        admin.query(
+          'INSERT INTO catalogos.unidad_medida (id, nombre, simbolo) VALUES ($1, $2, $3)',
+          [uuidv7(), ` ${tag}-BASE `, 'b'],
+        ),
+      ).rejects.toThrow(/unidad_medida_nombre_minusculas_key/);
+      await expect(
+        admin.query('UPDATE catalogos.unidad_medida SET simbolo = $2 WHERE id = $1', [u.id, '  ']),
+      ).rejects.toThrow(/unidad_medida_simbolo_check/);
+      await expect(
+        admin.query('UPDATE catalogos.unidad_medida SET nombre = $2 WHERE id = $1', [u.id, ' ']),
+      ).rejects.toThrow(/unidad_medida_nombre_check/);
+      await expect(prisma.unidadMedida.delete({ where: { id: u.id } })).rejects.toThrow();
+      expect(
+        (await admin.query('SELECT 1 FROM catalogos.unidad_medida WHERE id = $1', [u.id])).rowCount,
+      ).toBe(1);
+    });
+
+    it('la semilla base es idempotente y trae las unidades que usaba Inventario', async () => {
+      const antes = Number(
+        (await admin.query('SELECT count(*) FROM catalogos.unidad_medida')).rows[0].count,
+      );
+      const nuevas = await sembrarUnidadesMedida(prisma);
+      expect(nuevas).toBe(0); // ya estaban (las trasladó Inventario o las sembró antes)
+      expect(
+        Number((await admin.query('SELECT count(*) FROM catalogos.unidad_medida')).rows[0].count),
+      ).toBe(antes);
+      const nombres = (await admin.query('SELECT nombre FROM catalogos.unidad_medida')).rows.map(
+        (r: { nombre: string }) => r.nombre,
+      );
+      expect(nombres).toEqual(expect.arrayContaining(['Unidad', 'Galón', 'Litro', 'Kilogramo']));
     });
   });
 

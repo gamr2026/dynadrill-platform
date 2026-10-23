@@ -29,7 +29,6 @@ import {
   RegistrarMovimientoDto,
   SalidaDespachoDto,
   SubcategoriaDto,
-  UnidadStockDto,
 } from '../dto/inventario.dto';
 import { ArticulosService } from '../services/articulos.service';
 import { DespachosService } from '../services/despachos.service';
@@ -278,12 +277,6 @@ export class InventarioController {
   @Get('unidades')
   unidades() {
     return this.catalogos.unidades();
-  }
-
-  @RequirePermission(P.ARTICULOS_GESTIONAR)
-  @Post('unidades')
-  crearUnidad(@Body() dto: UnidadStockDto, @CurrentUser() actor: AuthUser) {
-    return this.catalogos.crearUnidad(dto, actor.id);
   }
 
   @RequirePermission(P.ARTICULOS_VER)

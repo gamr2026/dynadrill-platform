@@ -310,6 +310,14 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Despachar o rechazar solicitudes de despacho',
   ),
   def('inventario', 'inventario.articulos.gestionar', 'Administrar artículos y su kardex'),
+  // unidades de medida compartidas (catálogo de la plataforma, IN9): las administra quien administra los artículos
+  def(
+    'inventario',
+    'catalogos.unidades_medida.crear',
+    'Crear unidades de medida (galón, kilogramo...)',
+  ),
+  def('inventario', 'catalogos.unidades_medida.editar', 'Editar unidades de medida'),
+  def('inventario', 'catalogos.unidades_medida.inactivar', 'Inactivar unidades de medida'),
   def('articulosRead', 'inventario.articulos.ver', 'Consultar el catálogo de artículos'),
   def('inventarioConsumo', 'inventario.movimientos.consumir', 'Registrar consumo de inventario'),
   // fcr
@@ -664,6 +672,9 @@ export const Permission = {
   DESPACHOS_VER: 'inventario.despachos.ver',
   DESPACHOS_GESTIONAR: 'inventario.despachos.gestionar',
   ARTICULOS_GESTIONAR: 'inventario.articulos.gestionar',
+  UNIDADES_MEDIDA_CREAR: 'catalogos.unidades_medida.crear',
+  UNIDADES_MEDIDA_EDITAR: 'catalogos.unidades_medida.editar',
+  UNIDADES_MEDIDA_INACTIVAR: 'catalogos.unidades_medida.inactivar',
   ARTICULOS_VER: 'inventario.articulos.ver',
   INVENTARIO_CONSUMIR: 'inventario.movimientos.consumir',
   FCR_OPERAR: 'fcr.tickets.operar',

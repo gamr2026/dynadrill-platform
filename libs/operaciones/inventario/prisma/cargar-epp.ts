@@ -57,7 +57,7 @@ export async function cargarEpp(prisma: PrismaClient): Promise<ResumenEpp> {
   const motivoDe = new Map(
     datos.fusionados.flatMap((f) => f.desde.map((c) => [c, MOTIVO[f.motivo]] as const)),
   );
-  const unidad = await prisma.unidadStock.findUniqueOrThrow({
+  const unidad = await prisma.catUnidadMedida.findUniqueOrThrow({
     where: { nombre: UNIDAD_POR_DEFECTO },
   });
   const r: ResumenEpp = {

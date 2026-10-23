@@ -1,5 +1,5 @@
 /**
- * Siembra los catálogos de Inventario: unidades de stock y motivos de movimiento (idempotente).
+ * Siembra los catálogos de Inventario: los motivos de movimiento (idempotente). Las unidades de medida son de la plataforma: `db:seed:catalogos`.
  *   npm run db:seed:inventario
  * Variables: DATABASE_URL (usuario app_operaciones). El catálogo de artículos se carga aparte: `npm run db:cargar:inventario`.
  */
@@ -21,9 +21,7 @@ async function main() {
   try {
     const r = await sembrarCatalogos(prisma);
     await marcarCategoriasBase(prisma);
-    console.log(
-      `inventario: ${r.unidades} unidades de stock y ${r.motivos} motivos de movimiento nuevos`,
-    );
+    console.log(`inventario: ${r.motivos} motivos de movimiento nuevos`);
   } finally {
     await prisma.$disconnect();
   }

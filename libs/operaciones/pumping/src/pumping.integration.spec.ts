@@ -1884,7 +1884,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ] as const) {
         await admin.query(
           `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id)
-           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM inventario.unidad_stock ORDER BY nombre LIMIT 1))`,
+           VALUES ($1, $2, 'Articulo de prueba', $3, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1))`,
           [a.id, a.codigo, categoria],
         );
       }

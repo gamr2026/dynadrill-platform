@@ -1,25 +1,6 @@
 import { uuidv7 } from '@dyn/utils';
 import type { PrismaClient } from '../generated/client';
 
-/** Unidades de stock más usadas en bodega (nombre y símbolo). */
-export const UNIDADES_STOCK: ReadonlyArray<{ nombre: string; simbolo: string }> = [
-  { nombre: 'Unidad', simbolo: 'und' },
-  { nombre: 'Galón', simbolo: 'gal' },
-  { nombre: 'Litro', simbolo: 'l' },
-  { nombre: 'Kilogramo', simbolo: 'kg' },
-  { nombre: 'Barril', simbolo: 'bbl' },
-  { nombre: 'Metro cuadrado', simbolo: 'm2' },
-  { nombre: 'Libra', simbolo: 'lb' },
-  { nombre: 'Saco', simbolo: 'sc' },
-  { nombre: 'Tambor', simbolo: 'tbr' },
-  { nombre: 'Balde', simbolo: 'bld' },
-  { nombre: 'Caja', simbolo: 'cja' },
-  { nombre: 'Metro', simbolo: 'm' },
-  { nombre: 'Pie', simbolo: 'ft' },
-  { nombre: 'Par', simbolo: 'par' },
-  { nombre: 'Juego', simbolo: 'jgo' },
-];
-
 /** Categorías que agrupan químicos y las que llevan lista de partes, por defecto (el nombre es el del export de AS2). Solo la semilla y la carga inicial usan estos nombres: el sistema decide siempre por `es_quimica` y `lleva_partes`. */
 export const CATEGORIAS_QUIMICAS: readonly string[] = ['QUIMICA'];
 export const CATEGORIAS_CON_PARTES: readonly string[] = ['FISHING & TOOLS', 'HERRAMIENTAS'];
@@ -75,19 +56,16 @@ export const MOTIVOS: ReadonlyArray<Motivo> = [
   },
 ];
 
-/** Siembra las unidades y los motivos (idempotente: lo que ya existe no se toca). */
-export async function sembrarCatalogos(
-  prisma: PrismaClient,
-): Promise<{ unidades: number; motivos: number }> {
-  const u = await prisma.unidadStock.createMany({
-    data: UNIDADES_STOCK.map((x) => ({ id: uuidv7(), ...x })),
-    skipDuplicates: true,
-  });
+/**
+ * Siembra los motivos de movimiento (idempotente: lo que ya existe no se toca). Las unidades de medida ya no son de Inventario: son un
+ * catálogo compartido de la plataforma (IN9) y las siembra `npm run db:seed:catalogos`.
+ */
+export async function sembrarCatalogos(prisma: PrismaClient): Promise<{ motivos: number }> {
   const m = await prisma.motivoMovimiento.createMany({
     data: MOTIVOS.map((x) => ({ id: uuidv7(), ...x })),
     skipDuplicates: true,
   });
-  return { unidades: u.count, motivos: m.count };
+  return { motivos: m.count };
 }
 
 /** Marca las categorías base (idempotente): solo enciende lo que está apagado, no vuelve a apagar lo que un administrador encendió. */
