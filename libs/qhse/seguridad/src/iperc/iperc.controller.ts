@@ -9,7 +9,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import {
@@ -34,6 +34,12 @@ export class ListarActividadesDto {
   @IsOptional() @IsString() @MaxLength(100) q?: string;
   @IsOptional() @IsUUID() procesoId?: string;
   @IsOptional() @IsUUID() zonaId?: string;
+}
+
+export class CoberturaDeTicketDto {
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'El día se escribe AAAA-MM-DD' })
+  dia?: string;
 }
 
 /**
@@ -111,6 +117,19 @@ export class IpercController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.consulta.fijarCobertura(tipoCodigo, dto.actividadIds, actor);
+  }
+
+  /**
+   * Cobertura IPERC de un ticket para el banner del ticket de FCR. Lo lee el equipo de FCR con `qhse.documentos.ver_ticket` (no necesita ver
+   * toda la matriz). `?dia=AAAA-MM-DD` (hoy por defecto).
+   */
+  @RequirePermission(P.DOCUMENTOS_VER_TICKET)
+  @Get('tickets/:ticketId')
+  coberturaDeTicket(
+    @Param('ticketId', ParseUUIDPipe) ticketId: string,
+    @Query() q: CoberturaDeTicketDto,
+  ) {
+    return this.consulta.coberturaDeTicket(ticketId, q.dia);
   }
 
   @RequirePermission(P.IPERC_VER)

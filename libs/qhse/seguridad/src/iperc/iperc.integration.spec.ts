@@ -527,6 +527,56 @@ run('QHSE: matriz IPERC maestra y PTW (base de datos real)', () => {
       expect(await t.prisma.ptwMatriz.count({ where: { ptwId: conCobertura.ptwId } })).toBe(1);
     });
 
+    it('el equipo de FCR consulta la cobertura IPERC de un ticket: qué actividades exige y si cada matriz está aprobada y vigente', async () => {
+      const fcr = () =>
+        t.token(
+          'supervisor_operaciones_fcr',
+          'Fabio FCR',
+          [Permission.DOCUMENTOS_VER_TICKET],
+          uuidv7(),
+        );
+      const consultar = (ticketId: string, dia = '', quien = fcr()) =>
+        t
+          .http()
+          .get(`/api/qhse/iperc/tickets/${ticketId}${dia ? `?dia=${dia}` : ''}`)
+          .set(quien);
+      // un ticket que QHSE no conoce, o sin servicios con cobertura: no exige nada
+      const desconocido = await consultar(uuidv7());
+      expect(desconocido.status).toBe(200);
+      expect(desconocido.body).toMatchObject({ requisitos: [], coberturaOk: true });
+
+      const { actividadId, matrizId } = await nuevaActividad();
+      expect((await fijarCobertura([actividadId])).status).toBe(200);
+      const { ticketId } = await ticketConServicio();
+      const sinAprobar = await consultar(ticketId);
+      expect(sinAprobar.body).toMatchObject({ ticketId, dia: hoy, coberturaOk: false });
+      expect(sinAprobar.body.requisitos[0]).toMatchObject({ actividadId, matrizId: null });
+      expect(sinAprobar.body.requisitos[0].falta).toMatch(/aún no está aprobada/);
+
+      expect((await hastaRevision(matrizId)).status).toBe(201);
+      expect((await post(`matrices/${matrizId}/aprobar`, {}, gerente())).status).toBe(201);
+      const aprobada = await consultar(ticketId);
+      expect(aprobada.body.coberturaOk).toBe(true);
+      expect(aprobada.body.requisitos[0]).toMatchObject({ actividadId, matrizId, falta: null });
+      expect(aprobada.body.requisitos[0].vigenteHasta).toBeTruthy();
+
+      // otro día: pasado el año de vigencia ya no cubre
+      const vencida = await consultar(ticketId, masDias(hoy, 400));
+      expect(vencida.body.coberturaOk).toBe(false);
+      expect(vencida.body.requisitos[0].falta).toMatch(/vale hasta el/);
+
+      // permisos y validación del día
+      const sinPermiso = t.token(
+        'operador',
+        'Oscar Operador',
+        [Permission.QHSE_REPORTAR],
+        uuidv7(),
+      );
+      expect((await consultar(ticketId, '', sinPermiso)).status).toBe(403);
+      expect((await consultar(ticketId, 'mañana')).status).toBe(400);
+      expect((await consultar('no-es-uuid')).status).toBe(400);
+    });
+
     it('una matriz vencida el día de operación bloquea (la vigencia es de 12 meses)', async () => {
       const { actividadId } = await aprobada();
       await fijarCobertura([actividadId]);

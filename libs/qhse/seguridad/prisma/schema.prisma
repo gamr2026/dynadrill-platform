@@ -1164,6 +1164,15 @@ model IdUsuario {
   inspeccionesHechas  Inspeccion[]    @relation("inspeccionInspector")
   inspeccionesCreadas Inspeccion[]    @relation("inspeccionCreador")
 
+  // investigación de incidentes (S2)
+  investigacionesLideradas Investigacion[]          @relation("investigacionLider")
+  investigacionesCreadas   Investigacion[]          @relation("investigacionCreador")
+  investigacionesEditadas  Investigacion[]          @relation("investigacionEditor")
+  investigacionHistorial   InvestigacionHistorial[] @relation("investigacionHistorialActor")
+  investigacionesTrabajador InvestigacionTrabajador[] @relation("investigacionTrabajadorUsuario")
+  investigacionesEquipo     InvestigacionEquipo[]     @relation("investigacionEquipoUsuario")
+  investigacionAcciones     InvestigacionAccion[]     @relation("investigacionAccionResponsable")
+
   @@map("usuario")
   @@schema("identidad")
 }
@@ -1962,5 +1971,763 @@ model EmergenciaReporteFlash {
   emitidoPor       String     @map("emitido_por") @db.Uuid
 
   @@map("emergencia_reporte_flash")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Investigación de incidentes (DYN-SGI-RE-034, HSE-TRIAGE-002), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoInvestigacion {
+  abierta
+  en_investigacion
+  en_revision
+  cerrada
+
+  @@map("estado_investigacion")
+  @@schema("qhse")
+}
+
+/// Resultado del incidente con los plazos de HSE-TRIAGE-002 (catálogo).
+model InvestigacionResultado {
+  id                       String   @id @db.Uuid
+  codigo                   String   @unique
+  nombre                   String
+  orden                    Int      @unique
+  inicioHoras              Int      @map("inicio_horas")
+  preliminarHoras          Int?     @map("preliminar_horas")
+  finalDias                Int      @map("final_dias")
+  plazoSupuesto            Boolean  @default(false) @map("plazo_supuesto")
+  involucraLesionado       Boolean  @map("involucra_lesionado")
+  sugiereNotificacionLegal Boolean  @map("sugiere_notificacion_legal")
+  activo                   Boolean  @default(true)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String?  @map("created_by") @db.Uuid
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?  @map("updated_by") @db.Uuid
+
+  investigaciones Investigacion[]
+
+  @@map("investigacion_resultado")
+  @@schema("qhse")
+}
+
+/// Investigación de incidente o accidente. Los plazos se calculan con el catálogo de resultados.
+model Investigacion {
+  id                 String                 @id @db.Uuid
+  numero             Int                    @unique @default(autoincrement())
+  resultadoId        String                 @map("resultado_id") @db.Uuid
+  resultado          InvestigacionResultado @relation(fields: [resultadoId], references: [id])
+  descripcionEvento  String                 @map("descripcion_evento")
+  fechaIncidente     DateTime               @map("fecha_incidente") @db.Timestamptz(6)
+  ubicacion          String
+  origenEmergenciaId String?                @unique @map("origen_emergencia_id") @db.Uuid
+  estado             EstadoInvestigacion    @default(abierta)
+  liderId            String?                @map("lider_id") @db.Uuid
+  lider              IdUsuario?             @relation("investigacionLider", fields: [liderId], references: [id])
+  escenaAseguradaAt  DateTime?              @map("escena_asegurada_at") @db.Timestamptz(6)
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String                 @map("created_by") @db.Uuid
+  creador            IdUsuario              @relation("investigacionCreador", fields: [createdBy], references: [id])
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?                @map("updated_by") @db.Uuid
+  editor             IdUsuario?             @relation("investigacionEditor", fields: [updatedBy], references: [id])
+  evidenciasRecopiladas String? @map("evidencias_recopiladas")
+  testimoniosResumen    String? @map("testimonios_resumen")
+  conclusion                   ConclusionInvestigacion? @map("conclusion")
+  leccionesAprendidas          String?                  @map("lecciones_aprendidas")
+  ipercActividadId             String?                  @map("iperc_actividad_id") @db.Uuid
+  notificacionLegalRequerida   Boolean                  @default(false) @map("notificacion_legal_requerida")
+  ministerioTrabajoNotificadoAt DateTime?               @map("ministerio_trabajo_notificado_at") @db.Timestamptz(6)
+  iessNotificadoAt             DateTime?                @map("iess_notificado_at") @db.Timestamptz(6)
+  revisionEnviadaAt            DateTime?                @map("revision_enviada_at") @db.Timestamptz(6)
+  revisionEnviadaPor           String?                  @map("revision_enviada_por") @db.Uuid
+  cerradaAt                    DateTime?                @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor                   String?                  @map("cerrada_por") @db.Uuid
+
+  historial  InvestigacionHistorial[]
+  trabajador InvestigacionTrabajador?
+  detalle    InvestigacionDetalle?
+  equipo     InvestigacionEquipo[]
+  testigos   InvestigacionTestigo[]
+  entorno    InvestigacionEntornoFactor[]
+  porques    InvestigacionPorque[]
+  ishikawa   InvestigacionIshikawaCausa[]
+  causas     InvestigacionCausa[]
+  acciones   InvestigacionAccion[]
+
+  @@index([estado])
+  @@index([fechaIncidente])
+  @@index([resultadoId])
+  @@map("investigacion")
+  @@schema("qhse")
+}
+
+/// Rastro de estados de la investigación: solo se agrega.
+model InvestigacionHistorial {
+  id              String               @id @db.Uuid
+  investigacionId String               @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion        @relation(fields: [investigacionId], references: [id])
+  estadoAnterior  EstadoInvestigacion? @map("estado_anterior")
+  estadoNuevo     EstadoInvestigacion  @map("estado_nuevo")
+  observacion     String?
+  actorId         String               @map("actor_id") @db.Uuid
+  actor           IdUsuario            @relation("investigacionHistorialActor", fields: [actorId], references: [id])
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([investigacionId, createdAt])
+  @@map("investigacion_historial")
+  @@schema("qhse")
+}
+
+enum JornadaSuceso {
+  ordinaria
+  extra
+  suplementaria
+
+  @@map("jornada_suceso")
+  @@schema("qhse")
+}
+
+enum ZonaIncidente {
+  rural
+  urbana
+
+  @@map("zona_incidente")
+  @@schema("qhse")
+}
+
+enum SexoPersona {
+  masculino
+  femenino
+
+  @@map("sexo_persona")
+  @@schema("qhse")
+}
+
+/// «Datos del trabajador involucrado»: cuenta del portal (datos por JOIN) o persona externa. Solo si el resultado involucra a un lesionado.
+model InvestigacionTrabajador {
+  investigacionId        String        @id @map("investigacion_id") @db.Uuid
+  investigacion          Investigacion @relation(fields: [investigacionId], references: [id])
+  usuarioId              String?       @map("usuario_id") @db.Uuid
+  usuario                IdUsuario?    @relation("investigacionTrabajadorUsuario", fields: [usuarioId], references: [id])
+  apellidosNombres       String?       @map("apellidos_nombres")
+  cedula                 String?
+  cargo                  String?
+  direccion              String?
+  telefono               String?
+  fechaNacimiento        DateTime?     @map("fecha_nacimiento") @db.Date
+  sexo                   SexoPersona?
+  fechaIngreso           DateTime?     @map("fecha_ingreso") @db.Date
+  tipoVinculacion        String?       @map("tipo_vinculacion")
+  oficioDesempenaba      String?       @map("oficio_desempenaba")
+  jornadaHabitual        String?       @map("jornada_habitual")
+  tiempoExperienciaMeses Int?          @map("tiempo_experiencia_meses")
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy              String        @map("created_by") @db.Uuid
+  updatedAt              DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy              String?       @map("updated_by") @db.Uuid
+
+  @@map("investigacion_trabajador")
+  @@schema("qhse")
+}
+
+/// «Información sobre el incidente o accidente» del formato.
+model InvestigacionDetalle {
+  investigacionId           String         @id @map("investigacion_id") @db.Uuid
+  investigacion             Investigacion  @relation(fields: [investigacionId], references: [id])
+  jornadaSuceso             JornadaSuceso? @map("jornada_suceso")
+  empresaDondeOcurrio       String?        @map("empresa_donde_ocurrio")
+  direccionOcurrencia       String?        @map("direccion_ocurrencia")
+  zona                      ZonaIncidente?
+  oficioEraPropioDelCargo   Boolean?       @map("oficio_era_propio_del_cargo")
+  horaInicioJornada         DateTime?      @map("hora_inicio_jornada") @db.Time(0)
+  tiempoLaboradoPrevioHoras Decimal?       @map("tiempo_laborado_previo_horas") @db.Decimal(5, 2)
+  seInformoOportunamente    Boolean?       @map("se_informo_oportunamente")
+  tiempoAtencionMedica      String?        @map("tiempo_atencion_medica")
+  centroMedico              String?        @map("centro_medico")
+  causoMuerte               Boolean        @default(false) @map("causo_muerte")
+  fechaMuerte               DateTime?      @map("fecha_muerte") @db.Date
+  parteCuerpoAfectada       String?        @map("parte_cuerpo_afectada")
+  tipoLesionSufrida         String?        @map("tipo_lesion_sufrida")
+  factorQueOrigino          String?        @map("factor_que_origino")
+  totalDiasIncapacidad      Int?           @map("total_dias_incapacidad")
+  continuaIncapacitado      Boolean?       @map("continua_incapacitado")
+  sucesosSimilaresPrevios   Boolean?       @map("sucesos_similares_previos")
+  sucesosSimilaresDetalle   String?        @map("sucesos_similares_detalle")
+  danosMateriales           String?        @map("danos_materiales")
+  totalPerdidasEconomicas   Decimal?       @map("total_perdidas_economicas") @db.Decimal(14, 2)
+  danosMedioAmbiente        String?        @map("danos_medio_ambiente")
+  createdAt                 DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                 String         @map("created_by") @db.Uuid
+  updatedAt                 DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                 String?        @map("updated_by") @db.Uuid
+
+  @@map("investigacion_detalle")
+  @@schema("qhse")
+}
+
+/// Equipo investigador: cuentas del portal o personas externas.
+model InvestigacionEquipo {
+  id              String        @id @db.Uuid
+  investigacionId String        @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion @relation(fields: [investigacionId], references: [id])
+  usuarioId       String?       @map("usuario_id") @db.Uuid
+  usuario         IdUsuario?    @relation("investigacionEquipoUsuario", fields: [usuarioId], references: [id])
+  nombreExterno   String?       @map("nombre_externo")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String        @map("created_by") @db.Uuid
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?       @map("updated_by") @db.Uuid
+
+  @@index([investigacionId])
+  @@map("investigacion_equipo")
+  @@schema("qhse")
+}
+
+/// Testigos del incidente (máximo 3).
+model InvestigacionTestigo {
+  id               String        @id @db.Uuid
+  investigacionId  String        @map("investigacion_id") @db.Uuid
+  investigacion    Investigacion @relation(fields: [investigacionId], references: [id])
+  orden            Int
+  nombresApellidos String        @map("nombres_apellidos")
+  cedula           String?
+  version          String
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String        @map("created_by") @db.Uuid
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy        String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_testigo")
+  @@schema("qhse")
+}
+
+/// Factores de riesgo presentes en la estación de trabajo.
+model InvestigacionEntornoFactor {
+  id                 String        @id @db.Uuid
+  investigacionId    String        @map("investigacion_id") @db.Uuid
+  investigacion      Investigacion @relation(fields: [investigacionId], references: [id])
+  orden              Int
+  tipo               String
+  fuente             String
+  existeControl      Boolean       @map("existe_control")
+  contribuyoAlSuceso Boolean       @map("contribuyo_al_suceso")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String        @map("created_by") @db.Uuid
+  updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_entorno_factor")
+  @@schema("qhse")
+}
+
+enum TipoCausaInvestigacion {
+  acto_inseguro
+  condicion_insegura
+  factor_personal
+  factor_trabajo
+  fuente_gestion
+
+  @@map("tipo_causa_investigacion")
+  @@schema("qhse")
+}
+
+/// Categorías (6 M) del diagrama de Ishikawa (catálogo).
+model IshikawaCategoria {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  causas InvestigacionIshikawaCausa[]
+
+  @@map("ishikawa_categoria")
+  @@schema("qhse")
+}
+
+/// Un nivel de los 5 Porqués.
+model InvestigacionPorque {
+  id              String        @id @db.Uuid
+  investigacionId String        @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion @relation(fields: [investigacionId], references: [id])
+  orden           Int
+  pregunta        String
+  respuesta       String
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String        @map("created_by") @db.Uuid
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?       @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@map("investigacion_porque")
+  @@schema("qhse")
+}
+
+/// Una causa del diagrama de Ishikawa.
+model InvestigacionIshikawaCausa {
+  id              String            @id @db.Uuid
+  investigacionId String            @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion     @relation(fields: [investigacionId], references: [id])
+  categoriaId     String            @map("categoria_id") @db.Uuid
+  categoria       IshikawaCategoria @relation(fields: [categoriaId], references: [id])
+  orden           Int
+  descripcion     String
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String            @map("created_by") @db.Uuid
+  updatedAt       DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?           @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, orden])
+  @@index([categoriaId])
+  @@map("investigacion_ishikawa_causa")
+  @@schema("qhse")
+}
+
+/// Una causa del formato (acto inseguro, condición insegura, factor personal, factor de trabajo, fuente de gestión).
+model InvestigacionCausa {
+  id              String                  @id @db.Uuid
+  investigacionId String                  @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion           @relation(fields: [investigacionId], references: [id])
+  tipo            TipoCausaInvestigacion
+  orden           Int
+  descripcion     String
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String                  @map("created_by") @db.Uuid
+  updatedAt       DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?                 @map("updated_by") @db.Uuid
+
+  @@unique([investigacionId, tipo, orden])
+  @@map("investigacion_causa")
+  @@schema("qhse")
+}
+
+enum TipoAccionInvestigacion {
+  correctiva
+  preventiva
+
+  @@map("tipo_accion_investigacion")
+  @@schema("qhse")
+}
+
+enum EstadoAccionInvestigacion {
+  pendiente
+  implementada
+  verificada
+  cancelada
+
+  @@map("estado_accion_investigacion")
+  @@schema("qhse")
+}
+
+enum NivelControlAccion {
+  planeacion_diseno
+  fuente
+  medio
+  trabajador
+
+  @@map("nivel_control_accion")
+  @@schema("qhse")
+}
+
+/// Acción correctiva o preventiva de una investigación. Su seguimiento sigue después del cierre; no se borra, se cancela.
+model InvestigacionAccion {
+  id                      String                    @id @db.Uuid
+  investigacionId         String                    @map("investigacion_id") @db.Uuid
+  investigacion           Investigacion             @relation(fields: [investigacionId], references: [id])
+  orden                   Int
+  descripcion             String
+  tipo                    TipoAccionInvestigacion
+  responsableId           String                    @map("responsable_id") @db.Uuid
+  responsable             IdUsuario                 @relation("investigacionAccionResponsable", fields: [responsableId], references: [id])
+  plazo                   DateTime                  @db.Date
+  estado                  EstadoAccionInvestigacion @default(pendiente)
+  implementadaAt          DateTime?                 @map("implementada_at") @db.Timestamptz(6)
+  implementadaPor         String?                   @map("implementada_por") @db.Uuid
+  fueEficaz               Boolean?                  @map("fue_eficaz")
+  verificacionObservacion String?                   @map("verificacion_observacion")
+  verificadaAt            DateTime?                 @map("verificada_at") @db.Timestamptz(6)
+  verificadaPor           String?                   @map("verificada_por") @db.Uuid
+  canceladaAt             DateTime?                 @map("cancelada_at") @db.Timestamptz(6)
+  canceladaPor            String?                   @map("cancelada_por") @db.Uuid
+  cancelacionMotivo       String?                   @map("cancelacion_motivo")
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy               String                    @map("created_by") @db.Uuid
+  updatedAt               DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy               String?                   @map("updated_by") @db.Uuid
+
+  controles InvestigacionAccionControl[]
+  historial InvestigacionAccionHistorial[]
+
+  @@unique([investigacionId, orden])
+  @@index([investigacionId])
+  @@map("investigacion_accion")
+  @@schema("qhse")
+}
+
+/// Nivel de control (P/D, F, M, T) al que aplica una acción.
+model InvestigacionAccionControl {
+  accionId  String              @map("accion_id") @db.Uuid
+  accion    InvestigacionAccion @relation(fields: [accionId], references: [id])
+  nivel     NivelControlAccion
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String              @map("created_by") @db.Uuid
+
+  @@id([accionId, nivel])
+  @@map("investigacion_accion_control")
+  @@schema("qhse")
+}
+
+/// Rastro de estados de la acción: solo se agrega.
+model InvestigacionAccionHistorial {
+  id             String                     @id @db.Uuid
+  accionId       String                     @map("accion_id") @db.Uuid
+  accion         InvestigacionAccion        @relation(fields: [accionId], references: [id])
+  estadoAnterior EstadoAccionInvestigacion? @map("estado_anterior")
+  estadoNuevo    EstadoAccionInvestigacion  @map("estado_nuevo")
+  observacion    String?
+  actorId        String                     @map("actor_id") @db.Uuid
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([accionId, createdAt])
+  @@map("investigacion_accion_historial")
+  @@schema("qhse")
+}
+
+enum ConclusionInvestigacion {
+  incidente
+  accidente
+
+  @@map("conclusion_investigacion")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Requisitos legales (DocumentoLegalQhse de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoRequisitoLegal {
+  vigente
+  reemplazado
+
+  @@map("estado_requisito_legal")
+  @@schema("qhse")
+}
+
+/// Tipos de matriz de requisitos legales (catálogo): Gestión Ambiental y Seguridad y Salud en el Trabajo.
+model RequisitoLegalTipo {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  revisiones RequisitoLegal[]
+
+  @@map("requisito_legal_tipo")
+  @@schema("qhse")
+}
+
+/// Revisión de la matriz de requisitos legales. Una vigente por tipo; las anteriores quedan como historia.
+model RequisitoLegal {
+  id              String               @id @db.Uuid
+  tipoId          String               @map("tipo_id") @db.Uuid
+  tipo            RequisitoLegalTipo   @relation(fields: [tipoId], references: [id])
+  revision        String
+  fechaAprobacion DateTime             @map("fecha_aprobacion") @db.Date
+  vigenteHasta    DateTime?            @map("vigente_hasta") @db.Date
+  archivoId       String               @unique @map("archivo_id") @db.Uuid
+  estado          EstadoRequisitoLegal @default(vigente)
+  reemplazadoAt   DateTime?            @map("reemplazado_at") @db.Timestamptz(6)
+  reemplazadoPor  String?              @map("reemplazado_por") @db.Uuid
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String               @map("created_by") @db.Uuid
+  updatedAt       DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?              @map("updated_by") @db.Uuid
+
+  @@unique([tipoId, revision])
+  @@map("requisito_legal")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Objetivos ambientales (ObjetivoAmbiental de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum EstadoObjetivoAmbiental {
+  en_curso
+  cumplido
+  no_cumplido
+
+  @@map("estado_objetivo_ambiental")
+  @@schema("qhse")
+}
+
+/// Frecuencias de seguimiento (catálogo): mensual, trimestral, semestral, anual.
+model FrecuenciaSeguimiento {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  accionesObjetivo ObjetivoAmbientalAccion[]
+  aspectos         AspectoAmbiental[]
+
+  @@map("frecuencia_seguimiento")
+  @@schema("qhse")
+}
+
+/// Objetivo del Sistema de Gestión Ambiental. Se cierra como cumplido o no cumplido.
+model ObjetivoAmbiental {
+  id                   String                  @id @db.Uuid
+  numero               Int                     @unique @default(autoincrement())
+  titulo               String
+  objetivo             String
+  meta                 String
+  indicador            String
+  beneficioEmpresarial String?                 @map("beneficio_empresarial")
+  plazo                DateTime?               @db.Date
+  estado               EstadoObjetivoAmbiental @default(en_curso)
+  resultado            String?
+  evidencia            String?
+  cerradoAt            DateTime?               @map("cerrado_at") @db.Timestamptz(6)
+  cerradoPor           String?                 @map("cerrado_por") @db.Uuid
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String                  @map("created_by") @db.Uuid
+  updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?                 @map("updated_by") @db.Uuid
+
+  acciones     ObjetivoAmbientalAccion[]
+  seguimientos ObjetivoAmbientalSeguimiento[]
+
+  @@index([estado])
+  @@map("objetivo_ambiental")
+  @@schema("qhse")
+}
+
+/// Acción específica del plan de acción de un objetivo.
+model ObjetivoAmbientalAccion {
+  id                String                @id @db.Uuid
+  objetivoId        String                @map("objetivo_id") @db.Uuid
+  objetivo          ObjetivoAmbiental     @relation(fields: [objetivoId], references: [id])
+  orden             Int
+  accionEspecifica  String                @map("accion_especifica")
+  responsableId     String?               @map("responsable_id") @db.Uuid
+  indicador         String?
+  evidenciaEsperada String?               @map("evidencia_esperada")
+  frecuenciaId      String?               @map("frecuencia_id") @db.Uuid
+  frecuencia        FrecuenciaSeguimiento? @relation(fields: [frecuenciaId], references: [id])
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String                @map("created_by") @db.Uuid
+  updatedAt         DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String?               @map("updated_by") @db.Uuid
+
+  @@unique([objetivoId, orden])
+  @@map("objetivo_ambiental_accion")
+  @@schema("qhse")
+}
+
+/// Registro de seguimiento de un objetivo (inmutable).
+model ObjetivoAmbientalSeguimiento {
+  id               String            @id @db.Uuid
+  objetivoId       String            @map("objetivo_id") @db.Uuid
+  objetivo         ObjetivoAmbiental @relation(fields: [objetivoId], references: [id])
+  fecha            DateTime          @db.Date
+  avancePorcentaje Int               @map("avance_porcentaje") @db.SmallInt
+  observacion      String
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String            @map("created_by") @db.Uuid
+
+  @@index([objetivoId, fecha])
+  @@map("objetivo_ambiental_seguimiento")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Aspectos ambientales (AspectoAmbiental de la demo), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+enum ClasificacionAspecto {
+  bajo
+  moderado
+  alto
+
+  @@map("clasificacion_aspecto")
+  @@schema("qhse")
+}
+
+enum CondicionOperacionAspecto {
+  normal
+  anormal
+  emergencia
+
+  @@map("condicion_operacion_aspecto")
+  @@schema("qhse")
+}
+
+enum TipoResponsabilidadAspecto {
+  directa
+  indirecta
+
+  @@map("tipo_responsabilidad_aspecto")
+  @@schema("qhse")
+}
+
+enum TipoImpactoAspecto {
+  positivo
+  negativo
+
+  @@map("tipo_impacto_aspecto")
+  @@schema("qhse")
+}
+
+enum EstadoControlAspecto {
+  pendiente
+  en_ejecucion
+  implementado
+
+  @@map("estado_control_aspecto")
+  @@schema("qhse")
+}
+
+enum EstadoAspecto {
+  vigente
+  dado_de_baja
+
+  @@map("estado_aspecto")
+  @@schema("qhse")
+}
+
+/// Etapas del ciclo de vida de un aspecto (catálogo).
+model AspectoEtapaCicloVida {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  aspectos AspectoAmbiental[]
+
+  @@map("aspecto_etapa_ciclo_vida")
+  @@schema("qhse")
+}
+
+/// Factores ambientales afectados (catálogo).
+model AspectoFactorAmbiental {
+  id        String   @id @db.Uuid
+  codigo    String   @unique
+  nombre    String
+  orden     Int      @unique
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  aspectos AspectoAmbiental[]
+
+  @@map("aspecto_factor_ambiental")
+  @@schema("qhse")
+}
+
+/// Aspecto e impacto ambiental de una actividad (matriz). El nivel de riesgo (probabilidad × consecuencia) se calcula.
+model AspectoAmbiental {
+  id                       String                      @id @db.Uuid
+  numero                   Int                         @unique @default(autoincrement())
+  fecha                    DateTime                    @db.Date
+  etapaId                  String                      @map("etapa_id") @db.Uuid
+  etapa                    AspectoEtapaCicloVida       @relation(fields: [etapaId], references: [id])
+  procesoId                String                      @map("proceso_id") @db.Uuid
+  actividad                String
+  produccionDelAspecto     String?                     @map("produccion_del_aspecto")
+  riesgoGestion            String?                     @map("riesgo_gestion")
+  aspecto                  String
+  impacto                  String
+  factorId                 String?                     @map("factor_id") @db.Uuid
+  factor                   AspectoFactorAmbiental?     @relation(fields: [factorId], references: [id])
+  condicionOperacion       CondicionOperacionAspecto?  @map("condicion_operacion")
+  tipoResponsabilidad      TipoResponsabilidadAspecto? @map("tipo_responsabilidad")
+  tipoImpacto              TipoImpactoAspecto?         @map("tipo_impacto")
+  fechaValoracion          DateTime?                   @map("fecha_valoracion") @db.Date
+  probabilidad             Int                         @db.SmallInt
+  consecuencia             Int                         @db.SmallInt
+  clasificacion            ClasificacionAspecto
+  ncar                     String?
+  planAccionExistente      String?                     @map("plan_accion_existente")
+  planTratamiento          String?                     @map("plan_tratamiento")
+  responsableId            String?                     @map("responsable_id") @db.Uuid
+  presupuesto              Decimal?                    @db.Decimal(14, 2)
+  plazo                    DateTime?                   @db.Date
+  estadoControl            EstadoControlAspecto        @default(pendiente) @map("estado_control")
+  seguimientoIndicador     String?                     @map("seguimiento_indicador")
+  seguimientoResponsableId String?                     @map("seguimiento_responsable_id") @db.Uuid
+  seguimientoFrecuenciaId  String?                     @map("seguimiento_frecuencia_id") @db.Uuid
+  seguimientoFrecuencia    FrecuenciaSeguimiento?      @relation(fields: [seguimientoFrecuenciaId], references: [id])
+  estado                   EstadoAspecto               @default(vigente)
+  bajaAt                   DateTime?                   @map("baja_at") @db.Timestamptz(6)
+  bajaPor                  String?                     @map("baja_por") @db.Uuid
+  bajaMotivo               String?                     @map("baja_motivo")
+  createdAt                DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String                      @map("created_by") @db.Uuid
+  updatedAt                DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                String?                     @map("updated_by") @db.Uuid
+
+  seguimientos AspectoAmbientalSeguimiento[]
+
+  @@index([procesoId])
+  @@map("aspecto_ambiental")
+  @@schema("qhse")
+}
+
+/// Registro de seguimiento de un aspecto (inmutable).
+model AspectoAmbientalSeguimiento {
+  id          String           @id @db.Uuid
+  aspectoId   String           @map("aspecto_id") @db.Uuid
+  aspecto     AspectoAmbiental @relation(fields: [aspectoId], references: [id])
+  fecha       DateTime         @db.Date
+  eficaz      Boolean
+  observacion String
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String           @map("created_by") @db.Uuid
+
+  @@index([aspectoId, fecha])
+  @@map("aspecto_ambiental_seguimiento")
+  @@schema("qhse")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Avisos por vencimiento (emisor programado de QHSE), sesión S2
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Hecho por vencimiento ya avisado (clave = tipo + entidad + fecha límite). Solo se agrega.
+model AvisoProgramado {
+  clave       String    @id
+  tipo        String
+  entidadId   String    @map("entidad_id") @db.Uuid
+  fechaLimite DateTime? @map("fecha_limite") @db.Date
+  emitidoAt   DateTime  @default(now()) @map("emitido_at") @db.Timestamptz(6)
+
+  @@index([tipo, entidadId])
+  @@map("aviso_programado")
   @@schema("qhse")
 }

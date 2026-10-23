@@ -48,6 +48,28 @@ import { StopService } from './stop/stop.service';
 import { PtwConsultaService } from './ptw/ptw-consulta.service';
 import { PtwController } from './ptw/ptw.controller';
 import { PtwService } from './ptw/ptw.service';
+import { InvestigacionesConsultaService } from './investigaciones/investigaciones-consulta.service';
+import { InvestigacionesController } from './investigaciones/investigaciones.controller';
+import { InvestigacionesFormatoController } from './investigaciones/investigaciones-formato.controller';
+import { InvestigacionesFormatoService } from './investigaciones/investigaciones-formato.service';
+import { InvestigacionesCausasController } from './investigaciones/investigaciones-causas.controller';
+import { InvestigacionesCausasService } from './investigaciones/investigaciones-causas.service';
+import { InvestigacionesAccionesController } from './investigaciones/investigaciones-acciones.controller';
+import { InvestigacionesAccionesService } from './investigaciones/investigaciones-acciones.service';
+import { InvestigacionesCierreController } from './investigaciones/investigaciones-cierre.controller';
+import { InvestigacionesCierreService } from './investigaciones/investigaciones-cierre.service';
+import { RequisitosLegalesConsultaService } from './legal/requisitos-legales-consulta.service';
+import { RequisitosLegalesController } from './legal/requisitos-legales.controller';
+import { RequisitosLegalesService } from './legal/requisitos-legales.service';
+import { ObjetivosAmbientalesConsultaService } from './objetivos-ambientales/objetivos-ambientales-consulta.service';
+import { ObjetivosAmbientalesController } from './objetivos-ambientales/objetivos-ambientales.controller';
+import { ObjetivosAmbientalesService } from './objetivos-ambientales/objetivos-ambientales.service';
+import { AspectosAmbientalesConsultaService } from './aspectos-ambientales/aspectos-ambientales-consulta.service';
+import { AspectosAmbientalesController } from './aspectos-ambientales/aspectos-ambientales.controller';
+import { AspectosAmbientalesService } from './aspectos-ambientales/aspectos-ambientales.service';
+import { AvisosProgramadosController } from './avisos/avisos-programados.controller';
+import { AvisosProgramadosService } from './avisos/avisos-programados.service';
+import { InvestigacionesService } from './investigaciones/investigaciones.service';
 
 /**
  * QHSE (contenedor qhse). Dueño exclusivo del schema `qhse`. Requiere en la app `AppConfigModule` (DATABASE_URL),
@@ -69,6 +91,15 @@ import { PtwService } from './ptw/ptw.service';
     DesechosController,
     DerramesController,
     EmergenciasController,
+    InvestigacionesController,
+    InvestigacionesFormatoController,
+    InvestigacionesCausasController,
+    InvestigacionesAccionesController,
+    InvestigacionesCierreController,
+    RequisitosLegalesController,
+    ObjetivosAmbientalesController,
+    AspectosAmbientalesController,
+    AvisosProgramadosController,
   ],
   providers: [
     PrismaService,
@@ -110,6 +141,19 @@ import { PtwService } from './ptw/ptw.service';
     EmergenciasCierreService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
+    InvestigacionesService,
+    InvestigacionesConsultaService,
+    InvestigacionesFormatoService,
+    InvestigacionesCausasService,
+    InvestigacionesAccionesService,
+    InvestigacionesCierreService,
+    RequisitosLegalesService,
+    RequisitosLegalesConsultaService,
+    ObjetivosAmbientalesService,
+    ObjetivosAmbientalesConsultaService,
+    AspectosAmbientalesService,
+    AspectosAmbientalesConsultaService,
+    AvisosProgramadosService,
   ],
   exports: [
     EpiService,

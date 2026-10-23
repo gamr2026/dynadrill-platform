@@ -10,6 +10,9 @@ import { sembrarDerrames } from '../src/catalog/sembrar-derrames';
 import { sembrarDesechos } from '../src/catalog/sembrar-desechos';
 import { sembrarEmergencias } from '../src/catalog/sembrar-emergencias';
 import { sembrarEpi } from '../src/catalog/sembrar-epi';
+import { sembrarAmbiental } from '../src/catalog/sembrar-ambiental';
+import { sembrarInvestigacion } from '../src/catalog/sembrar-investigacion';
+import { sembrarRequisitosLegales } from '../src/catalog/sembrar-requisitos-legales';
 import { sembrarStopEInspecciones } from '../src/catalog/sembrar-stop-inspecciones';
 import { sembrarSwa } from '../src/catalog/sembrar-swa';
 import { PrismaClient } from '../src/generated/client';
@@ -45,6 +48,16 @@ async function main() {
     const eme = await sembrarEmergencias(prisma);
     console.log(
       `qhse: emergencias con ${eme.tipos} tipos y ${eme.pasos} pasos de la cascada nuevos`,
+    );
+    const inv = await sembrarInvestigacion(prisma);
+    console.log(
+      `qhse: investigación con ${inv.resultados} resultados de incidente y ${inv.categorias} categorías de Ishikawa nuevos`,
+    );
+    const legal = await sembrarRequisitosLegales(prisma);
+    console.log(`qhse: requisitos legales con ${legal.tipos} tipos nuevos`);
+    const amb = await sembrarAmbiental(prisma);
+    console.log(
+      `qhse: ambiental con ${amb.frecuencias} frecuencias, ${amb.etapas} etapas de ciclo de vida y ${amb.factores} factores ambientales nuevos`,
     );
   } finally {
     await prisma.$disconnect();

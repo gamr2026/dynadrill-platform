@@ -628,6 +628,54 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'qhse.derrames.configurar',
     'Configurar las bandas de volumen de los derrames (umbrales de notificación al MAE y de escalada)',
     [...ADMIN_ROLE_CODES, RoleCode.GERENTE_HSE],
+  // ---- qhse: investigación de incidentes (DYN-SGI-RE-034). Aprobar el informe y cerrar es solo del Gerente HSE; el Supervisor no entra.
+  nuevo(
+    'qhse.investigaciones.ver',
+    'Ver las investigaciones de incidentes, sus plazos y acciones',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.investigaciones.gestionar',
+    'Abrir y conducir una investigación de incidente: escena, causas, acciones y notificación legal',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.investigaciones.aprobar',
+    'Aprobar el informe de una investigación de incidente y cerrarla',
+    ModuleRoles.ipercApprove,
+  ),
+  // ---- qhse: requisitos legales (matrices de Gestión Ambiental y SST). El Supervisor no entra.
+  nuevo(
+    'qhse.legal.ver',
+    'Ver los requisitos legales (matrices de Gestión Ambiental y SST), su vigencia y sus revisiones',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.legal.gestionar',
+    'Registrar una revisión nueva de los requisitos legales con su documento y vigencia',
+    ModuleRoles.qhse,
+  ),
+  // ---- qhse: objetivos ambientales. El Supervisor no entra.
+  nuevo(
+    'qhse.objetivos_ambientales.ver',
+    'Ver los objetivos ambientales, su plan de acción y su seguimiento',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.objetivos_ambientales.gestionar',
+    'Registrar y conducir un objetivo ambiental: plan de acción, seguimiento y cierre',
+    ModuleRoles.qhse,
+  ),
+  // ---- qhse: matriz de aspectos e impactos ambientales. El Supervisor no entra.
+  nuevo(
+    'qhse.aspectos_ambientales.ver',
+    'Ver la matriz de aspectos e impactos ambientales, su control y su seguimiento',
+    ModuleRoles.qhse,
+  ),
+  nuevo(
+    'qhse.aspectos_ambientales.gestionar',
+    'Registrar, editar y dar de baja aspectos ambientales; dar seguimiento y ampliar sus catálogos',
+    ModuleRoles.qhse,
   ),
 ];
 
@@ -763,6 +811,15 @@ export const Permission = {
   DERRAMES_CONFIGURAR: 'qhse.derrames.configurar',
   EMERGENCIAS_VER: 'qhse.emergencias.ver',
   EMERGENCIAS_GESTIONAR: 'qhse.emergencias.gestionar',
+  INVESTIGACIONES_VER: 'qhse.investigaciones.ver',
+  INVESTIGACIONES_GESTIONAR: 'qhse.investigaciones.gestionar',
+  INVESTIGACIONES_APROBAR: 'qhse.investigaciones.aprobar',
+  LEGAL_VER: 'qhse.legal.ver',
+  LEGAL_GESTIONAR: 'qhse.legal.gestionar',
+  OBJETIVOS_AMBIENTALES_VER: 'qhse.objetivos_ambientales.ver',
+  OBJETIVOS_AMBIENTALES_GESTIONAR: 'qhse.objetivos_ambientales.gestionar',
+  ASPECTOS_AMBIENTALES_VER: 'qhse.aspectos_ambientales.ver',
+  ASPECTOS_AMBIENTALES_GESTIONAR: 'qhse.aspectos_ambientales.gestionar',
 } as const;
 
 export type PermissionCode = (typeof Permission)[keyof typeof Permission];

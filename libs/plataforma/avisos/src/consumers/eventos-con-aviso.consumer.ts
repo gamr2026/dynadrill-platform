@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { runInEventSpan } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
+import { EVENTOS_QHSE_VENCIMIENTOS } from '../catalog/plantillas/qhse-vencimientos';
 import { PrismaService } from '../prisma/prisma.service';
 import { AvisosService } from '../services/avisos.service';
 
@@ -47,6 +48,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'qhse.swa.activado',
       'qhse.stop.con_hallazgos',
       'qhse.inspeccion.rechazada',
+      ...EVENTOS_QHSE_VENCIMIENTOS,
     ],
   },
 ];

@@ -1,6 +1,7 @@
 import { PLANTILLAS_QHSE_DERRAMES } from './qhse-derrames';
 import { PLANTILLAS_QHSE_DESECHOS } from './qhse-desechos';
 import { PLANTILLAS_QHSE_EMERGENCIAS } from './qhse-emergencias';
+import { PLANTILLAS_QHSE_VENCIMIENTOS } from './qhse-vencimientos';
 import { FILA, type PlantillaDef } from './tipos';
 
 const DATOS =
@@ -155,4 +156,5 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   ...PLANTILLAS_QHSE_DESECHOS,
   ...PLANTILLAS_QHSE_DERRAMES,
   ...PLANTILLAS_QHSE_EMERGENCIAS,
+  ...PLANTILLAS_QHSE_VENCIMIENTOS,
 ];
