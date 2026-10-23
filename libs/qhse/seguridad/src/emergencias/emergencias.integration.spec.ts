@@ -55,6 +55,28 @@ run('QHSE: Emergencias (base de datos real)', () => {
     return x.id;
   };
   const sql = (texto: string, params: unknown[] = []) => t.admin.query(texto, params);
+  /** Pasa a controlada directo en la base, con los datos de contención que exige el CHECK. */
+  const controlarDirecto = (id: string) =>
+    sql(
+      "UPDATE qhse.emergencia SET estado = 'controlada', controlada_at = now(), controlada_por = $2 WHERE id = $1",
+      [id, OPERADOR.id],
+    );
+  /** Cierra directo en la base cumpliendo las reglas: nivel declarado (1 si falta), controlada y Reporte Flash emitido. */
+  const cerrarDirecto = async (id: string) => {
+    await sql(
+      'UPDATE qhse.emergencia SET nivel = COALESCE(nivel, 1), nivel_declarado_por = COALESCE(nivel_declarado_por, $2), nivel_declarado_at = COALESCE(nivel_declarado_at, now()) WHERE id = $1',
+      [id, OPERADOR.id],
+    );
+    await controlarDirecto(id);
+    await sql(
+      "INSERT INTO qhse.emergencia_reporte_flash (emergencia_id, resumen_ejecutivo, personal_afectado, acciones_tomadas, estado_actual, proximos_pasos, emitido_por) VALUES ($1, 'a', 'b', 'c', 'd', 'e', $2) ON CONFLICT DO NOTHING",
+      [id, OPERADOR.id],
+    );
+    await sql(
+      "UPDATE qhse.emergencia SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE id = $1",
+      [id, OPERADOR.id],
+    );
+  };
   const ticketNuevo = async () => {
     const ticketId = uuidv7();
     tickets.push(ticketId);
@@ -494,8 +516,7 @@ run('QHSE: Emergencias (base de datos real)', () => {
     it('una emergencia cerrada ya no recibe nivel, conteo ni notificaciones', async () => {
       const id = (await activar()).body.id as string;
       const paso = ((await detalle(id)).cascada as Array<{ pasoId: string }>)[0].pasoId;
-      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
-      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      await cerrarDirecto(id);
       for (const [ruta, cuerpo] of [
         ['nivel', { nivel: 1 }],
         ['conteo', { totalEnLocacion: 1, evacuados: 1 }],
@@ -783,14 +804,238 @@ run('QHSE: Emergencias (base de datos real)', () => {
         triage: 'verde',
         mecanismoLesion: 'Golpe',
       });
-      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
-      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      await cerrarDirecto(id);
       for (const [ruta, cuerpo] of [
         ['heridos', { nombreCompleto: 'Otro', triage: 'verde', mecanismoLesion: 'x' }],
         [`heridos/${sano}/signos-vitales`, { pulso: 70 }],
         [`heridos/${sano}/medevac`, {}],
       ] as Array<[string, Record<string, unknown>]>)
         expect((await post(id, ruta, cuerpo)).status).toBe(409);
+    });
+  });
+
+  describe('Reporte Flash, controlada, cierre, tablero y enlaces', () => {
+    const post = (
+      id: string,
+      ruta: string,
+      cuerpo: Record<string, unknown> = {},
+      quien = gestor(),
+    ) => t.http().post(`/api/qhse/emergencias/${id}/${ruta}`).set(quien).send(cuerpo);
+    const flash = (cuerpo: Record<string, unknown> = {}) => ({
+      resumenEjecutivo: 'Incendio en el generador, controlado por la brigada',
+      personalAfectado: 'Un operador con quemaduras leves',
+      accionesTomadas: 'Corte de energía y uso de extintores',
+      estadoActual: 'Controlado, sin riesgo de propagación',
+      proximosPasos: 'Investigar la causa y reemplazar el generador',
+      ...cuerpo,
+    });
+
+    it('el Reporte Flash se emite una sola vez, completo, e informa si salió del plazo de 2 horas sin bloquear', async () => {
+      const id = (await activar()).body.id as string;
+      expect((await detalle(id)).reporteFlashVencido).toBe(false);
+      expect((await post(id, 'reporte-flash', flash(), tecnico())).status).toBe(403);
+      for (const campo of [
+        'resumenEjecutivo',
+        'personalAfectado',
+        'accionesTomadas',
+        'estadoActual',
+        'proximosPasos',
+      ])
+        expect((await post(id, 'reporte-flash', flash({ [campo]: '   ' }))).status).toBe(400);
+      expect((await post(id, 'reporte-flash', { resumenEjecutivo: 'x' })).status).toBe(400);
+
+      // la emergencia se activó hace 3 horas: el plazo ya venció y se ve
+      await sql(
+        "UPDATE qhse.emergencia SET activado_at = now() - interval '3 hours' WHERE id = $1",
+        [id],
+      );
+      expect((await detalle(id)).reporteFlashVencido).toBe(true);
+      const r = await post(id, 'reporte-flash', flash());
+      expect(r.status).toBe(201);
+      expect(r.body.reporteFlash).toMatchObject({ emitidoPor: TECNICO.nombre, fueraDePlazo: true });
+      expect(r.body.reporteFlash.minutos).toBeGreaterThanOrEqual(179);
+      expect(r.body.reporteFlashVencido).toBe(false);
+      expect(r.body.cronometro.at(-1).texto).toMatch(/fuera del plazo de 2 horas/);
+      expect(
+        (await eventos('qhse.emergencia.reporte_flash_emitido', id))[0].datos.data,
+      ).toMatchObject({
+        fueraDePlazo: true,
+        plazoMinutos: 120,
+      });
+      expect((await post(id, 'reporte-flash', flash())).status).toBe(409); // una sola vez
+
+      const aTiempo = (await activar()).body.id as string;
+      const ok = await post(aTiempo, 'reporte-flash', flash());
+      expect(ok.body.reporteFlash.fueraDePlazo).toBe(false);
+    });
+
+    it('controlar y cerrar: nivel 1 se cierra con el Reporte Flash y el nivel; sin ellos, no', async () => {
+      const id = (await activar()).body.id as string;
+      const cerrarYa = await post(id, 'cerrar');
+      expect(cerrarYa.status).toBe(409);
+      expect(cerrarYa.body.detail).toMatch(/Primero marque la emergencia como controlada/);
+      expect((await post(id, 'controlar', {}, tecnico())).status).toBe(403);
+      const c = await post(id, 'controlar');
+      expect(c.status).toBe(201);
+      expect(c.body).toMatchObject({
+        estado: 'controlada',
+        controladaPor: TECNICO.nombre,
+        puedeCerrar: false,
+      });
+      expect((await post(id, 'controlar')).status).toBe(409);
+      expect(await eventos('qhse.emergencia.controlada', id)).toHaveLength(1);
+
+      const sinFlash = await post(id, 'cerrar');
+      expect(sinFlash.status).toBe(409);
+      expect(sinFlash.body.detail).toMatch(/emita antes el Reporte Flash/);
+      await post(id, 'reporte-flash', flash());
+      const sinNivel = await post(id, 'cerrar');
+      expect(sinNivel.status).toBe(409);
+      expect(sinNivel.body.detail).toMatch(/declare antes su nivel/);
+      await post(id, 'nivel', { nivel: 1 });
+      expect((await detalle(id)).puedeCerrar).toBe(true);
+      expect((await post(id, 'cerrar', {}, tecnico())).status).toBe(403);
+      const r = await post(id, 'cerrar');
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
+        estado: 'cerrada',
+        cerradaPor: TECNICO.nombre,
+        requiereInvestigacion: false,
+      });
+      expect(r.body.historial.map((h: { estado: string }) => h.estado)).toEqual([
+        'activa',
+        'controlada',
+        'cerrada',
+      ]);
+      expect((await eventos('qhse.emergencia.cerrada', id))[0].datos.data).toMatchObject({
+        nivel: 1,
+        requiereInvestigacion: false,
+      });
+      expect((await post(id, 'cerrar')).status).toBe(409);
+      expect((await post(id, 'reporte-flash', flash())).status).toBe(409);
+      expect((await post(id, 'controlar')).status).toBe(409);
+    });
+
+    it('el nivel 2 o 3 no se cierra sin su investigación de incidentes (HSE-TRIAGE-002)', async () => {
+      const id = (await activar()).body.id as string;
+      await post(id, 'nivel', { nivel: 3 });
+      await post(id, 'controlar');
+      await post(id, 'reporte-flash', flash());
+      const d = await detalle(id);
+      expect(d.requiereInvestigacion).toBe(true);
+      // la tabla de investigaciones es de otra sesión: si está instalada, se exige; si no, no hay nada que exigir
+      const instalada =
+        (await sql("SELECT to_regclass('qhse.investigacion') AS r")).rows[0].r !== null;
+      if (instalada) {
+        expect(d.investigacionAbierta).toBe(false);
+        expect(d.puedeCerrar).toBe(false);
+        const r = await post(id, 'cerrar');
+        expect(r.status).toBe(409);
+        expect(r.body.detail).toMatch(/nivel 2 o 3 no se cierra sin su investigación/);
+        // la base lo impide aunque se salte el servicio
+        await expect(cerrarDirecto(id)).rejects.toThrow(/no se cierra sin su investigación/);
+      } else {
+        expect(d.investigacionAbierta).toBe(true);
+        expect((await post(id, 'cerrar')).status).toBe(201);
+      }
+    });
+
+    it('el detalle de la SWA y del derrame muestran su emergencia y si pueden escalar', async () => {
+      const tipoPeligro = (
+        await sql("SELECT id FROM qhse.swa_tipo_peligro WHERE codigo = 'quimico'")
+      ).rows[0].id;
+      const swaCreada = await t
+        .http()
+        .post('/api/qhse/swa')
+        .set(operador())
+        .send({ tipoPeligroId: tipoPeligro, descripcion: 'Fuga para escalar' });
+      swas.push(swaCreada.body.id);
+      const verSwa = async () =>
+        (
+          await t
+            .http()
+            .get(`/api/qhse/swa/${swaCreada.body.id}`)
+            .set(t.token('tecnico_hse', TECNICO.nombre, [P.SWA_VER], TECNICO.id))
+        ).body;
+      expect(await verSwa()).toMatchObject({ emergencia: null, puedeEscalarAEmergencia: true });
+      const e = await activar({ origenSwaId: swaCreada.body.id });
+      expect(await verSwa()).toMatchObject({
+        emergencia: { id: e.body.id, codigo: e.body.codigo, estado: 'activa' },
+        puedeEscalarAEmergencia: false,
+      });
+
+      const derrame = await t.http().post('/api/qhse/derrames').set(operador()).send({
+        ubicacionId: ubicacionAgua,
+        bandaId: bandaMenor,
+        descripcion: 'Derrame en el río',
+      });
+      derrames.push(derrame.body.id);
+      const verDerrame = async () =>
+        (
+          await t
+            .http()
+            .get(`/api/qhse/derrames/${derrame.body.id}`)
+            .set(t.token('tecnico_hse', TECNICO.nombre, [P.DERRAMES_VER], TECNICO.id))
+        ).body;
+      expect(await verDerrame()).toMatchObject({ emergencia: null, puedeEscalarAEmergencia: true });
+      const e2 = await activar({ origenDerrameId: derrame.body.id });
+      expect(await verDerrame()).toMatchObject({
+        emergencia: { id: e2.body.id, codigo: e2.body.codigo },
+        puedeEscalarAEmergencia: false,
+      });
+      // un derrame menor en suelo no escala: no ofrece escalar
+      const menor = await derrameNuevo(ubicacionSuelo, bandaMenor);
+      const dm = (
+        await t
+          .http()
+          .get(`/api/qhse/derrames/${menor}`)
+          .set(t.token('tecnico_hse', TECNICO.nombre, [P.DERRAMES_VER], TECNICO.id))
+      ).body;
+      expect(dm.puedeEscalarAEmergencia).toBe(false);
+    });
+
+    it('el tablero cuenta por estado y nivel, heridos por triage, MEDEVAC y Reporte Flash', async () => {
+      const resumen = async (anio?: number) =>
+        (
+          await t
+            .http()
+            .get(`/api/qhse/emergencias/resumen${anio ? `?anio=${anio}` : ''}`)
+            .set(tecnico())
+        ).body;
+      expect((await t.http().get('/api/qhse/emergencias/resumen').set(operador())).status).toBe(
+        403,
+      );
+      const antes = await resumen();
+      expect(antes.plazoReporteFlashMinutos).toBe(120);
+
+      const id = (await activar()).body.id as string;
+      await post(id, 'nivel', { nivel: 2 });
+      await post(id, 'heridos', {
+        nombreCompleto: 'Rojo Uno',
+        triage: 'rojo',
+        mecanismoLesion: 'x',
+      });
+      await post(id, 'heridos', {
+        nombreCompleto: 'Verde Uno',
+        triage: 'verde',
+        mecanismoLesion: 'y',
+      });
+      const rojo = ((await detalle(id)).heridos as Array<{ id: string; triage: string }>).find(
+        (h) => h.triage === 'rojo',
+      );
+      await post(id, `heridos/${rojo?.id}/medevac`);
+      const despues = await resumen();
+      expect(despues.total).toBe(antes.total + 1);
+      expect(despues.porEstado.activa).toBe(antes.porEstado.activa + 1);
+      expect(despues.porNivel.nivel2).toBe(antes.porNivel.nivel2 + 1);
+      expect(despues.heridosPorTriage.rojo).toBe(antes.heridosPorTriage.rojo + 1);
+      expect(despues.heridosPorTriage.verde).toBe(antes.heridosPorTriage.verde + 1);
+      expect(despues.medevacActivados).toBe(antes.medevacActivados + 1);
+      expect(despues.reporteFlashPendientes).toBe(antes.reporteFlashPendientes + 1);
+      expect(await resumen(2001)).toMatchObject({ anio: 2001, total: 0, medevacActivados: 0 });
+      expect(
+        (await t.http().get('/api/qhse/emergencias/resumen?anio=abc').set(tecnico())).status,
+      ).toBe(400);
     });
   });
 
@@ -821,7 +1066,7 @@ run('QHSE: Emergencias (base de datos real)', () => {
       await expect(
         sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]),
       ).rejects.toThrow(/Cambio de estado no permitido/);
-      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
+      await controlarDirecto(id);
       await expect(
         sql("UPDATE qhse.emergencia SET estado = 'activa' WHERE id = $1", [id]),
       ).rejects.toThrow(/Cambio de estado no permitido/);
@@ -988,8 +1233,7 @@ run('QHSE: Emergencias (base de datos real)', () => {
         t.prisma.emergenciaPasoNotificacion.deleteMany({ where: { orden: 1 } }),
       ).rejects.toThrow(/permission denied|denegado/i);
       // una emergencia cerrada no se modifica ni recibe registros nuevos
-      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
-      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      await cerrarDirecto(id);
       await expect(
         sql(
           'UPDATE qhse.emergencia SET nivel = 1, nivel_declarado_por = $2, nivel_declarado_at = now() WHERE id = $1',
@@ -1112,8 +1356,7 @@ run('QHSE: Emergencias (base de datos real)', () => {
         );
         return id;
       })();
-      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [cerrada]);
-      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [cerrada]);
+      await cerrarDirecto(cerrada);
       await expect(actualizar(hc, "lesiones = 'otra'")).rejects.toThrow(
         /está cerrada y ya no recibe registros/,
       );
@@ -1159,6 +1402,65 @@ run('QHSE: Emergencias (base de datos real)', () => {
       await expect(
         t.prisma.heridoSignosVitales.deleteMany({ where: { heridoId: h } }),
       ).rejects.toThrow(/permission denied|denegado/i);
+    });
+
+    it('el cierre y el Reporte Flash: cada estado trae sus datos, cerrar exige el Reporte Flash y el nivel, y el Reporte Flash es completo e inmutable', async () => {
+      const id = (await activar()).body.id as string;
+      const actualizar = (set: string, params: unknown[] = []) =>
+        sql(`UPDATE qhse.emergencia SET ${set} WHERE id = $1`, [id, ...params]);
+      // controlada sin quién ni cuándo, o activa con datos de contención, no se acepta
+      await expect(actualizar("estado = 'controlada'")).rejects.toThrow(/emergencia_cierre_check/);
+      await expect(
+        actualizar('controlada_at = now(), controlada_por = $2', [OPERADOR.id]),
+      ).rejects.toThrow(/emergencia_cierre_check/);
+      await controlarDirecto(id);
+      // cerrar sin Reporte Flash, sin nivel, o sin quién y cuándo
+      await expect(
+        actualizar("estado = 'cerrada', cerrada_at = now(), cerrada_por = $2", [OPERADOR.id]),
+      ).rejects.toThrow(/hay que emitir el Reporte Flash/);
+      await sql(
+        "INSERT INTO qhse.emergencia_reporte_flash (emergencia_id, resumen_ejecutivo, personal_afectado, acciones_tomadas, estado_actual, proximos_pasos, emitido_por) VALUES ($1, 'a', 'b', 'c', 'd', 'e', $2)",
+        [id, OPERADOR.id],
+      );
+      await expect(
+        actualizar("estado = 'cerrada', cerrada_at = now(), cerrada_por = $2", [OPERADOR.id]),
+      ).rejects.toThrow(/hay que declarar su nivel/);
+      await actualizar('nivel = 1, nivel_declarado_por = $2, nivel_declarado_at = now()', [
+        OPERADOR.id,
+      ]);
+      await expect(actualizar("estado = 'cerrada'")).rejects.toThrow(/emergencia_cierre_check/);
+      await expect(
+        actualizar("estado = 'cerrada', cerrada_at = now() - interval '5 days', cerrada_por = $2", [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/emergencia_cierre_check/);
+      await actualizar("estado = 'cerrada', cerrada_at = now(), cerrada_por = $2", [OPERADOR.id]);
+
+      // el Reporte Flash: completo, uno por emergencia, inmutable y solo con la emergencia abierta
+      const otra = (await activar()).body.id as string;
+      const flash = (resumen: string) =>
+        sql(
+          'INSERT INTO qhse.emergencia_reporte_flash (emergencia_id, resumen_ejecutivo, personal_afectado, acciones_tomadas, estado_actual, proximos_pasos, emitido_por) VALUES ($1, $2, $3, $3, $3, $3, $4)',
+          [otra, resumen, 'x', OPERADOR.id],
+        );
+      await expect(flash('   ')).rejects.toThrow(/emergencia_reporte_flash_completo_check/);
+      await flash('Resumen');
+      await expect(flash('Otro')).rejects.toThrow(/emergencia_reporte_flash_pkey/);
+      await expect(
+        t.prisma.emergenciaReporteFlash.updateMany({
+          where: { emergenciaId: otra },
+          data: { resumenEjecutivo: 'cambiado' },
+        }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.emergenciaReporteFlash.deleteMany({ where: { emergenciaId: otra } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        sql(
+          "INSERT INTO qhse.emergencia_reporte_flash (emergencia_id, resumen_ejecutivo, personal_afectado, acciones_tomadas, estado_actual, proximos_pasos, emitido_por) VALUES ($1, 'a', 'b', 'c', 'd', 'e', $2)",
+          [id, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/emergencia_reporte_flash_pkey|está cerrada y ya no recibe registros/);
     });
 
     it('la descripción no puede estar vacía y el tipo, el ticket y los orígenes deben existir (FK)', async () => {

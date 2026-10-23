@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import type { Tx } from '../epi/epi-tipos';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Consecutivo visible de la emergencia: EME-000001. */
@@ -7,6 +8,9 @@ export const codigoEmergencia = (numero: number): string =>
 
 const codigoSwa = (numero: number) => `SWA-${String(numero).padStart(6, '0')}`;
 const codigoDerrame = (numero: number) => `DER-${String(numero).padStart(6, '0')}`;
+
+/** HSE-TRIAGE-001: el Reporte Flash se emite dentro de las 2 horas desde la activación (se informa; no bloquea). */
+export const PLAZO_REPORTE_FLASH_MINUTOS = 120;
 
 /** Minutos entre dos instantes, con un decimal. */
 export const minutosEntre = (desde: Date, hasta: Date): number =>
@@ -92,6 +96,7 @@ export class EmergenciasConsultaService {
         notificaciones: true,
         niveles: { orderBy: { createdAt: 'asc' } },
         conteos: { orderBy: { createdAt: 'asc' } },
+        reporteFlash: true,
         heridos: {
           orderBy: { createdAt: 'asc' },
           include: {
@@ -131,6 +136,9 @@ export class EmergenciasConsultaService {
       ...e.conteos.map((c) => c.actorId),
       ...(e.nivelDeclaradoPor ? [e.nivelDeclaradoPor] : []),
       ...(e.conteoPor ? [e.conteoPor] : []),
+      ...(e.reporteFlash ? [e.reporteFlash.emitidoPor] : []),
+      ...(e.controladaPor ? [e.controladaPor] : []),
+      ...(e.cerradaPor ? [e.cerradaPor] : []),
       ...e.heridos.flatMap((h) => [
         h.createdBy,
         ...(h.medevacPor ? [h.medevacPor] : []),
@@ -141,6 +149,12 @@ export class EmergenciasConsultaService {
       ]),
     ]);
     const t = e.ticketId ? tickets.get(e.ticketId) : undefined;
+    const flash = e.reporteFlash;
+    const flashMinutos = flash ? minutosEntre(e.activadoAt, flash.emitidoAt) : null;
+    const requiereInvestigacion = e.nivel !== null && e.nivel >= 2;
+    const investigacion = requiereInvestigacion
+      ? await this.tieneInvestigacion(this.prisma, id)
+      : null;
     const cascada = pasos.map((p) => {
       const n = e.notificaciones.find((x) => x.pasoId === p.id);
       const limite = e.activadoAt.getTime() + p.plazoMinutos * 60_000;
@@ -222,6 +236,41 @@ export class EmergenciasConsultaService {
       /** Cascada de notificación: cada paso con su plazo desde la activación. */
       cascada,
       notificacionCompleta: cascada.every((c) => c.notificadoAt !== null),
+      /** Reporte Flash: plazo de 2 horas desde la activación (se informa; no bloquea). */
+      reporteFlash: flash
+        ? {
+            resumenEjecutivo: flash.resumenEjecutivo,
+            personalAfectado: flash.personalAfectado,
+            accionesTomadas: flash.accionesTomadas,
+            estadoActual: flash.estadoActual,
+            proximosPasos: flash.proximosPasos,
+            emitidoAt: flash.emitidoAt,
+            emitidoPor: nombres.get(flash.emitidoPor) ?? null,
+            minutos: flashMinutos,
+            fueraDePlazo: (flashMinutos ?? 0) > PLAZO_REPORTE_FLASH_MINUTOS,
+          }
+        : null,
+      plazoReporteFlashMinutos: PLAZO_REPORTE_FLASH_MINUTOS,
+      /** Sin emitir y con el plazo de 2 horas ya vencido (solo mientras la emergencia siga abierta). */
+      reporteFlashVencido:
+        !flash &&
+        e.estado !== 'cerrada' &&
+        Date.now() > e.activadoAt.getTime() + PLAZO_REPORTE_FLASH_MINUTOS * 60_000,
+      controladaAt: e.controladaAt,
+      controladaPor: e.controladaPor ? (nombres.get(e.controladaPor) ?? null) : null,
+      cerradaAt: e.cerradaAt,
+      cerradaPor: e.cerradaPor ? (nombres.get(e.cerradaPor) ?? null) : null,
+      /** Nivel 2 o 3: siempre origina una investigación de incidentes (HSE-TRIAGE-002). */
+      requiereInvestigacion,
+      /** ¿Ya está abierta la investigación? Nulo si no aplica o si el módulo de investigaciones no está instalado. */
+      investigacionAbierta: investigacion,
+      puedeControlar: e.estado === 'activa',
+      /** Controlada, con el Reporte Flash emitido, el nivel declarado y (nivel 2 o 3) la investigación abierta. */
+      puedeCerrar:
+        e.estado === 'controlada' &&
+        !!flash &&
+        e.nivel !== null &&
+        (!requiereInvestigacion || investigacion !== false),
       /** Resumen del triage de los heridos. */
       triage: {
         rojo: e.heridos.filter((h) => h.triage === 'rojo').length,
@@ -294,6 +343,71 @@ export class EmergenciasConsultaService {
         actor: nombres.get(h.actorId) ?? null,
         at: h.createdAt,
       })),
+    };
+  }
+
+  /**
+   * ¿Hay una investigación de incidentes abierta por esta emergencia? Es la tabla de otra sesión (`investigacion`): solo se consulta si existe;
+   * si el módulo no está instalado devuelve `true` (no hay nada que exigir).
+   */
+  async tieneInvestigacion(
+    db: Pick<PrismaService, '$queryRaw'> | Tx,
+    emergenciaId: string,
+  ): Promise<boolean> {
+    const existe = await db.$queryRaw<
+      Array<{ r: string | null }>
+    >`SELECT to_regclass('qhse.investigacion')::text AS r`;
+    if (!existe[0]?.r) return true;
+    const filas = await db.$queryRaw<
+      Array<{ n: number }>
+    >`SELECT count(*)::int AS n FROM qhse.investigacion WHERE origen_emergencia_id = ${emergenciaId}::uuid`;
+    return (filas[0]?.n ?? 0) > 0;
+  }
+
+  /** Tablero de emergencias del año: por estado y nivel, heridos por triage, MEDEVAC y Reporte Flash. */
+  async tablero(
+    anio = Number(
+      new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' }).slice(0, 4),
+    ),
+  ) {
+    const desde = new Date(`${anio}-01-01T00:00:00-05:00`);
+    const hasta = new Date(`${anio + 1}-01-01T00:00:00-05:00`);
+    const filas = await this.prisma.emergencia.findMany({
+      where: { activadoAt: { gte: desde, lt: hasta } },
+      include: { reporteFlash: true, heridos: true },
+    });
+    const porEstado = { activa: 0, controlada: 0, cerrada: 0 };
+    const porNivel = { sinDeclarar: 0, nivel1: 0, nivel2: 0, nivel3: 0 };
+    const triage = { rojo: 0, amarillo: 0, verde: 0, negro: 0 };
+    let medevacActivados = 0;
+    let medevacTransferidos = 0;
+    let flashPendientes = 0;
+    let flashFueraDePlazo = 0;
+    for (const e of filas) {
+      porEstado[e.estado]++;
+      if (e.nivel === null) porNivel.sinDeclarar++;
+      else porNivel[`nivel${e.nivel}` as 'nivel1' | 'nivel2' | 'nivel3']++;
+      for (const h of e.heridos) {
+        triage[h.triage]++;
+        if (h.medevacAt) medevacActivados++;
+        if (h.transferidoAt) medevacTransferidos++;
+      }
+      if (e.reporteFlash) {
+        if (minutosEntre(e.activadoAt, e.reporteFlash.emitidoAt) > PLAZO_REPORTE_FLASH_MINUTOS)
+          flashFueraDePlazo++;
+      } else if (e.estado !== 'cerrada') flashPendientes++;
+    }
+    return {
+      anio,
+      total: filas.length,
+      porEstado,
+      porNivel,
+      heridosPorTriage: triage,
+      medevacActivados,
+      medevacTransferidos,
+      reporteFlashPendientes: flashPendientes,
+      reporteFlashFueraDePlazo: flashFueraDePlazo,
+      plazoReporteFlashMinutos: PLAZO_REPORTE_FLASH_MINUTOS,
     };
   }
 

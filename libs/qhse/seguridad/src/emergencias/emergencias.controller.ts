@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   Body,
   Controller,
@@ -12,6 +13,7 @@ import {
 import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { EmergenciasCierreService } from './emergencias-cierre.service';
 import { EmergenciasHeridosService } from './emergencias-heridos.service';
 import { EmergenciasPlanService } from './emergencias-plan.service';
 import { EmergenciasConsultaService } from './emergencias-consulta.service';
@@ -88,6 +90,18 @@ export class AgregarHospitalDto {
   @IsOptional() @IsString() @MaxLength(50) telefono?: string;
 }
 
+export class ResumenEmergenciasDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(2000) anio?: number;
+}
+
+export class ReporteFlashDto {
+  @IsString() @MaxLength(3000) resumenEjecutivo!: string;
+  @IsString() @MaxLength(3000) personalAfectado!: string;
+  @IsString() @MaxLength(3000) accionesTomadas!: string;
+  @IsString() @MaxLength(3000) estadoActual!: string;
+  @IsString() @MaxLength(3000) proximosPasos!: string;
+}
+
 export class AgregarLineaDto {
   @IsString() @MaxLength(1000) texto!: string;
 }
@@ -102,6 +116,7 @@ export class EmergenciasController {
     private readonly emergencias: EmergenciasService,
     private readonly plan: EmergenciasPlanService,
     private readonly heridos: EmergenciasHeridosService,
+    private readonly cierre: EmergenciasCierreService,
     private readonly consulta: EmergenciasConsultaService,
   ) {}
 
@@ -116,6 +131,13 @@ export class EmergenciasController {
   @Post()
   activar(@Body() dto: ActivarEmergenciaDto, @CurrentUser() actor: AuthUser) {
     return this.emergencias.activar(dto, actor);
+  }
+
+  /** Tablero del año: por estado y nivel, heridos por triage, MEDEVAC y Reporte Flash. Va antes de `:id`. */
+  @RequirePermission(P.EMERGENCIAS_VER)
+  @Get('resumen')
+  resumen(@Query() q: ResumenEmergenciasDto) {
+    return this.consulta.tablero(q.anio);
   }
 
   /** Hospitales a los que se evacúa. Va antes de `:id`. */
@@ -268,5 +290,32 @@ export class EmergenciasController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.heridos.transferir(id, heridoId, actor);
+  }
+
+  // ------------------------------------------------------------------------- Reporte Flash, controlada y cierre
+
+  /** Emite el Reporte Flash (una sola vez, completo); su plazo de 2 horas se informa y no bloquea. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/reporte-flash')
+  reporteFlash(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReporteFlashDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.cierre.emitirReporteFlash(id, dto, actor);
+  }
+
+  /** Marca la emergencia como controlada. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/controlar')
+  controlar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.cierre.controlar(id, actor);
+  }
+
+  /** Cierra la emergencia controlada (exige el Reporte Flash, el nivel y, en nivel 2 o 3, la investigación). */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/cerrar')
+  cerrar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.cierre.cerrar(id, actor);
   }
 }

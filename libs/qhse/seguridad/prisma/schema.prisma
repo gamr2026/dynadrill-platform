@@ -1720,6 +1720,10 @@ model Emergencia {
   evacuados          Int?
   conteoPor          String?          @map("conteo_por") @db.Uuid
   conteoAt           DateTime?        @map("conteo_at") @db.Timestamptz(6)
+  controladaAt       DateTime?        @map("controlada_at") @db.Timestamptz(6)
+  controladaPor      String?          @map("controlada_por") @db.Uuid
+  cerradaAt          DateTime?        @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor         String?          @map("cerrada_por") @db.Uuid
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy   String           @map("created_by") @db.Uuid
   updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1731,6 +1735,7 @@ model Emergencia {
   niveles        EmergenciaNivelHistorial[]
   conteos        EmergenciaConteoHistorial[]
   heridos        Herido[]
+  reporteFlash   EmergenciaReporteFlash?
 
   @@index([estado])
   @@index([tipoId])
@@ -1941,5 +1946,21 @@ model HeridoSignosVitales {
 
   @@index([heridoId, registradoAt])
   @@map("herido_signos_vitales")
+  @@schema("qhse")
+}
+
+/// Reporte Flash: se emite una sola vez, completo, y es inmutable. Plazo de 2 horas desde la activación (se informa, no bloquea).
+model EmergenciaReporteFlash {
+  emergenciaId     String     @id @map("emergencia_id") @db.Uuid
+  emergencia       Emergencia @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  resumenEjecutivo String     @map("resumen_ejecutivo")
+  personalAfectado String     @map("personal_afectado")
+  accionesTomadas  String     @map("acciones_tomadas")
+  estadoActual     String     @map("estado_actual")
+  proximosPasos    String     @map("proximos_pasos")
+  emitidoAt        DateTime   @default(now()) @map("emitido_at") @db.Timestamptz(6)
+  emitidoPor       String     @map("emitido_por") @db.Uuid
+
+  @@map("emergencia_reporte_flash")
   @@schema("qhse")
 }

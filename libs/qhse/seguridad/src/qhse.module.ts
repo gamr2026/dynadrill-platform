@@ -30,6 +30,7 @@ import { DerramesConsultaService } from './derrames/derrames-consulta.service';
 import { DerramesController } from './derrames/derrames.controller';
 import { DerramesEventosService } from './derrames/derrames-eventos.service';
 import { DerramesService } from './derrames/derrames.service';
+import { EmergenciasCierreService } from './emergencias/emergencias-cierre.service';
 import { EmergenciasHeridosService } from './emergencias/emergencias-heridos.service';
 import { EmergenciasPlanService } from './emergencias/emergencias-plan.service';
 import { EmergenciasConsultaService } from './emergencias/emergencias-consulta.service';
@@ -106,6 +107,7 @@ import { PtwService } from './ptw/ptw.service';
     EmergenciasEventosService,
     EmergenciasPlanService,
     EmergenciasHeridosService,
+    EmergenciasCierreService,
     PumpingEventosConsumer,
     ArticulosEpiConsumer,
   ],

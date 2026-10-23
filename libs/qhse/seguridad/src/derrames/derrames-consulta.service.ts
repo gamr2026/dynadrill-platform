@@ -196,6 +196,10 @@ export class DerramesConsultaService {
       },
     });
     if (!d) throw new NotFoundException('El derrame no existe');
+    const emergencia = await this.prisma.emergencia.findFirst({
+      where: { derrameId: id },
+      select: { id: true, numero: true, estado: true },
+    });
     const [tickets, items, bandas] = await Promise.all([
       this.tickets([d.ticketId]),
       this.prisma.derrameChecklistItem.findMany({
@@ -283,6 +287,16 @@ export class DerramesConsultaService {
       /** El suelo contaminado genera un desecho peligroso (uno por derrame); nulo mientras no se genere. */
       desecho: d.desecho ? { id: d.desecho.id, codigo: codigoDesecho(d.desecho.numero) } : null,
       puedeGenerarDesecho: d.ubicacion.generaDesecho && !d.desecho,
+      /** Emergencia a la que escaló (HSE-MASTER-001); nulo mientras no escale. */
+      emergencia: emergencia
+        ? {
+            id: emergencia.id,
+            codigo: `EME-${String(emergencia.numero).padStart(6, '0')}`,
+            estado: emergencia.estado,
+          }
+        : null,
+      /** Un derrame mayor o en cuerpo de agua escala a emergencia; falta escalarlo mientras no tenga una. */
+      puedeEscalarAEmergencia: escalaAEmergencia(reglas) && !emergencia && d.estado !== 'cerrado',
       cerradoAt: d.cerradoAt,
       cerradoPor: d.cerradoPor ? (nombres.get(d.cerradoPor) ?? null) : null,
       volumenes: d.volumenes.map((v) => ({
