@@ -13,17 +13,18 @@ import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { IngresoService } from './ingreso.service';
 import { RequisitosService } from './requisitos.service';
+import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
 
 /**
- * Lo que el Jefe de Base elige: solo ids. Cada operador lleva su unidad (como en la demo); las unidades del servicio son las de sus
- * operadores. Los químicos (artículo, bodega y cantidad) salen de bodega al asignar y exigen el documento de mezcla.
+ * Lo que el Jefe de Base elige: solo ids. Cada operador lleva su unidad de Flota (como en la demo); las unidades del servicio son las de
+ * sus operadores. Los químicos (artículo, bodega y cantidad) salen de bodega al asignar y exigen el documento de mezcla.
  */
 export interface AsignacionEntrada {
   supervisorId: string;
-  operadores: Array<{ usuarioId: string; vehiculoId: string }>;
+  operadores: Array<{ usuarioId: string; unidadId: string }>;
   /** El conductor de cada unidad (uno por unidad): es el responsable de su inspección y de su gerenciamiento de viaje. */
-  conductores: Array<{ usuarioId: string; vehiculoId: string }>;
+  conductores: Array<{ usuarioId: string; unidadId: string }>;
   quimicos?: LineaDeTicket[];
   /** Archivo (de `archivos`) con el documento de mezcla: obligatorio si hay químicos. */
   documentoMezclaId?: string | null;
@@ -83,9 +84,9 @@ export class AsignacionService {
     if (!operadores.length) throw new BadRequestException('Indique al menos un operador');
     if (new Set(personasIds).size !== personasIds.length)
       throw new BadRequestException('Una misma persona no puede asignarse dos veces');
-    const unidadIds = [...new Set(operadores.map((o) => o.vehiculoId))];
+    const unidadIds = [...new Set(operadores.map((o) => o.unidadId))];
     // cada unidad lleva un conductor (y solo uno)
-    const unidadesConductor = conductores.map((c) => c.vehiculoId);
+    const unidadesConductor = conductores.map((c) => c.unidadId);
     if (
       new Set(unidadesConductor).size !== unidadesConductor.length ||
       unidadesConductor.length !== unidadIds.length ||
@@ -207,10 +208,14 @@ export class AsignacionService {
           ocupados: ocupadas,
         });
       }
-      const unidades = await tx.catVehiculo.findMany({ where: { id: { in: unidadIds } } });
-      if (unidades.length !== unidadIds.length || unidades.some((u) => !u.habilitado)) {
+      // las unidades son las de Flota (D2): existen y están activas
+      const unidades = await tx.flotaUnidad.findMany({
+        where: { id: { in: unidadIds } },
+        ...UNIDAD_CON_PLACA,
+      });
+      if (unidades.length !== unidadIds.length || unidades.some((u) => !u.activa)) {
         throw new BadRequestException(
-          'Alguna de las unidades indicadas no existe o no está habilitada',
+          'Alguna de las unidades indicadas no existe o no está activa en Flota',
         );
       }
 
@@ -223,7 +228,7 @@ export class AsignacionService {
       await tx.ticketPersona.deleteMany({ where: { ticketId: id } });
       await tx.ticketUnidad.deleteMany({ where: { ticketId: id } });
       await tx.ticketUnidad.createMany({
-        data: unidades.map((u) => ({ ticketId: id, vehiculoId: u.id, asignadoPor: actor.id })),
+        data: unidades.map((u) => ({ ticketId: id, unidadId: u.id, asignadoPor: actor.id })),
       });
       await tx.ticketPersona.createMany({
         data: [
@@ -237,14 +242,14 @@ export class AsignacionService {
             ticketId: id,
             usuarioId: o.persona.id,
             rol: 'operador' as const,
-            vehiculoId: o.vehiculoId,
+            unidadId: o.unidadId,
             asignadoPor: actor.id,
           })),
           ...equipoConductor.map((c) => ({
             ticketId: id,
             usuarioId: c.persona.id,
             rol: 'conductor' as const,
-            vehiculoId: c.vehiculoId,
+            unidadId: c.unidadId,
             asignadoPor: actor.id,
           })),
         ],
@@ -294,7 +299,11 @@ export class AsignacionService {
         });
       }
 
-      const placaDe = (vid: string) => unidades.find((u) => u.id === vid)?.placa ?? '';
+      const unidadDe = (uid: string) => unidades.find((u) => u.id === uid);
+      const nombreDeUnidad = (uid: string) => {
+        const u = unidadDe(uid);
+        return u ? etiquetaDeUnidad(u) : '';
+      };
       await this.bus.publish(
         tx,
         this.bus.create({
@@ -315,12 +324,12 @@ export class AsignacionService {
             asignadoPor: actor.name,
             supervisor: supervisor.nombre,
             operadores: equipo
-              .map((o) => `${o.persona.nombre} (${placaDe(o.vehiculoId)})`)
+              .map((o) => `${o.persona.nombre} (${nombreDeUnidad(o.unidadId)})`)
               .join(', '),
             conductores: equipoConductor
-              .map((c) => `${c.persona.nombre} (${placaDe(c.vehiculoId)})`)
+              .map((c) => `${c.persona.nombre} (${nombreDeUnidad(c.unidadId)})`)
               .join(', '),
-            unidades: unidades.map((u) => u.placa).join(', '),
+            unidades: unidades.map(etiquetaDeUnidad).join(', '),
             // Las cuentas elegidas: a ellas (y solo a ellas) se les avisa, con la plantilla de su rol de asignación. Los demás módulos
             // (QHSE: EPI de cada operador; Mantenimiento: inspección de cada unidad) abren sus casos con `operadores` y `unidadesIds`.
             asignados: [
@@ -328,14 +337,18 @@ export class AsignacionService {
               ...equipo.map((o) => ({ usuarioId: o.persona.id, rolCodigo: 'operador' })),
               ...equipoConductor.map((c) => ({ usuarioId: c.persona.id, rolCodigo: 'conductor' })),
             ],
+            // `unidadId` es la unidad de Flota (D2); `vehiculoId` es el vehículo del catálogo enlazado a ella (nulo si no tiene) y se
+            // conserva mientras algún consumidor aún lo lea
             operadoresUnidades: equipo.map((o) => ({
               usuarioId: o.persona.id,
-              vehiculoId: o.vehiculoId,
+              unidadId: o.unidadId,
+              vehiculoId: unidadDe(o.unidadId)?.vehiculoId ?? null,
             })),
             // el conductor de cada unidad es el responsable de su inspección (Flota abre el caso a su nombre)
             conductoresUnidades: equipoConductor.map((c) => ({
               usuarioId: c.persona.id,
-              vehiculoId: c.vehiculoId,
+              unidadId: c.unidadId,
+              vehiculoId: unidadDe(c.unidadId)?.vehiculoId ?? null,
             })),
             conQuimicos: quimicos.length > 0,
           },

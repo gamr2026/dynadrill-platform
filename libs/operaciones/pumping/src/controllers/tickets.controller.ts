@@ -38,8 +38,8 @@ export class ListarTicketsDto {
 export class OperadorUnidadDto {
   /** Cuenta del operador (rol operador). */
   @IsUUID() usuarioId!: string;
-  /** Vehículo del catálogo que lleva este operador. */
-  @IsUUID() vehiculoId!: string;
+  /** Unidad de Flota que lleva este operador (activa). */
+  @IsUUID() unidadId!: string;
 }
 
 /** Un químico: de qué bodega sale (o a cuál vuelve) y cuánto. */
@@ -154,13 +154,13 @@ export class TicketsController {
 
   /** El Supervisor del equipo aprueba la inspección de una unidad al revisar los reportes de salida. */
   @RequirePermission(P.PUMPING_OPERAR)
-  @Post('tickets/:id/revision-salida/inspecciones/:vehiculoId/aprobar')
+  @Post('tickets/:id/revision-salida/inspecciones/:unidadId/aprobar')
   aprobarInspeccion(
     @Param('id', ParseUUIDPipe) id: string,
-    @Param('vehiculoId', ParseUUIDPipe) vehiculoId: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.revisionSalida.aprobarInspeccion(id, vehiculoId, actor);
+    return this.revisionSalida.aprobarInspeccion(id, unidadId, actor);
   }
 
   /** Químicos del ticket (asignado, usado, devuelto y pendiente) y su documento de mezcla. */
