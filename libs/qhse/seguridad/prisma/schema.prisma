@@ -1730,6 +1730,7 @@ model Emergencia {
   notificaciones EmergenciaNotificacion[]
   niveles        EmergenciaNivelHistorial[]
   conteos        EmergenciaConteoHistorial[]
+  heridos        Herido[]
 
   @@index([estado])
   @@index([tipoId])
@@ -1826,5 +1827,119 @@ model EmergenciaConteoHistorial {
 
   @@index([emergenciaId, createdAt])
   @@map("emergencia_conteo_historial")
+  @@schema("qhse")
+}
+
+enum TriageColor {
+  rojo
+  amarillo
+  verde
+  negro
+
+  @@map("triage_color")
+  @@schema("qhse")
+}
+
+enum MedioTransporteMedevac {
+  ambulancia
+  lancha
+  helicoptero
+
+  @@map("medio_transporte_medevac")
+  @@schema("qhse")
+}
+
+/// Escala de cuatro valores (alerta, responde a la voz, responde al dolor, inconsciente).
+enum NivelConsciencia {
+  alerta
+  voz
+  dolor
+  inconsciente
+
+  @@map("nivel_consciencia")
+  @@schema("qhse")
+}
+
+/// Hospital al que se evacúa (catálogo editable por QHSE; sin duplicados por nombre y ciudad).
+model EmergenciaHospital {
+  id        String   @id @db.Uuid
+  nombre    String
+  ciudad    String
+  telefono  String?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  heridos Herido[]
+
+  @@map("emergencia_hospital")
+  @@schema("qhse")
+}
+
+/// Herido de una emergencia: triage, lesiones y evacuación MEDEVAC (el orden de los hitos lo exige la base).
+model Herido {
+  id                    String                  @id @db.Uuid
+  emergenciaId          String                  @map("emergencia_id") @db.Uuid
+  emergencia            Emergencia              @relation(fields: [emergenciaId], references: [id], onDelete: Cascade)
+  nombreCompleto        String                  @map("nombre_completo")
+  cedula                String?
+  triage                TriageColor
+  mecanismoLesion       String                  @map("mecanismo_lesion")
+  lesiones              String?
+  tratamientoCampo      String?                 @map("tratamiento_campo")
+  medevacAt             DateTime?               @map("medevac_at") @db.Timestamptz(6)
+  medevacPor            String?                 @map("medevac_por") @db.Uuid
+  medioTransporte       MedioTransporteMedevac? @map("medio_transporte")
+  hospitalId            String?                 @map("hospital_id") @db.Uuid
+  hospital              EmergenciaHospital?     @relation(fields: [hospitalId], references: [id])
+  etaMinutos            Int?                    @map("eta_minutos")
+  hospitalNotificadoAt  DateTime?               @map("hospital_notificado_at") @db.Timestamptz(6)
+  hospitalNotificadoPor String?                 @map("hospital_notificado_por") @db.Uuid
+  transferidoAt         DateTime?               @map("transferido_at") @db.Timestamptz(6)
+  transferidoPor        String?                 @map("transferido_por") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String                  @map("created_by") @db.Uuid
+  updatedAt             DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?                 @map("updated_by") @db.Uuid
+
+  signos   HeridoSignosVitales[]
+  triajes  HeridoTriageHistorial[]
+
+  @@index([emergenciaId])
+  @@map("herido")
+  @@schema("qhse")
+}
+
+/// Cada triage asignado a un herido (el vigente está en `Herido`). Inmutable.
+model HeridoTriageHistorial {
+  id        String      @id @db.Uuid
+  heridoId  String      @map("herido_id") @db.Uuid
+  herido    Herido      @relation(fields: [heridoId], references: [id], onDelete: Cascade)
+  triage    TriageColor
+  actorId   String      @map("actor_id") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([heridoId, createdAt])
+  @@map("herido_triage_historial")
+  @@schema("qhse")
+}
+
+/// Cada toma de signos vitales (la presión en dos columnas). Inmutable.
+model HeridoSignosVitales {
+  id                String            @id @db.Uuid
+  heridoId          String            @map("herido_id") @db.Uuid
+  herido            Herido            @relation(fields: [heridoId], references: [id], onDelete: Cascade)
+  registradoAt      DateTime          @default(now()) @map("registrado_at") @db.Timestamptz(6)
+  registradoPor     String            @map("registrado_por") @db.Uuid
+  pulso             Int?
+  presionSistolica  Int?              @map("presion_sistolica")
+  presionDiastolica Int?              @map("presion_diastolica")
+  respiracion       Int?
+  consciencia       NivelConsciencia?
+
+  @@index([heridoId, registradoAt])
+  @@map("herido_signos_vitales")
   @@schema("qhse")
 }

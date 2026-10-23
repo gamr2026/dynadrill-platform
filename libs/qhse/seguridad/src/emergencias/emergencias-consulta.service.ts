@@ -92,6 +92,14 @@ export class EmergenciasConsultaService {
         notificaciones: true,
         niveles: { orderBy: { createdAt: 'asc' } },
         conteos: { orderBy: { createdAt: 'asc' } },
+        heridos: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            hospital: { select: { id: true, nombre: true, ciudad: true, telefono: true } },
+            signos: { orderBy: { registradoAt: 'asc' } },
+            triajes: { orderBy: { createdAt: 'asc' } },
+          },
+        },
       },
     });
     if (!e) throw new NotFoundException('La emergencia no existe');
@@ -123,6 +131,14 @@ export class EmergenciasConsultaService {
       ...e.conteos.map((c) => c.actorId),
       ...(e.nivelDeclaradoPor ? [e.nivelDeclaradoPor] : []),
       ...(e.conteoPor ? [e.conteoPor] : []),
+      ...e.heridos.flatMap((h) => [
+        h.createdBy,
+        ...(h.medevacPor ? [h.medevacPor] : []),
+        ...(h.hospitalNotificadoPor ? [h.hospitalNotificadoPor] : []),
+        ...(h.transferidoPor ? [h.transferidoPor] : []),
+        ...h.signos.map((s) => s.registradoPor),
+        ...h.triajes.map((x) => x.actorId),
+      ]),
     ]);
     const t = e.ticketId ? tickets.get(e.ticketId) : undefined;
     const cascada = pasos.map((p) => {
@@ -206,6 +222,62 @@ export class EmergenciasConsultaService {
       /** Cascada de notificación: cada paso con su plazo desde la activación. */
       cascada,
       notificacionCompleta: cascada.every((c) => c.notificadoAt !== null),
+      /** Resumen del triage de los heridos. */
+      triage: {
+        rojo: e.heridos.filter((h) => h.triage === 'rojo').length,
+        amarillo: e.heridos.filter((h) => h.triage === 'amarillo').length,
+        verde: e.heridos.filter((h) => h.triage === 'verde').length,
+        negro: e.heridos.filter((h) => h.triage === 'negro').length,
+      },
+      /** Heridos con MEDEVAC activado y aún sin transferir. */
+      medevacEnCurso: e.heridos.filter((h) => h.medevacAt && !h.transferidoAt).length,
+      heridos: e.heridos.map((h) => ({
+        id: h.id,
+        nombreCompleto: h.nombreCompleto,
+        cedula: h.cedula,
+        triage: h.triage,
+        mecanismoLesion: h.mecanismoLesion,
+        lesiones: h.lesiones,
+        tratamientoCampo: h.tratamientoCampo,
+        registradoPor: nombres.get(h.createdBy) ?? null,
+        triajes: h.triajes.map((x) => ({
+          triage: x.triage,
+          actor: nombres.get(x.actorId) ?? null,
+          at: x.createdAt,
+        })),
+        signosVitales: h.signos.map((s) => ({
+          registradoAt: s.registradoAt,
+          registradoPor: nombres.get(s.registradoPor) ?? null,
+          pulso: s.pulso,
+          presionSistolica: s.presionSistolica,
+          presionDiastolica: s.presionDiastolica,
+          respiracion: s.respiracion,
+          consciencia: s.consciencia,
+        })),
+        /** Criterios MEDEVAC: lesión que amenaza la vida, atención hospitalaria en menos de 2 horas, no tratable en campo. */
+        medevac: h.medevacAt
+          ? {
+              activadoAt: h.medevacAt,
+              activadoPor: h.medevacPor ? (nombres.get(h.medevacPor) ?? null) : null,
+              medioTransporte: h.medioTransporte,
+              hospital: h.hospital,
+              etaMinutos: h.etaMinutos,
+              hospitalNotificadoAt: h.hospitalNotificadoAt,
+              hospitalNotificadoPor: h.hospitalNotificadoPor
+                ? (nombres.get(h.hospitalNotificadoPor) ?? null)
+                : null,
+              transferidoAt: h.transferidoAt,
+              transferidoPor: h.transferidoPor ? (nombres.get(h.transferidoPor) ?? null) : null,
+              etapa: h.transferidoAt
+                ? ('transferido' as const)
+                : h.hospitalNotificadoAt
+                  ? ('hospital_notificado' as const)
+                  : h.medioTransporte && h.hospital
+                    ? ('listo_para_notificar' as const)
+                    : ('activado' as const),
+            }
+          : null,
+      })),
       /** Cronómetro: cada línea con los minutos transcurridos desde la activación. */
       cronometro: e.lineas.map((l) => ({
         at: l.at,

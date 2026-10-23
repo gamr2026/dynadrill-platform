@@ -135,6 +135,9 @@ run('QHSE: Emergencias (base de datos real)', () => {
 
   afterAll(async () => {
     await sql('DELETE FROM qhse.emergencia WHERE id = ANY($1::uuid[])', [emergencias]);
+    await sql('DELETE FROM qhse.emergencia_hospital WHERE nombre LIKE $1', [
+      `Hospital Prueba ${n}%`,
+    ]);
     await sql('DELETE FROM qhse.derrame WHERE id = ANY($1::uuid[])', [derrames]);
     await sql('DELETE FROM qhse.swa WHERE id = ANY($1::uuid[])', [swas]);
     await sql('DELETE FROM qhse.ticket_ref WHERE ticket_id = ANY($1::uuid[])', [tickets]);
@@ -504,6 +507,293 @@ run('QHSE: Emergencias (base de datos real)', () => {
     });
   });
 
+  describe('heridos, triage, signos vitales y MEDEVAC', () => {
+    const post = (
+      id: string,
+      ruta: string,
+      cuerpo: Record<string, unknown> = {},
+      quien = gestor(),
+    ) => t.http().post(`/api/qhse/emergencias/${id}/${ruta}`).set(quien).send(cuerpo);
+    const herido = async (id: string, cuerpo: Record<string, unknown> = {}) => {
+      const r = await post(id, 'heridos', {
+        nombreCompleto: 'Juan Pérez',
+        cedula: '1712345678',
+        triage: 'rojo',
+        mecanismoLesion: 'Quemadura por explosión',
+        lesiones: 'Quemaduras de segundo grado',
+        ...cuerpo,
+      });
+      expect(r.status).toBe(201);
+      const h = (r.body.heridos as Array<{ id: string; nombreCompleto: string }>).at(-1);
+      if (!h) throw new Error('No se registró el herido');
+      return h.id;
+    };
+    const hospitalNuevo = async (sufijo: string) => {
+      const r = await t
+        .http()
+        .post('/api/qhse/emergencias/hospitales')
+        .set(gestor())
+        .send({ nombre: `Hospital Prueba ${n} ${sufijo}`, ciudad: 'Quito', telefono: '022222222' });
+      expect(r.status).toBe(201);
+      return r.body.id as string;
+    };
+
+    it('el catálogo de hospitales lo amplía el equipo HSE, sin duplicados por nombre y ciudad', async () => {
+      const nombre = `Hospital Prueba ${n} catalogo`;
+      expect(
+        (
+          await t
+            .http()
+            .post('/api/qhse/emergencias/hospitales')
+            .set(tecnico())
+            .send({ nombre, ciudad: 'Quito' })
+        ).status,
+      ).toBe(403);
+      const ok = await t
+        .http()
+        .post('/api/qhse/emergencias/hospitales')
+        .set(gestor())
+        .send({ nombre, ciudad: 'Quito' });
+      expect(ok.status).toBe(201);
+      const repetido = await t
+        .http()
+        .post('/api/qhse/emergencias/hospitales')
+        .set(gestor())
+        .send({ nombre: nombre.toUpperCase(), ciudad: ' quito ' });
+      expect(repetido.status).toBe(409);
+      expect(
+        (
+          await t
+            .http()
+            .post('/api/qhse/emergencias/hospitales')
+            .set(gestor())
+            .send({ nombre: '   ', ciudad: 'Quito' })
+        ).status,
+      ).toBe(400);
+      const lista = (await t.http().get('/api/qhse/emergencias/hospitales').set(tecnico()))
+        .body as Array<{
+        nombre: string;
+      }>;
+      expect(lista.some((h) => h.nombre === nombre)).toBe(true);
+      expect((await t.http().get('/api/qhse/emergencias/hospitales').set(operador())).status).toBe(
+        403,
+      );
+    });
+
+    it('registra heridos con triage por color, lo cambia dejando historial, y no pasa a fallecido uno con MEDEVAC', async () => {
+      const id = (await activar()).body.id as string;
+      expect(
+        (
+          await post(
+            id,
+            'heridos',
+            { nombreCompleto: 'X', triage: 'rojo', mecanismoLesion: 'y' },
+            tecnico(),
+          )
+        ).status,
+      ).toBe(403);
+      for (const malo of [
+        { nombreCompleto: '   ', triage: 'rojo', mecanismoLesion: 'caída' },
+        { nombreCompleto: 'Ana', triage: 'rojo', mecanismoLesion: '  ' },
+        { nombreCompleto: 'Ana', triage: 'azul', mecanismoLesion: 'caída' },
+      ])
+        expect((await post(id, 'heridos', malo)).status).toBe(400);
+
+      const h1 = await herido(id);
+      const h2 = await herido(id, {
+        nombreCompleto: 'Ana Gómez',
+        triage: 'verde',
+        mecanismoLesion: 'Corte',
+      });
+      const d = await detalle(id);
+      expect(d.triage).toEqual({ rojo: 1, amarillo: 0, verde: 1, negro: 0 });
+      expect(d.heridos[0]).toMatchObject({
+        nombreCompleto: 'Juan Pérez',
+        cedula: '1712345678',
+        triage: 'rojo',
+        registradoPor: TECNICO.nombre,
+        medevac: null,
+      });
+      const ev = await eventos('qhse.emergencia.herido_registrado', id);
+      expect(ev).toHaveLength(2);
+      // el evento lleva ids y triage, nunca el nombre ni la cédula del herido
+      expect(JSON.stringify(ev[0].datos.data)).not.toMatch(/Juan|1712345678/);
+      expect(d.cronometro.map((c: { texto: string }) => c.texto)).toContain(
+        'Herido registrado con triage rojo (inmediato)',
+      );
+
+      const patch = (heridoId: string, cuerpo: Record<string, unknown>) =>
+        t
+          .http()
+          .patch(`/api/qhse/emergencias/${id}/heridos/${heridoId}`)
+          .set(gestor())
+          .send(cuerpo);
+      expect((await patch(h2, {})).status).toBe(400);
+      const sube = await patch(h2, { triage: 'amarillo', tratamientoCampo: 'Inmovilización' });
+      expect(sube.status).toBe(200);
+      const fila = sube.body.heridos.find((x: { id: string }) => x.id === h2);
+      expect(fila).toMatchObject({ triage: 'amarillo', tratamientoCampo: 'Inmovilización' });
+      expect(fila.triajes.map((x: { triage: string }) => x.triage)).toEqual(['verde', 'amarillo']);
+      expect(
+        (await eventos('qhse.emergencia.herido_triage_actualizado', id))[0].datos.data,
+      ).toMatchObject({
+        triage: 'amarillo',
+        triageAnterior: 'verde',
+      });
+      // un herido con MEDEVAC activado no pasa a fallecido
+      await post(id, `heridos/${h1}/medevac`);
+      const negro = await patch(h1, { triage: 'negro' });
+      expect(negro.status).toBe(409);
+      expect(negro.body.detail).toMatch(/MEDEVAC activado no se puede pasar a fallecido/);
+      expect((await patch(uuidv7(), { triage: 'verde' })).status).toBe(404);
+      expect((await patch('no-es-uuid', { triage: 'verde' })).status).toBe(400);
+    });
+
+    it('los signos vitales son registros nuevos, con la presión completa y la consciencia en escala', async () => {
+      const id = (await activar()).body.id as string;
+      const h = await herido(id);
+      const signos = (cuerpo: Record<string, unknown>, quien = gestor()) =>
+        post(id, `heridos/${h}/signos-vitales`, cuerpo, quien);
+      expect((await signos({ pulso: 90 }, tecnico())).status).toBe(403);
+      for (const malo of [
+        {},
+        { presionSistolica: 120 },
+        { presionDiastolica: 80 },
+        { presionSistolica: 70, presionDiastolica: 90 },
+        { pulso: 400 },
+        { respiracion: -1 },
+        { consciencia: 'dormido' },
+      ])
+        expect((await signos(malo)).status).toBe(400);
+      expect(
+        (
+          await signos({
+            pulso: 112,
+            presionSistolica: 90,
+            presionDiastolica: 60,
+            respiracion: 24,
+            consciencia: 'voz',
+          })
+        ).status,
+      ).toBe(201);
+      const r = await signos({ consciencia: 'dolor' });
+      const lista = r.body.heridos[0].signosVitales;
+      expect(lista).toHaveLength(2);
+      expect(lista[0]).toMatchObject({
+        pulso: 112,
+        presionSistolica: 90,
+        presionDiastolica: 60,
+        respiracion: 24,
+        consciencia: 'voz',
+        registradoPor: TECNICO.nombre,
+      });
+      expect(lista[1]).toMatchObject({ pulso: null, consciencia: 'dolor' });
+      expect((await post(id, `heridos/${uuidv7()}/signos-vitales`, { pulso: 80 })).status).toBe(
+        404,
+      );
+    });
+
+    it('el MEDEVAC sigue el orden: activar, medio y hospital, hospital notificado y transferido', async () => {
+      const id = (await activar()).body.id as string;
+      const h = await herido(id);
+      const hospital = await hospitalNuevo('orden');
+      const medevac = (cuerpo: Record<string, unknown>) =>
+        t.http().put(`/api/qhse/emergencias/${id}/heridos/${h}/medevac`).set(gestor()).send(cuerpo);
+      const orden = (paso: string) => post(id, `heridos/${h}/${paso}`);
+      // fuera de orden
+      expect((await medevac({ medioTransporte: 'helicoptero' })).status).toBe(409);
+      expect((await orden('hospital-notificado')).status).toBe(409);
+      expect((await orden('transferir')).status).toBe(409);
+
+      const a = await orden('medevac');
+      expect(a.status).toBe(201);
+      expect(a.body.medevacEnCurso).toBe(1);
+      expect(a.body.heridos[0].medevac).toMatchObject({
+        etapa: 'activado',
+        activadoPor: TECNICO.nombre,
+      });
+      expect((await orden('medevac')).status).toBe(409); // ya activado
+      expect(await eventos('qhse.emergencia.medevac_activado', id)).toHaveLength(1);
+
+      // sin medio y hospital no se notifica al hospital
+      const sin = await orden('hospital-notificado');
+      expect(sin.status).toBe(409);
+      expect(sin.body.detail).toMatch(/medio de transporte y el hospital de destino/);
+      expect((await medevac({})).status).toBe(400);
+      expect((await medevac({ hospitalId: uuidv7() })).status).toBe(400);
+      expect((await medevac({ medioTransporte: 'cohete' })).status).toBe(400);
+      expect((await medevac({ etaMinutos: 0 })).status).toBe(400);
+      const listo = await medevac({
+        medioTransporte: 'helicoptero',
+        hospitalId: hospital,
+        etaMinutos: 45,
+      });
+      expect(listo.status).toBe(200);
+      expect(listo.body.heridos[0].medevac).toMatchObject({
+        etapa: 'listo_para_notificar',
+        medioTransporte: 'helicoptero',
+        etaMinutos: 45,
+        hospital: { id: hospital, ciudad: 'Quito' },
+      });
+      // transferir antes de notificar al hospital, no
+      const antes = await orden('transferir');
+      expect(antes.status).toBe(409);
+      expect(antes.body.detail).toMatch(/notifique antes al hospital/);
+
+      const n = await orden('hospital-notificado');
+      expect(n.status).toBe(201);
+      expect(n.body.heridos[0].medevac).toMatchObject({
+        etapa: 'hospital_notificado',
+        hospitalNotificadoPor: TECNICO.nombre,
+      });
+      expect((await orden('hospital-notificado')).status).toBe(409);
+      const evN = await eventos('qhse.emergencia.hospital_notificado', id);
+      expect(evN[0].datos.data).toMatchObject({
+        heridoId: h,
+        hospitalId: hospital,
+        medioTransporte: 'helicoptero',
+        etaMinutos: 45,
+      });
+      expect(JSON.stringify(evN[0].datos.data)).not.toMatch(/Juan|1712345678/);
+
+      // todavía se puede ajustar el ETA hasta transferirlo
+      expect((await medevac({ etaMinutos: 30 })).body.heridos[0].medevac.etaMinutos).toBe(30);
+      const t1 = await orden('transferir');
+      expect(t1.status).toBe(201);
+      expect(t1.body.heridos[0].medevac).toMatchObject({
+        etapa: 'transferido',
+        transferidoPor: TECNICO.nombre,
+      });
+      expect(t1.body.medevacEnCurso).toBe(0);
+      expect((await orden('transferir')).status).toBe(409);
+      const tras = await medevac({ etaMinutos: 10 });
+      expect(tras.status).toBe(409);
+      expect(tras.body.detail).toMatch(/ya fue transferido/);
+      expect(await eventos('qhse.emergencia.herido_transferido', id)).toHaveLength(1);
+    });
+
+    it('un fallecido (triage negro) no se evacúa, y una emergencia cerrada no recibe heridos ni signos', async () => {
+      const id = (await activar()).body.id as string;
+      const fallecido = await herido(id, { triage: 'negro', lesiones: 'Sin signos vitales' });
+      const r = await post(id, `heridos/${fallecido}/medevac`);
+      expect(r.status).toBe(409);
+      expect(r.body.detail).toMatch(/fallecido \(triage negro\) no se evacúa/);
+      const sano = await herido(id, {
+        nombreCompleto: 'Luis',
+        triage: 'verde',
+        mecanismoLesion: 'Golpe',
+      });
+      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [id]);
+      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [id]);
+      for (const [ruta, cuerpo] of [
+        ['heridos', { nombreCompleto: 'Otro', triage: 'verde', mecanismoLesion: 'x' }],
+        [`heridos/${sano}/signos-vitales`, { pulso: 70 }],
+        [`heridos/${sano}/medevac`, {}],
+      ] as Array<[string, Record<string, unknown>]>)
+        expect((await post(id, ruta, cuerpo)).status).toBe(409);
+    });
+  });
+
   describe('reglas de la base', () => {
     const insertar = (
       extra: { estado?: string; swa?: string | null; derrame?: string | null } = {},
@@ -717,6 +1007,158 @@ run('QHSE: Emergencias (base de datos real)', () => {
           [id, otroPaso, OPERADOR.id],
         ),
       ).rejects.toThrow(/está cerrada y ya no recibe registros/);
+    });
+
+    it('el herido: orden del MEDEVAC, fallecido sin evacuación, datos válidos e hitos que no se deshacen', async () => {
+      const emergenciaId = (await activar()).body.id as string;
+      const hospital = (
+        await sql(
+          "INSERT INTO qhse.emergencia_hospital (id, nombre, ciudad) VALUES ($1, $2, 'Quito') RETURNING id",
+          [uuidv7(), `Hospital Prueba ${n} base`],
+        )
+      ).rows[0].id as string;
+      const nuevo = async (triage = 'rojo') => {
+        const id = uuidv7();
+        await sql(
+          `INSERT INTO qhse.herido (id, emergencia_id, nombre_completo, triage, mecanismo_lesion, created_by)
+           VALUES ($1, $2, 'Herido de prueba', $3::qhse.triage_color, 'Golpe', $4)`,
+          [id, emergenciaId, triage, OPERADOR.id],
+        );
+        return id;
+      };
+      const actualizar = (id: string, set: string, params: unknown[] = []) =>
+        sql(`UPDATE qhse.herido SET ${set} WHERE id = $1`, [id, ...params]);
+      const h = await nuevo();
+
+      // datos mínimos
+      await expect(
+        sql(
+          "INSERT INTO qhse.herido (id, emergencia_id, nombre_completo, triage, mecanismo_lesion, created_by) VALUES ($1, $2, '  ', 'rojo', 'x', $3)",
+          [uuidv7(), emergenciaId, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/herido_texto_check/);
+      // el medio, el hospital y el ETA solo existen con el MEDEVAC activado
+      await expect(actualizar(h, "medio_transporte = 'lancha'")).rejects.toThrow(
+        /herido_medevac_datos_check/,
+      );
+      // cada hito trae quién y cuándo
+      await expect(actualizar(h, 'medevac_at = now()')).rejects.toThrow(/herido_medevac_check/);
+      // no se notifica al hospital sin MEDEVAC, ni sin medio y hospital
+      await expect(
+        actualizar(h, 'hospital_notificado_at = now(), hospital_notificado_por = $2', [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/herido_notificado_orden_check|herido_medevac_datos_check/);
+      await actualizar(h, 'medevac_at = now(), medevac_por = $2', [OPERADOR.id]);
+      await expect(
+        actualizar(h, 'hospital_notificado_at = now(), hospital_notificado_por = $2', [
+          OPERADOR.id,
+        ]),
+      ).rejects.toThrow(/herido_notificado_orden_check/);
+      await expect(actualizar(h, 'eta_minutos = 0')).rejects.toThrow(/herido_eta_check/);
+      // no se transfiere sin haber notificado al hospital
+      await expect(
+        actualizar(h, 'transferido_at = now(), transferido_por = $2', [OPERADOR.id]),
+      ).rejects.toThrow(/herido_transferido_orden_check/);
+      await actualizar(h, "medio_transporte = 'ambulancia', hospital_id = $2, eta_minutos = 90", [
+        hospital,
+      ]);
+      await actualizar(h, 'hospital_notificado_at = now(), hospital_notificado_por = $2', [
+        OPERADOR.id,
+      ]);
+      await actualizar(h, 'transferido_at = now(), transferido_por = $2', [OPERADOR.id]);
+      // los hitos ya registrados no se deshacen ni se cambian, y tras transferirlo el destino no cambia
+      await expect(actualizar(h, 'medevac_at = NULL, medevac_por = NULL')).rejects.toThrow(
+        /hito del MEDEVAC ya registrado no se cambia|herido_/,
+      );
+      await expect(actualizar(h, "transferido_at = now() + interval '1 hour'")).rejects.toThrow(
+        /hito del MEDEVAC ya registrado no se cambia/,
+      );
+      await expect(actualizar(h, 'eta_minutos = 5')).rejects.toThrow(/ya fue transferido/);
+
+      // un fallecido (negro) no tiene MEDEVAC
+      const negro = await nuevo('negro');
+      await expect(
+        actualizar(negro, 'medevac_at = now(), medevac_por = $2', [OPERADOR.id]),
+      ).rejects.toThrow(/herido_medevac_negro_check/);
+      // el herido no cambia de emergencia, y la aplicación no reescribe lo registrado ni lo borra
+      const otra = (await activar()).body.id as string;
+      await expect(actualizar(negro, 'emergencia_id = $2', [otra])).rejects.toThrow(
+        /no se pasa a otra emergencia/,
+      );
+      await expect(
+        t.prisma.herido.update({ where: { id: negro }, data: { nombreCompleto: 'Otro' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.herido.update({ where: { id: negro }, data: { cedula: '1' } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(t.prisma.herido.delete({ where: { id: negro } })).rejects.toThrow(
+        /permission denied|denegado/i,
+      );
+      await expect(
+        t.prisma.heridoTriageHistorial.deleteMany({ where: { heridoId: negro } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.emergenciaHospital.deleteMany({ where: { id: hospital } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+
+      // una emergencia cerrada no recibe heridos nuevos ni cambios en los que tiene
+      const cerrada = (await activar()).body.id as string;
+      const hc = await (async () => {
+        const id = uuidv7();
+        await sql(
+          "INSERT INTO qhse.herido (id, emergencia_id, nombre_completo, triage, mecanismo_lesion, created_by) VALUES ($1, $2, 'A', 'verde', 'x', $3)",
+          [id, cerrada, OPERADOR.id],
+        );
+        return id;
+      })();
+      await sql("UPDATE qhse.emergencia SET estado = 'controlada' WHERE id = $1", [cerrada]);
+      await sql("UPDATE qhse.emergencia SET estado = 'cerrada' WHERE id = $1", [cerrada]);
+      await expect(actualizar(hc, "lesiones = 'otra'")).rejects.toThrow(
+        /está cerrada y ya no recibe registros/,
+      );
+      await expect(
+        sql(
+          "INSERT INTO qhse.herido (id, emergencia_id, nombre_completo, triage, mecanismo_lesion, created_by) VALUES ($1, $2, 'B', 'verde', 'x', $3)",
+          [uuidv7(), cerrada, OPERADOR.id],
+        ),
+      ).rejects.toThrow(/está cerrada y ya no recibe registros/);
+    });
+
+    it('los signos vitales: alguna medida, presión completa y coherente, rangos, y no se editan ni se borran', async () => {
+      const emergenciaId = (await activar()).body.id as string;
+      const h = uuidv7();
+      await sql(
+        "INSERT INTO qhse.herido (id, emergencia_id, nombre_completo, triage, mecanismo_lesion, created_by) VALUES ($1, $2, 'S', 'amarillo', 'x', $3)",
+        [h, emergenciaId, OPERADOR.id],
+      );
+      const signos = (columnas: string, valores: string) =>
+        sql(
+          `INSERT INTO qhse.herido_signos_vitales (id, herido_id, registrado_por${columnas ? ', ' + columnas : ''}) VALUES ($1, $2, $3${valores ? ', ' + valores : ''})`,
+          [uuidv7(), h, OPERADOR.id],
+        );
+      await expect(signos('', '')).rejects.toThrow(/herido_signos_vitales_alguno_check/);
+      await expect(signos('presion_sistolica', '120')).rejects.toThrow(
+        /herido_signos_vitales_presion_check/,
+      );
+      await expect(signos('presion_sistolica, presion_diastolica', '70, 90')).rejects.toThrow(
+        /herido_signos_vitales_presion_check/,
+      );
+      await expect(signos('pulso', '400')).rejects.toThrow(/herido_signos_vitales_pulso_check/);
+      await expect(signos('respiracion', '-1')).rejects.toThrow(
+        /herido_signos_vitales_respiracion_check/,
+      );
+      await expect(signos('consciencia', "'dormido'")).rejects.toThrow(/nivel_consciencia/);
+      await signos(
+        'pulso, presion_sistolica, presion_diastolica, consciencia',
+        "90, 120, 80, 'alerta'",
+      );
+      await expect(
+        t.prisma.heridoSignosVitales.updateMany({ where: { heridoId: h }, data: { pulso: 1 } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
+      await expect(
+        t.prisma.heridoSignosVitales.deleteMany({ where: { heridoId: h } }),
+      ).rejects.toThrow(/permission denied|denegado/i);
     });
 
     it('la descripción no puede estar vacía y el tipo, el ticket y los orígenes deben existir (FK)', async () => {

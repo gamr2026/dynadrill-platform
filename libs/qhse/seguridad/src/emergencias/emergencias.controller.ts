@@ -1,7 +1,18 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { EmergenciasHeridosService } from './emergencias-heridos.service';
 import { EmergenciasPlanService } from './emergencias-plan.service';
 import { EmergenciasConsultaService } from './emergencias-consulta.service';
 import { EmergenciasService } from './emergencias.service';
@@ -38,6 +49,45 @@ export class NotificarPasoDto {
   @IsUUID() pasoId!: string;
 }
 
+const TRIAGES = ['rojo', 'amarillo', 'verde', 'negro'] as const;
+const MEDIOS = ['ambulancia', 'lancha', 'helicoptero'] as const;
+const CONSCIENCIAS = ['alerta', 'voz', 'dolor', 'inconsciente'] as const;
+
+export class RegistrarHeridoDto {
+  @IsString() @MaxLength(200) nombreCompleto!: string;
+  @IsOptional() @IsString() @MaxLength(20) cedula?: string;
+  @IsIn(TRIAGES) triage!: (typeof TRIAGES)[number];
+  @IsString() @MaxLength(500) mecanismoLesion!: string;
+  @IsOptional() @IsString() @MaxLength(1000) lesiones?: string;
+  @IsOptional() @IsString() @MaxLength(1000) tratamientoCampo?: string;
+}
+
+export class ActualizarHeridoDto {
+  @IsOptional() @IsIn(TRIAGES) triage?: (typeof TRIAGES)[number];
+  @IsOptional() @IsString() @MaxLength(1000) lesiones?: string;
+  @IsOptional() @IsString() @MaxLength(1000) tratamientoCampo?: string;
+}
+
+export class SignosVitalesDto {
+  @IsOptional() @IsInt() @Min(0) @Max(300) pulso?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(300) presionSistolica?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(300) presionDiastolica?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(100) respiracion?: number;
+  @IsOptional() @IsIn(CONSCIENCIAS) consciencia?: (typeof CONSCIENCIAS)[number];
+}
+
+export class DatosMedevacDto {
+  @IsOptional() @IsIn(MEDIOS) medioTransporte?: (typeof MEDIOS)[number];
+  @IsOptional() @IsUUID() hospitalId?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(10080) etaMinutos?: number;
+}
+
+export class AgregarHospitalDto {
+  @IsString() @MaxLength(200) nombre!: string;
+  @IsString() @MaxLength(100) ciudad!: string;
+  @IsOptional() @IsString() @MaxLength(50) telefono?: string;
+}
+
 export class AgregarLineaDto {
   @IsString() @MaxLength(1000) texto!: string;
 }
@@ -51,6 +101,7 @@ export class EmergenciasController {
   constructor(
     private readonly emergencias: EmergenciasService,
     private readonly plan: EmergenciasPlanService,
+    private readonly heridos: EmergenciasHeridosService,
     private readonly consulta: EmergenciasConsultaService,
   ) {}
 
@@ -65,6 +116,20 @@ export class EmergenciasController {
   @Post()
   activar(@Body() dto: ActivarEmergenciaDto, @CurrentUser() actor: AuthUser) {
     return this.emergencias.activar(dto, actor);
+  }
+
+  /** Hospitales a los que se evacúa. Va antes de `:id`. */
+  @RequirePermission(P.EMERGENCIAS_VER)
+  @Get('hospitales')
+  hospitales() {
+    return this.heridos.hospitales();
+  }
+
+  /** Agrega un hospital al catálogo (el equipo HSE lo amplía). */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post('hospitales')
+  agregarHospital(@Body() dto: AgregarHospitalDto, @CurrentUser() actor: AuthUser) {
+    return this.heridos.agregarHospital(dto, actor);
   }
 
   @RequirePermission(P.EMERGENCIAS_VER)
@@ -121,5 +186,87 @@ export class EmergenciasController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.plan.notificarPaso(id, dto.pasoId, actor);
+  }
+
+  // ------------------------------------------------------------------------------------- heridos, triage y MEDEVAC
+
+  /** Registra un herido con su triage por color. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/heridos')
+  registrarHerido(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RegistrarHeridoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.registrar(id, dto, actor);
+  }
+
+  /** Cambia el triage o completa las lesiones y el tratamiento en campo. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Patch(':id/heridos/:heridoId')
+  actualizarHerido(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @Body() dto: ActualizarHeridoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.actualizar(id, heridoId, dto, actor);
+  }
+
+  /** Toma de signos vitales (cada una es un registro nuevo). */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/heridos/:heridoId/signos-vitales')
+  registrarSignos(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @Body() dto: SignosVitalesDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.registrarSignos(id, heridoId, dto, actor);
+  }
+
+  /** Activa el MEDEVAC del herido. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/heridos/:heridoId/medevac')
+  activarMedevac(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.activarMedevac(id, heridoId, actor);
+  }
+
+  /** Medio de transporte, hospital de destino y ETA del MEDEVAC. */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Put(':id/heridos/:heridoId/medevac')
+  datosMedevac(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @Body() dto: DatosMedevacDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.datosMedevac(id, heridoId, dto, actor);
+  }
+
+  /** Registra que se notificó al hospital (exige el medio de transporte y el hospital de destino). */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/heridos/:heridoId/hospital-notificado')
+  notificarHospital(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.notificarHospital(id, heridoId, actor);
+  }
+
+  /** Registra la transferencia del herido al hospital (exige haber notificado al hospital). */
+  @RequirePermission(P.EMERGENCIAS_GESTIONAR)
+  @Post(':id/heridos/:heridoId/transferir')
+  transferir(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('heridoId', ParseUUIDPipe) heridoId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.heridos.transferir(id, heridoId, actor);
   }
 }
