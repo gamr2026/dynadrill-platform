@@ -233,6 +233,9 @@ model Ticket {
   reporteHerramientasCompletador   IdUsuario? @relation("completadorReporteHerramientas", fields: [reporteHerramientasCompletadoPor], references: [id])
 
   @@index([pasoCodigo])
+  @@index([clienteId])
+  @@index([pozoId])
+  @@index([campoId])
   @@map("ticket")
   @@schema("pumping")
 }
@@ -651,6 +654,8 @@ model TicketRequisito {
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([ticketId, estado])
+  @@index([requisitoCodigo])
+  @@index([usuarioId])
   @@map("ticket_requisito")
   @@schema("pumping")
 }

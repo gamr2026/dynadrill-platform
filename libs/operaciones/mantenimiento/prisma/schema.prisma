@@ -186,6 +186,7 @@ model Suborden {
   @@unique([ordenId, tipoId])
   @@index([asignadaA, estadoId])
   @@index([estadoId])
+  @@index([tipoId])
   @@map("suborden")
   @@schema("mantenimiento")
 }

@@ -306,6 +306,7 @@ model Vehiculo {
   habilitado      Boolean        @default(true)
 
   @@index([transportistaId])
+  @@index([tipoVehiculoId])
   @@map("vehiculo")
   @@schema("catalogos")
 }

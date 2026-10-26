@@ -357,6 +357,7 @@ model InspeccionCaso {
   @@unique([ticketId, unidadId])
   @@unique([id, unidadId])
   @@index([operadorId])
+  @@index([unidadId])
   @@map("inspeccion_caso")
   @@schema("flota")
 }
@@ -398,6 +399,7 @@ model InspeccionVehiculo {
   @@unique([id, unidadId])
   @@index([unidadId, fecha(sort: Desc)])
   @@index([conductorId])
+  @@index([casoId, unidadId])
   @@map("inspeccion_vehiculo")
   @@schema("flota")
 }
@@ -573,6 +575,7 @@ model GerenciamientoViaje {
   comunicaciones GerenciamientoViajeComunicacion[]
 
   @@index([conductorId, createdAt(sort: Desc)])
+  @@index([unidadId])
   @@map("gerenciamiento_viaje")
   @@schema("flota")
 }

@@ -309,6 +309,11 @@ model Pedido {
   @@index([clienteId])
   @@index([lineaId, estado])
   @@index([analistaFacturacionId])
+  @@index([agenteComercialId])
+  @@index([tecnicoHseId])
+  @@index([bodegaId])
+  @@index([taladroId])
+  @@index([bloqueId])
   @@map("pedido")
   @@schema("comercial")
 }
@@ -374,6 +379,7 @@ model PedidoTipoServicio {
   subtipos PedidoSubtipoServicio[]
 
   @@unique([pedidoId, tipoId])
+  @@index([tipoId])
   @@map("pedido_tipo_servicio")
   @@schema("comercial")
 }
@@ -415,6 +421,7 @@ model PedidoItem {
   tipoLinea          TipoLinea         @default(servicio) @map("tipo_linea")
 
   @@unique([pedidoId, orden])
+  @@index([listaPreciosItemId])
   @@map("pedido_item")
   @@schema("comercial")
 }
@@ -907,6 +914,7 @@ model Prefactura {
 
   @@unique([pedidoId, version])
   @@index([pedidoId])
+  @@index([listaPreciosId])
   @@map("prefactura")
   @@schema("comercial")
 }
@@ -1136,6 +1144,9 @@ model GuiaRemision {
   firmasDigitales GuiaFirmaDigital[]
 
   @@index([pedidoId])
+  @@index([vehiculoId])
+  @@index([choferId])
+  @@index([transportistaId])
   @@map("guia_remision")
   @@schema("comercial")
 }

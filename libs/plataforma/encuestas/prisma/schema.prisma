@@ -213,6 +213,7 @@ model Respuesta {
   opcion              PreguntaOpcion?   @relation(fields: [opcionId, preguntaId], references: [id, preguntaId])
 
   @@index([preguntaId])
+  @@index([opcionId, preguntaId])
   @@map("respuesta")
   @@schema("encuestas")
 }

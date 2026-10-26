@@ -115,6 +115,7 @@ model CorreoAviso {
 
   @@index([eventoId])
   @@index([usuarioId])
+  @@index([reglaId])
   @@map("correo_aviso")
   @@schema("avisos")
 }

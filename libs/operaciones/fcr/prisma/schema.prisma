@@ -328,6 +328,9 @@ model Ticket {
   bitacora       BitacoraDia[]
 
   @@index([pasoCodigo])
+  @@index([clienteId])
+  @@index([pozoId])
+  @@index([campoId])
   @@map("ticket")
   @@schema("fcr")
 }
@@ -420,6 +423,8 @@ model TicketRequisito {
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([ticketId, estado])
+  @@index([requisitoCodigo])
+  @@index([usuarioId])
   @@map("ticket_requisito")
   @@schema("fcr")
 }

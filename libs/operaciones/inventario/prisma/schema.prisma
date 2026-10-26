@@ -199,6 +199,7 @@ model Articulo {
 
   @@index([categoriaId])
   @@index([subcategoriaId])
+  @@index([categoriaId, subcategoriaId])
   @@map("articulo")
   @@schema("inventario")
 }
@@ -308,6 +309,8 @@ model Movimiento {
   @@index([ticketPumpingId])
   @@index([despachoId])
   @@index([fecha])
+  @@index([bodegaId])
+  @@index([responsableId])
   @@map("movimiento")
   @@schema("inventario")
 }
@@ -353,6 +356,7 @@ model Despacho {
 
   @@index([estado])
   @@index([pedidoId])
+  @@index([bodegaId])
   @@map("despacho")
   @@schema("inventario")
 }
@@ -397,6 +401,7 @@ model ConsumoTicket {
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([ticketPumpingId, articuloId])
+  @@index([articuloId])
   @@map("consumo_ticket")
   @@schema("inventario")
 }

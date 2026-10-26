@@ -303,6 +303,7 @@ model EpiEntregaItem {
   updatedBy           String?     @map("updated_by") @db.Uuid
 
   @@index([entregaId])
+  @@index([elementoId])
   @@map("epi_entrega_item")
   @@schema("qhse")
 }
@@ -402,6 +403,7 @@ model Ptw {
   @@index([ticketId])
   @@index([pedidoId, diaOperacion])
   @@index([fase])
+  @@index([ticketId, pedidoId])
   @@map("ptw")
   @@schema("qhse")
 }
@@ -974,6 +976,8 @@ model StopTarjeta {
   @@index([estado])
   @@index([fecha])
   @@index([observadorId])
+  @@index([observadoId])
+  @@index([ticketId])
   @@map("stop_tarjeta")
   @@schema("qhse")
 }
@@ -1157,6 +1161,8 @@ model Inspeccion {
 
   @@index([equipoId, fecha(sort: Desc)])
   @@index([resultado])
+  @@index([tipoId])
+  @@index([inspectorId])
   @@map("inspeccion")
   @@schema("qhse")
 }
@@ -2146,6 +2152,7 @@ model Investigacion {
   @@index([estado])
   @@index([fechaIncidente])
   @@index([resultadoId])
+  @@index([liderId])
   @@map("investigacion")
   @@schema("qhse")
 }
@@ -2782,6 +2789,7 @@ model AspectoAmbiental {
   seguimientos AspectoAmbientalSeguimiento[]
 
   @@index([procesoId])
+  @@index([responsableId])
   @@map("aspecto_ambiental")
   @@schema("qhse")
 }
