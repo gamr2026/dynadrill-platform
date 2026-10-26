@@ -712,6 +712,7 @@ run('pedidos (base de datos real)', () => {
         expect.objectContaining({
           archivoId: ARCHIVO_OK.id,
           nombre: 'orden de compra.pdf',
+          descripcion: 'orden de compra.pdf', // CM-1: sin descripción escrita, el nombre del archivo
           mimeType: 'application/pdf',
           tamanoBytes: 2048,
         }),

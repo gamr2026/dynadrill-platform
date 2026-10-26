@@ -200,7 +200,7 @@ export class PedidosController {
     @CurrentUser() actor: AuthUser,
     @Headers('authorization') auth?: string,
   ) {
-    return this.pedidos.adjuntarDocumento(id, dto.archivoId, this.ctx(actor, auth));
+    return this.pedidos.adjuntarDocumento(id, dto.archivoId, dto.descripcion, this.ctx(actor, auth));
   }
 
   @RequirePermission(P.PEDIDOS_EDITAR)

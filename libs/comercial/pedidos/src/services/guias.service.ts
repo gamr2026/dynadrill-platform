@@ -24,6 +24,8 @@ const SIN_GUIA = new Set(['borrador', 'anulado', 'facturado']);
 
 const dia = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);
 const aDia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+const aHora = (d: Date | null) => (d ? d.toISOString().slice(11, 16) : null);
+const deHora = (h: string) => new Date(`1970-01-01T${h}:00.000Z`);
 const num = (d: Prisma.Decimal | number | null | undefined) =>
   d === null || d === undefined ? null : Number(d);
 
@@ -55,8 +57,8 @@ const aDto = (g: GuiaCompleta, autorizacion: AutorizacionGuia) => ({
   lugarOrigen: { id: g.lugarOrigenId, nombre: g.lugarOrigen.nombre },
   solicitadoPorNombre: g.solicitadoPorNombre,
   despachadoPorNombre: g.despachadoPorNombre,
-  horaSalida: g.horaSalida,
-  horaLlegada: g.horaLlegada,
+  horaSalida: aHora(g.horaSalida),
+  horaLlegada: aHora(g.horaLlegada),
   transportista: {
     id: g.transportistaId,
     nombre: g.transportistaNombre,
@@ -334,8 +336,8 @@ export class GuiasService {
           lugarOrigenId: lugar.id,
           solicitadoPorNombre: dto.solicitadoPorNombre?.trim() || null,
           despachadoPorNombre: dto.despachadoPorNombre?.trim() || null,
-          horaSalida: dto.horaSalida ?? null,
-          horaLlegada: dto.horaLlegada ?? null,
+          horaSalida: dto.horaSalida ? deHora(dto.horaSalida) : null,
+          horaLlegada: dto.horaLlegada ? deHora(dto.horaLlegada) : null,
           ...transporte,
           observaciones: dto.observaciones?.trim() || null,
           reemplazaAId: dto.reemplazaAId ?? null,

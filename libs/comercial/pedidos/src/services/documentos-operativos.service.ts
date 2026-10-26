@@ -41,6 +41,8 @@ const ADMITEN_CORRECCION = new Set([
 
 const dia = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00.000Z`);
 const aDia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+const aHora = (d: Date | null) => (d ? d.toISOString().slice(11, 16) : null);
+const deHora = (h: string) => new Date(`1970-01-01T${h}:00.000Z`);
 const MS_DIA = 86_400_000;
 
 export interface Avance {
@@ -228,8 +230,8 @@ export class DocumentosOperativosService {
       actividades: d.actividades.map((a) => ({
         orden: a.orden,
         fecha: aDia(a.fecha),
-        horaInicio: a.horaInicio,
-        horaFin: a.horaFin,
+        horaInicio: aHora(a.horaInicio),
+        horaFin: aHora(a.horaFin),
         duracionHoras: Number(a.duracionHoras),
         detalle: a.detalle,
         autor: a.autor,
@@ -444,8 +446,8 @@ export class DocumentosOperativosService {
           documentoId,
           orden,
           fecha: dia(a.fecha),
-          horaInicio: a.horaInicio,
-          horaFin: a.horaFin,
+          horaInicio: deHora(a.horaInicio),
+          horaFin: deHora(a.horaFin),
           duracionHoras: a.duracionHoras,
           detalle: a.detalle,
           autor: a.autor ?? null,

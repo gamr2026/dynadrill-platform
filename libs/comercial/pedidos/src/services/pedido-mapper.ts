@@ -207,6 +207,7 @@ export function toDetalle(p: PedidoConHijos) {
         id: d.id,
         archivoId: d.archivoId,
         nombre: d.archivo.nombreOriginal,
+        descripcion: d.descripcion,
         mimeType: d.archivo.mimeType,
         tamanoBytes: Number(d.archivo.tamanoBytes),
         subidoPor: d.archivo.subidoPor,

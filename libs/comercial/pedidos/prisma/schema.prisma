@@ -500,6 +500,8 @@ model PedidoDocumento {
   archivoId   String     @map("archivo_id") @db.Uuid
   /// El nombre, el tipo, el tamaño y quién lo subió salen del archivo (FK a `archivos.archivo`).
   archivo     CatArchivo @relation(fields: [archivoId], references: [id])
+  /// Qué es el documento, escrito por quien lo adjunta (si no la escribe, el nombre del archivo).
+  descripcion String
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([pedidoId, archivoId])
@@ -673,8 +675,8 @@ model DocumentoOperativoActividad {
   orden         Int
   fecha         DateTime           @db.Date
   /// 'HH:mm'
-  horaInicio    String             @map("hora_inicio")
-  horaFin       String             @map("hora_fin")
+  horaInicio    DateTime           @map("hora_inicio") @db.Time(0)
+  horaFin       DateTime           @map("hora_fin") @db.Time(0)
   duracionHoras Decimal            @map("duracion_horas") @db.Decimal(5, 2)
   detalle       String
   autor         String?
@@ -1094,8 +1096,8 @@ model GuiaRemision {
   solicitadoPorNombre String? @map("solicitado_por_nombre")
   despachadoPorNombre String? @map("despachado_por_nombre")
   /// 'HH:mm'
-  horaSalida    String?    @map("hora_salida")
-  horaLlegada   String?    @map("hora_llegada")
+  horaSalida    DateTime?  @map("hora_salida") @db.Time(0)
+  horaLlegada   DateTime?  @map("hora_llegada") @db.Time(0)
   /// Transporte: el id es FK al catálogo (solo en la base de datos); el nombre y la identificación se conservan tal como se emitió.
   transportistaId             String  @map("transportista_id") @db.Uuid
   transportistaNombre         String  @map("transportista_nombre")

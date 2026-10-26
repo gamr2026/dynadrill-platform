@@ -233,4 +233,6 @@ export class ItemsListaQueryDto {
 export class AdjuntarDocumentoDto {
   /** Id del archivo en el módulo `archivos` (subido con módulo `pedido_documento`). */
   @IsUUID() archivoId!: string;
+  /** Qué es el documento; si no se escribe, se usa el nombre del archivo. */
+  @IsOptional() @IsString() @MaxLength(300) descripcion?: string;
 }

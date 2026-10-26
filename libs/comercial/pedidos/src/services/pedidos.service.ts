@@ -643,7 +643,7 @@ export class PedidosService {
    * misma persona, mientras el pedido es editable. El contenido no pasa por aquí: se guarda su id y una copia de nombre,
    * tipo y tamaño.
    */
-  async adjuntarDocumento(id: string, archivoId: string, ctx: Contexto) {
+  async adjuntarDocumento(id: string, archivoId: string, descripcion: string | undefined, ctx: Contexto) {
     const p = await this.cargar(this.prisma, id);
     if (!EDITABLES.has(p.estado)) throw new ConflictException('Este pedido ya no se puede editar');
     if (p.documentos.length >= MAX_DOCUMENTOS) {
@@ -665,6 +665,7 @@ export class PedidosService {
         id: uuidv7(),
         pedidoId: id,
         archivoId: a.id,
+        descripcion: descripcion?.trim() || a.nombre,
       },
     });
     return this.detalle(id, ctx);
