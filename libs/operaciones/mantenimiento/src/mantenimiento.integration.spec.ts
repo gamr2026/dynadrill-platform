@@ -142,9 +142,9 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
     const firmado = opciones.firmado ?? true;
     await admin.query(
       `INSERT INTO pumping.reporte_unidad
-         (id, ticket_id, unidad_id, origen, destino, llegada_fecha, novedades_mecanica, novedades_instrumentacion,
+         (id, ticket_id, unidad_id, destino_pozo_id, llegada_fecha, novedades_mecanica, novedades_instrumentacion,
           novedades_operaciones, unidad_lista, operacion_interrumpida, llegada_firmada_por, llegada_firmada_at)
-       VALUES ($1, $2, $3, 'Base', 'Pozo X', '2026-11-06', $4, $5, $6, false, false, $7, $8)`,
+       VALUES ($1, $2, $3, (SELECT id FROM catalogos.pozo ORDER BY id LIMIT 1), '2026-11-06', $4, $5, $6, false, false, $7, $8)`,
       [
         reporteId,
         ticketId,
@@ -330,7 +330,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         unidad: { id: UNIDAD.id, codigo: UNIDAD.codigo, tipo: 'transporte' },
         novedades: {
           mecanica: 'Fuga de aceite en el motor',
-          destino: 'Pozo X',
+          destino: expect.any(String), // el nombre del pozo del catálogo (OP-4)
           unidadLista: false,
         },
         descarte: null,

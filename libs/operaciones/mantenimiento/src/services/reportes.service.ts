@@ -19,7 +19,15 @@ const INCLUIR = {
   unidad: true,
   descartador: { select: { id: true, nombre: true } },
   orden: { select: { id: true } },
-  pumpingReporteUnidad: { include: { ticket: { select: { id: true, ticketNumero: true } } } },
+  pumpingReporteUnidad: {
+    include: {
+      ticket: { select: { id: true, ticketNumero: true } },
+      origenBodega: { select: { nombre: true } },
+      origenPozo: { select: { nombreCompleto: true } },
+      destinoBodega: { select: { nombre: true } },
+      destinoPozo: { select: { nombreCompleto: true } },
+    },
+  },
 } satisfies Prisma.ReporteRecibidoInclude;
 
 type ReporteConDatos = Prisma.ReporteRecibidoGetPayload<{ include: typeof INCLUIR }>;
@@ -289,8 +297,8 @@ export class ReportesService {
             mecanica: p.novedadesMecanica,
             instrumentacion: p.novedadesInstrumentacion,
             operaciones: p.novedadesOperaciones,
-            origen: p.origen,
-            destino: p.destino,
+            origen: p.origenBodega?.nombre ?? p.origenPozo?.nombreCompleto ?? null,
+            destino: p.destinoBodega?.nombre ?? p.destinoPozo?.nombreCompleto ?? null,
             fechaLlegada: p.llegadaFecha,
             operacionInterrumpida: p.operacionInterrumpida,
             detalleInterrupcion: p.detalleInterrupcion,

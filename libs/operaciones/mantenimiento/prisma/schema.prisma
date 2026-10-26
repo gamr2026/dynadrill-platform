@@ -275,8 +275,15 @@ model PumpingReporteUnidad {
   ticket                   PumpingTicket @relation(fields: [ticketId], references: [id])
   /// Unidad de Flota del reporte de Pumping (D2: FK real en la base, mismo contenedor).
   unidadId                 String        @map("unidad_id") @db.Uuid
-  origen                   String?
-  destino                  String?
+  /// Origen y destino del traslado: cada extremo es una bodega o un pozo (OP-4).
+  origenBodegaId           String?       @map("origen_bodega_id") @db.Uuid
+  origenBodega             CatBodega?    @relation("reporteOrigenBodega", fields: [origenBodegaId], references: [id])
+  origenPozoId             String?       @map("origen_pozo_id") @db.Uuid
+  origenPozo               CatPozo?      @relation("reporteOrigenPozo", fields: [origenPozoId], references: [id])
+  destinoBodegaId          String?       @map("destino_bodega_id") @db.Uuid
+  destinoBodega            CatBodega?    @relation("reporteDestinoBodega", fields: [destinoBodegaId], references: [id])
+  destinoPozoId            String?       @map("destino_pozo_id") @db.Uuid
+  destinoPozo              CatPozo?      @relation("reporteDestinoPozo", fields: [destinoPozoId], references: [id])
   llegadaFecha             DateTime?     @map("llegada_fecha") @db.Date
   novedadesMecanica        String?       @map("novedades_mecanica")
   novedadesInstrumentacion String?       @map("novedades_instrumentacion")
@@ -338,8 +345,22 @@ model CatBodega {
   habilitado Boolean
 
   repuestos SubordenRepuesto[]
+  reportesOrigen  PumpingReporteUnidad[] @relation("reporteOrigenBodega")
+  reportesDestino PumpingReporteUnidad[] @relation("reporteDestinoBodega")
 
   @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// `catalogos.pozo`: dueño Plataforma. Solo para nombrar el origen o el destino de un traslado.
+model CatPozo {
+  id             String @id @db.Uuid
+  nombreCompleto String @map("nombre_completo")
+
+  reportesOrigen  PumpingReporteUnidad[] @relation("reporteOrigenPozo")
+  reportesDestino PumpingReporteUnidad[] @relation("reporteDestinoPozo")
+
+  @@map("pozo")
   @@schema("catalogos")
 }
 
