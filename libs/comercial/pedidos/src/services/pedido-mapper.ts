@@ -77,17 +77,18 @@ export function toItem(i: PedidoConHijos['items'][number]) {
   };
 }
 
-/** Resumen para la lista de pedidos (sin ítems). */
-export function toResumen(
-  p: Prisma.PedidoGetPayload<{
-    include: typeof INCLUDE_NOMBRES & {
-      estadoRef: true;
-      linea: true;
-      tipoOt: true;
-      tiposServicio: { include: { tipo: true } };
-    };
-  }>,
-) {
+/** Lo que la lista de pedidos lee de cada pedido: nombres, estado, servicio y solo los importes de sus ítems. */
+export const INCLUDE_RESUMEN = {
+  ...INCLUDE_NOMBRES,
+  estadoRef: true,
+  linea: true,
+  tipoOt: true,
+  tiposServicio: { include: { tipo: true } },
+  items: { select: { cantidad: true, valorUnitario: true, descuentoPct: true } },
+} as const satisfies Prisma.PedidoInclude;
+
+/** Resumen para la lista de pedidos (sin ítems; el valor estimado es la suma de sus netos). */
+export function toResumen(p: Prisma.PedidoGetPayload<{ include: typeof INCLUDE_RESUMEN }>) {
   return {
     id: p.id,
     codigo: p.codigo,
@@ -109,6 +110,7 @@ export function toResumen(
     analistaFacturacionNombre: p.analistaFacturacion?.nombre ?? null,
     fechaInicioServicio: dia(p.fechaInicioServicio),
     fechaFinServicio: dia(p.fechaFinServicio),
+    valorEstimado: redondeo(p.items.reduce((a, i) => a + importesItem(i).neto, 0)),
     as2Numero: p.as2Numero,
     as2Estado: p.as2Estado,
     as2SyncEstado: p.as2SyncEstado,

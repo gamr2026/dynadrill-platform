@@ -23,6 +23,7 @@ import { ActorFlujo, WorkflowService } from '../workflow/workflow.service';
 import { SecuenciasService } from './secuencias.service';
 import {
   INCLUDE_NOMBRES,
+  INCLUDE_RESUMEN,
   PedidoConHijos,
   nombreCliente,
   rucCliente,
@@ -140,13 +141,7 @@ export class PedidosService {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
-        include: {
-          ...INCLUDE_NOMBRES,
-          estadoRef: true,
-          linea: true,
-          tipoOt: true,
-          tiposServicio: { include: { tipo: true } },
-        },
+        include: INCLUDE_RESUMEN,
       }),
     ]);
     return { items: filas.map(toResumen), total, page, limit };

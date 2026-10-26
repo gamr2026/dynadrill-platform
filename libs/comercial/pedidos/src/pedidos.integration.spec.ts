@@ -1372,6 +1372,9 @@ run('pedidos (base de datos real)', () => {
         .set(ventas())
         .expect(200);
       expect(detalle.body.items.length).toBeGreaterThan(0);
+      // el valor estimado de la lista es la suma de los netos de las líneas (descuento aplicado, sin impuestos)
+      const neto = detalle.body.items.reduce((a: number, i: { neto: number }) => a + i.neto, 0);
+      expect(r.body.items[0].valorEstimado).toBeCloseTo(neto, 2);
       await http().get(`/api/comercial/pedidos/${id()}`).set(ventas()).expect(404);
     });
 
