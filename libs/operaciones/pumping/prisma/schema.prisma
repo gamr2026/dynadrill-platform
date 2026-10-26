@@ -406,6 +406,9 @@ model ReporteDiario {
   completadoPor        String?   @map("completado_por") @db.Uuid
   /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
   corregidoAt          DateTime? @map("corregido_at") @db.Timestamptz(6)
+  /// Quién lo corrigió (actor del evento de Comercial); su rol es el de su usuario. Va junto con `corregidoAt`.
+  corregidoPor         String?   @map("corregido_por") @db.Uuid
+  corrector            IdUsuario? @relation("reporteCorrector", fields: [corregidoPor], references: [id])
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy            String    @map("created_by") @db.Uuid
   updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1015,6 +1018,7 @@ model IdUsuario {
   cambiosRevisados   SolicitudCambioItems[]   @relation("revisorCambio")
   reportesCompletados Ticket[]                @relation("completadorReporteHerramientas")
   celdasReporte      ReporteItemDia[]         @relation("autorCeldaReporte")
+  reportesCorregidos ReporteDiario[]          @relation("reporteCorrector")
 
   @@map("usuario")
   @@schema("identidad")

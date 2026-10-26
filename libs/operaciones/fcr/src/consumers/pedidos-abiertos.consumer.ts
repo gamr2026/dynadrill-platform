@@ -58,6 +58,7 @@ export class PedidosAbiertosConsumer implements OnApplicationBootstrap {
                 tx,
                 String(event.data['pedidoId'] ?? ''),
                 String(event.data['fecha'] ?? ''),
+                event.actor?.userId,
               );
             }
             return;

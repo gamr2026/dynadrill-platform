@@ -41,6 +41,7 @@ export class DiaCorregidoConsumer implements OnApplicationBootstrap {
             tx,
             String(event.data['pedidoId'] ?? ''),
             String(event.data['fecha'] ?? ''),
+            event.actor?.userId,
           );
         });
         if (!nuevo) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);

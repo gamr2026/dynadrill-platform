@@ -211,6 +211,7 @@ export class BitacoraService {
     tx: Prisma.TransactionClient,
     pedidoId: string,
     fecha: string,
+    actorId?: string,
   ): Promise<void> {
     if (!FECHA.test(fecha)) return;
     const t = await tx.ticket.findUnique({
@@ -221,21 +222,26 @@ export class BitacoraService {
     const previo = await tx.bitacoraDia.findUnique({
       where: { ticketId_fecha: { ticketId: t.id, fecha: deDia(fecha) } },
     });
+    // quien corrigió es el actor del evento (si es un usuario conocido); si no, quien atendió el ticket por última vez
+    const conocido = actorId
+      ? await tx.idUsuario.findUnique({ where: { id: actorId }, select: { id: true } })
+      : null;
     if (previo) {
       if (!previo.corregidaAt) {
         await tx.bitacoraDia.update({
           where: { id: previo.id },
-          data: { corregidaAt: new Date() },
+          data: { corregidaAt: new Date(), corregidaPor: conocido?.id ?? previo.updatedBy },
         });
       }
       return;
     }
-    // quien lo «crea» es quien corrigió, que el evento no trae: se usa a quien atendió el ticket por última vez
-    const autor = await tx.ticketHistorial.findFirst({
-      where: { ticketId: t.id, actorId: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      select: { actorId: true },
-    });
+    const autor = conocido
+      ? { actorId: conocido.id }
+      : await tx.ticketHistorial.findFirst({
+          where: { ticketId: t.id, actorId: { not: null } },
+          orderBy: { createdAt: 'desc' },
+          select: { actorId: true },
+        });
     if (!autor?.actorId) return;
     // un día fuera de las fechas del servicio no se registra (la base no lo admite): no hay nada que bloquear
     if (
@@ -249,6 +255,7 @@ export class BitacoraService {
         ticketId: t.id,
         fecha: deDia(fecha),
         corregidaAt: new Date(),
+        corregidaPor: autor.actorId,
         createdBy: autor.actorId,
         updatedBy: autor.actorId,
       },

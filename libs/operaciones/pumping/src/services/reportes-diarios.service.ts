@@ -223,6 +223,7 @@ export class ReportesDiariosService {
     tx: Prisma.TransactionClient,
     pedidoId: string,
     fecha: string,
+    actorId?: string,
   ): Promise<void> {
     if (!FECHA.test(fecha)) return;
     const t = await tx.ticket.findUnique({ where: { pedidoId }, select: { id: true } });
@@ -230,21 +231,26 @@ export class ReportesDiariosService {
     const previo = await tx.reporteDiario.findUnique({
       where: { ticketId_fecha: { ticketId: t.id, fecha: deDia(fecha) } },
     });
+    // quien corrigió es el actor del evento (si es un usuario conocido); si no, quien atendió el ticket por última vez
+    const conocido = actorId
+      ? await tx.idUsuario.findUnique({ where: { id: actorId }, select: { id: true } })
+      : null;
     if (previo) {
       if (!previo.corregidoAt) {
         await tx.reporteDiario.update({
           where: { id: previo.id },
-          data: { corregidoAt: new Date() },
+          data: { corregidoAt: new Date(), corregidoPor: conocido?.id ?? previo.updatedBy },
         });
       }
       return;
     }
-    // quién lo "crea" es quien corrigió, que el evento no trae: se usa a quien atendió el ticket por última vez
-    const autor = await tx.ticketHistorial.findFirst({
-      where: { ticketId: t.id, actorId: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      select: { actorId: true },
-    });
+    const autor = conocido
+      ? { actorId: conocido.id }
+      : await tx.ticketHistorial.findFirst({
+          where: { ticketId: t.id, actorId: { not: null } },
+          orderBy: { createdAt: 'desc' },
+          select: { actorId: true },
+        });
     if (!autor?.actorId) return;
     await tx.reporteDiario.create({
       data: {
@@ -252,6 +258,7 @@ export class ReportesDiariosService {
         ticketId: t.id,
         fecha: deDia(fecha),
         corregidoAt: new Date(),
+        corregidoPor: autor.actorId,
         createdBy: autor.actorId,
         updatedBy: autor.actorId,
       },

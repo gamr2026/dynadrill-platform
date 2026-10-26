@@ -808,6 +808,9 @@ model BitacoraDia {
   enviador    IdUsuario? @relation("bitacoraEnviador", fields: [enviadaPor], references: [id])
   /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
   corregidaAt DateTime?  @map("corregida_at") @db.Timestamptz(6)
+  /// Quién lo corrigió (actor del evento de Comercial); su rol es el de su usuario. Va junto con `corregidaAt`.
+  corregidaPor String?   @map("corregida_por") @db.Uuid
+  corrector   IdUsuario? @relation("bitacoraCorrector", fields: [corregidaPor], references: [id])
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy   String     @map("created_by") @db.Uuid
   updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1047,6 +1050,7 @@ model IdUsuario {
   documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
   reuniones             ReunionOperativa[]        @relation("reunionFirmante")
   bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
+  bitacorasCorregidas    BitacoraDia[]             @relation("bitacoraCorrector")
   actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
   cambiosSolicitados    SolicitudCambioItems[]    @relation("solicitanteCambio")
   cambiosRevisados      SolicitudCambioItems[]    @relation("revisorCambio")
