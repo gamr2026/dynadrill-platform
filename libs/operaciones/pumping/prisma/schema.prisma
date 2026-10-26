@@ -223,6 +223,14 @@ model Ticket {
   documentos             TicketDocumento[]
   reportesDiarios        ReporteDiario[]
   solicitudesCambioItems SolicitudCambioItems[]
+  lineas                 TicketLinea[]
+
+  /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
+  reportePrecargadoAt              DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
+  /// Cuándo el operador dio por completo el Reporte de Herramientas (van juntos con quién).
+  reporteHerramientasCompletadoAt  DateTime? @map("reporte_herramientas_completado_at") @db.Timestamptz(6)
+  reporteHerramientasCompletadoPor String?   @map("reporte_herramientas_completado_por") @db.Uuid
+  reporteHerramientasCompletador   IdUsuario? @relation("completadorReporteHerramientas", fields: [reporteHerramientasCompletadoPor], references: [id])
 
   @@index([pasoCodigo])
   @@map("ticket")
@@ -328,6 +336,57 @@ model SolicitudCambioItem {
   @@unique([solicitudId, orden])
   @@unique([solicitudId, listaPreciosItemId])
   @@map("solicitud_cambio_item")
+  @@schema("pumping")
+}
+
+/// Estado de una celda del Reporte de Herramientas.
+enum EstadoItemReporte {
+  operacion
+  daily_charge
+  venta
+
+  @@map("estado_item_reporte")
+  @@schema("pumping")
+}
+
+/// Línea cotizada del pedido (de `comercial`, otro contenedor, D1: copia). Es la fila del Reporte de Herramientas: se reparte por día.
+model TicketLinea {
+  id                 String          @id @db.Uuid
+  ticketId           String          @map("ticket_id") @db.Uuid
+  ticket             Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden              Int             @db.SmallInt
+  /// Ítem de la lista de precios del cliente en `comercial` (otro contenedor): uuid sin FK; vacío si el ítem vino de AS2 sin enlace.
+  listaPreciosItemId String?         @map("lista_precios_item_id") @db.Uuid
+  codigo             String
+  descripcion        String
+  unidadMedidaId     String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
+  cantidad           Decimal         @db.Decimal(12, 3)
+  tipoLinea          TipoLineaItem   @map("tipo_linea")
+
+  dias ReporteItemDia[]
+
+  @@unique([ticketId, orden])
+  @@unique([ticketId, codigo])
+  @@map("ticket_linea")
+  @@schema("pumping")
+}
+
+/// Celda de un día de una línea del reporte: una marca que vale 1 (líneas por día) o la cantidad aplicada ese día. El total es la suma
+/// y la base impide pasar de lo cotizado.
+model ReporteItemDia {
+  id        String            @id @db.Uuid
+  lineaId   String            @map("linea_id") @db.Uuid
+  linea     TicketLinea       @relation(fields: [lineaId], references: [id])
+  fecha     DateTime          @db.Date
+  estado    EstadoItemReporte
+  cantidad  Decimal           @default(1) @db.Decimal(14, 3)
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String            @map("created_by") @db.Uuid
+  autor     IdUsuario         @relation("autorCeldaReporte", fields: [createdBy], references: [id])
+
+  @@unique([lineaId, fecha])
+  @@map("reporte_item_dia")
   @@schema("pumping")
 }
 
@@ -805,6 +864,7 @@ model CatUnidadMedida {
   periodo    PeriodoUnidad?
 
   solicitudes SolicitudCambioItem[]
+  lineas      TicketLinea[]
 
   @@map("unidad_medida")
   @@schema("catalogos")
@@ -950,6 +1010,8 @@ model IdUsuario {
   actividadesDiarias ReporteDiarioActividad[] @relation("actividadAutor")
   cambiosSolicitados SolicitudCambioItems[]   @relation("solicitanteCambio")
   cambiosRevisados   SolicitudCambioItems[]   @relation("revisorCambio")
+  reportesCompletados Ticket[]                @relation("completadorReporteHerramientas")
+  celdasReporte      ReporteItemDia[]         @relation("autorCeldaReporte")
 
   @@map("usuario")
   @@schema("identidad")
