@@ -26,6 +26,7 @@ import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -88,6 +89,8 @@ run(
     jest.setTimeout(120000);
     let app: INestApplication;
     let prisma: PrismaService;
+    /** Id de una unidad del catálogo por su nombre. */
+    let U: (nombre: string) => string;
     let consumer: PedidosAbiertosConsumer;
     const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
     const appPool = new Pool({ connectionString: APP_DB, max: 2 });
@@ -165,11 +168,11 @@ run(
     const linea = (
       codigo: string,
       cantidad: number,
-      extra: Partial<{ unidad: string; tipoLinea: string; descripcion: string }> = {},
+      extra: Partial<{ unidadMedidaId: string; tipoLinea: string; descripcion: string }> = {},
     ) => ({
       codigo,
       descripcion: extra.descripcion ?? `Línea ${codigo}`,
-      unidad: extra.unidad ?? 'Corrida',
+      unidadMedidaId: extra.unidadMedidaId ?? U('Corrida'),
       cantidad,
       tipoLinea: extra.tipoLinea ?? 'herramienta',
     });
@@ -278,6 +281,7 @@ run(
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
+      U = await idsDeUnidades(prisma);
       consumer = app.get(PedidosAbiertosConsumer);
     });
 
@@ -493,7 +497,7 @@ run(
         ]).expect(200);
         await config(CLIENTE.id, diario, [[CANASTA, 1]]).expect(200);
         const t = await crear({
-          lineas: [linea(corrida, 2), linea(diario, 5, { unidad: 'Días' })],
+          lineas: [linea(corrida, 2), linea(diario, 5, { unidadMedidaId: U('Día') })],
         });
         const lista = await herramientas(t.id);
         expect(conteo(lista, CEPILLO)).toBe(4);
@@ -524,7 +528,7 @@ run(
           lineas: [
             linea(mov, 1, {
               tipoLinea: 'movilizacion',
-              unidad: 'Unidad',
+              unidadMedidaId: U('Unidad'),
               descripcion: 'Movilización',
             }),
           ],
@@ -1218,12 +1222,12 @@ run(
       it('las líneas y los avisos de la precarga: cantidad positiva, un orden por línea y artículo solo en el aviso de artículo inactivo', async () => {
         const t = await enPreparacion();
         await rechaza(
-          "INSERT INTO fcr.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad, cantidad, tipo_linea) VALUES ($1, $2, 1, 'X', 'X', 'u', 1, 'servicio')",
+          "INSERT INTO fcr.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 1, 'X', 'X', (SELECT id FROM catalogos.unidad_medida WHERE nombre = 'Unidad'), 1, 'servicio')",
           [uuidv7(), t.id],
           /ticket_linea_orden_key/,
         );
         await rechaza(
-          "INSERT INTO fcr.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad, cantidad, tipo_linea) VALUES ($1, $2, 99, 'X', 'X', 'u', 0, 'servicio')",
+          "INSERT INTO fcr.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 99, 'X', 'X', (SELECT id FROM catalogos.unidad_medida WHERE nombre = 'Unidad'), 0, 'servicio')",
           [uuidv7(), t.id],
           /ticket_linea_cantidad_check/,
         );
@@ -1239,13 +1243,14 @@ run(
         );
       });
 
-      it('las unidades de cotización: de tiempo, solo día, hora, semana y mes; el código no se repite', async () => {
-        const filas = await prisma.unidadCotizacion.findMany({ where: { esTiempo: true } });
-        expect(filas.map((u) => u.codigo).sort()).toEqual(['dia', 'hora', 'mes', 'semana']);
+      it('las unidades de tiempo son las del catálogo compartido con período; una línea exige una unidad que exista', async () => {
+        const filas = await prisma.catUnidadMedida.findMany({ where: { periodo: { not: null } } });
+        expect(filas.map((u) => u.nombre).sort()).toEqual(['Día', 'Hora', 'Mes', 'Semana']);
+        const t = await crear({ lineas: [] });
         await rechaza(
-          "INSERT INTO fcr.unidad_cotizacion (id, codigo, nombre, orden) VALUES ($1, 'dia', 'Otro', 99)",
-          [uuidv7()],
-          /unidad_cotizacion_codigo_key/,
+          "INSERT INTO fcr.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 1, 'X', 'X', $3, 1, 'servicio')",
+          [uuidv7(), t.id, uuidv7()],
+          /ticket_linea_unidad_medida_id_fkey/,
         );
       });
     });

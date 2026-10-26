@@ -845,6 +845,8 @@ run('catalogos (base de datos real)', () => {
         nombre: `${tag}-Cubeta`,
         simbolo: 'cbt',
         habilitado: true,
+        // sin período: no es una unidad de tiempo
+        periodo: null,
       });
       // la lectura es de cualquier cuenta autenticada (los formularios la necesitan para sus selectores)
       const lista = await http().get(url).set(bearer(token())).expect(200);

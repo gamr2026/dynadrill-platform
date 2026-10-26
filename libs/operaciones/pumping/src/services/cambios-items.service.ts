@@ -18,14 +18,15 @@ export interface ItemPropuesto {
   listaPreciosItemId: string;
   codigo: string;
   descripcion: string;
-  unidad: string;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`). */
+  unidadMedidaId: string;
   cantidad: number;
   descuentoPct?: number | null;
   tipoLinea: TipoLineaItem;
 }
 
 const INCLUIR = {
-  items: { orderBy: { orden: 'asc' } },
+  items: { orderBy: { orden: 'asc' }, include: { unidadMedida: { select: { nombre: true } } } },
   solicitante: { select: { id: true, nombre: true } },
   revisor: { select: { id: true, nombre: true } },
 } satisfies Prisma.SolicitudCambioItemsInclude;
@@ -79,6 +80,12 @@ export class CambiosItemsService {
       await tx.solicitudCambioItems.create({
         data: { id: nuevo, ticketId, motivo: texto, solicitadoPor: actor.id },
       });
+      const unidades = [...new Set(items.map((i) => i.unidadMedidaId))];
+      const existen = await tx.catUnidadMedida.count({ where: { id: { in: unidades } } });
+      if (existen !== unidades.length)
+        throw new BadRequestException(
+          'Una de las unidades no existe en el catálogo de unidades de medida',
+        );
       await tx.solicitudCambioItem.createMany({
         data: items.map((i, k) => ({
           id: uuidv7(),
@@ -87,7 +94,7 @@ export class CambiosItemsService {
           listaPreciosItemId: i.listaPreciosItemId,
           codigo: i.codigo.trim(),
           descripcion: i.descripcion.trim(),
-          unidad: i.unidad.trim(),
+          unidadMedidaId: i.unidadMedidaId,
           cantidad: i.cantidad,
           descuentoPct: i.descuentoPct ?? null,
           tipoLinea: i.tipoLinea,
@@ -234,7 +241,10 @@ export class CambiosItemsService {
     const s = await tx.solicitudCambioItems.findUnique({
       where: { id },
       include: {
-        items: { orderBy: { orden: 'asc' } },
+        items: {
+          orderBy: { orden: 'asc' },
+          include: { unidadMedida: { select: { nombre: true } } },
+        },
         ticket: {
           select: { pedidoId: true, personas: { select: { usuarioId: true, rol: true } } },
         },
@@ -274,7 +284,7 @@ export class CambiosItemsService {
       if (i.descuentoPct != null && (i.descuentoPct < 0 || i.descuentoPct > 100)) {
         throw new BadRequestException(`El descuento del ítem ${n} va entre 0 y 100`);
       }
-      if (!i.codigo?.trim() || !i.descripcion?.trim() || !i.unidad?.trim()) {
+      if (!i.codigo?.trim() || !i.descripcion?.trim() || !i.unidadMedidaId) {
         throw new BadRequestException(`Faltan datos del ítem ${n}`);
       }
     }
@@ -298,7 +308,8 @@ export class CambiosItemsService {
         listaPreciosItemId: i.listaPreciosItemId,
         codigo: i.codigo,
         descripcion: i.descripcion,
-        unidad: i.unidad,
+        unidad: i.unidadMedida.nombre,
+        unidadMedidaId: i.unidadMedidaId,
         cantidad: Number(i.cantidad),
         descuentoPct: i.descuentoPct === null ? null : Number(i.descuentoPct),
         tipoLinea: i.tipoLinea,

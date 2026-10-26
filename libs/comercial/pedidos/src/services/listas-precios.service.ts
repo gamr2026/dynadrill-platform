@@ -96,7 +96,10 @@ export class ListasPreciosService {
     const filas = await this.prisma.listaPreciosItem.findMany({
       where,
       orderBy: [{ codigo: 'asc' }, { listaPrecios: { vigenteDesde: 'desc' } }],
-      include: { listaPrecios: { select: { id: true, numeroContrato: true } } },
+      include: {
+        listaPrecios: { select: { id: true, numeroContrato: true } },
+        unidadMedida: { select: { nombre: true } },
+      },
     });
     // un código solo una vez (el de la lista más reciente, que ya viene primero)
     const unicos = new Map<string, (typeof filas)[number]>();
@@ -112,7 +115,8 @@ export class ListasPreciosService {
         numeroContrato: f.listaPrecios.numeroContrato,
         codigo: f.codigo,
         descripcion: f.descripcion,
-        unidad: f.unidad,
+        unidad: f.unidadMedida.nombre,
+        unidadMedidaId: f.unidadMedidaId,
         precio: Number(f.precio),
         tipo: f.tipo,
       })),
@@ -146,6 +150,7 @@ export class ListasPreciosService {
         orderBy: { codigo: 'asc' },
         skip: (page - 1) * limit,
         take: limit,
+        include: { unidadMedida: { select: { nombre: true } } },
       }),
     ]);
     return {
@@ -156,7 +161,8 @@ export class ListasPreciosService {
         id: f.id,
         codigo: f.codigo,
         descripcion: f.descripcion,
-        unidad: f.unidad,
+        unidad: f.unidadMedida.nombre,
+        unidadMedidaId: f.unidadMedidaId,
         precio: Number(f.precio),
         tipo: f.tipo,
       })),

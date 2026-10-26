@@ -70,7 +70,11 @@ export class HerramientasService {
         include: HERRAMIENTA_INCLUDE,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
-      this.prisma.ticketLinea.findMany({ where: { ticketId }, orderBy: { orden: 'asc' } }),
+      this.prisma.ticketLinea.findMany({
+        where: { ticketId },
+        orderBy: { orden: 'asc' },
+        include: { unidadMedida: { select: { nombre: true } } },
+      }),
       this.prisma.ticketAvisoPrecarga.findMany({
         where: { ticketId },
         include: { articulo: { select: { codigo: true, nombre: true } } },
@@ -94,7 +98,7 @@ export class HerramientasService {
         .map((l) => ({
           codigo: l.codigo,
           descripcion: l.descripcion,
-          unidad: l.unidad,
+          unidad: l.unidadMedida.nombre,
           cantidad: Number(l.cantidad),
         })),
       avisosPrecarga: avisos.map((a) => ({

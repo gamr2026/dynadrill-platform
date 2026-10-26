@@ -74,7 +74,8 @@ export class HerramientaOperativaDto {
   @IsOptional() @IsString() @MaxLength(100) serie?: string;
   /** Código de la herramienta en la lista de precios del cliente (con él se factura). */
   @IsOptional() @IsString() @MaxLength(100) codigo?: string;
-  @IsOptional() @IsString() @MaxLength(50) unidad?: string;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`), la de la línea cotizada. */
+  @IsOptional() @IsUUID() unidadMedidaId?: string;
   /** Cantidad real del ítem (marcas por día o cantidad escrita): con ella se factura. */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) cantidad?: number;
   @IsArray()

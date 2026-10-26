@@ -22,7 +22,10 @@ export class CambioItemsService {
   async itemsParaCambio(pedidoId: string, texto?: string) {
     const pedido = await this.prisma.pedido.findUnique({
       where: { id: pedidoId },
-      select: { clienteId: true, items: { orderBy: { orden: 'asc' } } },
+      select: {
+        clienteId: true,
+        items: { orderBy: { orden: 'asc' }, include: { unidadMedida: true } },
+      },
     });
     if (!pedido) throw new NotFoundException('El pedido no existe');
     const q = texto?.trim();
@@ -38,6 +41,7 @@ export class CambioItemsService {
             },
             orderBy: { codigo: 'asc' },
             take: 30,
+            include: { unidadMedida: true },
           })
         : [];
     return {
@@ -45,7 +49,8 @@ export class CambioItemsService {
         listaPreciosItemId: i.listaPreciosItemId,
         codigo: i.codigo,
         descripcion: i.descripcion,
-        unidad: i.unidad,
+        unidad: i.unidadMedida.nombre,
+        unidadMedidaId: i.unidadMedidaId,
         cantidad: Number(i.cantidad),
         descuentoPct: i.descuentoPct === null ? null : Number(i.descuentoPct),
         tipoLinea: i.tipoLinea,
@@ -54,7 +59,8 @@ export class CambioItemsService {
         listaPreciosItemId: o.id,
         codigo: o.codigo,
         descripcion: o.descripcion,
-        unidad: o.unidad,
+        unidad: o.unidadMedida.nombre,
+        unidadMedidaId: o.unidadMedidaId,
         tipo: o.tipo,
       })),
     };

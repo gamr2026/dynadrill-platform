@@ -319,7 +319,8 @@ model SolicitudCambioItem {
   listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
   codigo             String
   descripcion        String
-  unidad             String
+  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
   cantidad           Decimal              @db.Decimal(12, 3)
   descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
   tipoLinea          TipoLineaItem        @map("tipo_linea")
@@ -794,6 +795,31 @@ model ReporteUnidadInspeccion {
 // de las FK. Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id,
 // nombre, email, activo y rol). Las administra el módulo dueño de cada tabla.
 // ---------------------------------------------------------------------------------------------------------------
+
+/// Unidad de medida compartida (catalogos, CM-4/OP-6). Solo lectura.
+model CatUnidadMedida {
+  id         String         @id @db.Uuid
+  nombre     String
+  simbolo    String
+  habilitado Boolean
+  periodo    PeriodoUnidad?
+
+  solicitudes SolicitudCambioItem[]
+
+  @@map("unidad_medida")
+  @@schema("catalogos")
+}
+
+/// Período de las unidades de tiempo (catalogos.periodo_unidad).
+enum PeriodoUnidad {
+  hora
+  dia
+  semana
+  mes
+
+  @@map("periodo_unidad")
+  @@schema("catalogos")
+}
 
 model CatCliente {
   id              String  @id @db.Uuid

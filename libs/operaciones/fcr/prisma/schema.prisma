@@ -481,23 +481,6 @@ enum TipoEventoHerramienta {
   @@schema("fcr")
 }
 
-/// Unidades de cotización: si es de tiempo (día, hora, mes, semana) se pide un solo juego del kit.
-model UnidadCotizacion {
-  id        String   @id @db.Uuid
-  codigo    String   @unique
-  nombre    String
-  esTiempo  Boolean  @default(false) @map("es_tiempo")
-  orden     Int
-  activo    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String?  @map("created_by") @db.Uuid
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy String?  @map("updated_by") @db.Uuid
-
-  @@map("unidad_cotizacion")
-  @@schema("fcr")
-}
-
 /// Qué hace FCR con un código de la lista de precios de un cliente.
 model ConfiguracionCodigo {
   id            String              @id @db.Uuid
@@ -543,7 +526,8 @@ model TicketLinea {
   orden       Int       @db.SmallInt
   codigo      String
   descripcion String
-  unidad      String
+  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
   cantidad    Decimal   @db.Decimal(12, 3)
   tipoLinea   TipoLinea @map("tipo_linea")
   /// Ítem de la lista de precios del cliente en `comercial` (otro contenedor, D1): uuid sin FK; vacío si el ítem vino de AS2 sin enlace.
@@ -900,7 +884,8 @@ model ReporteItem {
   listaPreciosItemId String? @map("lista_precios_item_id") @db.Uuid
   codigo      String
   descripcion String
-  unidad      String?
+  unidadMedidaId String?          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida? @relation(fields: [unidadMedidaId], references: [id])
   /// La unidad es de tiempo: sus celdas son marcas (O/D/V) que valen 1; en las demás filas cada celda lleva su cantidad.
   porDia      Boolean  @map("por_dia")
   serie       String?
@@ -947,6 +932,33 @@ enum CausaFaltante {
 // Espejos de SOLO LECTURA de tablas de otros módulos (`catalogos`, `identidad`), para obtener el nombre con JOIN a partir de las FK.
 // Este módulo nunca escribe en ellas (`app_operaciones` solo tiene SELECT, y de `identidad.usuario` solo id, nombre, email, activo y rol).
 // ---------------------------------------------------------------------------------------------------------------
+
+/// Unidad de medida compartida (catalogos, CM-4/OP-6). Solo lectura.
+model CatUnidadMedida {
+  id         String         @id @db.Uuid
+  nombre     String
+  simbolo    String
+  habilitado Boolean
+  periodo    PeriodoUnidad?
+
+  lineas      TicketLinea[]
+  reporte     ReporteItem[]
+  solicitudes SolicitudCambioItem[]
+
+  @@map("unidad_medida")
+  @@schema("catalogos")
+}
+
+/// Período de las unidades de tiempo (catalogos.periodo_unidad).
+enum PeriodoUnidad {
+  hora
+  dia
+  semana
+  mes
+
+  @@map("periodo_unidad")
+  @@schema("catalogos")
+}
 
 model CatCliente {
   id              String  @id @db.Uuid
@@ -1149,7 +1161,8 @@ model SolicitudCambioItem {
   listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
   codigo             String
   descripcion        String
-  unidad             String
+  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
   cantidad           Decimal              @db.Decimal(12, 3)
   descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
   tipoLinea          TipoLinea        @map("tipo_linea")

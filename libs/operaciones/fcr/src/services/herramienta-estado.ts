@@ -34,19 +34,3 @@ export function estadoDeHerramienta(h: MarcasHerramienta): EstadoHerramienta {
   if (h.solicitadaAt) return h.bodegaNovedad ? 'novedad_bodega' : 'solicitada';
   return 'seleccionada';
 }
-
-/**
- * Las claves con que se puede buscar una unidad de cotización, de la más específica a la menos: sin tildes, en minúscula y, si parece
- * plural, sin la «s» o la «es» («Días» → dias, dia; «Meses» → meses, mese, mes).
- */
-export function clavesDeUnidad(unidad: string): string[] {
-  const t = unidad
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .trim()
-    .toLowerCase();
-  const claves = [t];
-  if (t.length > 3 && t.endsWith('s')) claves.push(t.slice(0, -1));
-  if (t.length > 4 && t.endsWith('es')) claves.push(t.slice(0, -2));
-  return claves;
-}

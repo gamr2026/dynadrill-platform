@@ -28,7 +28,7 @@ type ConNombres = Prisma.PedidoGetPayload<{ include: typeof INCLUDE_NOMBRES }>;
 
 export type PedidoConHijos = Prisma.PedidoGetPayload<{
   include: typeof INCLUDE_NOMBRES & {
-    items: true;
+    items: { include: { unidadMedida: true } };
     linea: true;
     tipoOt: true;
     documentos: { include: { archivo: true } };
@@ -66,7 +66,8 @@ export function toItem(i: PedidoConHijos['items'][number]) {
     orden: i.orden,
     codigo: i.codigo,
     descripcion: i.descripcion,
-    unidad: i.unidad,
+    unidad: i.unidadMedida.nombre,
+    unidadMedidaId: i.unidadMedidaId,
     cantidad: num(i.cantidad),
     valorUnitario: num(i.valorUnitario),
     descuentoPct: num(i.descuentoPct),

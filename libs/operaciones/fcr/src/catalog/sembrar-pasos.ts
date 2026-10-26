@@ -19,7 +19,6 @@ type Cliente = Pick<
   | 'tipoCompletacion'
   | 'tipoTrabajo'
   | 'tipoPicker'
-  | 'unidadCotizacion'
   | 'firmaRolPermitido'
 >;
 
@@ -283,17 +282,6 @@ const FIRMAS_PERMITIDAS = [
   ['liberado_qhse', 'gerente_hse'],
 ] as const;
 
-/** Unidades de cotización: las de tiempo piden un solo juego del kit. El código es el nombre sin tildes, en minúscula y en singular. */
-const UNIDADES_COTIZACION = [
-  ['dia', 'Día', true],
-  ['hora', 'Hora', true],
-  ['semana', 'Semana', true],
-  ['mes', 'Mes', true],
-  ['corrida', 'Corrida', false],
-  ['unidad', 'Unidad', false],
-  ['servicio', 'Servicio', false],
-] as const;
-
 const CATALOGOS = {
   tipoOperador: [
     ['mecanico', 'Mecánico'],
@@ -395,13 +383,6 @@ export async function sembrarPasos(db: Cliente): Promise<{
   catalogos += await sembrarCatalogo(db.tipoCompletacion, CATALOGOS.tipoCompletacion);
   catalogos += await sembrarCatalogo(db.tipoTrabajo, CATALOGOS.tipoTrabajo);
   catalogos += await sembrarCatalogo(db.tipoPicker, CATALOGOS.tipoPicker);
-  for (const [i, [codigo, nombre, esTiempo]] of UNIDADES_COTIZACION.entries()) {
-    if (await db.unidadCotizacion.findUnique({ where: { codigo }, select: { id: true } })) continue;
-    await db.unidadCotizacion.create({
-      data: { id: uuidv7(), codigo, nombre, esTiempo, orden: (i + 1) * 10 },
-    });
-    catalogos++;
-  }
   for (const [rolFirma, rolCodigo] of FIRMAS_PERMITIDAS) {
     await db.firmaRolPermitido.upsert({
       where: { rolFirma_rolCodigo: { rolFirma, rolCodigo } },

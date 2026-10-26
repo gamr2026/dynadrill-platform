@@ -57,7 +57,7 @@ const EDITABLES = new Set([
 
 const INCLUDE = {
   ...INCLUDE_NOMBRES,
-  items: true,
+  items: { include: { unidadMedida: true } },
   linea: true,
   tipoOt: true,
   documentos: { include: { archivo: true } },
@@ -360,7 +360,7 @@ export class PedidosService {
         orden: elegidos.length + k + 1,
         codigo: i.codigo,
         descripcion: i.descripcion,
-        unidad: i.unidad,
+        unidadMedidaId: i.unidadMedidaId,
         cantidad: i.cantidad,
         valorUnitario: i.valorUnitario,
         descuentoPct: i.descuentoPct,
@@ -704,7 +704,8 @@ export class PedidosService {
         listaPreciosItemId: it.id,
         codigo: it.codigo,
         descripcion: it.descripcion,
-        unidad: it.unidad,
+        unidad: it.unidadMedida.nombre,
+        unidadMedidaId: it.unidadMedidaId,
         cantidad: f.cantidad,
         precioLista,
         descuentoPct: f.descuentoPct ?? null,
@@ -827,7 +828,9 @@ export class PedidosService {
         lineas: p.items.map((it) => ({
           codigo: it.codigo,
           descripcion: it.descripcion,
-          unidad: it.unidad,
+          // la unidad viaja por id (catálogo compartido) y con su nombre para mostrarla sin consultar
+          unidadMedidaId: it.unidadMedidaId,
+          unidad: it.unidadMedida.nombre,
           cantidad: Number(it.cantidad),
           tipoLinea: it.tipoLinea,
           listaPreciosItemId: it.listaPreciosItemId ?? null,
@@ -1130,7 +1133,7 @@ export class PedidosService {
         codigo: { in: [...new Set(codigos.map((c) => c.trim()))] },
         listaPrecios: { clienteId, activa: true },
       },
-      include: { listaPrecios: { select: { vigenteDesde: true } } },
+      include: { listaPrecios: { select: { vigenteDesde: true } }, unidadMedida: true },
       orderBy: { listaPrecios: { vigenteDesde: 'desc' } },
     });
     const m = new Map<string, (typeof filas)[number]>();
@@ -1172,7 +1175,7 @@ export class PedidosService {
         orden: idx + 1,
         codigo: li.codigo,
         descripcion: li.descripcion,
-        unidad: li.unidad,
+        unidadMedidaId: li.unidadMedidaId,
         cantidad: i.cantidad,
         valorUnitario: li.precio,
         descuentoPct: i.descuentoPct ?? null,
@@ -1327,7 +1330,11 @@ export class PedidosService {
       select: { fechaInicioServicio: true, fechaFinServicio: true },
     });
     const items = conLineas
-      ? await tx.pedidoItem.findMany({ where: { pedidoId }, orderBy: { orden: 'asc' } })
+      ? await tx.pedidoItem.findMany({
+          where: { pedidoId },
+          orderBy: { orden: 'asc' },
+          include: { unidadMedida: true },
+        })
       : null;
     return {
       fechaInicioServicio: p.fechaInicioServicio?.toISOString().slice(0, 10) ?? null,
@@ -1337,7 +1344,8 @@ export class PedidosService {
             lineas: items.map((it) => ({
               codigo: it.codigo,
               descripcion: it.descripcion,
-              unidad: it.unidad,
+              unidadMedidaId: it.unidadMedidaId,
+              unidad: it.unidadMedida.nombre,
               cantidad: Number(it.cantidad),
               tipoLinea: it.tipoLinea,
               listaPreciosItemId: it.listaPreciosItemId ?? null,

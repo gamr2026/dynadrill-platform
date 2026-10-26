@@ -190,6 +190,7 @@ export class GuiasService {
     const docs = await this.prisma.documentoOperativoHerramienta.findMany({
       where: { documento: { pedidoId, tipo: 'reporte_herramientas' } },
       orderBy: [{ documento: { recibidoAt: 'asc' } }, { orden: 'asc' }],
+      include: { unidadMedida: { select: { nombre: true } } },
     });
     const items: GuiaItemDto[] = [];
     const porItem = docs.some((h) => h.cantidad !== null);
@@ -202,7 +203,12 @@ export class GuiasService {
               listaPrecios: { clienteId: pedido.clienteId, activa: true },
               codigo: { in: docs.map((h) => h.codigo).filter((c): c is string => !!c) },
             },
-            select: { codigo: true, tipo: true, descripcion: true, unidad: true },
+            select: {
+              codigo: true,
+              tipo: true,
+              descripcion: true,
+              unidadMedida: { select: { nombre: true } },
+            },
           })
         : [];
       const porCodigo = new Map(lista.map((l) => [l.codigo, l]));
@@ -220,7 +226,10 @@ export class GuiasService {
           codigo: h.codigo ?? undefined,
           descripcion: li?.descripcion ?? h.nombre,
           cantidad: h.serie ? 1 : cantidad,
-          unidad: h.serie ? 'Unidad' : (li?.unidad ?? h.unidad ?? 'Unidad'),
+          // la guía guarda la unidad como texto: es lo que se imprime en el documento emitido
+          unidad: h.serie
+            ? 'Unidad'
+            : (li?.unidadMedida.nombre ?? h.unidadMedida?.nombre ?? 'Unidad'),
           serie: h.serie ?? undefined,
           origen: esMaterial && !h.serie ? 'material' : 'herramienta',
         });
@@ -246,6 +255,7 @@ export class GuiasService {
     const materiales = await this.prisma.pedidoItem.findMany({
       where: { pedidoId, listaPreciosItem: { tipo: 'Material' } },
       orderBy: { orden: 'asc' },
+      include: { unidadMedida: { select: { nombre: true } } },
     });
     for (const m of materiales) {
       // la herramienta vendida ya figura con su serie: no se repite como material
@@ -254,7 +264,7 @@ export class GuiasService {
         codigo: m.codigo,
         descripcion: m.descripcion,
         cantidad: Number(m.cantidad),
-        unidad: m.unidad,
+        unidad: m.unidadMedida.nombre,
         origen: 'material',
       });
     }

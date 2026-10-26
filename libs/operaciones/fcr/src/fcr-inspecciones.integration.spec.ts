@@ -26,6 +26,7 @@ import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -87,6 +88,8 @@ run(
     jest.setTimeout(150000);
     let app: INestApplication;
     let prisma: PrismaService;
+    /** Id de una unidad del catálogo por su nombre. */
+    let U: (nombre: string) => string;
     let consumer: PedidosAbiertosConsumer;
     const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
     const appPool = new Pool({ connectionString: APP_DB, max: 2 });
@@ -165,7 +168,7 @@ run(
           {
             codigo,
             descripcion: 'Sarta',
-            unidad: 'Corrida',
+            unidadMedidaId: U('Corrida'),
             cantidad: 1,
             tipoLinea: 'herramienta',
           },
@@ -323,6 +326,7 @@ run(
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
+      U = await idsDeUnidades(prisma);
       consumer = app.get(PedidosAbiertosConsumer);
     });
 

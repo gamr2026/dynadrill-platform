@@ -85,7 +85,8 @@ export class AgregarItemReporteDto {
   /** Código de un ítem de la lista de precios del cliente (con él se factura). */
   @IsString() @MinLength(1) @MaxLength(100) codigo!: string;
   @IsString() @MinLength(1) @MaxLength(300) descripcion!: string;
-  @IsOptional() @IsString() @MaxLength(50) unidad?: string;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`), la de la lista de precios. */
+  @IsOptional() @IsUUID() unidadMedidaId?: string;
   @IsOptional() @IsString() @MaxLength(100) serie?: string;
 }
 

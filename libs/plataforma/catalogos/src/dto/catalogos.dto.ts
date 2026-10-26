@@ -21,6 +21,10 @@ export const TIPOS_PERSONA = [
 ] as const;
 export type TipoPersona = (typeof TIPOS_PERSONA)[number];
 
+/** Períodos de las unidades de tiempo (enum `catalogos.periodo_unidad`). */
+export const PERIODOS_UNIDAD = ['hora', 'dia', 'semana', 'mes'] as const;
+export type PeriodoUnidad = (typeof PERIODOS_UNIDAD)[number];
+
 const texto = (max = 200) => [IsString(), MinLength(1), MaxLength(max)];
 void texto;
 
@@ -53,6 +57,8 @@ export class CreateUnidadMedidaDto {
   /** Abreviatura que se imprime junto a las cantidades (kg, gal, und). */
   @IsString() @MinLength(1) @MaxLength(10) simbolo!: string;
   @IsOptional() @IsBoolean() habilitado?: boolean;
+  /** Solo las unidades de tiempo (`null` la deja sin período). */
+  @IsOptional() @IsIn(PERIODOS_UNIDAD) periodo?: PeriodoUnidad | null;
 }
 export class UpdateUnidadMedidaDto extends PartialType(CreateUnidadMedidaDto) {}
 

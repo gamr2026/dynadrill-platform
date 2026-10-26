@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { uuidv7 } from '@dyn/utils';
 import type { MotivoAvisoPrecarga, Prisma, TipoLinea } from '../generated/client';
-import { clavesDeUnidad } from './herramienta-estado';
 
 /** Una línea cotizada del pedido, tal como la publica `comercial` en sus eventos. */
 export interface LineaPedido {
   codigo: string;
   descripcion: string;
-  unidad: string;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`), la de la lista de precios. */
+  unidadMedidaId: string;
   cantidad: number;
   tipoLinea: string;
   /** Ítem de la lista de precios del cliente (si el pedido lo trae enlazado). */
@@ -45,6 +45,7 @@ export class PrecargaService {
         typeof l.codigo === 'string' &&
         l.codigo.trim() &&
         Number(l.cantidad) > 0 &&
+        typeof l.unidadMedidaId === 'string' &&
         TIPOS_LINEA.includes(l.tipoLinea),
     );
     if (!validas.length) return 0;
@@ -55,7 +56,7 @@ export class PrecargaService {
         orden: i + 1,
         codigo: l.codigo.trim(),
         descripcion: String(l.descripcion ?? '').trim() || l.codigo.trim(),
-        unidad: String(l.unidad ?? '').trim() || 'unidad',
+        unidadMedidaId: l.unidadMedidaId,
         cantidad: Number(l.cantidad),
         tipoLinea: l.tipoLinea as TipoLinea,
         listaPreciosItemId: l.listaPreciosItemId ?? null,
@@ -82,6 +83,7 @@ export class PrecargaService {
     const lineas = await tx.ticketLinea.findMany({
       where: { ticketId },
       orderBy: { orden: 'asc' },
+      include: { unidadMedida: { select: { periodo: true } } },
     });
     const avisos: AvisoDef[] = [];
     // lo que el pedido pide hoy: herramientas por (código de línea, artículo)
@@ -109,15 +111,6 @@ export class PrecargaService {
         },
       });
       const porCodigo = new Map(configs.map((c) => [c.codigo, c]));
-      const unidades = new Map(
-        (await tx.unidadCotizacion.findMany({ where: { activo: true } })).map((u) => [
-          u.codigo,
-          u.esTiempo,
-        ]),
-      );
-      const esDeTiempo = (unidad: string) =>
-        clavesDeUnidad(unidad).some((c) => unidades.get(c) === true);
-
       for (const l of lineas) {
         // la movilización la marca el pedido: se muestra aparte y no pide herramientas
         if (l.tipoLinea === 'movilizacion') continue;
@@ -132,7 +125,9 @@ export class PrecargaService {
           avisos.push({ motivo: 'kit_vacio', codigo: l.codigo, descripcion: l.descripcion });
           continue;
         }
-        const juegos = esDeTiempo(l.unidad) ? 1 : Math.max(1, Math.ceil(Number(l.cantidad)));
+        // una línea de tiempo (día, hora, semana, mes: tiene período en el catálogo) pide un solo juego
+        const juegos =
+          l.unidadMedida.periodo !== null ? 1 : Math.max(1, Math.ceil(Number(l.cantidad)));
         for (const k of cfg.kit) {
           // un artículo dado de baja, o que ya no es de una categoría de herramientas, no se puede pedir
           if (!k.articulo.activo || !k.articulo.categoria.llevaPartes) {

@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { Permission } from '@dyn/authz';
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
+import type { PeriodoUnidad } from '../dto/catalogos.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CatalogoEventos, exigirInactivar } from './catalogo-eventos.service';
 
@@ -9,6 +10,7 @@ export interface UnidadMedidaEntrada {
   nombre: string;
   simbolo: string;
   habilitado?: boolean;
+  periodo?: PeriodoUnidad | null;
 }
 
 export interface UnidadMedidaResponse {
@@ -16,6 +18,7 @@ export interface UnidadMedidaResponse {
   nombre: string;
   simbolo: string;
   habilitado: boolean;
+  periodo: PeriodoUnidad | null;
 }
 
 const vista = (u: UnidadMedidaResponse): UnidadMedidaResponse => ({
@@ -23,11 +26,12 @@ const vista = (u: UnidadMedidaResponse): UnidadMedidaResponse => ({
   nombre: u.nombre,
   simbolo: u.simbolo,
   habilitado: u.habilitado,
+  periodo: u.periodo,
 });
 
 /**
- * Unidades de medida compartidas (IN9). Hoy las usa Inventario; las listas de precios y AS2 las traen como texto y se enlazan cuando Asinfo
- * confirme la equivalencia. No se borran (otros módulos las referencian con FK): se inhabilitan.
+ * Unidades de medida compartidas (IN9, CM-4): las usan Inventario, las listas de precios y los ítems de Comercial y las
+ * líneas de Operaciones, todos con FK. Se administran en el portal. No se borran (otros módulos las referencian): se inhabilitan.
  */
 @Injectable()
 export class UnidadesMedidaService {
@@ -55,6 +59,7 @@ export class UnidadesMedidaService {
           nombre: dto.nombre.trim(),
           simbolo: dto.simbolo.trim(),
           ...(dto.habilitado !== undefined ? { habilitado: dto.habilitado } : {}),
+          periodo: dto.periodo ?? null,
           createdBy: actor.id,
           updatedBy: actor.id,
         },
@@ -81,6 +86,7 @@ export class UnidadesMedidaService {
           ...(dto.nombre !== undefined ? { nombre: dto.nombre.trim() } : {}),
           ...(dto.simbolo !== undefined ? { simbolo: dto.simbolo.trim() } : {}),
           ...(dto.habilitado !== undefined ? { habilitado: dto.habilitado } : {}),
+          ...(dto.periodo !== undefined ? { periodo: dto.periodo } : {}),
           updatedBy: actor.id,
         },
       });

@@ -26,6 +26,7 @@ import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { OperacionesPort, type DocumentoTicketPumpingRef } from './directorio/operaciones.port';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import {
   emitirGuiaDePrueba,
   quitarGuiasDePrueba,
@@ -74,6 +75,8 @@ run('prefactura (base de datos real)', () => {
   jest.setTimeout(90000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let U: (nombre: string) => string;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -251,7 +254,7 @@ run('prefactura (base de datos real)', () => {
           orden: 0,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           cantidad: 5,
           valorUnitario: 437.23,
         },
@@ -261,7 +264,7 @@ run('prefactura (base de datos real)', () => {
           orden: 1,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           cantidad: 1,
           valorUnitario: 200,
           descuentoPct: 10,
@@ -359,6 +362,7 @@ run('prefactura (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    U = await idsDeUnidades(prisma);
     cerrado = app.get(TicketCerradoConsumer);
     ticketOperativo = app.get(TicketOperativoConsumer);
 
@@ -384,7 +388,7 @@ run('prefactura (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           precio: 437.23,
           tipo: 'Servicio',
         },
@@ -393,7 +397,7 @@ run('prefactura (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           precio: 200,
           tipo: 'Servicio',
         },
@@ -402,7 +406,7 @@ run('prefactura (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `CT-${n}`,
           descripcion: 'Cargo básico unidad',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           precio: 100,
           tipo: 'Servicio',
         },
@@ -773,14 +777,14 @@ run('prefactura (base de datos real)', () => {
             nombre: 'Cargo básico',
             serie: 'DY-1',
             codigo: `CT-${n}`,
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             cantidad: 1,
             usos: [{ fecha: '2026-11-01', estado: 'operacion' }],
           },
           {
             nombre: 'Supervisor',
             codigo: `SUP-${n}`,
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             cantidad: 1,
             usos: [{ fecha: '2026-11-01', estado: 'operacion' }],
           },

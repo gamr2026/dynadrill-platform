@@ -43,6 +43,37 @@ async function main() {
     const yaMigradas = new Set(
       (await prisma.listaPrecios.findMany({ select: { legacyId: true } })).map((l) => l.legacyId),
     );
+    // la unidad es FK al catálogo compartido (CM-4): el texto de la demo se traduce por nombre, símbolo o las escrituras
+    // conocidas; una desconocida detiene la carga (agréguela al catálogo y repita)
+    const unidades = await prisma.catUnidadMedida.findMany();
+    const alias: Record<string, string> = {
+      gls: 'galón',
+      gl: 'galón',
+      lbs: 'libra',
+      hr: 'hora',
+      hrs: 'hora',
+      sx: 'saco',
+      'hhp*hr': 'hhp·hora',
+      'tn-km': 'tonelada·kilómetro',
+      ton: 'tonelada',
+      dia: 'día',
+      und: 'unidad',
+      '': 'unidad',
+    };
+    const unidadDe = (texto: unknown): string => {
+      const k = String(texto ?? '')
+        .trim()
+        .replace(/\s+/g, '')
+        .toLowerCase();
+      const u = unidades.find(
+        (x) =>
+          x.nombre.toLowerCase() === (alias[k] ?? k) ||
+          x.simbolo.replace(/\s+/g, '').toLowerCase() === k,
+      );
+      if (!u)
+        throw new Error(`Unidad de la demo sin equivalente en catalogos.unidad_medida: «${texto}»`);
+      return u.id;
+    };
 
     let creadas = 0;
     let existentes = 0;
@@ -88,7 +119,7 @@ async function main() {
           listaPreciosId: id,
           codigo,
           descripcion: String(f['descripcion'] ?? '').trim() || codigo,
-          unidad: String(f['unidad'] ?? '').trim() || 'UND',
+          unidadMedidaId: unidadDe(f['unidad']),
           precio: Number(f['precio']),
           tipo: String(f['tipo'] ?? 'Servicio'),
         }));

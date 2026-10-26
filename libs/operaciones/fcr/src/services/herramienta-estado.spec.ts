@@ -1,4 +1,4 @@
-import { clavesDeUnidad, estadoDeHerramienta, type MarcasHerramienta } from './herramienta-estado';
+import { estadoDeHerramienta, type MarcasHerramienta } from './herramienta-estado';
 
 const ahora = new Date('2026-11-05T10:00:00Z');
 const vacia: MarcasHerramienta = {
@@ -36,17 +36,5 @@ describe('estadoDeHerramienta', () => {
     expect(estadoDeHerramienta({ ...enviada, recepcionNovedad: 'golpe en la rosca' })).toBe(
       'novedad_recepcion',
     );
-  });
-});
-
-describe('clavesDeUnidad', () => {
-  it('quita tildes, mayúsculas y el plural', () => {
-    expect(clavesDeUnidad('Días')).toEqual(['dias', 'dia']);
-    expect(clavesDeUnidad(' DIA ')).toEqual(['dia']);
-    expect(clavesDeUnidad('Horas')).toContain('hora');
-    expect(clavesDeUnidad('Semanas')).toContain('semana');
-    expect(clavesDeUnidad('Meses')).toContain('mes');
-    expect(clavesDeUnidad('Corrida')).toEqual(['corrida']);
-    expect(clavesDeUnidad('Mes')).toEqual(['mes']);
   });
 });

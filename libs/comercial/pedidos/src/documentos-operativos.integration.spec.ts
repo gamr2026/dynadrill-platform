@@ -24,6 +24,7 @@ import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { PedidosModule } from './index';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 import { sinSuscripciones } from './testing/sin-suscripciones';
 
@@ -64,6 +65,8 @@ run('documentos operativos (base de datos real)', () => {
   jest.setTimeout(60000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let U: (nombre: string) => string;
   let reporteDiario: ReporteDiarioConsumer;
   let cambioItems: CambioItemsConsumer;
   let listaCambio: string | null = null;
@@ -169,6 +172,7 @@ run('documentos operativos (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    U = await idsDeUnidades(prisma);
     reporteDiario = app.get(ReporteDiarioConsumer);
     cambioItems = app.get(CambioItemsConsumer);
   });
@@ -801,7 +805,7 @@ run('documentos operativos (base de datos real)', () => {
               {
                 nombre: 'Movilización',
                 codigo: 'MV0001',
-                unidad: 'KM',
+                unidadMedidaId: U('Kilómetro'),
                 cantidad: 120.5,
                 usos: [
                   { fecha: '2026-11-01', estado: 'operacion', cantidad: 80 },
@@ -812,7 +816,7 @@ run('documentos operativos (base de datos real)', () => {
           ),
         );
         const h = (await docs(id)).find((d: { tipo: string }) => d.tipo === 'reporte_herramientas');
-        expect(h.herramientas[0]).toMatchObject({ cantidad: 120.5, unidad: 'KM' });
+        expect(h.herramientas[0]).toMatchObject({ cantidad: 120.5, unidad: 'Kilómetro' });
         expect(h.herramientas[0].usos).toEqual([
           expect.objectContaining({ fecha: '2026-11-01', cantidad: 80 }),
           expect.objectContaining({ fecha: '2026-11-02', cantidad: 40.5 }),
@@ -918,7 +922,7 @@ run('documentos operativos (base de datos real)', () => {
             listaPreciosId: listaCambio,
             codigo: `SUP-${n}`,
             descripcion: 'Supervisor de campo',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             precio: 437.23,
             tipo: 'Servicio',
           },
@@ -927,7 +931,7 @@ run('documentos operativos (base de datos real)', () => {
             listaPreciosId: listaCambio,
             codigo: `QUI-${n}`,
             descripcion: 'Químico de prueba',
-            unidad: 'gal',
+            unidadMedidaId: U('Galón'),
             precio: 12.5,
             tipo: 'Material',
           },
@@ -936,7 +940,7 @@ run('documentos operativos (base de datos real)', () => {
             listaPreciosId: listaCambio,
             codigo: `MOV-${n}`,
             descripcion: 'Movilización',
-            unidad: 'Unidad',
+            unidadMedidaId: U('Unidad'),
             precio: 200,
             tipo: 'Servicio',
           },
@@ -953,7 +957,7 @@ run('documentos operativos (base de datos real)', () => {
           orden: 1,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor de campo',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           cantidad: 3,
           valorUnitario: 437.23,
           listaPreciosItemId: itemA,
@@ -1069,7 +1073,7 @@ run('documentos operativos (base de datos real)', () => {
           orden: 2,
           codigo: 'AS2-1',
           descripcion: 'Línea de AS2',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           cantidad: 1,
           valorUnitario: 50,
           origenItem: 'as2',

@@ -212,7 +212,7 @@ export class PrefacturasService {
     const id = await this.prisma.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUnique({
         where: { id: pedidoId },
-        include: { items: true, linea: true },
+        include: { items: { include: { unidadMedida: true } }, linea: true },
       });
       if (!pedido) throw new NotFoundException('El pedido no existe');
       if (!PUEDEN_GENERAR.includes(pedido.estado)) {
@@ -295,7 +295,7 @@ export class PrefacturasService {
     const calculo = await this.prisma.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUniqueOrThrow({
         where: { id: pedidoId },
-        include: { items: true, linea: true },
+        include: { items: { include: { unidadMedida: true } }, linea: true },
       });
       return this.calcular(tx, pedido);
     });
@@ -411,7 +411,7 @@ export class PrefacturasService {
     await this.prisma.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUniqueOrThrow({
         where: { id: p.pedidoId },
-        include: { items: true, linea: true },
+        include: { items: { include: { unidadMedida: true } }, linea: true },
       });
       const calculo = await this.calcular(tx, pedido);
       await tx.prefactura.update({
@@ -747,20 +747,23 @@ export class PrefacturasService {
 
   private async calcular(
     tx: Prisma.TransactionClient,
-    pedido: Prisma.PedidoGetPayload<{ include: { items: true; linea: true } }>,
+    pedido: Prisma.PedidoGetPayload<{
+      include: { items: { include: { unidadMedida: true } }; linea: true };
+    }>,
   ) {
     const lista = pedido.clienteId
       ? await tx.listaPrecios.findFirst({
           where: { clienteId: pedido.clienteId, activa: true },
           orderBy: { vigenteDesde: 'desc' },
-          include: { items: true },
+          include: { items: { include: { unidadMedida: true } } },
         })
       : null;
+    // la prefactura guarda la unidad como texto (nombre del catálogo): es un documento emitido
     const itemsLista: ItemLista[] | null = lista
       ? lista.items.map((i) => ({
           codigo: i.codigo,
           descripcion: i.descripcion,
-          unidad: i.unidad,
+          unidad: i.unidadMedida.nombre,
           precio: Number(i.precio),
           tipo: i.tipo,
         }))
@@ -768,7 +771,9 @@ export class PrefacturasService {
 
     const reportes = await tx.documentoOperativo.findMany({
       where: { pedidoId: pedido.id },
-      include: { herramientas: { orderBy: { orden: 'asc' }, include: { usos: true } } },
+      include: {
+        herramientas: { orderBy: { orden: 'asc' }, include: { usos: true, unidadMedida: true } },
+      },
     });
     const diasJob = new Set(
       reportes.filter((r) => r.tipo === 'reporte_job').map((r) => aDia(r.fecha)),
@@ -780,7 +785,7 @@ export class PrefacturasService {
         nombre: h.nombre,
         serie: h.serie,
         codigo: h.codigo,
-        unidad: h.unidad,
+        unidad: h.unidadMedida?.nombre ?? null,
         cantidad: h.cantidad === null ? null : Number(h.cantidad),
         usos: h.usos.map((u) => ({ estado: u.estado })),
       }));
@@ -790,7 +795,7 @@ export class PrefacturasService {
       itemsPedido: pedido.items.map((i) => ({
         codigo: i.codigo,
         descripcion: i.descripcion,
-        unidad: i.unidad,
+        unidad: i.unidadMedida.nombre,
         cantidad: Number(i.cantidad),
         valorUnitario: Number(i.valorUnitario),
         descuentoPct: Number(i.descuentoPct ?? 0),

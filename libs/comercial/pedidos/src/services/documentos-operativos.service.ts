@@ -205,7 +205,7 @@ export class DocumentosOperativosService {
         },
         herramientas: {
           orderBy: { orden: 'asc' },
-          include: { usos: { orderBy: { fecha: 'asc' } } },
+          include: { usos: { orderBy: { fecha: 'asc' } }, unidadMedida: true },
         },
         supervisor: true,
         operador: true,
@@ -246,7 +246,8 @@ export class DocumentosOperativosService {
         nombre: h.nombre,
         serie: h.serie,
         codigo: h.codigo,
-        unidad: h.unidad,
+        unidad: h.unidadMedida?.nombre ?? null,
+        unidadMedidaId: h.unidadMedidaId,
         cantidad: h.cantidad === null ? null : Number(h.cantidad),
         usos: h.usos.map((u) => ({
           fecha: aDia(u.fecha),
@@ -498,7 +499,7 @@ export class DocumentosOperativosService {
         nombre: h.nombre,
         serie: h.serie ?? null,
         codigo: h.codigo ?? null,
-        unidad: h.unidad ?? null,
+        unidadMedidaId: h.unidadMedidaId ?? null,
         cantidad: h.cantidad ?? null,
       },
     });

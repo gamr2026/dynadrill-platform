@@ -27,6 +27,7 @@ import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -73,6 +74,8 @@ run(
     jest.setTimeout(150000);
     let app: INestApplication;
     let prisma: PrismaService;
+    /** Id de una unidad del catálogo por su nombre. */
+    let U: (nombre: string) => string;
     let consumer: PedidosAbiertosConsumer;
     const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
     const appPool = new Pool({ connectionString: APP_DB, max: 2 });
@@ -167,7 +170,7 @@ run(
           {
             codigo,
             descripcion: 'Sarta',
-            unidad: 'Corrida',
+            unidadMedidaId: U('Corrida'),
             cantidad: 1,
             tipoLinea: 'herramienta',
           },
@@ -176,35 +179,35 @@ run(
             {
               codigo: `SFS-EJ-${n}`,
               descripcion: 'Ítem de prueba',
-              unidad: 'día',
+              unidadMedidaId: U('Día'),
               cantidad: 10,
               tipoLinea: 'servicio',
             },
             {
               codigo: 'SFS6001',
               descripcion: 'Hydraulic jar',
-              unidad: 'día',
+              unidadMedidaId: U('Día'),
               cantidad: 10,
               tipoLinea: 'servicio',
             },
             {
               codigo: 'SFS6057',
               descripcion: 'Daily charge',
-              unidad: 'día',
+              unidadMedidaId: U('Día'),
               cantidad: 10,
               tipoLinea: 'servicio',
             },
             {
               codigo: 'SFC33012',
               descripcion: 'Bombeo',
-              unidad: 'gls',
+              unidadMedidaId: U('Galón'),
               cantidad: 5000,
               tipoLinea: 'material',
             },
             {
               codigo: 'SFS6146',
               descripcion: 'Movilización livianas',
-              unidad: 'km',
+              unidadMedidaId: U('Kilómetro'),
               cantidad: 200,
               tipoLinea: 'movilizacion',
             },
@@ -294,7 +297,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: `SFS-EJ-${n}`,
             descripcion: 'Ítem de prueba',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
           })
           .expect(201);
         await http()
@@ -402,6 +405,7 @@ run(
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
+      U = await idsDeUnidades(prisma);
       consumer = app.get(PedidosAbiertosConsumer);
     });
 
@@ -747,7 +751,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFS6001',
             descripcion: 'Hydraulic jar primer día',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             serie: 'DY-RT-391',
           })
           .expect(201);
@@ -806,7 +810,7 @@ run(
               {
                 codigo: 'SFS6057',
                 descripcion: 'Daily charge',
-                unidad: 'día',
+                unidadMedidaId: U('Día'),
                 cantidad: 1,
                 tipoLinea: 'servicio',
                 listaPreciosItemId: uuidv7(),
@@ -814,7 +818,7 @@ run(
               {
                 codigo: 'SFC33012',
                 descripcion: 'Bombeo',
-                unidad: 'gls',
+                unidadMedidaId: U('Galón'),
                 cantidad: 2000,
                 tipoLinea: 'material',
                 listaPreciosItemId: uuidv7(),
@@ -847,7 +851,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFC33012',
             descripcion: 'Bombeo',
-            unidad: 'gls',
+            unidadMedidaId: U('Galón'),
           })
           .expect(201);
         const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012').id;
@@ -908,7 +912,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFC33012',
             descripcion: 'Bombeo',
-            unidad: 'gls',
+            unidadMedidaId: U('Galón'),
           })
           .expect(201);
         const id = a.body.items.find((x: { codigo: string }) => x.codigo === 'SFC33012');
@@ -943,7 +947,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'NO-COTIZADO',
             descripcion: 'Extra',
-            unidad: 'gls',
+            unidadMedidaId: U('Galón'),
           })
           .expect(201);
         const idz = z.body.items.find((x: { codigo: string }) => x.codigo === 'NO-COTIZADO');
@@ -964,7 +968,7 @@ run(
             {
               codigo: 'SFS6057',
               descripcion: 'Daily charge',
-              unidad: 'día',
+              unidadMedidaId: U('Día'),
               cantidad: 3,
               tipoLinea: 'servicio',
               listaPreciosItemId: lista1,
@@ -972,7 +976,7 @@ run(
             {
               codigo: 'SFC33012',
               descripcion: 'Bombeo',
-              unidad: 'gls',
+              unidadMedidaId: U('Galón'),
               cantidad: 2000,
               tipoLinea: 'material',
               listaPreciosItemId: uuidv7(),
@@ -980,7 +984,7 @@ run(
             {
               codigo: 'SFC33026',
               descripcion: 'Movilización unidades livianas',
-              unidad: 'km',
+              unidadMedidaId: U('Kilómetro'),
               cantidad: 76.6,
               tipoLinea: 'movilizacion',
               listaPreciosItemId: null,
@@ -1016,7 +1020,7 @@ run(
           listaPreciosItemId: uuidv7(),
           codigo: 'SFS6057',
           descripcion: 'Daily charge',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
         };
         await http()
           .post(`${url}/items`)
@@ -1048,7 +1052,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: cod,
             descripcion: 'Sarta',
-            unidad: 'Corrida',
+            unidadMedidaId: U('Corrida'),
           })
           .expect(201);
         const lista = (await http().get(url).set(operador()).expect(200)).body.items;
@@ -1067,7 +1071,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'X1',
             descripcion: 'x',
-            unidad: 'unidad',
+            unidadMedidaId: U('Unidad'),
           })
           .expect(403);
         await http()
@@ -1077,7 +1081,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'X1',
             descripcion: 'x',
-            unidad: 'unidad',
+            unidadMedidaId: U('Unidad'),
           })
           .expect(403);
         // un reporte sin filas no se confirma; una fila por día sin marcas tampoco
@@ -1091,7 +1095,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFS6057',
             descripcion: 'Daily',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
           })
           .expect(201);
         const id = vacia.body.items[0].id;
@@ -1128,7 +1132,7 @@ run(
         listaPreciosItemId: uuidv7(),
         codigo: 'SFS6057',
         descripcion: 'Daily charge',
-        unidad: 'día',
+        unidadMedidaId: U('Día'),
         cantidad: 2,
         tipoLinea: 'herramienta',
         ...extra,
@@ -1169,7 +1173,12 @@ run(
             motivo: 'Se usó menos',
             items: [
               a,
-              item({ codigo: 'SFS6146', unidad: 'km', cantidad: 115, tipoLinea: 'movilizacion' }),
+              item({
+                codigo: 'SFS6146',
+                unidadMedidaId: U('Kilómetro'),
+                cantidad: 115,
+                tipoLinea: 'movilizacion',
+              }),
             ],
           })
           .expect(201);
@@ -1273,7 +1282,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFS6146',
             descripcion: 'Movilización livianas',
-            unidad: 'km',
+            unidadMedidaId: U('Kilómetro'),
           })
           .expect(201);
         await http()
@@ -1290,7 +1299,7 @@ run(
             listaPreciosItemId: uuidv7(),
             codigo: 'SFS6057',
             descripcion: 'Daily charge',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             serie: 'DY-RT-415',
           })
           .expect(201);
@@ -1322,7 +1331,7 @@ run(
             listaPreciosItemId: expect.any(String),
             codigo: expect.stringMatching(/^SFS-EJ-/),
             nombre: 'Ítem de prueba',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             cantidad: 1,
             usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 1 }],
           },
@@ -1330,7 +1339,7 @@ run(
             listaPreciosItemId: expect.any(String),
             codigo: 'SFS6146',
             nombre: 'Movilización livianas',
-            unidad: 'km',
+            unidadMedidaId: U('Kilómetro'),
             cantidad: 115,
             usos: [{ fecha: '2026-11-05', estado: 'operacion', cantidad: 115 }],
           },
@@ -1338,7 +1347,7 @@ run(
             listaPreciosItemId: expect.any(String),
             codigo: 'SFS6057',
             nombre: 'Daily charge',
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             serie: 'DY-RT-415',
             cantidad: 2,
             usos: [

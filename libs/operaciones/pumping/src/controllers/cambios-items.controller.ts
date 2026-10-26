@@ -27,7 +27,8 @@ export class ItemCambioDto {
   @IsUUID() listaPreciosItemId!: string;
   @IsString() @MaxLength(100) codigo!: string;
   @IsString() @MaxLength(500) descripcion!: string;
-  @IsString() @MaxLength(50) unidad!: string;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`), la del ítem de la lista. */
+  @IsUUID() unidadMedidaId!: string;
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0.001)

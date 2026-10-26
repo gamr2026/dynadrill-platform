@@ -411,7 +411,9 @@ model PedidoItem {
   orden              Int               @db.SmallInt
   codigo             String
   descripcion        String
-  unidad             String
+  /// Unidad del catálogo compartido (CM-4): la de su línea de la lista de precios.
+  unidadMedidaId     String            @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida   @relation(fields: [unidadMedidaId], references: [id])
   cantidad           Decimal           @db.Decimal(12, 3)
   valorUnitario      Decimal           @map("valor_unitario") @db.Decimal(14, 2)
   descuentoPct       Decimal?          @map("descuento_pct") @db.Decimal(5, 2)
@@ -462,7 +464,9 @@ model ListaPreciosItem {
   listaPrecios   ListaPrecios @relation(fields: [listaPreciosId], references: [id])
   codigo         String
   descripcion    String
-  unidad         String
+  /// Unidad del catálogo compartido (CM-4), administrado en el portal: la fija la lista de precios.
+  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
   precio         Decimal      @db.Decimal(14, 2)
   /// 'Material' | 'Servicio'
   tipo           TipoItemLista
@@ -754,8 +758,9 @@ model DocumentoOperativoHerramienta {
   nombre      String
   serie       String?
   codigo      String?
-  /// Unidad de la lista de precios y cantidad real del ítem según el reporte (nula en los reportes anteriores).
-  unidad      String?
+  /// Unidad de la lista de precios y cantidad real del ítem según el reporte (nulas en los reportes anteriores).
+  unidadMedidaId String?          @map("unidad_medida_id") @db.Uuid
+  unidadMedida   CatUnidadMedida? @relation(fields: [unidadMedidaId], references: [id])
   cantidad    Decimal? @db.Decimal(14, 3)
 
   usos DocumentoOperativoUso[]
@@ -1284,6 +1289,21 @@ model CatCliente {
   listasPrecios ListaPrecios[]
 
   @@map("cliente")
+  @@schema("catalogos")
+}
+
+/// Unidad de medida compartida (CM-4). Solo lectura desde Comercial.
+model CatUnidadMedida {
+  id         String  @id @db.Uuid
+  nombre     String
+  simbolo    String
+  habilitado Boolean
+
+  listaPreciosItems ListaPreciosItem[]
+  pedidoItems       PedidoItem[]
+  herramientas      DocumentoOperativoHerramienta[]
+
+  @@map("unidad_medida")
   @@schema("catalogos")
 }
 

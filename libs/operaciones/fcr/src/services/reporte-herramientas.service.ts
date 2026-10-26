@@ -17,11 +17,9 @@ const PASO = 'ejecucion_operativa';
 const deDia = (f: string) => new Date(`${f}T00:00:00.000Z`);
 const aDia = (d: Date) => d.toISOString().slice(0, 10);
 const num = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
-const PERIODO_DIA = /d[ií]a/i;
-
-/** Una unidad de la lista de precios es «por día» cuando se mide en días: esas filas se reportan con marcas por día. */
-export const esUnidadPorDia = (unidad: string | null | undefined): boolean =>
-  !!unidad && PERIODO_DIA.test(unidad);
+/** Una fila es «por día» cuando su unidad se mide en días (período día en el catálogo): se reporta con marcas por día. */
+export const esUnidadPorDia = (unidad: { periodo: string | null } | null | undefined): boolean =>
+  unidad?.periodo === 'dia';
 
 /** Cantidad real de una fila: la suma de las cantidades de sus días (cada marca de una fila por día vale 1). */
 export const cantidadDeFila = (f: { dias: Array<{ cantidad: Prisma.Decimal | number }> }): number =>
@@ -41,7 +39,8 @@ export interface AgregarItemEntrada {
   listaPreciosItemId?: string | null;
   codigo: string;
   descripcion: string;
-  unidad?: string | null;
+  /** Unidad del catálogo compartido (`catalogos.unidad_medida`). */
+  unidadMedidaId?: string | null;
   serie?: string | null;
 }
 
@@ -71,7 +70,10 @@ export class ReporteHerramientasService {
     const [filas, herramientas, confirmado, lineas] = await Promise.all([
       this.prisma.reporteItem.findMany({
         where: { ticketId },
-        include: { dias: { orderBy: { fecha: 'asc' } } },
+        include: {
+          dias: { orderBy: { fecha: 'asc' } },
+          unidadMedida: { select: { nombre: true } },
+        },
         orderBy: { orden: 'asc' },
       }),
       this.prisma.ticketHerramienta.findMany({
@@ -97,7 +99,8 @@ export class ReporteHerramientasService {
         listaPreciosItemId: f.listaPreciosItemId,
         codigo: f.codigo,
         descripcion: f.descripcion,
-        unidad: f.unidad,
+        unidad: f.unidadMedida?.nombre ?? null,
+        unidadMedidaId: f.unidadMedidaId,
         porDia: f.porDia,
         serie: f.serie,
         cantidad: cantidadDeFila(f),
@@ -126,9 +129,17 @@ export class ReporteHerramientasService {
     if (!codigo || !descripcion)
       throw new BadRequestException('Indique el código y la descripción');
     const serie = e.serie?.trim() || null;
-    const porDia = esUnidadPorDia(e.unidad);
     await this.prisma.$transaction(async (tx) => {
       await this.exigirOperador(tx, ticketId, actor);
+      const unidad = e.unidadMedidaId
+        ? await tx.catUnidadMedida.findUnique({
+            where: { id: e.unidadMedidaId },
+            select: { periodo: true },
+          })
+        : null;
+      if (e.unidadMedidaId && !unidad)
+        throw new BadRequestException('La unidad no existe en el catálogo');
+      const porDia = esUnidadPorDia(unidad);
       const ultimo = await tx.reporteItem.aggregate({
         where: { ticketId },
         _max: { orden: true },
@@ -153,7 +164,7 @@ export class ReporteHerramientasService {
           listaPreciosItemId: e.listaPreciosItemId ?? null,
           codigo,
           descripcion,
-          unidad: e.unidad?.trim() || null,
+          unidadMedidaId: e.unidadMedidaId ?? null,
           porDia,
           serie,
           createdBy: actor.id,
@@ -294,7 +305,7 @@ export class ReporteHerramientasService {
       listaPreciosItemId: f.listaPreciosItemId,
       codigo: f.codigo,
       nombre: f.descripcion,
-      unidad: f.unidad ?? undefined,
+      unidadMedidaId: f.unidadMedidaId ?? undefined,
       serie: f.serie ?? undefined,
       cantidad: cantidadDeFila(f),
       // todas las filas envían sus días con la cantidad aplicada (en las de por día cada marca vale 1): la suma de las cantidades de los
@@ -331,6 +342,7 @@ export class ReporteHerramientasService {
       const lineas = await tx.ticketLinea.findMany({
         where: { ticketId },
         orderBy: { orden: 'asc' },
+        include: { unidadMedida: { select: { periodo: true } } },
       });
       // si el servicio dura un solo día no hay nada que repartir: cada ítem se aplica a ese día con su cantidad cotizada. Con más de un día
       // el operador decide en qué días se aplicó cada cantidad.
@@ -347,7 +359,7 @@ export class ReporteHerramientasService {
       for (const l of lineas) {
         if (usados.has(l.codigo)) continue; // el operador ya agregó ese código
         usados.add(l.codigo);
-        const porDia = esUnidadPorDia(l.unidad);
+        const porDia = esUnidadPorDia(l.unidadMedida);
         const id = uuidv7();
         await tx.reporteItem.create({
           data: {
@@ -357,7 +369,7 @@ export class ReporteHerramientasService {
             listaPreciosItemId: l.listaPreciosItemId,
             codigo: l.codigo,
             descripcion: l.descripcion,
-            unidad: l.unidad,
+            unidadMedidaId: l.unidadMedidaId,
             porDia,
             createdBy: quien,
             updatedBy: quien,

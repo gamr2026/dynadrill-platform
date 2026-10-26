@@ -24,6 +24,7 @@ import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 import { sinSuscripciones } from './testing/sin-suscripciones';
 
@@ -51,6 +52,8 @@ run('guía de remisión y despacho (base de datos real)', () => {
   jest.setTimeout(90000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let U: (nombre: string) => string;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -257,7 +260,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           orden: 0,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           cantidad: 5,
           valorUnitario: 437.23,
         },
@@ -267,7 +270,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           orden: 1,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           cantidad: 1,
           valorUnitario: 200,
         },
@@ -277,7 +280,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           orden: 2,
           codigo: `MAT-${n}`,
           descripcion: 'Niple de prueba',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           cantidad: 3,
           valorUnitario: 50,
           listaPreciosItemId: mat.id,
@@ -389,6 +392,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    U = await idsDeUnidades(prisma);
 
     const sec = await admin.query(
       `SELECT s.id, s.numero_actual FROM comercial.secuencia s JOIN comercial.documento d ON d.id = s.documento_id WHERE d.codigo = 'guia_remision'`,
@@ -413,7 +417,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           precio: 437.23,
           tipo: 'Servicio',
         },
@@ -422,7 +426,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           precio: 200,
           tipo: 'Servicio',
         },
@@ -431,7 +435,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `CT-${n}`,
           descripcion: 'Cargo básico unidad',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           precio: 100,
           tipo: 'Servicio',
         },
@@ -440,7 +444,7 @@ run('guía de remisión y despacho (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo: `MAT-${n}`,
           descripcion: 'Niple de prueba',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           precio: 50,
           tipo: 'Material',
         },
@@ -543,18 +547,24 @@ run('guía de remisión y despacho (base de datos real)', () => {
             nombre: 'Cargo básico',
             serie: 'DY-9',
             codigo: `CT-${n}`,
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             cantidad: 2,
             usos: [
               { fecha: '2026-11-01', estado: 'operacion' },
               { fecha: '2026-11-02', estado: 'daily_charge' },
             ],
           },
-          { nombre: 'Niple', codigo: `MAT-${n}`, unidad: 'Unidad', cantidad: 2, usos: [] },
+          {
+            nombre: 'Niple',
+            codigo: `MAT-${n}`,
+            unidadMedidaId: U('Unidad'),
+            cantidad: 2,
+            usos: [],
+          },
           {
             nombre: 'Supervisor',
             codigo: `SUP-${n}`,
-            unidad: 'día',
+            unidadMedidaId: U('Día'),
             cantidad: 3,
             usos: [
               { fecha: '2026-11-01', estado: 'operacion' },
@@ -562,7 +572,13 @@ run('guía de remisión y despacho (base de datos real)', () => {
               { fecha: '2026-11-03', estado: 'operacion' },
             ],
           },
-          { nombre: 'Movilización', codigo: `MOV-${n}`, unidad: 'km', cantidad: 115, usos: [] },
+          {
+            nombre: 'Movilización',
+            codigo: `MOV-${n}`,
+            unidadMedidaId: U('Kilómetro'),
+            cantidad: 115,
+            usos: [],
+          },
         ],
       },
       id,

@@ -195,8 +195,20 @@ model UnidadMedida {
   nombre     String  @unique
   simbolo    String
   habilitado Boolean @default(true)
+  /// Período de las unidades de tiempo (nulo en las demás): «de tiempo» = tiene período; «por día» = día.
+  periodo    PeriodoUnidad?
 
   @@map("unidad_medida")
+  @@schema("catalogos")
+}
+
+enum PeriodoUnidad {
+  hora
+  dia
+  semana
+  mes
+
+  @@map("periodo_unidad")
   @@schema("catalogos")
 }
 

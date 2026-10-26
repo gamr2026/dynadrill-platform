@@ -28,6 +28,7 @@ import { RequisitosExternosConsumer } from './consumers/requisitos-externos.cons
 import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
@@ -112,6 +113,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   jest.setTimeout(90000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let U: (nombre: string) => string;
   let consumer: PedidosAbiertosConsumer;
   let externos: RequisitosExternosConsumer;
   let diaCorregido: DiaCorregidoConsumer;
@@ -241,6 +244,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
+    U = await idsDeUnidades(prisma);
     consumer = app.get(PedidosAbiertosConsumer);
     externos = app.get(RequisitosExternosConsumer);
     diaCorregido = app.get(DiaCorregidoConsumer);
@@ -2367,7 +2371,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       listaPreciosItemId,
       codigo: `COD-${listaPreciosItemId.slice(-4)}`,
       descripcion: 'Ítem de la lista del cliente',
-      unidad: 'día',
+      unidadMedidaId: U('Día'),
       cantidad: 2,
       tipoLinea: 'servicio',
       ...extra,

@@ -34,6 +34,7 @@ import {
   UsuarioRef,
 } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
 import { sinSuscripciones } from './testing/sin-suscripciones';
 
@@ -260,6 +261,8 @@ run('pedidos (base de datos real)', () => {
   jest.setTimeout(90000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let UM: (nombre: string) => string;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -376,6 +379,7 @@ run('pedidos (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    UM = await idsDeUnidades(prisma);
 
     // El código del pedido es el número del pedido de AS2 (`PEC-`): los de prueba avanzan ese espejo y se devuelve al final.
     const pec = await prisma.secuencia.findFirstOrThrow({
@@ -415,7 +419,7 @@ run('pedidos (base de datos real)', () => {
           listaPreciosId: listaId,
           codigo,
           descripcion,
-          unidad: 'dia',
+          unidadMedidaId: UM('Día'),
           precio,
           tipo,
         },
@@ -439,7 +443,7 @@ run('pedidos (base de datos real)', () => {
           listaPreciosId: otra,
           codigo: 'IT-AJENO',
           descripcion: 'Ajeno',
-          unidad: 'u',
+          unidadMedidaId: UM('Unidad'),
           precio: 1,
           tipo: 'Material',
         },

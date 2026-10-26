@@ -24,6 +24,7 @@ import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
+import { idsDeUnidades } from './testing/unidades';
 import {
   emitirGuiaDePrueba,
   quitarGuiasDePrueba,
@@ -75,6 +76,8 @@ run('orden de trabajo y cierre (base de datos real)', () => {
   jest.setTimeout(120000);
   let app: INestApplication;
   let prisma: PrismaService;
+  /** Id de una unidad del catálogo por su nombre. */
+  let U: (nombre: string) => string;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
   const http = () => request(app.getHttpServer());
   const signer = new JwtService({
@@ -164,7 +167,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
           listaPreciosId: id,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           precio: 437.23,
           tipo: 'Servicio',
         },
@@ -173,7 +176,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
           listaPreciosId: id,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           precio: 200,
           tipo: 'Servicio',
         },
@@ -216,7 +219,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
           orden: 0,
           codigo: `SUP-${n}`,
           descripcion: 'Supervisor',
-          unidad: 'día',
+          unidadMedidaId: U('Día'),
           cantidad: 1,
           valorUnitario: 437.23,
         },
@@ -226,7 +229,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
           orden: 1,
           codigo: `MOV-${n}`,
           descripcion: 'Movilización',
-          unidad: 'Unidad',
+          unidadMedidaId: U('Unidad'),
           cantidad: 1,
           valorUnitario: 200,
           descuentoPct: 10,
@@ -311,6 +314,7 @@ run('orden de trabajo y cierre (base de datos real)', () => {
     sinSuscripciones();
     await app.init();
     prisma = app.get(PrismaService);
+    U = await idsDeUnidades(prisma);
     const sec = await admin.query(
       `SELECT s.id, s.numero_actual FROM comercial.secuencia s JOIN comercial.documento d ON d.id = s.documento_id WHERE d.codigo = 'orden_trabajo'`,
     );
@@ -518,7 +522,8 @@ run('orden de trabajo y cierre (base de datos real)', () => {
     // movilización va en "Unidad" → UN; el supervisor va por día: sin código de AS2 confirmado
     const mov = e.filas.find((f: { codigoProducto: string }) => f.codigoProducto === `MOV-${n}`);
     expect(mov).toMatchObject({ codigoUnidad: 'UN', porcentajeDescuento: 10 });
-    expect(e.advertencias.join(' ')).toContain('día');
+    // la unidad es la del catálogo compartido (CM-4), con su nombre
+    expect(e.advertencias.join(' ')).toContain('Día');
     // una prefactura que no está firmada no se exporta
     const l = await prisma.servicioLinea.findUniqueOrThrow({ where: { codigo: 'pumping' } });
     const pid = uuidv7();
