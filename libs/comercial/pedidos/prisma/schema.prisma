@@ -891,6 +891,8 @@ model Prefactura {
   rechazadaPor         String?          @map("rechazada_por") @db.Uuid
   rechazoMotivo        String?          @map("rechazo_motivo")
   rechazoDevueltoA     AreaDevolucion?  @map("rechazo_devuelto_a")
+  /// Persona a quien se devuelve la corrección (el área va aparte).
+  rechazoDevueltoAUsuarioId String?     @map("rechazo_devuelto_a_usuario_id") @db.Uuid
   anuladaAt            DateTime?        @map("anulada_at") @db.Timestamptz(6)
   anuladaPor           String?          @map("anulada_por") @db.Uuid
   anulacionMotivo      String?          @map("anulacion_motivo")
@@ -898,6 +900,8 @@ model Prefactura {
   items        PrefacturaItem[]
   advertencias PrefacturaAdvertencia[]
   firmas       PrefacturaFirma[]
+  rechazoItems PrefacturaRechazoItem[]
+  seguimiento  PrefacturaSeguimiento[]
 
   @@unique([pedidoId, version])
   @@index([pedidoId])
@@ -921,8 +925,41 @@ model PrefacturaItem {
   tipo           TipoItemLista
   fuente         FuenteItemPrefactura
 
+  observaciones PrefacturaRechazoItem[]
+
   @@unique([prefacturaId, orden])
+  @@unique([id, prefacturaId])
   @@map("prefactura_item")
+  @@schema("comercial")
+}
+
+/// Ítem que el cliente observó al rechazar la prefactura, con su observación. INMUTABLE.
+model PrefacturaRechazoItem {
+  id               String         @id @db.Uuid
+  prefacturaId     String         @map("prefactura_id") @db.Uuid
+  prefactura       Prefactura     @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
+  prefacturaItemId String         @map("prefactura_item_id") @db.Uuid
+  item             PrefacturaItem @relation(fields: [prefacturaItemId, prefacturaId], references: [id, prefacturaId], onDelete: Cascade)
+  observacion      String
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        String         @map("created_by") @db.Uuid
+
+  @@unique([prefacturaId, prefacturaItemId])
+  @@map("prefactura_rechazo_item")
+  @@schema("comercial")
+}
+
+/// Nota de seguimiento de la corrección de una prefactura rechazada: quién y cuándo. INMUTABLE.
+model PrefacturaSeguimiento {
+  id           String     @id @db.Uuid
+  prefacturaId String     @map("prefactura_id") @db.Uuid
+  prefactura   Prefactura @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
+  nota         String
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String     @map("created_by") @db.Uuid
+
+  @@index([prefacturaId, createdAt])
+  @@map("prefactura_seguimiento")
   @@schema("comercial")
 }
 

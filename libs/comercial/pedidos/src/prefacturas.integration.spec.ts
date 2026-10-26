@@ -1093,6 +1093,25 @@ run('prefactura (base de datos real)', () => {
       estado: 'rechazada',
       rechazo: { motivo: 'Cantidad de días incorrecta', devueltoA: 'operaciones' },
     });
+    // CM-2: ítems observados y seguimiento de la corrección (la base los exige en una prefactura rechazada)
+    const item = await prisma.prefacturaItem.findFirstOrThrow({ where: { prefacturaId: v1.id } });
+    await prisma.prefacturaRechazoItem.create({
+      data: { id: uuidv7(), prefacturaId: v1.id, prefacturaItemId: item.id, observacion: 'Días de más', createdBy: ACTOR },
+    });
+    await prisma.prefacturaSeguimiento.create({
+      data: { id: uuidv7(), prefacturaId: v1.id, nota: 'Se avisó a Operaciones', createdBy: ACTOR },
+    });
+    await expect(
+      prisma.prefacturaRechazoItem.create({
+        data: { id: uuidv7(), prefacturaId: v1.id, prefacturaItemId: item.id, observacion: 'Otra vez', createdBy: ACTOR },
+      }),
+    ).rejects.toThrow(); // un ítem se observa una vez
+    await expect(
+      prisma.prefacturaSeguimiento.create({
+        data: { id: uuidv7(), prefacturaId: v1.id, nota: '  ', createdBy: ACTOR },
+      }),
+    ).rejects.toThrow(); // nota vacía
+    await expect(prisma.$executeRaw`DELETE FROM comercial.prefactura_seguimiento WHERE prefactura_id = ${v1.id}::uuid`).rejects.toThrow(); // inmutable
     expect(await estadoDe(id)).toBe('en_correccion');
     const hist = await prisma.procesoHistorial.findMany({
       where: { entidadId: id },
