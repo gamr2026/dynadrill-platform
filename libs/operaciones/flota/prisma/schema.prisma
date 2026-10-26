@@ -370,8 +370,15 @@ model InspeccionVehiculo {
   unidad          Unidad            @relation(fields: [unidadId], references: [id])
   momento         MomentoInspeccion @default(salida)
   fecha           DateTime          @db.Timestamptz(6)
-  puntoPartida    String            @map("punto_partida")
-  destino         String?
+  /// Punto de partida y destino: cada extremo es una bodega o un pozo (el de partida es obligatorio y uno solo; el destino, a lo más uno).
+  partidaBodegaId String?           @map("partida_bodega_id") @db.Uuid
+  partidaBodega   CatBodega?        @relation("inspeccionPartidaBodega", fields: [partidaBodegaId], references: [id])
+  partidaPozoId   String?           @map("partida_pozo_id") @db.Uuid
+  partidaPozo     CatPozo?          @relation("inspeccionPartidaPozo", fields: [partidaPozoId], references: [id])
+  destinoBodegaId String?           @map("destino_bodega_id") @db.Uuid
+  destinoBodega   CatBodega?        @relation("inspeccionDestinoBodega", fields: [destinoBodegaId], references: [id])
+  destinoPozoId   String?           @map("destino_pozo_id") @db.Uuid
+  destinoPozo     CatPozo?          @relation("inspeccionDestinoPozo", fields: [destinoPozoId], references: [id])
   conductorId     String            @map("conductor_id") @db.Uuid
   conductor       IdUsuario         @relation("inspeccionConductor", fields: [conductorId], references: [id])
   observaciones   String?
@@ -506,7 +513,9 @@ model OpcionRiesgoViaje {
 model UmbralRiesgoViaje {
   nivel           NivelRiesgoViaje @id
   desdePuntos     Int              @unique @map("desde_puntos")
+  /// Permiso (identidad.permiso) que autoriza los viajes de este nivel.
   permisoAutoriza String           @map("permiso_autoriza")
+  permiso         IdPermiso        @relation(fields: [permisoAutoriza], references: [codigo])
   descripcion     String
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy       String?          @map("created_by") @db.Uuid
@@ -616,6 +625,8 @@ model CatBodega {
 
   viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenBodega")
   viajesDestino GerenciamientoViaje[] @relation("viajeDestinoBodega")
+  inspeccionesPartida InspeccionVehiculo[] @relation("inspeccionPartidaBodega")
+  inspeccionesDestino InspeccionVehiculo[] @relation("inspeccionDestinoBodega")
 
   @@map("bodega")
   @@schema("catalogos")
@@ -642,6 +653,8 @@ model CatPozo {
 
   viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenPozo")
   viajesDestino GerenciamientoViaje[] @relation("viajeDestinoPozo")
+  inspeccionesPartida InspeccionVehiculo[] @relation("inspeccionPartidaPozo")
+  inspeccionesDestino InspeccionVehiculo[] @relation("inspeccionDestinoPozo")
 
   @@map("pozo")
   @@schema("catalogos")
@@ -685,6 +698,17 @@ model IdRol {
   usuarios IdUsuario[]
 
   @@map("rol")
+  @@schema("identidad")
+}
+
+/// `identidad.permiso`: solo el código (lo referencian los umbrales de riesgo del viaje).
+model IdPermiso {
+  id     String @id @db.Uuid
+  codigo String @unique
+
+  umbrales UmbralRiesgoViaje[]
+
+  @@map("permiso")
   @@schema("identidad")
 }
 

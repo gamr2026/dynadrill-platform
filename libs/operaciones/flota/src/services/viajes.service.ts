@@ -370,7 +370,14 @@ export class ViajesService {
         include: {
           conductor: { select: { id: true, nombre: true } },
           unidad: { select: { id: true, codigo: true, vehiculoId: true } },
-          inspeccion: { select: { puntoPartida: true, destino: true } },
+          inspeccion: {
+            select: {
+              partidaBodega: { select: { nombre: true } },
+              partidaPozo: { select: { nombreCompleto: true } },
+              destinoBodega: { select: { nombre: true } },
+              destinoPozo: { select: { nombreCompleto: true } },
+            },
+          },
           origenBodega: { select: { nombre: true } },
           origenPozo: { select: { nombreCompleto: true } },
           destinoBodega: { select: { nombre: true } },
@@ -393,12 +400,16 @@ export class ViajesService {
       origen:
         v.origenBodega?.nombre ??
         v.origenPozo?.nombreCompleto ??
-        (v.tipo === 'salida' ? v.inspeccion?.puntoPartida : v.inspeccion?.destino) ??
+        (v.tipo === 'salida'
+          ? (v.inspeccion?.partidaBodega?.nombre ?? v.inspeccion?.partidaPozo?.nombreCompleto)
+          : (v.inspeccion?.destinoBodega?.nombre ?? v.inspeccion?.destinoPozo?.nombreCompleto)) ??
         '—',
       destino:
         v.destinoBodega?.nombre ??
         v.destinoPozo?.nombreCompleto ??
-        (v.tipo === 'salida' ? v.inspeccion?.destino : v.inspeccion?.puntoPartida) ??
+        (v.tipo === 'salida'
+          ? (v.inspeccion?.destinoBodega?.nombre ?? v.inspeccion?.destinoPozo?.nombreCompleto)
+          : (v.inspeccion?.partidaBodega?.nombre ?? v.inspeccion?.partidaPozo?.nombreCompleto)) ??
         '—',
       puntajeTotal: v.puntajeTotal,
       nivel: v.nivel,
@@ -425,7 +436,18 @@ export class ViajesService {
           },
         },
         ticket: { select: { ticketNumero: true } },
-        inspeccion: { select: { puntoPartida: true, destino: true } },
+        inspeccion: {
+          select: {
+            partidaBodega: { select: { id: true, nombre: true } },
+            partidaPozo: {
+              select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
+            },
+            destinoBodega: { select: { id: true, nombre: true } },
+            destinoPozo: {
+              select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
+            },
+          },
+        },
         origenBodega: { select: { id: true, nombre: true } },
         origenPozo: {
           select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
@@ -443,25 +465,30 @@ export class ViajesService {
       throw new NotFoundException('El gerenciamiento de viaje no existe');
     }
     const umbrales = await this.umbrales();
-    const extremo = (
-      bodega: { id: string; nombre: string } | null,
-      pozo: { id: string; nombreCompleto: string; campo: { nombre: string } | null } | null,
-      texto: string | null,
-    ) =>
-      bodega
-        ? { tipo: 'bodega' as const, id: bodega.id, nombre: bodega.nombre }
-        : pozo
+    type Bodega = { id: string; nombre: string } | null;
+    type Pozo = { id: string; nombreCompleto: string; campo: { nombre: string } | null } | null;
+    // el viaje de un ticket toma sus extremos de la inspección de salida: en el retorno van al revés
+    const extremo = (bodega: Bodega, pozo: Pozo, alterno: { bodega: Bodega; pozo: Pozo } | null) => {
+      const b = bodega ?? (pozo ? null : (alterno?.bodega ?? null));
+      const p = bodega ? null : (pozo ?? alterno?.pozo ?? null);
+      return b
+        ? { tipo: 'bodega' as const, id: b.id, nombre: b.nombre }
+        : p
           ? {
               tipo: 'pozo' as const,
-              id: pozo.id,
-              nombre: pozo.nombreCompleto,
-              campo: pozo.campo?.nombre ?? null,
+              id: p.id,
+              nombre: p.nombreCompleto,
+              campo: p.campo?.nombre ?? null,
             }
-          : // el viaje de un ticket toma sus extremos de la inspección de salida: en el retorno van al revés
-            { tipo: 'texto' as const, nombre: texto ?? '—' };
+          : { tipo: 'texto' as const, nombre: '—' };
+    };
     const salida = v.tipo === 'salida';
-    const partida = v.inspeccion?.puntoPartida ?? null;
-    const llegada = v.inspeccion?.destino ?? null;
+    const partida = v.inspeccion
+      ? { bodega: v.inspeccion.partidaBodega, pozo: v.inspeccion.partidaPozo }
+      : null;
+    const llegada = v.inspeccion
+      ? { bodega: v.inspeccion.destinoBodega, pozo: v.inspeccion.destinoPozo }
+      : null;
     return {
       id: v.id,
       codigo: codigoDeViaje(v.numero),

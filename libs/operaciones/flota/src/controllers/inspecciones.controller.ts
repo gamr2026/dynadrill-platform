@@ -32,6 +32,12 @@ export class ResultadoItemDto {
   @IsIn(RESULTADOS) resultado!: (typeof RESULTADOS)[number];
 }
 
+/** Una bodega o un pozo del catálogo. */
+export class ExtremoInspeccionDto {
+  @IsOptional() @IsUUID() bodegaId?: string;
+  @IsOptional() @IsUUID() pozoId?: string;
+}
+
 export class RegistrarInspeccionDto {
   /** Caso del ticket; sin caso, indique `unidadId` (inspección suelta). */
   @IsOptional() @IsUUID() casoId?: string;
@@ -39,8 +45,8 @@ export class RegistrarInspeccionDto {
   @IsOptional() @IsIn(MOMENTOS) momento?: (typeof MOMENTOS)[number];
   /** Momento de la inspección (ISO 8601); por omisión, ahora. */
   @IsOptional() @IsString() @MaxLength(40) fecha?: string;
-  @IsString() @MinLength(2) @MaxLength(200) puntoPartida!: string;
-  @IsOptional() @IsString() @MaxLength(200) destino?: string | null;
+  @ValidateNested() @Type(() => ExtremoInspeccionDto) puntoPartida!: ExtremoInspeccionDto;
+  @IsOptional() @ValidateNested() @Type(() => ExtremoInspeccionDto) destino?: ExtremoInspeccionDto | null;
   @IsUUID() conductorId!: string;
   /** Lectura del odómetro al momento de la inspección. */
   @IsNumber() @Min(0) @Max(100000000) km!: number;

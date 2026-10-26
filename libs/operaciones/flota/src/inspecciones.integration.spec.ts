@@ -84,6 +84,9 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
   jest.setTimeout(180000);
   let app: INestApplication;
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
+  // FL-3: el punto de partida y el destino son una bodega o un pozo del catálogo
+  let bodegaId = '';
+  let pozoId = '';
   const appDb = new Pool({
     connectionString: APP_DB.replace('?pgbouncer=true', ''),
     max: 2,
@@ -177,6 +180,8 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
     // Sin RabbitMQ: no se suscribe; el consumidor se prueba llamando a `consumir` directamente.
     jest.spyOn(AsignacionPumpingConsumer.prototype, 'onApplicationBootstrap').mockResolvedValue();
     await sembrarMaestros(admin, MAESTROS);
+    bodegaId = (await admin.query("SELECT id FROM catalogos.bodega WHERE nombre = 'Bodega Matriz'")).rows[0].id;
+    pozoId = (await admin.query('SELECT id FROM catalogos.pozo LIMIT 1')).rows[0].id;
     await admin.query(
       "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo) VALUES ($1, $2, $3, 'revision_inicial')",
       [ticketId, uuidv7(), `PED-INSP-${n}`],
@@ -520,8 +525,8 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
     let inspA = '';
     const cuerpo = (extra: Record<string, unknown> = {}) => ({
       casoId: casoA,
-      puntoPartida: 'Base Coca',
-      destino: 'Pozo Prueba 1',
+      puntoPartida: { bodegaId },
+      destino: { pozoId },
       conductorId: CONDUCTOR.id,
       km: 1200,
       resultados: todoCumple(),
@@ -554,7 +559,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       unidades.push(servicio.body.id);
       const noTransporte = await registrar({
         unidadId: servicio.body.id,
-        puntoPartida: 'Base',
+        puntoPartida: { bodegaId },
         conductorId: CONDUCTOR.id,
         km: 10,
         resultados: todoCumple(),
@@ -704,8 +709,8 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
         cuerpo({
           momento: 'llegada',
           km: 1350,
-          puntoPartida: 'Pozo Prueba 1',
-          destino: 'Base Coca',
+          puntoPartida: { pozoId },
+          destino: { bodegaId },
         }),
       );
       expect(r.status).toBe(201);
@@ -756,7 +761,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       ).rows[0].id;
       expect(
         await rechazoDeBase(
-          appDb.query("UPDATE flota.inspeccion_vehiculo SET punto_partida = 'otro' WHERE id = $1", [
+          appDb.query('UPDATE flota.inspeccion_vehiculo SET partida_pozo_id = NULL WHERE id = $1', [
             insp,
           ]),
         ),
@@ -831,9 +836,9 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       // `anulada` evita el índice único parcial para que el rechazo sea el de la FK compuesta
       const insertar = (unidad: string, momento: string, anulada: boolean) =>
         admin.query(
-          `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, punto_partida, conductor_id, created_by,
+          `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, partida_bodega_id, conductor_id, created_by,
                                                   anulada_at, anulada_por, anulacion_motivo)
-           VALUES ($1, $2, $3, $4, now(), 'Base', $5, $5, ${anulada ? "now(), $5, 'Prueba de la FK'" : 'NULL, NULL, NULL'})`,
+           VALUES ($1, $2, $3, $4, now(), (SELECT id FROM catalogos.bodega LIMIT 1), $5, $5, ${anulada ? "now(), $5, 'Prueba de la FK'" : 'NULL, NULL, NULL'})`,
           [uuidv7(), caso, unidad, momento, CONDUCTOR.id],
         );
       expect(await rechazoDeBase(insertar(unidad2Id, 'salida', true))).toMatch(

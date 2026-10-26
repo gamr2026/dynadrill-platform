@@ -628,26 +628,26 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect([sin.status, sin.body.code]).toEqual([409, 'sin_inspeccion_de_salida']);
 
       await admin.query(
-        `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, punto_partida, destino, conductor_id, created_by)
-         VALUES ($1, $2, $3, 'salida', now(), 'Base Coca', 'Pozo Sacha 12', $4, $4)`,
-        [uuidv7(), caso, unidadId, CONDUCTOR.id],
+        `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, partida_bodega_id, destino_pozo_id, conductor_id, created_by)
+         VALUES ($1, $2, $3, 'salida', now(), $5, $6, $4, $4)`,
+        [uuidv7(), caso, unidadId, CONDUCTOR.id, bodegaId, pozoId],
       );
       const ok = await solicitar(sinOrigen());
       expect(ok.status).toBe(201);
       const salida = (await http().get(`${base}/${ok.body.id}`).set(conductor()).expect(200)).body;
-      expect(salida.origen).toEqual({ tipo: 'texto', nombre: 'Base Coca' });
-      expect(salida.destino).toEqual({ tipo: 'texto', nombre: 'Pozo Sacha 12' });
+      expect(salida.origen).toMatchObject({ tipo: 'bodega', id: bodegaId, nombre: 'Bodega Matriz' });
+      expect(salida.destino).toMatchObject({ tipo: 'pozo', id: pozoId });
       // la bandeja muestra el origen y el destino de la inspección
       const fila = (
         await http().get(`${base}?ticketId=${ticket}`).set(conductor()).expect(200)
       ).body.find((x: { id: string }) => x.id === ok.body.id);
-      expect([fila.origen, fila.destino]).toEqual(['Base Coca', 'Pozo Sacha 12']);
+      expect([fila.origen, fila.destino]).toEqual(['Bodega Matriz', salida.destino.nombre]);
       // en el retorno el recorrido va al revés
       const retorno = await solicitar(sinOrigen({ tipo: 'retorno' }));
       expect(retorno.status).toBe(201);
       const volver = (await http().get(`${base}/${retorno.body.id}`).set(conductor()).expect(200))
         .body;
-      expect([volver.origen.nombre, volver.destino.nombre]).toEqual(['Pozo Sacha 12', 'Base Coca']);
+      expect([volver.origen.nombre, volver.destino.nombre]).toEqual([salida.destino.nombre, 'Bodega Matriz']);
       // con un solo extremo indicado hay que indicar los dos
       const mitad = await solicitar(
         cuerpo({ ticketId: ticket, tipo: 'retorno', destino: undefined }),
