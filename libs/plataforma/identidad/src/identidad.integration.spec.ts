@@ -579,7 +579,8 @@ run('identidad (base de datos real)', () => {
     it('roles: cualquier autenticado los lista; usuarios por rol solo trae id, nombre y especialidad', async () => {
       await http().get('/api/roles').expect(401);
       const roleList = (await http().get('/api/roles').set(bearer(adminToken)).expect(200)).body;
-      expect(roleList).toHaveLength(16);
+      // todos los roles de la base (un número fijo dependía de los restos de otras pruebas)
+      expect(roleList).toHaveLength(await prisma.rol.count());
       expect(roleList[0]).toEqual(
         expect.objectContaining({
           id: expect.any(String),

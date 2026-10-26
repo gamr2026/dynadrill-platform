@@ -22,6 +22,7 @@
     "test:integration": "cross-env RUN_INTEGRATION=1 nx run-many -t test --skip-nx-cache",
     "db:migrate:identidad": "cd libs/plataforma/identidad && prisma migrate deploy",
     "db:generate": "nx run-many -t prisma-generate",
+    "db:test:preparar": "node scripts/preparar-base-de-pruebas.mjs",
     "db:seed:identidad": "tsx --tsconfig tsconfig.base.json libs/plataforma/identidad/prisma/seed.ts",
     "db:migrate-demo:identidad": "tsx --tsconfig tsconfig.base.json libs/plataforma/identidad/prisma/migrate-from-demo.ts",
     "db:migrate-demo:comercial": "tsx --tsconfig tsconfig.base.json libs/comercial/pedidos/prisma/migrate-from-demo.ts",
