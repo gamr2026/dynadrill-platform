@@ -2205,6 +2205,40 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       }
     });
 
+    it('el adjunto del día es un archivo de la plataforma: una sola vez por reporte, y es historia (D-PD)', async () => {
+      const t = await enEjecucion();
+      const archivo = uuidv7();
+      await admin.query(
+        `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+         SELECT $1::uuid, mo.id, 'mezcla.pdf', 'application/pdf', 10, repeat('c', 64), 'prueba/' || $1::text, 'omitido', $2::uuid
+           FROM archivos.modulo_archivo mo WHERE mo.codigo = 'pedido_documento'`,
+        [archivo, JEFE],
+      );
+      try {
+        const r = await guardar(t, { actividades: [actividad({})] });
+        expect(r.status).toBe(200);
+        const reporte = (
+          await admin.query('SELECT id FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id])
+        ).rows[0].id;
+        const insertar = (archivoId: string) =>
+          admin.query(
+            'INSERT INTO pumping.reporte_diario_adjunto (id, reporte_id, archivo_id, created_by) VALUES ($1, $2, $3, $4)',
+            [uuidv7(), reporte, archivoId, JEFE],
+          );
+        await insertar(archivo);
+        await expect(insertar(archivo)).rejects.toThrow(/reporte_diario_adjunto_key/); // una sola vez
+        await expect(insertar(uuidv7())).rejects.toThrow(/reporte_diario_adjunto_archivo_fkey/); // el archivo existe
+        // la aplicación no cambia ni borra un adjunto
+        const privilegios = await admin.query(
+          "SELECT has_table_privilege('app_operaciones', 'pumping.reporte_diario_adjunto', 'UPDATE') AS u, has_table_privilege('app_operaciones', 'pumping.reporte_diario_adjunto', 'DELETE') AS d",
+        );
+        expect(privilegios.rows[0]).toEqual({ u: false, d: false });
+      } finally {
+        await admin.query('DELETE FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id]);
+        await admin.query('DELETE FROM archivos.archivo WHERE id = $1', [archivo]);
+      }
+    });
+
     it('guarda el día como borrador, con la duración y las tablas de cada actividad calculadas y leídas del servidor', async () => {
       const t = await enEjecucion();
       const r = await guardar(t, {

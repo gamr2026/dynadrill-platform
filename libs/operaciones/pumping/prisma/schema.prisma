@@ -424,9 +424,27 @@ model ReporteDiario {
   updatedBy            String    @map("updated_by") @db.Uuid
 
   actividades ReporteDiarioActividad[]
+  adjuntos    ReporteDiarioAdjunto[]
 
   @@unique([ticketId, fecha])
   @@map("reporte_diario")
+  @@schema("pumping")
+}
+
+/// Archivo adjunto a un día del reporte (archivo de `archivos`). INMUTABLE. Las firmas del supervisor y del cliente van en `plataforma/firmas`.
+model ReporteDiarioAdjunto {
+  id        String        @id @db.Uuid
+  reporteId String        @map("reporte_id") @db.Uuid
+  reporte   ReporteDiario @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  archivoId String        @map("archivo_id") @db.Uuid
+  archivo   ArchivoRef    @relation(fields: [archivoId], references: [id])
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String        @map("created_by") @db.Uuid
+  autor     IdUsuario     @relation("autorAdjuntoReporte", fields: [createdBy], references: [id])
+
+  @@unique([reporteId, archivoId])
+  @@index([archivoId])
+  @@map("reporte_diario_adjunto")
   @@schema("pumping")
 }
 
@@ -505,6 +523,7 @@ model ReporteDiarioTablaCelda {
 model ArchivoRef {
   id         String            @id @db.Uuid
   documentos TicketDocumento[]
+  adjuntosReporte ReporteDiarioAdjunto[]
 
   @@map("archivo")
   @@schema("archivos")
@@ -1050,6 +1069,7 @@ model IdUsuario {
   reportesCompletados Ticket[]                @relation("completadorReporteHerramientas")
   celdasReporte      ReporteItemDia[]         @relation("autorCeldaReporte")
   reportesCorregidos ReporteDiario[]          @relation("reporteCorrector")
+  adjuntosReporte    ReporteDiarioAdjunto[]   @relation("autorAdjuntoReporte")
 
   @@map("usuario")
   @@schema("identidad")

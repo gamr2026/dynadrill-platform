@@ -16,6 +16,7 @@ export const DOCUMENTOS_FIRMABLES: readonly EntradaCatalogo[] = [
   { codigo: 'qhse_desecho', descripcion: 'Manifiesto de desechos' },
   { codigo: 'qhse_entrega_epi', descripcion: 'Entrega de equipo de protección personal' },
   { codigo: 'fcr_inspeccion', descripcion: 'Inspección y reparación de herramientas de FCR' },
+  { codigo: 'pumping_reporte_diario', descripcion: 'Reporte Diario de Actividades de Pumping (DYN-SGI-RE-047)' },
 ];
 
 /** Papeles de quien firma: los que hoy usan PTW, la entrega de EPI y la inspección de FCR. */
@@ -29,4 +30,6 @@ export const ROLES_FIRMANTE: readonly EntradaCatalogo[] = [
   { codigo: 'reparado_por', descripcion: 'Reparado por' },
   { codigo: 'revisado_por', descripcion: 'Revisado por' },
   { codigo: 'liberado_qhse', descripcion: 'Liberado por QHSE' },
+  { codigo: 'supervisor', descripcion: 'Supervisor de Dynadrill' },
+  { codigo: 'representante_cliente', descripcion: 'Representante del cliente (Company Man)' },
 ];
