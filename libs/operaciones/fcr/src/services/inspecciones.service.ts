@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
-import { uuidv7 } from '@dyn/utils';
+import { firmaDeUnaLinea, uuidv7 } from '@dyn/utils';
 import type {
   Prisma,
   ResponsableTrabajo,
@@ -378,9 +378,25 @@ export class InspeccionesService {
           data: { fechaReparacion: hoy(), updatedBy: actor.id },
         });
       }
-      await tx.inspeccionFirma.create({
+      const firma = await tx.inspeccionFirma.create({
         data: { inspeccionId, rol, usuarioId: actor.id },
       });
+      // evidencia (contrato 4.14): Firmas la registra; aquí la firma sigue guardada porque de ella depende el envío
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'operaciones.fcr.inspeccion.firmado',
+          subject: { type: 'fcr_inspeccion', id: inspeccionId },
+          data: {
+            ticketId,
+            pedidoId: t.pedidoId,
+            inspeccionId,
+            ...firmaDeUnaLinea('fcr_inspeccion', inspeccionId, rol, actor.id, firma.firmadaAt),
+          },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
+      );
     });
     return this.obtener(ticketId, inspeccionId);
   }

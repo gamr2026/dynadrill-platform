@@ -187,7 +187,9 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     expect((await confirmar(id, 'ptw_en_sitio')).status).toBe(201);
     expect((await confirmar(id, 'ptw_en_sitio')).status).toBe(409);
     expect((await confirmar(id, 'acta_recibimiento')).status).toBe(201);
-    expect(await eventos('qhse.ptw.firmado', ticketId)).toHaveLength(0);
+    // cada confirmación publica su evidencia (contrato 4.14); la formalización completa, su propio evento
+    expect(await eventos('qhse.ptw.formalizado', ticketId)).toHaveLength(0);
+    expect(await eventos('qhse.ptw.firmado', ticketId)).toHaveLength(2);
     const firmado = await confirmar(id, 'barricadas');
     expect(firmado.status).toBe(201);
     expect(firmado.body.fase).toBe('aprobacion');
@@ -196,9 +198,23 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
       TECNICO.nombre,
       TECNICO.nombre,
     ]);
-    const ev = await eventos('qhse.ptw.firmado', ticketId);
+    const ev = await eventos('qhse.ptw.formalizado', ticketId);
     expect(ev).toHaveLength(1);
     expect(ev[0].datos.data).toMatchObject({ ptwId: id, ticketId, pedidoId, fase: 'aprobacion' });
+    const evidencias = await eventos('qhse.ptw.firmado', ticketId);
+    expect(evidencias).toHaveLength(3);
+    expect(evidencias.map((e) => e.datos.data['rolFirmante']).sort()).toEqual([
+      'acta_recibimiento',
+      'barricadas',
+      'ptw_en_sitio',
+    ]);
+    expect(evidencias[0].datos.actor?.userId).toBe(TECNICO.id);
+    expect(evidencias[0].datos.data).toMatchObject({
+      documentoTipo: 'qhse_ptw',
+      documentoId: id,
+      metodo: 'linea',
+      hashDocumento: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
 
     // aprueba quien tiene el permiso de aprobar, no quien solo gestiona
     expect((await accion(id, 'aprobar', {}, hse())).status).toBe(403);
@@ -208,6 +224,12 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     const cerrado = await eventos('qhse.ptw.cerrado', ticketId);
     expect(cerrado).toHaveLength(1);
     expect(cerrado[0].datos.actor?.userId).toBe(GERENTE.id);
+    // la aprobación también deja su evidencia, con quien aprobó como firmante
+    const aprobacion = (await eventos('qhse.ptw.firmado', ticketId)).filter(
+      (e) => e.datos.data['rolFirmante'] === 'aprobacion',
+    );
+    expect(aprobacion).toHaveLength(1);
+    expect(aprobacion[0].datos.actor?.userId).toBe(GERENTE.id);
     expect(cerrado[0].datos.data).toMatchObject({
       ptwId: id,
       ticketId,

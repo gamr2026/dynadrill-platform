@@ -85,6 +85,7 @@ const FUENTES = [
       'qhse.swa.cerrado',
       'qhse.ptw.abierto',
       'qhse.ptw.firmado',
+      'qhse.ptw.formalizado',
       'qhse.ptw.cerrado',
       'qhse.ptw.anulado',
       'qhse.epi.despachada',

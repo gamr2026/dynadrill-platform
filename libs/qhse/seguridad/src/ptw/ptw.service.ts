@@ -7,6 +7,7 @@ import {
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
+import { firmaDeUnaLinea } from '../comun/firma';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { AccionPtw, FasePtw, TipoFirmaPtw } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,7 +16,7 @@ import { codigoPtw, requisitosDeGabinete } from './ptw-documentos';
 import { requisitosIperc } from './ptw-iperc';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-/** Las tres confirmaciones de la formalización; al completarse el PTW pasa solo a aprobación y se publica `qhse.ptw.firmado`. */
+/** Las tres confirmaciones de la formalización; al completarse el PTW pasa solo a aprobación y se publica `qhse.ptw.formalizado`. */
 const FORMALIZACION: TipoFirmaPtw[] = [
   TipoFirmaPtw.ptw_en_sitio,
   TipoFirmaPtw.acta_recibimiento,
@@ -151,7 +152,10 @@ export class PtwService {
         throw new ConflictException('Las confirmaciones se registran en la fase de formalización');
       if (await tx.ptwFirma.count({ where: { ptwId: id, tipo } }))
         throw new ConflictException('Esa confirmación ya está registrada');
-      await tx.ptwFirma.create({ data: { id: uuidv7(), ptwId: id, tipo, usuarioId: actor.id } });
+      const firmada = await tx.ptwFirma.create({
+        data: { id: uuidv7(), ptwId: id, tipo, usuarioId: actor.id },
+      });
+      await this.publicarFirma(tx, id, tipo, actor, firmada.firmadoAt);
       const hechas = await tx.ptwFirma.count({ where: { ptwId: id, tipo: { in: FORMALIZACION } } });
       if (hechas < FORMALIZACION.length) return;
       // el cambio de fase lo gana una sola petición aunque dos confirmaciones lleguen a la vez
@@ -161,7 +165,7 @@ export class PtwService {
       });
       if (cambio.count !== 1) return;
       await this.historia(tx, id, AccionPtw.firmado, actor);
-      await this.publicar(tx, 'qhse.ptw.firmado', id, actor);
+      await this.publicar(tx, 'qhse.ptw.formalizado', id, actor);
     });
     return this.consulta.detalle(id);
   }
@@ -172,9 +176,10 @@ export class PtwService {
       const p = await this.vigente(tx, id);
       if (p.fase !== FasePtw.aprobacion)
         throw new ConflictException('El PTW debe tener la formalización completa para aprobarlo');
-      await tx.ptwFirma.create({
+      const firmada = await tx.ptwFirma.create({
         data: { id: uuidv7(), ptwId: id, tipo: TipoFirmaPtw.aprobacion, usuarioId: actor.id },
       });
+      await this.publicarFirma(tx, id, TipoFirmaPtw.aprobacion, actor, firmada.firmadoAt);
       const cambio = await tx.ptw.updateMany({
         where: { id, fase: FasePtw.aprobacion },
         data: { fase: FasePtw.aprobado, updatedBy: actor.id },
@@ -236,7 +241,35 @@ export class PtwService {
     });
   }
 
-  private async publicar(tx: Tx, tipo: string, ptwId: string, actor: ActorPtw, motivo?: string) {
+  /**
+   * Evidencia de una confirmación (contrato 4.14): el evento `qhse.ptw.firmado` lleva al PTW y la prueba «de una línea». Firmas lo
+   * registra; aquí la confirmación sigue guardada porque de ella depende el avance de fase.
+   */
+  private async publicarFirma(
+    tx: Tx,
+    ptwId: string,
+    tipo: TipoFirmaPtw,
+    actor: ActorPtw,
+    firmadaAt: Date,
+  ) {
+    await this.publicar(
+      tx,
+      'qhse.ptw.firmado',
+      ptwId,
+      actor,
+      undefined,
+      firmaDeUnaLinea('qhse_ptw', ptwId, tipo, actor.id, firmadaAt),
+    );
+  }
+
+  private async publicar(
+    tx: Tx,
+    tipo: string,
+    ptwId: string,
+    actor: ActorPtw,
+    motivo?: string,
+    extra: Record<string, unknown> = {},
+  ) {
     const p = await tx.ptw.findUniqueOrThrow({
       where: { id: ptwId },
       include: {
@@ -266,6 +299,7 @@ export class PtwService {
             ? { asignados: [{ usuarioId: p.ticket.supervisorId, rolCodigo: 'supervisor' }] }
             : {}),
           ...(motivo ? { motivo } : {}),
+          ...extra,
         },
         actor: enActor(actor),
         traceparent: currentTraceparent(),

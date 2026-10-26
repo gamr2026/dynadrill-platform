@@ -30,6 +30,9 @@ export const ROLES_FIRMANTE: readonly EntradaCatalogo[] = [
   { codigo: 'reparado_por', descripcion: 'Reparado por' },
   { codigo: 'revisado_por', descripcion: 'Revisado por' },
   { codigo: 'liberado_qhse', descripcion: 'Liberado por QHSE' },
+  { codigo: 'despachado_por', descripcion: 'Despachado por (manifiesto de desechos)' },
+  { codigo: 'transportado_por', descripcion: 'Transportado por (manifiesto de desechos)' },
+  { codigo: 'recibido_por', descripcion: 'Recibido por (manifiesto de desechos)' },
   { codigo: 'supervisor', descripcion: 'Supervisor de Dynadrill' },
   { codigo: 'representante_cliente', descripcion: 'Representante del cliente (Company Man)' },
 ];

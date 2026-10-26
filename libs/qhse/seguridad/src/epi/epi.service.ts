@@ -9,6 +9,7 @@ import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import { EstadoEpi } from '../generated/client';
+import { firmaDeUnaLinea } from '../comun/firma';
 import { PrismaService } from '../prisma/prisma.service';
 import { EpiConsultaService } from './epi-consulta.service';
 import { EpiRenglonesService } from './epi-renglones.service';
@@ -287,13 +288,30 @@ export class EpiService {
         throw new ConflictException('La entrega ya fue despachada');
       const ya = quien === 'trabajador' ? e.firmaTrabajadorAt : e.firmaThAt;
       if (ya) throw new ConflictException('Esta firma ya fue registrada');
+      const firmadaAt = new Date();
       await tx.epiEntrega.update({
         where: { id },
         data:
           quien === 'trabajador'
-            ? { firmaTrabajadorPor: actor.id, firmaTrabajadorAt: new Date(), updatedBy: actor.id }
-            : { firmaThPor: actor.id, firmaThAt: new Date(), updatedBy: actor.id },
+            ? { firmaTrabajadorPor: actor.id, firmaTrabajadorAt: firmadaAt, updatedBy: actor.id }
+            : { firmaThPor: actor.id, firmaThAt: firmadaAt, updatedBy: actor.id },
       });
+      // evidencia (contrato 4.14): Firmas la registra; aquí la firma sigue guardada porque de ella depende el despacho
+      await this.publicar(
+        tx,
+        'qhse.epi.firmado',
+        id,
+        enActor(actor),
+        undefined,
+        undefined,
+        firmaDeUnaLinea(
+          'qhse_entrega_epi',
+          id,
+          quien === 'trabajador' ? 'trabajador' : 'talento_humano',
+          actor.id,
+          firmadaAt,
+        ),
+      );
     });
   }
 
@@ -358,6 +376,7 @@ export class EpiService {
     actor: { userId: string; role: string } | null,
     causa?: EventEnvelope,
     motivo?: string,
+    extra: Record<string, unknown> = {},
   ) {
     const e = await tx.epiEntrega.findUniqueOrThrow({
       where: { id: entregaId },
@@ -379,6 +398,7 @@ export class EpiService {
           // texto para avisos (no cambia: es el nombre de la persona al momento del hecho)
           trabajador: e.trabajador.nombre,
           ...(motivo ? { motivo } : {}),
+          ...extra,
         },
         ...(actor ? { actor } : {}),
         ...(causa ? { causationId: causa.id, correlationId: causa.correlationId } : {}),

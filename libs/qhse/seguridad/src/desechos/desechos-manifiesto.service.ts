@@ -7,6 +7,7 @@ import {
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { aFecha, hoyEcuador } from '../comun/fechas';
+import { firmaDeUnaLinea } from '../comun/firma';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { RolFirmaDesecho } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -147,7 +148,7 @@ export class DesechosManifiestoService {
         throw new ConflictException('Solo se firma el manifiesto de un desecho con manifiesto');
       if (await tx.desechoFirma.count({ where: { manifiestoId: m.id, rol } }))
         throw new ConflictException('Esa firma ya está registrada');
-      await tx.desechoFirma.create({
+      const firma = await tx.desechoFirma.create({
         data: {
           id: uuidv7(),
           manifiestoId: m.id,
@@ -162,6 +163,8 @@ export class DesechosManifiestoService {
         rolFirma: rol,
         firmasRegistradas: firmadas,
         firmasCompletas: firmadas === 3,
+        // evidencia (contrato 4.14); el firmante en papel (nombre y cédula) se guarda aquí porque Firmas no tiene dónde
+        ...firmaDeUnaLinea('qhse_desecho', id, rol, actor.id, firma.firmadoAt, nombre ?? '', cedula ?? ''),
       });
     });
     return this.consulta.detalle(id);

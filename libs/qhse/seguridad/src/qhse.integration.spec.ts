@@ -634,6 +634,16 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
         .post(`/api/qhse/epi/${entregaId}/firma-talento-humano`)
         .set(tecnico())
         .expect(201);
+
+      // cada firma deja su evidencia para Firmas (contrato 4.14), 
+      const firmas = (await salida(entregaId)).filter((p) => p.tipo === 'qhse.epi.firmado');
+      expect(firmas.map((p) => p.datos.data['rolFirmante'])).toEqual(['trabajador', 'talento_humano']);
+      expect(firmas[0].datos.data).toMatchObject({
+        documentoTipo: 'qhse_entrega_epi',
+        documentoId: entregaId,
+        metodo: 'linea',
+        hashDocumento: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
     });
 
     it('revertir exige motivo, vuelve a aprobado y publica qhse.epi.revertida; todo queda en el historial', async () => {

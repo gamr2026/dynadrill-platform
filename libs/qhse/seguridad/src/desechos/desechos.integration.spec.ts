@@ -423,7 +423,15 @@ run('QHSE: Desechos (base de datos real)', () => {
       expect(c.body.manifiesto.firmasCompletas).toBe(true);
       const ev = await eventos('qhse.desecho.firmado', id);
       expect(ev.map((e) => e.datos.data['firmasRegistradas'])).toEqual([1, 2, 3]);
-      expect(ev[2].datos.data).toMatchObject({ rolFirma: 'recibido_por', firmasCompletas: true });
+      expect(ev[2].datos.data).toMatchObject({
+        rolFirma: 'recibido_por',
+        firmasCompletas: true,
+        documentoTipo: 'qhse_desecho',
+        documentoId: id,
+        rolFirmante: 'recibido_por',
+        metodo: 'linea',
+        hashDocumento: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
       // con las tres firmas la guía ya no cambia
       expect((await patchGuia(id, { placas: 'XXX-0000' })).status).toBe(409);
     });

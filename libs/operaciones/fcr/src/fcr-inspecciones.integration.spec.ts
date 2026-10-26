@@ -583,6 +583,22 @@ run(
         });
         expect(f1.body.fechaReparacion).toBe(new Date().toISOString().slice(0, 10));
         await firmar(t.id, i.id, 'reparado_por').expect(409);
+        // la firma deja su evidencia para Firmas (contrato 4.14), con quien firmó como actor
+        const evidencia = (
+          await admin.query(
+            "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.fcr.inspeccion.firmado' AND datos->'data'->>'inspeccionId' = $1",
+            [i.id],
+          )
+        ).rows;
+        expect(evidencia).toHaveLength(1);
+        expect(evidencia[0].datos.actor.userId).toBe(INSPECTOR.id);
+        expect(evidencia[0].datos.data).toMatchObject({
+          documentoTipo: 'fcr_inspeccion',
+          documentoId: i.id,
+          rolFirmante: 'reparado_por',
+          metodo: 'linea',
+          hashDocumento: expect.stringMatching(/^[0-9a-f]{64}$/),
+        });
         // los datos y las partes quedaron bloqueados
         await http().put(url).set(inspector()).send({ observaciones: 'tarde' }).expect(409);
         await http().post(`${url}/partes`).set(inspector()).send({ descripcion: 'x' }).expect(409);
