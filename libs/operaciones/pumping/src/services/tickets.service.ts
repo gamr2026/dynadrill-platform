@@ -18,7 +18,7 @@ export interface PedidoAbiertoData {
   /** Código del pedido (PED-...). */
   codigo: string;
   lineaServicio: string | null;
-  tipoOt?: string | null;
+  tipoOt?: 'venta' | 'servicio' | null;
   tiposServicio?: string[];
   /** Número de ticket reservado por comercial (el de la prefactura que vendrá). */
   ticketNumero?: number | null;

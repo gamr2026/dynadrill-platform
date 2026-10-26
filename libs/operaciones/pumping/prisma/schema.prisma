@@ -186,7 +186,7 @@ model Ticket {
   pasoCodigo   String  @map("paso_codigo")
   paso         Paso    @relation(fields: [pasoCodigo], references: [codigo])
   version      Int     @default(1)
-  tipoOt       String? @map("tipo_ot")
+  tipoOt       TipoOt? @map("tipo_ot")
 
   // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
   clienteId            String?             @map("cliente_id") @db.Uuid
@@ -234,6 +234,15 @@ model Ticket {
 
   @@index([pasoCodigo])
   @@map("ticket")
+  @@schema("pumping")
+}
+
+/// Tipo de orden de trabajo del pedido: lo decide Ventas (pedido.tipo_ot).
+enum TipoOt {
+  venta
+  servicio
+
+  @@map("tipo_ot")
   @@schema("pumping")
 }
 
