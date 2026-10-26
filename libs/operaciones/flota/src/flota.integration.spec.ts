@@ -185,15 +185,9 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
     });
   });
 
-  describe('carga inicial', () => {
-    it('trae las unidades de la demo con su horómetro y sus reglas preventivas', async () => {
-      const r = await http()
-        .get('/api/operaciones/flota/unidades?q=PUM-07')
-        .set(operador())
-        .expect(200);
-      const pum07 = r.body.find((u: { codigo: string }) => u.codigo === 'PUM-07');
-      expect(pum07).toMatchObject({ tipo: 'servicio', activa: true });
-      expect(pum07.horometro.valor).toBe(1480);
+  // Las pruebas ya no dependen de las unidades de la demo (se borraron al dejar la base en blanco): crean las suyas.
+  describe('catálogo del sistema y filtros', () => {
+    it('las reglas preventivas del sistema están sembradas', async () => {
       const reglas = await admin.query('SELECT codigo FROM flota.regla_preventiva ORDER BY codigo');
       expect(reglas.rows.map((x: { codigo: string }) => x.codigo)).toEqual([
         'auxiliar_tiempo',
@@ -205,11 +199,17 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
     });
 
     it('filtra por tipo y no lista las unidades dadas de baja por omisión', async () => {
+      const a1 = await crear({ codigo: codigo('AUX'), nombre: 'Auxiliar 1', tipo: 'auxiliar' });
+      const a2 = await crear({ codigo: codigo('AUX'), nombre: 'Auxiliar 2', tipo: 'auxiliar' });
+      const s1 = await crear({ codigo: codigo('SRV'), nombre: 'Servicio 1', tipo: 'servicio', lecturaInicial: 10 });
+      expect([a1.status, a2.status, s1.status]).toEqual([201, 201, 201]);
       const r = await http()
         .get('/api/operaciones/flota/unidades?tipo=auxiliar')
         .set(operador())
         .expect(200);
-      expect(r.body.length).toBeGreaterThanOrEqual(2);
+      const ids = r.body.map((u: { id: string }) => u.id);
+      expect(ids).toEqual(expect.arrayContaining([a1.body.id, a2.body.id]));
+      expect(ids).not.toContain(s1.body.id);
       expect(r.body.every((u: { tipo: string }) => u.tipo === 'auxiliar')).toBe(true);
     });
   });
@@ -879,13 +879,6 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
         [id],
       );
       expect(ev.rows).toHaveLength(3);
-    });
-
-    it('los preventivos de la carga inicial quedan marcados como tales', async () => {
-      const r = await admin.query(
-        "SELECT count(*)::int AS n FROM flota.unidad_preventivo p JOIN flota.unidad u ON u.id = p.unidad_id WHERE u.codigo = 'PUM-07' AND p.origen = 'carga_inicial' AND p.responsable_id IS NULL",
-      );
-      expect(r.rows[0].n).toBe(2);
     });
   });
 });
