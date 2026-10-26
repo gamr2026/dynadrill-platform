@@ -942,6 +942,9 @@ model StopTarjeta {
   operadora             CatCliente? @relation(fields: [operadoraId], references: [id])
   lugar                 String?
   contacto              String?
+  /// Equipo del catálogo al que se refiere la observación, si aplica.
+  equipoId              String?     @map("equipo_id") @db.Uuid
+  equipo                Equipo?     @relation(fields: [equipoId], references: [id])
   ticketId              String?     @map("ticket_id") @db.Uuid
   ticket                TicketRef?  @relation(fields: [ticketId], references: [ticketId])
   fotoArchivoId         String?     @map("foto_archivo_id") @db.Uuid
@@ -1022,8 +1025,87 @@ model InspeccionTipo {
 
   criterios    InspeccionCriterio[]
   inspecciones Inspeccion[]
+  equipos      Equipo[]
 
   @@map("inspeccion_tipo")
+  @@schema("qhse")
+}
+
+/// Equipo que se inspecciona: único por tipo y por código sin mayúsculas ni espacios (índice en la base). Se da de alta al inspeccionar.
+model Equipo {
+  id          String         @id @db.Uuid
+  tipoId      String         @map("tipo_id") @db.Uuid
+  tipo        InspeccionTipo @relation(fields: [tipoId], references: [id])
+  codigo      String
+  descripcion String?
+  activo      Boolean        @default(true)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String         @map("created_by") @db.Uuid
+  creador     IdUsuario      @relation("equipoCreador", fields: [createdBy], references: [id])
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   String         @map("updated_by") @db.Uuid
+  editor      IdUsuario      @relation("equipoEditor", fields: [updatedBy], references: [id])
+
+  inspecciones Inspeccion[]
+  tarjetasStop StopTarjeta[]
+
+  @@unique([id, tipoId])
+  @@map("equipo")
+  @@schema("qhse")
+}
+
+/// Categoría de un indicador del tablero HSE.
+enum KpiCategoria {
+  seguridad
+  operacional
+  ambiental
+  cultura_preventiva
+
+  @@map("kpi_categoria")
+  @@schema("qhse")
+}
+
+/// Sentido del indicador: con `mayor_mejor` está fuera de meta si el valor es menor que la meta; con `menor_mejor`, si es mayor.
+enum KpiDireccion {
+  mayor_mejor
+  menor_mejor
+
+  @@map("kpi_direccion")
+  @@schema("qhse")
+}
+
+/// Indicador del Dashboard Integrado del Sistema (HSE-MASTER-001). Los define el sistema: la aplicación solo los lee.
+model KpiIndicador {
+  id                 String       @id @db.Uuid
+  codigo             String       @unique
+  categoria          KpiCategoria
+  nombre             String
+  unidad             String
+  direccion          KpiDireccion
+  orden              Int          @unique @db.SmallInt
+  disponible         Boolean
+  /// Por qué no se puede calcular (solo si no está disponible).
+  motivoNoDisponible String?      @map("motivo_no_disponible")
+
+  metas KpiMeta[]
+
+  @@map("kpi_indicador")
+  @@schema("qhse")
+}
+
+/// Meta de un indicador. INMUTABLE: una meta nueva reemplaza a la anterior (la vigente es la más reciente).
+model KpiMeta {
+  id           String       @id @db.Uuid
+  indicadorId  String       @map("indicador_id") @db.Uuid
+  indicador    KpiIndicador @relation(fields: [indicadorId], references: [id])
+  valor        Decimal      @db.Decimal(14, 3)
+  vigenteDesde DateTime     @default(now()) @map("vigente_desde") @db.Timestamptz(6)
+  createdBy    String       @map("created_by") @db.Uuid
+  creador      IdUsuario    @relation("kpiMetaCreador", fields: [createdBy], references: [id])
+
+  @@unique([indicadorId, vigenteDesde])
+  @@index([indicadorId, vigenteDesde(sort: Desc)])
+  @@map("kpi_meta")
   @@schema("qhse")
 }
 
@@ -1052,7 +1134,9 @@ model Inspeccion {
   numero            Int                 @unique @default(autoincrement())
   tipoId            String              @map("tipo_id") @db.Uuid
   tipo              InspeccionTipo      @relation(fields: [tipoId], references: [id])
-  equipoCodigo      String              @map("equipo_codigo")
+  equipoId          String              @map("equipo_id") @db.Uuid
+  /// La inspección y su equipo son del mismo tipo (FK compuesta).
+  equipo            Equipo              @relation(fields: [equipoId, tipoId], references: [id, tipoId])
   /// Unidad de Flota (otro contenedor, D1: sin FK).
   unidadId          String?             @map("unidad_id") @db.Uuid
   unidadCodigo      String?             @map("unidad_codigo")
@@ -1071,7 +1155,7 @@ model Inspeccion {
 
   resultados InspeccionResultado[]
 
-  @@index([tipoId, equipoCodigo, fecha(sort: Desc)])
+  @@index([equipoId, fecha(sort: Desc)])
   @@index([resultado])
   @@map("inspeccion")
   @@schema("qhse")
@@ -1172,6 +1256,9 @@ model IdUsuario {
   investigacionesTrabajador InvestigacionTrabajador[] @relation("investigacionTrabajadorUsuario")
   investigacionesEquipo     InvestigacionEquipo[]     @relation("investigacionEquipoUsuario")
   investigacionAcciones     InvestigacionAccion[]     @relation("investigacionAccionResponsable")
+  equiposCreados            Equipo[]                  @relation("equipoCreador")
+  equiposEditados           Equipo[]                  @relation("equipoEditor")
+  kpiMetas                  KpiMeta[]                 @relation("kpiMetaCreador")
 
   @@map("usuario")
   @@schema("identidad")

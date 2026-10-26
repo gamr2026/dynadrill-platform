@@ -120,6 +120,7 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
     await sql('DELETE FROM qhse.inspeccion WHERE inspector_id = ANY($1::uuid[])', [
       [OPERADOR.id, TECNICO.id],
     ]);
+    await sql('DELETE FROM qhse.equipo WHERE created_by = ANY($1::uuid[])', [[OPERADOR.id, TECNICO.id]]);
     await sql(
       "DELETE FROM msg_qhse.outbox WHERE datos->'data'->>'equipoCodigo' LIKE $1 OR datos->'data'->>'observador' = $2 OR datos->'data'->>'lugar' LIKE $3",
       [`EQ-${n}-%`, OPERADOR.nombre, 'Locación 4%'],
@@ -478,25 +479,36 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
 
     describe('reglas de la base', () => {
       const idEslinga = () => tipos['eslinga_cable'].id;
-      const cab = (
+      // QH-1: el equipo es del catálogo; los INSERT en bruto lo crean si hace falta
+      const equipoRaw = async (tipoId: string, codigo: string) => {
+        await sql(
+          'INSERT INTO qhse.equipo (id, tipo_id, codigo, created_by, updated_by) SELECT $1, $2, $3, $4, $4 WHERE NOT EXISTS (SELECT 1 FROM qhse.equipo WHERE tipo_id = $2 AND codigo = $3)',
+          [uuidv7(), tipoId, codigo, OPERADOR.id],
+        );
+        return (await sql('SELECT id FROM qhse.equipo WHERE tipo_id = $1 AND codigo = $2', [tipoId, codigo])).rows[0].id as string;
+      };
+      const cab = async (
         id: string,
         resultado: string,
         fecha = hoy,
         vigente = "(CURRENT_DATE + INTERVAL '3 months')::date",
-      ) =>
-        sql(
-          `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'EQ-${n}-raw', $3, '${fecha}', $4, ${vigente}, $3)`,
-          [id, idEslinga(), OPERADOR.id, resultado],
+      ) => {
+        const equipoId = await equipoRaw(idEslinga(), `EQ-${n}-raw`);
+        return sql(
+          `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $5, $3, '${fecha}', $4, ${vigente}, $3)`,
+          [id, idEslinga(), OPERADOR.id, resultado, equipoId],
         );
+      };
 
       it('el resultado debe corresponder a los criterios y se evalúan todos (se comprueba al confirmar)', async () => {
+        const equipoRawId = await equipoRaw(idEslinga(), `EQ-${n}-raw`);
         const c = await t.admin.connect();
         try {
           await c.query('BEGIN');
           const id = uuidv7();
           await c.query(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'EQ-${n}-raw', $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
-            [id, idEslinga(), OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $4, $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
+            [id, idEslinga(), OPERADOR.id, equipoRawId],
           );
           // aprobada pero con un criterio que falla
           for (const [i, cr] of tipos['eslinga_cable'].criterios.entries())
@@ -516,8 +528,8 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
           await c2.query('BEGIN');
           const id = uuidv7();
           await c2.query(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'EQ-${n}-raw', $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
-            [id, idEslinga(), OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $4, $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
+            [id, idEslinga(), OPERADOR.id, equipoRawId],
           );
           await c2.query(
             'INSERT INTO qhse.inspeccion_resultado (inspeccion_id, criterio_id, cumple) VALUES ($1, $2, true)',
@@ -531,32 +543,35 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
       });
 
       it('la vigencia es trimestral, las reglas del tipo salen de sus columnas y el criterio debe ser del tipo', async () => {
+        const eqGrua = await equipoRaw(tipos['vehiculo_grua'].id, 'G');
+        const eqEslinga = await equipoRaw(idEslinga(), 'E');
+        const eqDetector = await equipoRaw(tipos['detector_gas'].id, 'D');
         await expect(
           cab(uuidv7(), 'aprobado', hoy, "(CURRENT_DATE + INTERVAL '4 months')::date"),
         ).rejects.toThrow(/inspeccion_vigencia_check/);
         // un tipo que exige unidad no admite inspección sin ella, y uno que no la exige no admite una unidad
         await expect(
           sql(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'G', $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
-            [uuidv7(), tipos['vehiculo_grua'].id, OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $4, $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
+            [uuidv7(), tipos['vehiculo_grua'].id, OPERADOR.id, eqGrua],
           ),
         ).rejects.toThrow(/es de una unidad/);
         await expect(
           sql(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, unidad_id, unidad_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'E', $3, 'U', $4, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $4)`,
-            [uuidv7(), idEslinga(), uuidv7(), OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, unidad_id, unidad_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $5, $3, 'U', $4, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $4)`,
+            [uuidv7(), idEslinga(), uuidv7(), OPERADOR.id, eqEslinga],
           ),
         ).rejects.toThrow(/no es de una unidad/);
         await expect(
           sql(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'D', $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
-            [uuidv7(), tipos['detector_gas'].id, OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $4, $3, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $3)`,
+            [uuidv7(), tipos['detector_gas'].id, OPERADOR.id, eqDetector],
           ),
         ).rejects.toThrow(/bump test/);
         await expect(
           sql(
-            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_codigo, unidad_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, 'G', $3, $4, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $4)`,
-            [uuidv7(), tipos['vehiculo_grua'].id, uuidv7(), OPERADOR.id],
+            `INSERT INTO qhse.inspeccion (id, tipo_id, equipo_id, unidad_id, inspector_id, fecha, resultado, vigente_hasta, created_by) VALUES ($1, $2, $5, $3, $4, CURRENT_DATE, 'aprobado', (CURRENT_DATE + INTERVAL '3 months')::date, $4)`,
+            [uuidv7(), tipos['vehiculo_grua'].id, uuidv7(), OPERADOR.id, eqGrua],
           ),
         ).rejects.toThrow(/inspeccion_unidad_check/);
         const ok = await inspeccionar('eslinga_cable');

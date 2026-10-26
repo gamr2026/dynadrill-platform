@@ -65,7 +65,7 @@ export class InspeccionesConsultaService {
         ...(q
           ? {
               OR: [
-                { equipoCodigo: { contains: q, mode: 'insensitive' } },
+                { equipo: { codigo: { contains: q, mode: 'insensitive' } } },
                 { unidadCodigo: { contains: q, mode: 'insensitive' } },
               ],
             }
@@ -76,6 +76,7 @@ export class InspeccionesConsultaService {
       include: {
         tipo: { select: { id: true, codigo: true, nombre: true } },
         inspector: { select: { nombre: true } },
+        equipo: { select: { codigo: true } },
       },
     });
     const hoy = hoyEcuador();
@@ -84,7 +85,7 @@ export class InspeccionesConsultaService {
       numero: i.numero,
       codigo: codigoInspeccion(i.numero),
       tipo: i.tipo,
-      equipoCodigo: i.equipoCodigo,
+      equipoCodigo: i.equipo.codigo,
       unidadId: i.unidadId,
       unidadCodigo: i.unidadCodigo,
       inspector: i.inspector.nombre,
@@ -101,6 +102,7 @@ export class InspeccionesConsultaService {
       include: {
         tipo: { select: { id: true, codigo: true, nombre: true, requiereBumpTest: true } },
         inspector: { select: { nombre: true } },
+        equipo: { select: { codigo: true } },
         ticket: { select: { ticketNumero: true, pedidoCodigo: true } },
         resultados: { include: { criterio: { select: { nombre: true, orden: true } } } },
       },
@@ -111,7 +113,7 @@ export class InspeccionesConsultaService {
       numero: i.numero,
       codigo: codigoInspeccion(i.numero),
       tipo: i.tipo,
-      equipoCodigo: i.equipoCodigo,
+      equipoCodigo: i.equipo.codigo,
       unidadId: i.unidadId,
       unidadCodigo: i.unidadCodigo,
       inspector: i.inspector.nombre,
@@ -142,7 +144,8 @@ export class InspeccionesConsultaService {
         id: true,
         numero: true,
         tipoId: true,
-        equipoCodigo: true,
+        equipoId: true,
+        equipo: { select: { codigo: true } },
         unidadCodigo: true,
         fecha: true,
         resultado: true,
@@ -153,14 +156,14 @@ export class InspeccionesConsultaService {
     const vistos = new Set<string>();
     const equipos = [];
     for (const i of todas) {
-      const clave = `${i.tipoId}|${i.equipoCodigo.trim().toLowerCase()}`;
+      const clave = i.equipoId;
       if (vistos.has(clave)) continue;
       vistos.add(clave);
       const fecha = aDia(i.fecha);
       const proxima = masDias(fecha, i.tipo.frecuenciaDias);
       equipos.push({
         tipo: { codigo: i.tipo.codigo, nombre: i.tipo.nombre },
-        equipoCodigo: i.equipoCodigo,
+        equipoCodigo: i.equipo.codigo,
         unidadCodigo: i.unidadCodigo,
         ultimaInspeccion: {
           id: i.id,

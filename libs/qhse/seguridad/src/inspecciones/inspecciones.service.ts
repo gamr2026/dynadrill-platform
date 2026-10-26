@@ -46,8 +46,8 @@ export class InspeccionesService {
       });
       if (!tipo?.activo)
         throw new BadRequestException('El tipo de inspección no existe o está inactivo');
-      const equipo = texto(e.equipoCodigo);
-      if (!equipo)
+      const codigoEquipo = texto(e.equipoCodigo);
+      if (!codigoEquipo)
         throw new BadRequestException('Indique el equipo que inspecciona (su número o código)');
       if (tipo.requiereUnidad && !e.unidadId)
         throw new BadRequestException('Este tipo de inspección es de una unidad: elija cuál');
@@ -74,14 +74,27 @@ export class InspeccionesService {
         ? ResultadoInspeccion.rechazado
         : ResultadoInspeccion.aprobado;
 
+      // el equipo es del catálogo: se busca por tipo y código sin mayúsculas ni espacios y, si no existe, se da de alta aquí mismo
+      const normalizado = codigoEquipo.replace(/\s+/g, '').toLowerCase();
+      const existentes = await tx.equipo.findMany({ where: { tipoId: tipo.id }, select: { id: true, codigo: true, activo: true } });
+      let equipo = existentes.find((q) => q.codigo.replace(/\s+/g, '').toLowerCase() === normalizado);
+      if (equipo && !equipo.activo)
+        throw new BadRequestException('Ese equipo está dado de baja: no se puede inspeccionar');
+      if (!equipo) {
+        equipo = await tx.equipo.create({
+          data: { id: uuidv7(), tipoId: tipo.id, codigo: codigoEquipo, createdBy: actor.id, updatedBy: actor.id },
+          select: { id: true, codigo: true, activo: true },
+        });
+      }
+
       const fecha = e.fecha ?? hoyEcuador();
       await tx.inspeccion.create({
         data: {
           id,
           tipoId: tipo.id,
-          equipoCodigo: equipo,
+          equipoId: equipo.id,
           unidadId: e.unidadId ?? null,
-          unidadCodigo: e.unidadId ? (texto(e.unidadCodigo) ?? equipo) : null,
+          unidadCodigo: e.unidadId ? (texto(e.unidadCodigo) ?? equipo.codigo) : null,
           inspectorId: actor.id,
           fecha: aFecha(fecha),
           resultado,
@@ -133,6 +146,7 @@ export class InspeccionesService {
       include: {
         tipo: { select: { codigo: true, nombre: true } },
         inspector: { select: { nombre: true } },
+        equipo: { select: { codigo: true } },
         ticket: { select: { ticketNumero: true, pedidoCodigo: true } },
       },
     });
@@ -148,7 +162,7 @@ export class InspeccionesService {
           tipo: i.tipo.codigo,
           // texto para el aviso (no cambia: es lo que se inspeccionó y quién lo hizo)
           tipoNombre: i.tipo.nombre,
-          equipoCodigo: i.equipoCodigo,
+          equipoCodigo: i.equipo.codigo,
           unidadId: i.unidadId,
           resultado: i.resultado,
           fecha: i.fecha.toISOString().slice(0, 10),

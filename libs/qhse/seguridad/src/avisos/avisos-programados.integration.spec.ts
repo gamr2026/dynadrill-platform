@@ -108,6 +108,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
     await sql('DELETE FROM qhse.requisito_legal WHERE tipo_id = $1', [tipoLegal]);
     await sql('DELETE FROM qhse.requisito_legal_tipo WHERE id = $1', [tipoLegal]);
     await sql('DELETE FROM qhse.inspeccion WHERE inspector_id = $1', [OPERADOR.id]);
+    await sql('DELETE FROM qhse.equipo WHERE created_by = $1', [OPERADOR.id]);
     await sql('DELETE FROM qhse.objetivo_ambiental_accion WHERE created_by = $1', [TECNICO.id]);
     await sql('DELETE FROM qhse.objetivo_ambiental WHERE created_by = $1', [TECNICO.id]);
     await sql('DELETE FROM qhse.aspecto_ambiental WHERE created_by = $1', [TECNICO.id]);
