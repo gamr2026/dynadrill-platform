@@ -224,6 +224,19 @@ export class AsignacionService {
         if (!archivo) throw new BadRequestException('El documento de mezcla no existe');
       }
 
+      // lo que ya se firmó con la asignación anterior (términos aceptados, reportes de unidad) es historia: no se reemplaza (la base también lo impide)
+      const [aceptaciones, reportes] = await Promise.all([
+        tx.aceptacionTerminos.count({ where: { ticketId: id } }),
+        tx.reporteUnidad.count({ where: { ticketId: id } }),
+      ]);
+      if (aceptaciones || reportes) {
+        throw new ConflictException({
+          message:
+            'El ticket ya tiene términos aceptados o reportes de unidad firmados con la asignación actual: no se puede reasignar',
+          code: 'ASIGNACION_CON_REGISTROS',
+        });
+      }
+
       // se reemplaza lo anterior: primero las personas (apuntan a la unidad) y después las unidades
       await tx.ticketPersona.deleteMany({ where: { ticketId: id } });
       await tx.ticketUnidad.deleteMany({ where: { ticketId: id } });

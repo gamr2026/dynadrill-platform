@@ -941,7 +941,7 @@ model PrefacturaRechazoItem {
   prefacturaId     String         @map("prefactura_id") @db.Uuid
   prefactura       Prefactura     @relation(fields: [prefacturaId], references: [id], onDelete: Cascade)
   prefacturaItemId String         @map("prefactura_item_id") @db.Uuid
-  item             PrefacturaItem @relation(fields: [prefacturaItemId, prefacturaId], references: [id, prefacturaId], onDelete: Cascade)
+  item             PrefacturaItem @relation(fields: [prefacturaItemId, prefacturaId], references: [id, prefacturaId], onDelete: Restrict)
   observacion      String
   createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy        String         @map("created_by") @db.Uuid

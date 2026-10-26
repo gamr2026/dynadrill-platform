@@ -989,6 +989,36 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await http().get(`${base}/tickets/${c.id}/personal-ocupado`).set(sinPermiso()).expect(403);
   });
 
+  it('lo firmado con la asignación (términos aceptados, reporte de unidad) no se borra al reasignar ni en cascada (auditoría de la base)', async () => {
+    const t = await ticketEnTraslado();
+    const version = (await admin.query('SELECT codigo FROM pumping.terminos_version LIMIT 1')).rows[0].codigo;
+    await admin.query(
+      'INSERT INTO pumping.aceptacion_terminos (id, ticket_id, usuario_id, version_codigo) VALUES ($1, $2, $3, $4)',
+      [uuidv7(), t.id, OP1.id, version],
+    );
+    try {
+      // (los requisitos del ticket ya impedían borrar a la persona asignada; se quitan para probar solo la regla de los términos)
+      await admin.query('DELETE FROM pumping.ticket_requisito WHERE ticket_id = $1', [t.id]);
+      // la base no deja borrar a la persona que ya aceptó los términos
+      await expect(
+        admin.query('DELETE FROM pumping.ticket_persona WHERE ticket_id = $1 AND usuario_id = $2', [t.id, OP1.id]),
+      ).rejects.toThrow(/aceptacion_terminos_persona_fkey/);
+      // y si el ticket vuelve a Asignación, reasignar se rechaza antes de tocar nada
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'asignacion' WHERE id = $1", [t.id]);
+      const r = await http().post(`${t.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(409);
+      expect(r.body.code).toBe('ASIGNACION_CON_REGISTROS');
+      const quedan = await admin.query('SELECT count(*)::int n FROM pumping.ticket_persona WHERE ticket_id = $1', [t.id]);
+      expect(quedan.rows[0].n).toBeGreaterThan(0);
+      // la historia del ticket no se cambia ni se borra desde la aplicación
+      const priv = await admin.query(
+        "SELECT has_table_privilege('app_operaciones', 'pumping.ticket_historial', 'UPDATE') AS u, has_table_privilege('app_operaciones', 'pumping.ticket_historial', 'DELETE') AS d",
+      );
+      expect(priv.rows[0]).toEqual({ u: false, d: false });
+    } finally {
+      await admin.query('DELETE FROM pumping.aceptacion_terminos WHERE ticket_id = $1', [t.id]);
+    }
+  });
+
   it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta está asignada como conductor u operador, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
     const t = await ticketEnTraslado();
     const permiso = [P.PUMPING_CONTEXTO_CONDUCTOR];
