@@ -456,15 +456,16 @@ run('guía de remisión y despacho (base de datos real)', () => {
   afterAll(async () => {
     if (pedidos.length) {
       await admin.query(
-        'DELETE FROM comercial.secuencia_emision WHERE documento_ref_id IN (SELECT id FROM comercial.guia_remision WHERE pedido_id = ANY($1::uuid[]))',
-        [pedidos],
-      );
-      await admin.query(
         'UPDATE comercial.guia_remision SET reemplaza_a_id = NULL WHERE pedido_id = ANY($1::uuid[])',
         [pedidos],
       );
-      await admin.query('DELETE FROM comercial.guia_remision WHERE pedido_id = ANY($1::uuid[])', [
-        pedidos,
+      // la guía tiene FK a su emisión: primero la guía y después los números que usó
+      const guias = await admin.query(
+        'DELETE FROM comercial.guia_remision WHERE pedido_id = ANY($1::uuid[]) RETURNING emision_id',
+        [pedidos],
+      );
+      await admin.query('DELETE FROM comercial.secuencia_emision WHERE id = ANY($1::uuid[])', [
+        guias.rows.map((r: { emision_id: string }) => r.emision_id),
       ]);
       await admin.query('DELETE FROM comercial.prefactura WHERE pedido_id = ANY($1::uuid[])', [
         pedidos,

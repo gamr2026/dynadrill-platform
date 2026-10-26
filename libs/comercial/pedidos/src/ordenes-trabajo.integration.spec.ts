@@ -325,12 +325,13 @@ run('orden de trabajo y cierre (base de datos real)', () => {
 
   afterAll(async () => {
     if (pedidos.length) {
-      await admin.query(
-        'DELETE FROM comercial.secuencia_emision WHERE documento_ref_id IN (SELECT id FROM comercial.orden_trabajo WHERE pedido_id = ANY($1::uuid[]))',
+      // la OT tiene FK a su emisión: primero la OT y después los números que usó
+      const ots = await admin.query(
+        'DELETE FROM comercial.orden_trabajo WHERE pedido_id = ANY($1::uuid[]) RETURNING emision_id',
         [pedidos],
       );
-      await admin.query('DELETE FROM comercial.orden_trabajo WHERE pedido_id = ANY($1::uuid[])', [
-        pedidos,
+      await admin.query('DELETE FROM comercial.secuencia_emision WHERE id = ANY($1::uuid[])', [
+        ots.rows.map((r: { emision_id: string }) => r.emision_id),
       ]);
       await admin.query('DELETE FROM comercial.prefactura WHERE pedido_id = ANY($1::uuid[])', [
         pedidos,

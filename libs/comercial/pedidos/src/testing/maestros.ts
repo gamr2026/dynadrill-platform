@@ -226,11 +226,22 @@ export async function emitirGuiaDePrueba(
       )
     ).rows[0].id;
   }
+  // el número de la guía sale de una emisión real de la secuencia (la guía tiene FK a ella)
+  const codigo = `GIT-${randomUUID()}`;
+  const emision = (
+    await admin.query(
+      `INSERT INTO comercial.secuencia_emision (id, secuencia_id, numero, codigo_formateado, estado, emitido_por)
+       SELECT gen_random_uuid(), s.id, 900000000 + floor(random() * 99999999)::int, $1, 'emitido', $2
+         FROM comercial.secuencia s ORDER BY s.id LIMIT 1
+       RETURNING id`,
+      [codigo, actorId],
+    )
+  ).rows[0].id as string;
   await admin.query(
     `INSERT INTO comercial.guia_remision (id, pedido_id, numero, codigo, emision_id, fecha, lugar_origen_id, transportista_id,
                                           transportista_nombre, transportista_identificacion, emitida_por)
-     VALUES (gen_random_uuid(), $1, 1, $2, gen_random_uuid(), current_date, $3, $4, $5, $6, $7)`,
-    [pedidoId, `GIT-${randomUUID()}`, lugar, t.id, t.nombre, t.identificacion, actorId],
+     VALUES (gen_random_uuid(), $1, 1, $2, $3, current_date, $4, $5, $6, $7, $8)`,
+    [pedidoId, codigo, emision, lugar, t.id, t.nombre, t.identificacion, actorId],
   );
 }
 
@@ -238,5 +249,8 @@ export async function quitarGuiasDePrueba(admin: Pool, pedidos: string[]): Promi
   await admin.query(
     "DELETE FROM comercial.guia_remision WHERE pedido_id = ANY($1::uuid[]) AND codigo LIKE 'GIT-%'",
     [pedidos],
+  );
+  await admin.query(
+    "DELETE FROM comercial.secuencia_emision e WHERE e.codigo_formateado LIKE 'GIT-%' AND NOT EXISTS (SELECT 1 FROM comercial.guia_remision g WHERE g.emision_id = e.id)",
   );
 }

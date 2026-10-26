@@ -461,10 +461,6 @@ run('pedidos (base de datos real)', () => {
       `DELETE FROM comercial.proceso_historial WHERE entidad_id = ANY($1::uuid[])`,
       [ids],
     );
-    await admin.query(
-      `DELETE FROM comercial.secuencia_emision WHERE documento_ref_id = ANY($1::uuid[])`,
-      [ids],
-    );
     await admin.query(`DELETE FROM comercial.pedido_documento WHERE pedido_id = ANY($1::uuid[])`, [
       ids,
     ]);
@@ -477,7 +473,15 @@ run('pedidos (base de datos real)', () => {
       `DELETE FROM comercial.pedido_tipo_servicio WHERE pedido_id = ANY($1::uuid[])`,
       [ids],
     );
-    await admin.query(`DELETE FROM comercial.pedido WHERE id = ANY($1::uuid[])`, [ids]);
+    const pedidosBorrados = await admin.query(
+      `DELETE FROM comercial.pedido WHERE id = ANY($1::uuid[]) RETURNING ticket_emision_id`,
+      [ids],
+    );
+    // el pedido tiene FK a la emisión de su ticket: primero el pedido y después sus números
+    await admin.query(
+      `DELETE FROM comercial.secuencia_emision WHERE documento_ref_id = ANY($1::uuid[]) OR id = ANY($2::uuid[])`,
+      [ids, pedidosBorrados.rows.map((r: { ticket_emision_id: string | null }) => r.ticket_emision_id).filter(Boolean)],
+    );
     await admin.query(
       `DELETE FROM comercial.lista_precios_item WHERE lista_precios_id IN (SELECT id FROM comercial.lista_precios WHERE cliente_id = ANY($1::uuid[]))`,
       [[CLIENTE.id, OTRO_CLIENTE.id]],
