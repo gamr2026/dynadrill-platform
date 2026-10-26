@@ -65,11 +65,17 @@ class InspeccionDto {
   @IsIn(RESULTADOS) resultado!: (typeof RESULTADOS)[number];
 }
 
+/** Una bodega o un pozo del catálogo. */
+class ExtremoDto {
+  @IsOptional() @IsUUID() bodegaId?: string;
+  @IsOptional() @IsUUID() pozoId?: string;
+}
+
 export class GuardarSalidaDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/) fecha!: string;
   @IsNumber() @Min(0) @Max(100000) combustible!: number;
-  @IsString() @MaxLength(200) origen!: string;
-  @IsString() @MaxLength(200) destino!: string;
+  @ValidateNested() @Type(() => ExtremoDto) origen!: ExtremoDto;
+  @ValidateNested() @Type(() => ExtremoDto) destino!: ExtremoDto;
   @IsArray()
   @ArrayMaxSize(60)
   @ValidateNested({ each: true })

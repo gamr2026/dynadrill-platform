@@ -574,8 +574,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     return {
       fecha: '2026-11-05',
       combustible: 80.5,
-      origen: 'Base Dynadrill',
-      destino: 'Pozo del servicio',
+      origen: { bodegaId: BODEGA.id },
+      destino: { pozoId: POZO.id },
       hubodometros: [
         { eje: 'A', punto: 'origen', salida: 1000 },
         { eje: 'B', punto: 'origen', salida: 2000.5 },
@@ -1502,7 +1502,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await http()
       .put(reporteUrl(VEHICULO.unidadId))
       .set(op1())
-      .send({ ...cuerpo1, origen: '  ' })
+      .send({ ...cuerpo1, origen: {} })
+      .expect(400);
+    // OP-4: cada extremo es una bodega o un pozo del catálogo, uno solo
+    await http()
+      .put(reporteUrl(VEHICULO.unidadId))
+      .set(op1())
+      .send({ ...cuerpo1, origen: { bodegaId: BODEGA.id, pozoId: POZO.id } })
+      .expect(400);
+    await http()
+      .put(reporteUrl(VEHICULO.unidadId))
+      .set(op1())
+      .send({ ...cuerpo1, destino: { pozoId: uuidv7() } })
       .expect(400);
     await http()
       .put(reporteUrl(VEHICULO.unidadId))
@@ -1534,8 +1545,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     ).body;
     expect(firmado).toMatchObject({
       placa: VEHICULO.placa,
-      origen: 'Base Dynadrill',
-      destino: 'Pozo del servicio',
+      origen: { tipo: 'bodega', id: BODEGA.id, nombre: BODEGA.nombre },
+      destino: { tipo: 'pozo', id: POZO.id },
       operador: { nombre: OP1.nombre },
     });
     expect(firmado.salida).toMatchObject({

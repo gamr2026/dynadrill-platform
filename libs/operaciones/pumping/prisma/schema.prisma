@@ -792,8 +792,15 @@ model ReporteUnidad {
   ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   unidadId                 String      @map("unidad_id") @db.Uuid
   unidad                   FlotaUnidad @relation(fields: [unidadId], references: [id])
-  origen                   String?
-  destino                  String?
+  /// Origen y destino del traslado: cada extremo es una bodega o un pozo (no ambos).
+  origenBodegaId           String?     @map("origen_bodega_id") @db.Uuid
+  origenBodega             CatBodega?  @relation("reporteOrigenBodega", fields: [origenBodegaId], references: [id])
+  origenPozoId             String?     @map("origen_pozo_id") @db.Uuid
+  origenPozo               CatPozo?    @relation("reporteOrigenPozo", fields: [origenPozoId], references: [id])
+  destinoBodegaId          String?     @map("destino_bodega_id") @db.Uuid
+  destinoBodega            CatBodega?  @relation("reporteDestinoBodega", fields: [destinoBodegaId], references: [id])
+  destinoPozoId            String?     @map("destino_pozo_id") @db.Uuid
+  destinoPozo              CatPozo?    @relation("reporteDestinoPozo", fields: [destinoPozoId], references: [id])
   salidaFecha              DateTime?   @map("salida_fecha") @db.Date
   salidaCombustible        Decimal?    @map("salida_combustible") @db.Decimal(8, 2)
   /// FK a `identidad.usuario` (solo en la base de datos).
@@ -929,7 +936,22 @@ model CatPozo {
   nombreCompleto String   @map("nombre_completo")
   tickets        Ticket[]
 
+  reportesOrigen  ReporteUnidad[] @relation("reporteOrigenPozo")
+  reportesDestino ReporteUnidad[] @relation("reporteDestinoPozo")
+
   @@map("pozo")
+  @@schema("catalogos")
+}
+
+/// `catalogos.bodega`: solo id y nombre (origen o destino de un traslado).
+model CatBodega {
+  id     String @id @db.Uuid
+  nombre String
+
+  reportesOrigen  ReporteUnidad[] @relation("reporteOrigenBodega")
+  reportesDestino ReporteUnidad[] @relation("reporteDestinoBodega")
+
+  @@map("bodega")
   @@schema("catalogos")
 }
 
