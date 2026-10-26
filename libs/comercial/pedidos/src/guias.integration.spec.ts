@@ -19,9 +19,10 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule } from '@dyn/messaging';
+import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
+import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
@@ -929,36 +930,90 @@ run('guía de remisión y despacho (base de datos real)', () => {
     expect(lista[0].autorizacion.numero).toBe('1133274030');
   });
 
-  it('despacho a Bodega: Facturación solicita, Bodega realiza; solo dos marcas y el estado vuelve a la prefactura', async () => {
+  it('despacho a Bodega (CM-5): Facturación lo pide con bodega, fecha e ítems; el resultado de Inventario devuelve el pedido a la prefactura', async () => {
     const id = await pedidoConReportes();
-    const base = `/api/comercial/pedidos/${id}/despacho`;
-    // antes de la prefactura no se solicita
-    await http().post(`${base}/solicitar`).set(fact()).expect(409);
-    await http().post(`/api/comercial/pedidos/${id}/prefacturas`).set(fact()).expect(201);
-    expect(await estadoDe(id)).toBe('prefactura_generada');
-    // permisos: Bodega no solicita y Facturación no realiza
-    await http().post(`${base}/solicitar`).set(bodega()).expect(403);
-    const adjuntos = { archivoRespaldoId: ARCHIVO_OK.id, archivoMsdsId: ARCHIVO_IMG.id };
-    await http().post(`${base}/realizar`).set(fact()).send(adjuntos).expect(403);
-    await http().post(`${base}/realizar`).set(bodega()).send(adjuntos).expect(409);
-    const s = await http().post(`${base}/solicitar`).set(fact()).expect(201);
-    expect(s.body).toMatchObject({ solicitado: { por: 'Fabiola Facturación' }, realizado: null });
-    expect(await estadoDe(id)).toBe('por_despachar_bodega');
-    await http().post(`${base}/solicitar`).set(fact()).expect(409);
-    // el documento de respaldo es obligatorio y los archivos deben existir
-    await http().post(`${base}/realizar`).set(bodega()).send({}).expect(400);
-    await http()
-      .post(`${base}/realizar`)
-      .set(bodega())
-      .send({ archivoRespaldoId: uuidv7() })
-      .expect(400);
-    const r = await http().post(`${base}/realizar`).set(bodega()).send(adjuntos).expect(201);
-    expect(r.body.realizado).toMatchObject({
-      por: 'Fabiola Facturación',
-      respaldo: { id: ARCHIVO_OK.id, nombre: 'guia firmada.pdf' },
-      msds: { id: ARCHIVO_IMG.id, nombre: 'guia escaneada.png' },
+    const solicitar = (cuerpo: object, quien = fact()) =>
+      http().post(`/api/comercial/pedidos/${id}/despacho/solicitar`).set(quien).send(cuerpo);
+    const bodegaId = (await prisma.catBodega.findFirstOrThrow({ select: { id: true } })).id;
+    const items = await prisma.pedidoItem.findMany({
+      where: { pedidoId: id },
+      orderBy: { orden: 'asc' },
     });
+    const mat = items.find((i) => i.codigo.startsWith('MAT-'))!;
+    const sup = items.find((i) => i.codigo.startsWith('SUP-'))!;
+    const valido = {
+      bodegaId,
+      fechaRequerida: '2099-01-15',
+      nota: 'Para el viernes',
+      items: [{ pedidoItemId: mat.id, cantidad: 2 }],
+    };
+    // antes de la prefactura no se solicita
+    await solicitar(valido).expect(409);
+    await http().post(`/api/comercial/pedidos/${id}/prefacturas`).set(fact()).expect(201);
+    // permisos: Bodega no solicita (lo resuelve en Inventario)
+    await solicitar(valido, bodega()).expect(403);
+    // reglas de la solicitud
+    await solicitar({ ...valido, items: [] }).expect(400);
+    await solicitar({ ...valido, fechaRequerida: '2020-01-01' }).expect(400);
+    await solicitar({ ...valido, bodegaId: uuidv7() }).expect(400);
+    await solicitar({ ...valido, items: [{ pedidoItemId: uuidv7(), cantidad: 1 }] }).expect(400);
+    await solicitar({ ...valido, items: [{ pedidoItemId: sup.id, cantidad: 1 }] }).expect(400);
+    await solicitar({ ...valido, items: [{ pedidoItemId: mat.id, cantidad: 4 }] }).expect(400);
     expect(await estadoDe(id)).toBe('prefactura_generada');
-    expect((await http().get(base).set(soloVer()).expect(200)).body.realizado).not.toBeNull();
+
+    await solicitar(valido).expect(201);
+    expect(await estadoDe(id)).toBe('por_despachar_bodega');
+    await solicitar(valido).expect(409);
+    const [evento] = await prisma.$queryRaw<{ datos: { data: Record<string, unknown> } }[]>`
+      SELECT datos FROM msg_comercial.outbox
+       WHERE tipo = 'comercial.despacho.solicitado' AND datos->'data'->>'pedidoId' = ${id}`;
+    expect(evento.datos.data).toMatchObject({
+      bodegaId,
+      fechaRequerida: '2099-01-15',
+      nota: 'Para el viernes',
+      items: [
+        {
+          codigo: mat.codigo,
+          descripcion: 'Niple de prueba',
+          cantidad: 2,
+          unidadMedidaId: mat.unidadMedidaId,
+          tipo: 'material',
+          listaPreciosItemId: mat.listaPreciosItemId,
+        },
+      ],
+    });
+
+    // Bodega lo rechaza en Inventario: el pedido vuelve a la prefactura (una sola vez aunque el evento se repita)
+    const consumidor = app.get(DespachoResultadoConsumer);
+    const resultado = (type: string, data: Record<string, unknown>) =>
+      ({
+        id: uuidv7(),
+        type,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'inventario_despacho', id: uuidv7() },
+        data: { pedidoId: id, numero: 7, ...data },
+        actor: { userId: ACTOR, role: 'bodeguero' },
+      }) as EventEnvelope;
+    const rechazo = resultado('operaciones.inventario.despacho.rechazado', { motivo: 'Sin stock' });
+    await consumidor.consumir(rechazo);
+    await consumidor.consumir(rechazo);
+    expect(await estadoDe(id)).toBe('prefactura_generada');
+    const [paso] = await prisma.procesoHistorial.findMany({
+      where: { entidadId: id, estadoAnterior: 'por_despachar_bodega' },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+    });
+    expect(paso.motivo).toBe('despacho 7 rechazado: Sin stock');
+    // un resultado que llega cuando el pedido ya no espera el despacho se omite sin fallar
+    await consumidor.consumir(resultado('operaciones.inventario.despacho.realizado', {}));
+    expect(await estadoDe(id)).toBe('prefactura_generada');
+    // otra solicitud, ahora despachada
+    await solicitar(valido).expect(201);
+    await consumidor.consumir(
+      resultado('operaciones.inventario.despacho.realizado', { numero: 8 }),
+    );
+    expect(await estadoDe(id)).toBe('prefactura_generada');
   });
 });

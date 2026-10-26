@@ -69,11 +69,24 @@ export class RegistrarGuiaFirmadaDto {
   @IsUUID() archivoId!: string;
 }
 
-/** Bodega confirma el despacho con su documento de respaldo (obligatorio) y, si despachó químicos, la hoja MSDS. */
-export class RealizarDespachoDto {
-  /** Archivo subido a `archivos` con módulo `despacho_documento`. */
-  @IsUUID() archivoRespaldoId!: string;
-  @IsOptional() @IsUUID() archivoMsdsId?: string;
+/** Un ítem del pedido que se pide a Bodega (material o herramienta) con la cantidad a despachar. */
+export class ItemDespachoDto {
+  @IsUUID() pedidoItemId!: string;
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 3 }) @IsPositive() cantidad!: number;
+}
+
+/** Facturación pide a Bodega el despacho (CM-5): desde qué bodega, para cuándo, qué ítems y una nota. Lo resuelve Bodega en Inventario. */
+export class SolicitarDespachoDto {
+  @IsUUID() bodegaId!: string;
+  /** Fecha en que se necesita (AAAA-MM-DD), hoy o después. */
+  @IsDateString() fechaRequerida!: string;
+  @IsOptional() @IsString() @MaxLength(1000) nota?: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => ItemDespachoDto)
+  items!: ItemDespachoDto[];
 }
 
 export class CrearLugarDespachoDto {

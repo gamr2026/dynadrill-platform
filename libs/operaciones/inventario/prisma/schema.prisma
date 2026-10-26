@@ -40,8 +40,18 @@ enum OrigenMovimiento {
 enum EstadoDespacho {
   solicitado
   realizado
+  rechazado
 
   @@map("estado_despacho")
+  @@schema("inventario")
+}
+
+/// Tipo de ítem de una solicitud de despacho (como la demo).
+enum TipoItemDespacho {
+  material
+  herramienta
+
+  @@map("tipo_item_despacho")
   @@schema("inventario")
 }
 
@@ -102,7 +112,8 @@ model CatUnidadMedida {
   simbolo    String
   habilitado Boolean
 
-  articulos Articulo[]
+  articulos      Articulo[]
+  despachoItems  DespachoItem[]
 
   @@map("unidad_medida")
   @@schema("catalogos")
@@ -184,6 +195,7 @@ model Articulo {
   movimientos   Movimiento[]
   minimos       StockMinimo[]
   consumos      ConsumoTicket[]
+  despachoItems DespachoItem[]
 
   @@index([categoriaId])
   @@index([subcategoriaId])
@@ -303,8 +315,18 @@ model Movimiento {
 /// Solicitud de despacho a bodega de un pedido (la marca el ciclo comercial por evento).
 model Despacho {
   id                String         @id @db.Uuid
+  /// Número de la solicitud (correlativo propio).
+  numero            Int            @unique @default(autoincrement())
   /// Pedido de comercial (otro contenedor): uuid sin FK.
-  pedidoId          String         @unique @map("pedido_id") @db.Uuid
+  pedidoId          String         @map("pedido_id") @db.Uuid
+  /// Código del pedido copiado para la bandeja de Bodega (que no ve los pedidos).
+  pedidoCodigo      String?        @map("pedido_codigo")
+  clienteId         String?        @map("cliente_id") @db.Uuid
+  cliente           CatCliente?    @relation(fields: [clienteId], references: [id])
+  bodegaId          String         @map("bodega_id") @db.Uuid
+  bodega            CatBodega      @relation(fields: [bodegaId], references: [id])
+  fechaRequerida    DateTime       @map("fecha_requerida") @db.Date
+  notaSolicitud     String?        @map("nota_solicitud")
   estado            EstadoDespacho
   solicitadoAt      DateTime       @map("solicitado_at") @db.Timestamptz(6)
   solicitadoPorId   String         @map("solicitado_por") @db.Uuid
@@ -314,15 +336,49 @@ model Despacho {
   realizadoPor      IdUsuario?     @relation("despachoEjecutor", fields: [realizadoPorId], references: [id])
   archivoRespaldoId String?        @map("archivo_respaldo_id") @db.Uuid
   archivoMsdsId     String?        @map("archivo_msds_id") @db.Uuid
+  notaBodega        String?        @map("nota_bodega")
+  /// Número de la «Orden Salida Material» de AS2.
+  referenciaAs2     String?        @map("referencia_as2")
+  rechazadoAt       DateTime?      @map("rechazado_at") @db.Timestamptz(6)
+  rechazadoPorId    String?        @map("rechazado_por") @db.Uuid
+  rechazadoPor      IdUsuario?     @relation("despachoRechazador", fields: [rechazadoPorId], references: [id])
+  motivoRechazo     String?        @map("motivo_rechazo")
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   createdBy         String         @map("created_by") @db.Uuid
   updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy         String         @map("updated_by") @db.Uuid
 
+  items       DespachoItem[]
   movimientos Movimiento[]
 
   @@index([estado])
+  @@index([pedidoId])
   @@map("despacho")
+  @@schema("inventario")
+}
+
+/// Ítem pedido en una solicitud de despacho (foto de la línea del pedido). INMUTABLE.
+model DespachoItem {
+  id                 String           @id @db.Uuid
+  despachoId         String           @map("despacho_id") @db.Uuid
+  despacho           Despacho         @relation(fields: [despachoId], references: [id])
+  orden              Int              @db.SmallInt
+  /// Ítem de la lista de precios en comercial (otro contenedor): uuid sin FK.
+  listaPreciosItemId String?          @map("lista_precios_item_id") @db.Uuid
+  codigo             String
+  descripcion        String
+  cantidad           Decimal          @db.Decimal(14, 3)
+  unidadMedidaId     String           @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida  @relation(fields: [unidadMedidaId], references: [id])
+  tipo               TipoItemDespacho
+  /// Artículo de Inventario con el mismo código, si existe.
+  articuloId         String?          @map("articulo_id") @db.Uuid
+  articulo           Articulo?        @relation(fields: [articuloId], references: [id])
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String           @map("created_by") @db.Uuid
+
+  @@unique([despachoId, orden])
+  @@map("despacho_item")
   @@schema("inventario")
 }
 
@@ -369,8 +425,20 @@ model CatBodega {
   habilitado  Boolean
   movimientos Movimiento[]
   minimos     StockMinimo[]
+  despachos   Despacho[]
 
   @@map("bodega")
+  @@schema("catalogos")
+}
+
+/// `catalogos.cliente`: el nombre del cliente de una solicitud de despacho.
+model CatCliente {
+  id              String     @id @db.Uuid
+  nombreComercial String     @map("nombre_comercial")
+  nombreFiscal    String?    @map("nombre_fiscal")
+  despachos       Despacho[]
+
+  @@map("cliente")
   @@schema("catalogos")
 }
 
@@ -416,6 +484,7 @@ model IdUsuario {
   consumos             ConsumoTicket[] @relation("consumoResponsable")
   despachosSolicitados Despacho[]      @relation("despachoSolicitante")
   despachosRealizados  Despacho[]      @relation("despachoEjecutor")
+  despachosRechazados  Despacho[]      @relation("despachoRechazador")
 
   @@map("usuario")
   @@schema("identidad")

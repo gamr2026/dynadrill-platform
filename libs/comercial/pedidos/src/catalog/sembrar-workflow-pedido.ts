@@ -174,7 +174,8 @@ const PASOS: PasoDef[] = [
     de: 'por_despachar_bodega',
     a: 'prefactura_generada',
     automatica: true,
-    evento: 'comercial.despacho.resuelto',
+    // Bodega lo resuelve en Inventario: despachado o rechazado (CM-5)
+    evento: 'operaciones.inventario.despacho.realizado|rechazado',
   },
   {
     de: 'prefactura_generada',

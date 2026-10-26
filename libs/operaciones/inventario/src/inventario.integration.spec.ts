@@ -247,6 +247,10 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
 
   afterAll(async () => {
     await admin.query(
+      'DELETE FROM inventario.despacho_item WHERE despacho_id IN (SELECT id FROM inventario.despacho WHERE pedido_id = $1)',
+      [PEDIDO_DESPACHO],
+    );
+    await admin.query(
       'DELETE FROM inventario.consumo_ticket WHERE ticket_pumping_id = ANY($1::uuid[])',
       [[TICKET_A, TICKET_B]],
     );
@@ -1236,9 +1240,8 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     });
   });
 
-  describe('despachos a bodega (eventos de comercial)', () => {
-    const evtDespacho = (
-      type: string,
+  describe('despachos a bodega (CM-5: los pide Comercial, los resuelve Bodega)', () => {
+    const evtSolicitud = (
       data: Record<string, unknown>,
       extra: Partial<EventEnvelope> = {},
     ): EventEnvelope => {
@@ -1246,148 +1249,268 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       eventosEnviados.push(id);
       return {
         id,
-        type,
+        type: 'comercial.despacho.solicitado',
         version: 1,
         occurredAt: new Date().toISOString(),
         source: 'comercial',
         subject: { type: 'pedido', id: PEDIDO_DESPACHO },
-        data: { pedidoId: PEDIDO_DESPACHO, ...data },
-        actor: { userId: BODEGUERO.id, role: 'bodeguero' },
+        data: {
+          pedidoId: PEDIDO_DESPACHO,
+          pedidoCodigo: 'PEC-IT-1',
+          clienteId: null,
+          bodegaId: BODEGA_A.id,
+          fechaRequerida: '2026-12-01',
+          nota: 'Para el pozo IT',
+          items: [
+            {
+              listaPreciosItemId: uuidv7(),
+              codigo: `IT${n}DX`,
+              descripcion: 'Material de prueba',
+              cantidad: 2,
+              unidadMedidaId: ids.unidad,
+              tipo: 'material',
+            },
+            {
+              codigo: 'SIN-ARTICULO',
+              descripcion: 'Herramienta sin artículo',
+              cantidad: 1,
+              unidadMedidaId: ids.unidad,
+              tipo: 'herramienta',
+            },
+          ],
+          ...data,
+        },
+        actor: { userId: BODEGUERO.id, role: 'facturacion' },
         ...extra,
       } as EventEnvelope;
     };
-    const despacho = async () =>
+    const despachos = async () =>
       (
-        await admin.query('SELECT * FROM inventario.despacho WHERE pedido_id = $1', [
-          PEDIDO_DESPACHO,
-        ])
-      ).rows[0];
+        await admin.query(
+          'SELECT * FROM inventario.despacho WHERE pedido_id = $1 ORDER BY numero',
+          [PEDIDO_DESPACHO],
+        )
+      ).rows;
+    const pendiente = async () => (await despachos()).find((d) => d.estado === 'solicitado');
+    let articulo: { id: string; codigo: string };
 
-    it('registra la solicitud una sola vez aunque el evento llegue repetido', async () => {
-      const e = evtDespacho('comercial.despacho.solicitado', {});
+    it('registra la solicitud con sus ítems una sola vez y enlaza el artículo por código', async () => {
+      articulo = await crearArticulo('DX');
+      const e = evtSolicitud({});
       await despachosConsumer.consumir(e);
       await despachosConsumer.consumir(e);
-      const d = await despacho();
-      expect(d).toMatchObject({
+      const lista = await despachos();
+      expect(lista).toHaveLength(1);
+      expect(lista[0]).toMatchObject({
         estado: 'solicitado',
+        pedido_codigo: 'PEC-IT-1',
+        bodega_id: BODEGA_A.id,
+        nota_solicitud: 'Para el pozo IT',
         solicitado_por: BODEGUERO.id,
-        realizado_at: null,
-        archivo_respaldo_id: null,
       });
-      expect(
-        (
-          await admin.query(
-            'SELECT count(*)::int AS c FROM inventario.despacho WHERE pedido_id = $1',
-            [PEDIDO_DESPACHO],
-          )
-        ).rows[0].c,
-      ).toBe(1);
+      const detalle = await http()
+        .get(`/api/operaciones/inventario/despachos/${lista[0].id}`)
+        .set(bodeguero());
+      expect(detalle.body).toMatchObject({
+        numero: lista[0].numero,
+        fechaRequerida: '2026-12-01',
+        bodega: { id: BODEGA_A.id },
+        items: [
+          {
+            orden: 1,
+            codigo: articulo.codigo,
+            cantidad: 2,
+            tipo: 'material',
+            articulo: { id: articulo.id },
+          },
+          { orden: 2, codigo: 'SIN-ARTICULO', tipo: 'herramienta', articulo: null },
+        ],
+      });
     });
 
-    it('ignora sin error un evento sin pedido, con una cuenta que no existe o con un archivo que no existe', async () => {
+    it('ignora sin error una solicitud incompleta y una segunda mientras hay una pendiente', async () => {
+      await despachosConsumer.consumir(evtSolicitud({ pedidoId: null }));
+      await despachosConsumer.consumir(evtSolicitud({ items: [] }));
+      await despachosConsumer.consumir(evtSolicitud({ bodegaId: 'no-es-uuid' }));
       await despachosConsumer.consumir(
-        evtDespacho('comercial.despacho.solicitado', { pedidoId: null }),
-      );
-      await despachosConsumer.consumir(
-        evtDespacho(
-          'comercial.despacho.solicitado',
-          {},
-          { actor: { userId: uuidv7(), role: 'x' } },
-        ),
-      );
-      await despachosConsumer.consumir(
-        evtDespacho('comercial.despacho.resuelto', {
-          archivoRespaldoId: uuidv7(),
-          archivoMsdsId: null,
+        evtSolicitud({
+          items: [
+            {
+              codigo: 'X',
+              descripcion: 'X',
+              cantidad: 0,
+              unidadMedidaId: ids.unidad,
+              tipo: 'material',
+            },
+          ],
         }),
       );
       await despachosConsumer.consumir(
-        evtDespacho('comercial.despacho.resuelto', { archivoRespaldoId: null }),
+        evtSolicitud({}, { actor: { userId: uuidv7(), role: 'x' } }),
       );
-      expect((await despacho()).estado).toBe('solicitado');
+      // otra solicitud válida del mismo pedido con una pendiente: se ignora
+      await despachosConsumer.consumir(evtSolicitud({}));
+      expect(await despachos()).toHaveLength(1);
+      // la base también lo impide
+      const d = await pendiente();
+      await expect(
+        admin.query(
+          `INSERT INTO inventario.despacho (id, pedido_id, bodega_id, fecha_requerida, estado, solicitado_at, solicitado_por, created_by, updated_by)
+           VALUES ($1, $2, $3, '2026-12-01', 'solicitado', now(), $4, $4, $4)`,
+          [uuidv7(), PEDIDO_DESPACHO, BODEGA_A.id, d.solicitado_por],
+        ),
+      ).rejects.toThrow(/despacho_pedido_pendiente_key/);
     });
 
-    it('lista y muestra el despacho; las salidas de stock lo respaldan y se rechazan sin stock', async () => {
-      const a = await crearArticulo('D1');
-      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 10);
-      const d = await despacho();
+    it('lista por estado y por pedido; las salidas de stock lo respaldan y se rechazan sin stock', async () => {
+      await mover(articulo.id, BODEGA_A.id, ids.motivoCompra, 10);
+      const d = await pendiente();
       const lista = await http()
-        .get('/api/operaciones/inventario/despachos?estado=solicitado')
+        .get(`/api/operaciones/inventario/despachos?estado=solicitado&pedidoId=${PEDIDO_DESPACHO}`)
         .set(bodeguero());
-      expect(lista.body.find((x: { id: string }) => x.id === d.id)).toMatchObject({
-        pedidoId: PEDIDO_DESPACHO,
-        estado: 'solicitado',
-        movimientos: 0,
-      });
+      expect(lista.body).toHaveLength(1);
+      expect(lista.body[0]).toMatchObject({ id: d.id, estado: 'solicitado', movimientos: 0 });
       const ok = await http()
         .post(`/api/operaciones/inventario/despachos/${d.id}/movimientos`)
         .set(bodeguero())
-        .send({ articuloId: a.id, bodegaId: BODEGA_A.id, cantidad: 4, observacion: 'Guía 001' });
+        .send({
+          articuloId: articulo.id,
+          bodegaId: BODEGA_A.id,
+          cantidad: 2,
+          observacion: 'Guía 001',
+        });
       expect(ok.status).toBe(201);
-      expect(ok.body.movimientos).toHaveLength(1);
       expect(ok.body.movimientos[0]).toMatchObject({
         origen: 'despacho_bodega',
         tipo: 'salida',
-        cantidad: 4,
-        saldoResultante: 6,
+        cantidad: 2,
+        saldoResultante: 8,
         despachoId: d.id,
       });
       const sinStock = await http()
         .post(`/api/operaciones/inventario/despachos/${d.id}/movimientos`)
         .set(bodeguero())
-        .send({ articuloId: a.id, bodegaId: BODEGA_A.id, cantidad: 50 });
+        .send({ articuloId: articulo.id, bodegaId: BODEGA_A.id, cantidad: 50 });
       expect(sinStock.body.code).toBe('STOCK_INSUFICIENTE');
-      // quien solo lee el catálogo no ve los despachos
       expect((await http().get('/api/operaciones/inventario/despachos').set(lector())).status).toBe(
         403,
       );
+      // con salidas registradas ya no se puede rechazar
+      const rechazo = await http()
+        .post(`/api/operaciones/inventario/despachos/${d.id}/rechazar`)
+        .set(bodeguero())
+        .send({ motivo: 'Sin stock' });
+      expect(rechazo.status).toBe(409);
     });
 
-    it('al resolverse queda el documento de respaldo y la hoja MSDS, y ya no admite más salidas', async () => {
-      await despachosConsumer.consumir(
-        evtDespacho('comercial.despacho.resuelto', {
+    it('Bodega despacha con el respaldo y la MSDS: publica el resultado y la solicitud ya no cambia', async () => {
+      const d = await pendiente();
+      const sinRespaldo = await http()
+        .post(`/api/operaciones/inventario/despachos/${d.id}/realizar`)
+        .set(bodeguero())
+        .send({ archivoRespaldoId: uuidv7() });
+      expect(sinRespaldo.status).toBe(400);
+      const r = await http()
+        .post(`/api/operaciones/inventario/despachos/${d.id}/realizar`)
+        .set(bodeguero())
+        .send({
           archivoRespaldoId: ARCHIVO_RESPALDO,
           archivoMsdsId: ARCHIVO_MSDS,
-        }),
-      );
-      const d = await despacho();
-      expect(d).toMatchObject({
+          referenciaAs2: 'OSM-0001',
+          notaBodega: 'Sale en el camión de la tarde',
+        });
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
         estado: 'realizado',
-        realizado_por: BODEGUERO.id,
-        archivo_respaldo_id: ARCHIVO_RESPALDO,
-        archivo_msds_id: ARCHIVO_MSDS,
+        realizadoPor: { id: BODEGUERO.id },
+        archivoRespaldoId: ARCHIVO_RESPALDO,
+        referenciaAs2: 'OSM-0001',
       });
-      const a = await crearArticulo('D2');
-      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 3);
-      const r = await http()
+      const evento = (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.despacho.realizado' AND datos->'data'->>'despachoId' = $1",
+          [d.id],
+        )
+      ).rows[0];
+      expect(evento.datos.data).toMatchObject({ pedidoId: PEDIDO_DESPACHO, numero: d.numero });
+      // resuelta: ni más salidas, ni rechazo, ni cambios en la base
+      const otra = await http()
         .post(`/api/operaciones/inventario/despachos/${d.id}/movimientos`)
         .set(bodeguero())
-        .send({ articuloId: a.id, bodegaId: BODEGA_A.id, cantidad: 1 });
-      expect(r.body.code).toBe('DESPACHO_REALIZADO');
+        .send({ articuloId: articulo.id, bodegaId: BODEGA_A.id, cantidad: 1 });
+      expect(otra.body.code).toBe('DESPACHO_REALIZADO');
+      expect(
+        (
+          await http()
+            .post(`/api/operaciones/inventario/despachos/${d.id}/rechazar`)
+            .set(bodeguero())
+            .send({ motivo: 'Tarde' })
+        ).body.code,
+      ).toBe('DESPACHO_RESUELTO');
+      await expect(
+        admin.query("UPDATE inventario.despacho SET nota_bodega = 'otra' WHERE id = $1", [d.id]),
+      ).rejects.toThrow(/ya fue resuelto/);
     });
 
-    it('una nueva solicitud del mismo pedido reabre el despacho y limpia lo realizado', async () => {
-      await despachosConsumer.consumir(evtDespacho('comercial.despacho.solicitado', {}));
-      expect(await despacho()).toMatchObject({
-        estado: 'solicitado',
-        realizado_at: null,
-        archivo_respaldo_id: null,
-        archivo_msds_id: null,
+    it('una nueva solicitud del mismo pedido es otra fila; Bodega la rechaza con motivo', async () => {
+      await despachosConsumer.consumir(evtSolicitud({ nota: null }));
+      const d = await pendiente();
+      expect(d.numero).toBeGreaterThan((await despachos())[0].numero);
+      const sinMotivo = await http()
+        .post(`/api/operaciones/inventario/despachos/${d.id}/rechazar`)
+        .set(bodeguero())
+        .send({ motivo: '  ' });
+      expect(sinMotivo.status).toBe(400);
+      const r = await http()
+        .post(`/api/operaciones/inventario/despachos/${d.id}/rechazar`)
+        .set(bodeguero())
+        .send({ motivo: 'No hay stock de la herramienta' });
+      expect(r.body).toMatchObject({
+        estado: 'rechazado',
+        motivoRechazo: 'No hay stock de la herramienta',
+        rechazadoPor: { id: BODEGUERO.id },
+        archivoRespaldoId: null,
       });
+      const evento = (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.despacho.rechazado' AND datos->'data'->>'despachoId' = $1",
+          [d.id],
+        )
+      ).rows[0];
+      expect(evento.datos.data).toMatchObject({ motivo: 'No hay stock de la herramienta' });
     });
 
-    it('la base exige el respaldo cuando está realizado y lo prohíbe cuando está solicitado', async () => {
+    it('la base exige lo de cada estado y no deja tocar los ítems', async () => {
+      const [realizado, rechazado] = await despachos();
+      await despachosConsumer.consumir(evtSolicitud({}));
+      const d = await pendiente();
+      // pendiente: sin nada de lo resuelto
       await expect(
-        admin.query("UPDATE inventario.despacho SET estado = 'realizado' WHERE pedido_id = $1", [
-          PEDIDO_DESPACHO,
-        ]),
-      ).rejects.toThrow(/despacho_estado_check/);
-      await expect(
-        admin.query('UPDATE inventario.despacho SET archivo_msds_id = $2 WHERE pedido_id = $1', [
-          PEDIDO_DESPACHO,
+        admin.query('UPDATE inventario.despacho SET archivo_msds_id = $2 WHERE id = $1', [
+          d.id,
           ARCHIVO_MSDS,
         ]),
       ).rejects.toThrow(/despacho_estado_check/);
+      // realizado sin respaldo / rechazado sin motivo
+      await expect(
+        admin.query("UPDATE inventario.despacho SET estado = 'realizado' WHERE id = $1", [d.id]),
+      ).rejects.toThrow(/despacho_estado_check/);
+      await expect(
+        admin.query(
+          "UPDATE inventario.despacho SET estado = 'rechazado', rechazado_at = now(), rechazado_por = solicitado_por, motivo_rechazo = ' ' WHERE id = $1",
+          [d.id],
+        ),
+      ).rejects.toThrow(/despacho_estado_check/);
+      // ítems: cantidad positiva
+      await expect(
+        admin.query(
+          `INSERT INTO inventario.despacho_item (id, despacho_id, orden, codigo, descripcion, cantidad, unidad_medida_id, tipo, created_by)
+           VALUES ($1, $2, 9, 'X', 'X', 0, $3, 'material', $4)`,
+          [uuidv7(), d.id, ids.unidad, BODEGUERO.id],
+        ),
+      ).rejects.toThrow(/despacho_item_cantidad_check/);
+      expect(realizado.estado).toBe('realizado');
+      expect(rechazado.estado).toBe('rechazado');
     });
   });
 

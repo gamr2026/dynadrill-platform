@@ -23,7 +23,7 @@ export class DespachosConsumer implements OnApplicationBootstrap {
       source: 'comercial',
       // Pumping también consume de comercial en este contenedor: sin grupo propio compartirían la cola y se perderían eventos
       group: 'inventario',
-      patterns: ['comercial.despacho.solicitado', 'comercial.despacho.resuelto'],
+      patterns: ['comercial.despacho.solicitado'],
       handler: (event) => this.consumir(event),
     });
   }
@@ -35,8 +35,6 @@ export class DespachosConsumer implements OnApplicationBootstrap {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
           if (event.type === 'comercial.despacho.solicitado')
             await this.despachos.alSolicitar(tx, event);
-          else if (event.type === 'comercial.despacho.resuelto')
-            await this.despachos.alResolver(tx, event);
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });

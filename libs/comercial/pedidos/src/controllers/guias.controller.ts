@@ -6,7 +6,7 @@ import {
   CrearLugarDespachoDto,
   EmitirGuiaDto,
   ReasignarNumeroGuiaDto,
-  RealizarDespachoDto,
+  SolicitarDespachoDto,
   RegistrarGuiaFirmadaDto,
 } from '../dto/guias.dto';
 import { ContextoGuia, GuiasService } from '../services/guias.service';
@@ -108,25 +108,14 @@ export class GuiasController {
 
   // ---- despacho a Bodega ------------------------------------------------------------------------------------
 
-  @RequirePermission(P.GUIAS_VER)
-  @Get('pedidos/:pedidoId/despacho')
-  despacho(@Param('pedidoId', ParseUUIDPipe) pedidoId: string) {
-    return this.guias.estadoDespacho(pedidoId);
-  }
-
+  /** El estado y la resolución del despacho los lleva Inventario (GET /api/operaciones/inventario/despachos?pedidoId=). */
   @RequirePermission(P.DESPACHO_SOLICITAR)
   @Post('pedidos/:pedidoId/despacho/solicitar')
-  solicitar(@Param('pedidoId', ParseUUIDPipe) pedidoId: string, @CurrentUser() actor: AuthUser) {
-    return this.guias.solicitarDespacho(pedidoId, actor);
-  }
-
-  @RequirePermission(P.DESPACHOS_GESTIONAR)
-  @Post('pedidos/:pedidoId/despacho/realizar')
-  realizar(
+  solicitar(
     @Param('pedidoId', ParseUUIDPipe) pedidoId: string,
-    @Body() dto: RealizarDespachoDto,
+    @Body() dto: SolicitarDespachoDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.guias.realizarDespacho(pedidoId, dto, actor);
+    return this.guias.solicitarDespacho(pedidoId, dto, actor);
   }
 }

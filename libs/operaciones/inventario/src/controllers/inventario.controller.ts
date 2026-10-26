@@ -27,6 +27,8 @@ import {
   ListarMovimientosDto,
   ParteDto,
   RegistrarMovimientoDto,
+  RealizarDespachoDto,
+  RechazarDespachoDto,
   SalidaDespachoDto,
   SubcategoriaDto,
 } from '../dto/inventario.dto';
@@ -194,6 +196,26 @@ export class InventarioController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.despachos.registrarSalida(id, dto, actor);
+  }
+
+  @RequirePermission(P.DESPACHOS_GESTIONAR)
+  @Post('despachos/:id/realizar')
+  realizarDespacho(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RealizarDespachoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.despachos.realizar(id, dto, actor);
+  }
+
+  @RequirePermission(P.DESPACHOS_GESTIONAR)
+  @Post('despachos/:id/rechazar')
+  rechazarDespacho(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RechazarDespachoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.despachos.rechazar(id, dto, actor);
   }
 
   // --- partes de una herramienta ---

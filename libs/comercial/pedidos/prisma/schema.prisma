@@ -296,20 +296,10 @@ model Pedido {
   items            PedidoItem[]
   documentos       PedidoDocumento[]
   documentosOperativos DocumentoOperativo[]
-  /// Despacho a Bodega: solo dos momentos (solicitado por Facturación, realizado por Bodega), sin documento.
   /// Número de ticket: el MISMO que tendrá la prefactura (el "ticket" de Dynadrill es la prefactura). Se toma del secuencial de la
   /// prefactura al abrir el pedido por primera vez; la prefactura, cuando exista, lleva este mismo número.
   ticketNumero     Int?    @unique @map("ticket_numero")
   ticketEmisionId  String? @map("ticket_emision_id") @db.Uuid
-  despachoSolicitadoAt     DateTime? @map("despacho_solicitado_at") @db.Timestamptz(6)
-  despachoSolicitadoPor    String?   @map("despacho_solicitado_por") @db.Uuid
-  despachoSolicitante      IdUsuario? @relation("pedidoDespachoSolicitado", fields: [despachoSolicitadoPor], references: [id])
-  despachoRealizadoAt      DateTime? @map("despacho_realizado_at") @db.Timestamptz(6)
-  despachoRealizadoPor     String?   @map("despacho_realizado_por") @db.Uuid
-  despachoEjecutor         IdUsuario? @relation("pedidoDespachoRealizado", fields: [despachoRealizadoPor], references: [id])
-  /// Bodega adjunta el documento de respaldo (obligatorio al realizar el despacho) y, si despacha químicos, la hoja MSDS.
-  despachoArchivoRespaldoId String?  @map("despacho_archivo_respaldo_id") @db.Uuid
-  despachoArchivoMsdsId     String?  @map("despacho_archivo_msds_id") @db.Uuid
   prefacturas      Prefactura[]
   documentosFirmados DocumentoRespaldoFirmado[]
   guias            GuiaRemision[]
@@ -1402,8 +1392,6 @@ model IdUsuario {
   comoAgente         Pedido[]             @relation("pedidoAgente")
   comoTecnicoHse     Pedido[]             @relation("pedidoHse")
   comoAnalista       Pedido[]             @relation("pedidoAnalista")
-  comoDespachoSolic  Pedido[]             @relation("pedidoDespachoSolicitado")
-  comoDespachoReal   Pedido[]             @relation("pedidoDespachoRealizado")
   comoSupervisorDoc  DocumentoOperativo[] @relation("docopSupervisor")
   comoOperadorDoc    DocumentoOperativo[] @relation("docopOperador")
 

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { CambioItemsController } from './controllers/cambio-items.controller';
 import { OrdenesTrabajoController } from './controllers/ordenes-trabajo.controller';
 import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
+import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
@@ -72,6 +73,7 @@ import { WorkflowService } from './workflow/workflow.service';
     ReporteDiarioConsumer,
     CambioItemsService,
     CambioItemsConsumer,
+    DespachoResultadoConsumer,
   ],
   exports: [SecuenciasService, WorkflowService, PedidosService],
 })

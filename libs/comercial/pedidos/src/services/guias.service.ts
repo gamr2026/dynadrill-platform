@@ -8,7 +8,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { DirectorioPort } from '../directorio/directorio.port';
-import { EmitirGuiaDto, GuiaItemDto, RealizarDespachoDto } from '../dto/guias.dto';
+import { EmitirGuiaDto, GuiaItemDto, SolicitarDespachoDto } from '../dto/guias.dto';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PedidoEstadoService } from './pedido-estado.service';
@@ -543,26 +543,67 @@ export class GuiasService {
 
   // ---- despacho a Bodega ------------------------------------------------------------------------------------
 
-  /** Facturación pide a Bodega que despache: solo una marca (quién y cuándo), sin documento. */
-  async solicitarDespacho(pedidoId: string, actor: AuthUser) {
+  /**
+   * Facturación pide a Bodega el despacho (CM-5) con la prefactura generada: la bodega de origen, la fecha requerida, la nota y
+   * los ítems del pedido (material o herramienta, sin pasar de lo cotizado). La solicitud la guarda y la resuelve Inventario; aquí
+   * solo cambia el estado del pedido. El resultado llega por `operaciones.inventario.despacho.realizado|rechazado`.
+   */
+  async solicitarDespacho(pedidoId: string, dto: SolicitarDespachoDto, actor: AuthUser) {
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (dto.fechaRequerida.slice(0, 10) < hoy) {
+      throw new BadRequestException('La fecha requerida no puede ser anterior a hoy');
+    }
     await this.prisma.$transaction(async (tx) => {
-      const p = await tx.pedido.findUnique({ where: { id: pedidoId }, select: { estado: true } });
+      const p = await tx.pedido.findUnique({
+        where: { id: pedidoId },
+        select: {
+          estado: true,
+          codigo: true,
+          clienteId: true,
+          items: { include: { listaPreciosItem: { select: { tipo: true } } } },
+        },
+      });
       if (!p) throw new NotFoundException('El pedido no existe');
       if (p.estado !== 'prefactura_generada') {
         throw new ConflictException(
           'El despacho se solicita cuando la prefactura ya está generada',
         );
       }
-      await tx.pedido.update({
-        where: { id: pedidoId },
-        data: {
-          despachoSolicitadoAt: new Date(),
-          despachoSolicitadoPor: actor.id,
-          despachoRealizadoAt: null,
-          despachoRealizadoPor: null,
-          despachoArchivoRespaldoId: null,
-          despachoArchivoMsdsId: null,
-        },
+      if (!(await tx.catBodega.findUnique({ where: { id: dto.bodegaId }, select: { id: true } }))) {
+        throw new BadRequestException('La bodega no existe');
+      }
+      const porId = new Map(p.items.map((i) => [i.id, i]));
+      const vistos = new Set<string>();
+      const items = dto.items.map((d, k) => {
+        const i = porId.get(d.pedidoItemId);
+        if (!i) throw new BadRequestException(`El ítem ${k + 1} no es de este pedido`);
+        if (vistos.has(i.id))
+          throw new BadRequestException(`El ítem ${i.codigo} está repetido: sume las cantidades`);
+        vistos.add(i.id);
+        const tipo =
+          i.tipoLinea === 'herramienta'
+            ? 'herramienta'
+            : i.tipoLinea === 'material' || i.listaPreciosItem?.tipo === 'Material'
+              ? 'material'
+              : null;
+        if (!tipo) {
+          throw new BadRequestException(
+            `El ítem ${i.codigo} no es material ni herramienta: no se despacha desde Bodega`,
+          );
+        }
+        if (d.cantidad > Number(i.cantidad)) {
+          throw new BadRequestException(
+            `El ítem ${i.codigo} pide ${d.cantidad} y el pedido cotiza ${Number(i.cantidad)}`,
+          );
+        }
+        return {
+          listaPreciosItemId: i.listaPreciosItemId,
+          codigo: i.codigo,
+          descripcion: i.descripcion,
+          cantidad: d.cantidad,
+          unidadMedidaId: i.unidadMedidaId,
+          tipo,
+        };
       });
       await this.estados.pasar(
         tx,
@@ -572,88 +613,16 @@ export class GuiasService {
         actor,
         'despacho solicitado',
       );
-      await this.publicarDespacho(tx, 'comercial.despacho.solicitado', pedidoId, actor, {});
-    });
-    return this.estadoDespacho(pedidoId);
-  }
-
-  /** Bodega confirma que despachó. El pedido vuelve a la etapa de prefactura. */
-  async realizarDespacho(pedidoId: string, dto: RealizarDespachoDto, actor: AuthUser) {
-    await this.prisma.$transaction(async (tx) => {
-      const p = await tx.pedido.findUnique({ where: { id: pedidoId }, select: { estado: true } });
-      if (!p) throw new NotFoundException('El pedido no existe');
-      if (p.estado !== 'por_despachar_bodega') {
-        throw new ConflictException('El pedido no tiene un despacho pendiente');
-      }
-      const ids = [dto.archivoRespaldoId, ...(dto.archivoMsdsId ? [dto.archivoMsdsId] : [])];
-      const existen = await tx.catArchivo.count({ where: { id: { in: ids } } });
-      if (existen !== new Set(ids).size) {
-        throw new BadRequestException('El documento de respaldo o la hoja MSDS no existen');
-      }
-      await tx.pedido.update({
-        where: { id: pedidoId },
-        data: {
-          despachoRealizadoAt: new Date(),
-          despachoRealizadoPor: actor.id,
-          despachoArchivoRespaldoId: dto.archivoRespaldoId,
-          despachoArchivoMsdsId: dto.archivoMsdsId ?? null,
-        },
-      });
-      await this.estados.pasar(
-        tx,
-        pedidoId,
-        p.estado,
-        'prefactura_generada',
-        actor,
-        'despacho realizado',
-      );
-      await this.publicarDespacho(tx, 'comercial.despacho.resuelto', pedidoId, actor, {
-        archivoRespaldoId: dto.archivoRespaldoId,
-        archivoMsdsId: dto.archivoMsdsId ?? null,
+      await this.publicarDespacho(tx, 'comercial.despacho.solicitado', pedidoId, actor, {
+        pedidoCodigo: p.codigo,
+        clienteId: p.clienteId,
+        bodegaId: dto.bodegaId,
+        fechaRequerida: dto.fechaRequerida.slice(0, 10),
+        nota: dto.nota?.trim() || null,
+        items,
       });
     });
-    return this.estadoDespacho(pedidoId);
-  }
-
-  async estadoDespacho(pedidoId: string) {
-    const p = await this.prisma.pedido.findUnique({
-      where: { id: pedidoId },
-      select: {
-        despachoSolicitadoAt: true,
-        despachoSolicitante: { select: { nombre: true } },
-        despachoRealizadoAt: true,
-        despachoEjecutor: { select: { nombre: true } },
-        despachoArchivoRespaldoId: true,
-        despachoArchivoMsdsId: true,
-      },
-    });
-    if (!p) throw new NotFoundException('El pedido no existe');
-    const ids = [p.despachoArchivoRespaldoId, p.despachoArchivoMsdsId].filter(
-      (x): x is string => !!x,
-    );
-    const archivos = ids.length
-      ? await this.prisma.catArchivo.findMany({
-          where: { id: { in: ids } },
-          select: { id: true, nombreOriginal: true },
-        })
-      : [];
-    const archivo = (id: string | null) => {
-      const a = archivos.find((x) => x.id === id);
-      return a ? { id: a.id, nombre: a.nombreOriginal } : null;
-    };
-    return {
-      solicitado: p.despachoSolicitadoAt
-        ? { at: p.despachoSolicitadoAt, por: p.despachoSolicitante?.nombre ?? null }
-        : null,
-      realizado: p.despachoRealizadoAt
-        ? {
-            at: p.despachoRealizadoAt,
-            por: p.despachoEjecutor?.nombre ?? null,
-            respaldo: archivo(p.despachoArchivoRespaldoId),
-            msds: archivo(p.despachoArchivoMsdsId),
-          }
-        : null,
-    };
+    return { pedidoId, estado: 'por_despachar_bodega' };
   }
 
   private async publicarDespacho(

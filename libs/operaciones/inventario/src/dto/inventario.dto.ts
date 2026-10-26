@@ -150,7 +150,26 @@ export class ListarMotivosDto {
 }
 
 export class ListarDespachosDto {
-  @IsOptional() @IsIn(['solicitado', 'realizado']) estado?: 'solicitado' | 'realizado';
+  @IsOptional()
+  @IsIn(['solicitado', 'realizado', 'rechazado'])
+  estado?: 'solicitado' | 'realizado' | 'rechazado';
+  /** Las solicitudes de un pedido (la ficha del pedido en Comercial). */
+  @IsOptional() @IsUUID() pedidoId?: string;
+}
+
+/** Bodega despacha: documento de respaldo (obligatorio) y, si hay químicos, la hoja MSDS; ambos subidos antes a `archivos`. */
+export class RealizarDespachoDto {
+  @IsUUID() archivoRespaldoId!: string;
+  @IsOptional() @IsUUID() archivoMsdsId?: string;
+  /** Número de la «Orden Salida Material» de AS2. */
+  @IsOptional() @IsString() @MaxLength(60) referenciaAs2?: string;
+  @IsOptional() @IsString() @MaxLength(1000) notaBodega?: string;
+}
+
+/** Bodega rechaza la solicitud (p. ej. sin stock): con motivo. */
+export class RechazarDespachoDto {
+  @IsString() @MinLength(3) @MaxLength(1000) motivo!: string;
+  @IsOptional() @IsString() @MaxLength(1000) notaBodega?: string;
 }
 
 /** Salida de stock que respalda un despacho a bodega. */
