@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -50,8 +51,7 @@ export class GuardarReporteDiarioDto {
   @ValidateNested({ each: true })
   @Type(() => ActividadDiariaDto)
   actividades!: ActividadDiariaDto[];
-  @IsOptional() @IsString() @MaxLength(200) representanteCliente?: string;
-  @IsOptional() @IsString() @MaxLength(200) cargoRepresentante?: string;
+  @IsOptional() @IsUUID() representanteId?: string | null;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(24) tiempoProductivo?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(24) tiempoNoProductivo?: number;
   @IsOptional() @IsString() @MaxLength(4000) observaciones?: string;

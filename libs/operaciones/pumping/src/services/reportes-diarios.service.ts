@@ -31,14 +31,15 @@ export interface ActividadEntrada {
 
 export interface ReporteDiarioEntrada {
   actividades: ActividadEntrada[];
-  representanteCliente?: string | null;
-  cargoRepresentante?: string | null;
+  /** Contacto de campo del cliente que firmó ese día; sin indicarlo se conserva el del día o el del ticket. */
+  representanteId?: string | null;
   tiempoProductivo?: number | null;
   tiempoNoProductivo?: number | null;
   observaciones?: string | null;
 }
 
 const INCLUIR = {
+  representante: { select: { id: true, nombre: true } },
   actividades: {
     orderBy: { orden: 'asc' },
     include: {
@@ -120,9 +121,9 @@ export class ReportesDiariosService {
         where: { ticketId_fecha: { ticketId, fecha: deDia(fecha) } },
       });
       if (previo?.corregidoAt) this.diaCorregido();
+      const representanteId = await this.representante(tx, ticketId, e.representanteId, previo?.representanteId);
       const datos = {
-        representanteCliente: e.representanteCliente?.trim() || null,
-        cargoRepresentante: e.cargoRepresentante?.trim() || null,
+        representanteId,
         tiempoProductivo: e.tiempoProductivo ?? null,
         tiempoNoProductivo: e.tiempoNoProductivo ?? null,
         observaciones: e.observaciones?.trim() || null,
@@ -389,12 +390,34 @@ export class ReportesDiariosService {
     }
   }
 
+  /**
+   * Company Man del día: el indicado (debe ser un representante de campo del catálogo) o, si no se indica, el del día o, al crearlo, el
+   * del ticket (que viene del pedido).
+   */
+  private async representante(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    indicado: string | null | undefined,
+    previo: string | null | undefined,
+  ): Promise<string | null> {
+    if (indicado) {
+      const p = await tx.catPersonaContacto.findUnique({ where: { id: indicado } });
+      if (!p || p.tipo !== 'representante_campo') {
+        throw new BadRequestException('El representante debe ser un representante de campo del catálogo');
+      }
+      return indicado;
+    }
+    if (indicado === null) return null;
+    if (previo !== undefined) return previo;
+    const ticket = await tx.ticket.findUnique({ where: { id: ticketId }, select: { representanteCampoId: true } });
+    return ticket?.representanteCampoId ?? null;
+  }
+
   private vista(r: ReporteConDatos) {
     return {
       fecha: aDia(r.fecha),
       estado: this.estado(r),
-      representanteCliente: r.representanteCliente,
-      cargoRepresentante: r.cargoRepresentante,
+      representante: r.representante,
       tiempoProductivo: r.tiempoProductivo === null ? null : Number(r.tiempoProductivo),
       tiempoNoProductivo: r.tiempoNoProductivo === null ? null : Number(r.tiempoNoProductivo),
       observaciones: r.observaciones,

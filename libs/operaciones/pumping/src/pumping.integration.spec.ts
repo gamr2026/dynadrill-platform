@@ -2169,11 +2169,34 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       } as EventEnvelope;
     };
 
+    it('el representante del día debe ser un representante de campo; la base también lo exige (OP-3)', async () => {
+      const t = await enEjecucion();
+      const otro = { id: uuidv7(), nombre: `Analista ${n}` };
+      await admin.query(
+        "INSERT INTO catalogos.persona_contacto (id, tipo, nombre) VALUES ($1, 'analista_facturacion', $2)",
+        [otro.id, otro.nombre],
+      );
+      try {
+        const cuerpo = { actividades: [actividad({})] };
+        expect((await guardar(t, { ...cuerpo, representanteId: otro.id })).status).toBe(400);
+        expect((await guardar(t, { ...cuerpo, representanteId: uuidv7() })).status).toBe(400);
+        // sin indicarlo se conserva el del día; con null se deja vacío
+        const r = await guardar(t, cuerpo);
+        expect(r.body.representante).toMatchObject({ id: COMPANY_MAN.id });
+        expect((await guardar(t, { ...cuerpo, representanteId: null })).body.representante).toBeNull();
+        expect((await guardar(t, cuerpo)).body.representante).toBeNull();
+        await expect(
+          admin.query('UPDATE pumping.reporte_diario SET representante_id = $2 WHERE ticket_id = $1', [t.id, otro.id]),
+        ).rejects.toThrow(/representante de campo/);
+      } finally {
+        await admin.query('DELETE FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id]);
+        await admin.query('DELETE FROM catalogos.persona_contacto WHERE id = $1', [otro.id]);
+      }
+    });
+
     it('guarda el día como borrador, con la duración y las tablas de cada actividad calculadas y leídas del servidor', async () => {
       const t = await enEjecucion();
       const r = await guardar(t, {
-        representanteCliente: 'Carlos Companyman',
-        cargoRepresentante: 'Representante de Campo',
         tiempoProductivo: 7.5,
         tiempoNoProductivo: 1,
         observaciones: 'Sin novedades',
@@ -2197,7 +2220,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect(r.body).toMatchObject({
         fecha: FECHA,
         estado: 'borrador',
-        representanteCliente: 'Carlos Companyman',
+        // OP-3: sin indicarlo, el día nace con el Company Man del ticket (que viene del pedido)
+        representante: { id: COMPANY_MAN.id, nombre: COMPANY_MAN.nombre },
         tiempoProductivo: 7.5,
         totalHoras: 7.5, // 3,5 + 4
       });

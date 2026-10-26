@@ -396,9 +396,9 @@ model ReporteDiario {
   ticketId             String    @map("ticket_id") @db.Uuid
   ticket               Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   fecha                DateTime  @db.Date
-  /// Persona externa (Company Man del cliente): texto, no una cuenta.
-  representanteCliente String?   @map("representante_cliente")
-  cargoRepresentante   String?   @map("cargo_representante")
+  /// Company Man del cliente que firmó ese día (contacto de campo del catálogo): se precarga con el del ticket.
+  representanteId      String?   @map("representante_id") @db.Uuid
+  representante        CatPersonaContacto? @relation(fields: [representanteId], references: [id])
   tiempoProductivo     Decimal?  @map("tiempo_productivo") @db.Decimal(5, 2)
   tiempoNoProductivo   Decimal?  @map("tiempo_no_productivo") @db.Decimal(5, 2)
   observaciones        String?
@@ -933,7 +933,10 @@ model CatTaladro {
 model CatPersonaContacto {
   id      String   @id @db.Uuid
   nombre  String
+  /// 'representante_campo' | 'representante_quito' | 'analista_facturacion' | 'agente_comercial'.
+  tipo    String
   tickets Ticket[]
+  reportesDiarios ReporteDiario[]
 
   @@map("persona_contacto")
   @@schema("catalogos")
