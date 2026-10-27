@@ -263,7 +263,8 @@ model ArticuloParte {
   orden            Int
   /// Etiqueta del ítem tal como aparece en el documento de origen ("1", "21*", "A").
   item             String
-  codigo           String
+  /// Código de la parte en el catálogo del fabricante; nulo si el registro de origen no lo trae. Puede repetirse dentro de la herramienta.
+  codigo           String?
   descripcion      String
   cantidadEsperada Int      @default(1) @map("cantidad_esperada")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

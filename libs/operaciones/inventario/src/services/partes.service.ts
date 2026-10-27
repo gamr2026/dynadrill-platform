@@ -48,7 +48,7 @@ export class PartesService {
           articuloId,
           orden: (ultima?.orden ?? 0) + 1,
           item: dto.item.trim(),
-          codigo: dto.codigo.trim(),
+          codigo: dto.codigo?.trim() || null,
           descripcion: dto.descripcion.trim(),
           cantidadEsperada: dto.cantidadEsperada ?? 1,
           createdBy: actorId,
@@ -72,7 +72,7 @@ export class PartesService {
       where: { id: parteId },
       data: {
         item: dto.item.trim(),
-        codigo: dto.codigo.trim(),
+        codigo: dto.codigo?.trim() || null,
         descripcion: dto.descripcion.trim(),
         ...(dto.cantidadEsperada !== undefined ? { cantidadEsperada: dto.cantidadEsperada } : {}),
         updatedBy: actorId,

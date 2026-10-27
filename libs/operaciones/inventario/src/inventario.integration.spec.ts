@@ -758,6 +758,15 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
             .set(bodeguero())
         ).status,
       ).toBe(404);
+      // una parte sin código se guarda con código nulo (el registro de origen no siempre lo trae); un código puede repetirse en la herramienta
+      const sinCodigo = await http().post(url).set(bodeguero()).send({ item: '20', descripcion: 'Sin código' });
+      expect(sinCodigo.status).toBe(201);
+      expect(sinCodigo.body.codigo).toBeNull();
+      const vacia = await http().post(url).set(bodeguero()).send({ item: '21', codigo: '  ', descripcion: 'Código en blanco' });
+      expect(vacia.status).toBe(201);
+      expect(vacia.body.codigo).toBeNull();
+      const repetida = await http().post(url).set(bodeguero()).send({ item: '22', codigo: 'P-2', descripcion: 'Misma pieza' });
+      expect(repetida.status).toBe(201);
       expect(
         (await http().get(`/api/operaciones/inventario/articulos/${uuidv7()}/partes`).set(lector()))
           .status,

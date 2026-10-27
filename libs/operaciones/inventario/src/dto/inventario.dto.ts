@@ -114,7 +114,8 @@ export class FijarMinimoDto {
 
 export class ParteDto {
   @IsString() @MinLength(1) @MaxLength(20) item!: string;
-  @IsString() @MinLength(1) @MaxLength(60) codigo!: string;
+  /** Sin código, se omite o va vacío. */
+  @IsOptional() @IsString() @MaxLength(60) codigo?: string | null;
   @IsString() @MinLength(1) @MaxLength(TEXTO_CORTO * 2) descripcion!: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10000) cantidadEsperada?: number;
 }
