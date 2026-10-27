@@ -60,6 +60,73 @@ function aPlantillas(d: Definicion): PlantillaDef[] {
 }
 
 const DEFINICIONES: Definicion[] = [
+  // ---- Documentos de ingreso que faltan en un servicio con personal asignado (los tres avisos que daba la demo)
+  {
+    evento: 'qhse.aviso.pedido_sin_formato_recepcion',
+    codigo: 'qhse_sin_formato_recepcion',
+    descripcion: 'Un servicio con personal asignado todavía no tiene el Formato de Recepción de la locación.',
+    asunto: 'Falta el Formato de Recepción: {{pedidoCodigo}}',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> ya tiene personal asignado y todavía no tiene el <strong>Formato de Recepción</strong> de la locación.',
+    introTexto:
+      'Como {{cargo}}, debe saber que el pedido {{pedidoCodigo}} ya tiene personal asignado y todavía no tiene el Formato de Recepción de la locación.',
+    filas: [
+      ['Pedido', 'pedidoCodigo'],
+      ['Cliente', 'cliente'],
+      ['Campo', 'campo'],
+      ['Pozo', 'pozo'],
+    ],
+    cierre: 'Cárguelo en Documentos del pedido: sin él no se puede formalizar el PTW.',
+    cierreTexto: 'Cárguelo en Documentos del pedido: sin él no se puede formalizar el PTW.',
+    titulo: '{{pedidoCodigo}} — falta el Formato de Recepción',
+    detalle: 'Pedido de {{cliente}} ({{campo}} / {{pozo}}) sin Formato de Recepción de la locación.',
+    enlace: '/dashboard/qhse/documentos',
+    tono: 'warning',
+  },
+  {
+    evento: 'qhse.aviso.personal_asignado_sin_sfi',
+    codigo: 'qhse_sin_sfi',
+    descripcion: 'Un servicio con personal asignado todavía no tiene el SFI (Formato de Seguridad de Ingreso).',
+    asunto: 'Falta el SFI: {{pedidoCodigo}}',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> ya tiene personal asignado y todavía no tiene el <strong>Formato de Seguridad de Ingreso (SFI)</strong>.',
+    introTexto:
+      'Como {{cargo}}, debe saber que el pedido {{pedidoCodigo}} ya tiene personal asignado y todavía no tiene el Formato de Seguridad de Ingreso (SFI).',
+    filas: [
+      ['Pedido', 'pedidoCodigo'],
+      ['Cliente', 'cliente'],
+      ['Campo', 'campo'],
+      ['Pozo', 'pozo'],
+    ],
+    cierre: 'Cárguelo en Documentos del pedido antes del ingreso del personal a la locación.',
+    cierreTexto: 'Cárguelo en Documentos del pedido antes del ingreso del personal a la locación.',
+    titulo: '{{pedidoCodigo}} — falta el SFI',
+    detalle: '{{pedidoCodigo}} tiene personal asignado y no tiene el Formato de Seguridad de Ingreso.',
+    enlace: '/dashboard/qhse/documentos',
+    tono: 'warning',
+  },
+  {
+    evento: 'qhse.aviso.ptw_sin_pt_hoy',
+    codigo: 'qhse_ptw_sin_pt_hoy',
+    descripcion: 'El PTW del día está abierto y todavía no tiene el Permiso de Trabajo (PT) de hoy.',
+    asunto: 'Falta el PT de hoy: PTW {{ptwCodigo}} ({{pedidoCodigo}})',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que el <strong>PTW {{ptwCodigo}}</strong> del pedido <strong>{{pedidoCodigo}}</strong> está abierto el <strong>{{diaOperacion}}</strong> y todavía no tiene el <strong>Permiso de Trabajo (PT)</strong> del día.',
+    introTexto:
+      'Como {{cargo}}, debe saber que el PTW {{ptwCodigo}} del pedido {{pedidoCodigo}} está abierto el {{diaOperacion}} y todavía no tiene el Permiso de Trabajo (PT) del día.',
+    filas: [
+      ['PTW', 'ptwCodigo'],
+      ['Pedido', 'pedidoCodigo'],
+      ['Cliente', 'cliente'],
+      ['Día', 'diaOperacion'],
+    ],
+    cierre: 'Cargue el PT del día para poder aprobar el PTW.',
+    cierreTexto: 'Cargue el PT del día para poder aprobar el PTW.',
+    titulo: 'PTW {{ptwCodigo}} — falta el PT de hoy',
+    detalle: 'PTW de {{pedidoCodigo}} abierto el {{diaOperacion}} sin el PT del día.',
+    enlace: '/dashboard/qhse/ptw',
+    tono: 'warning',
+  },
   // ---- ART de un pedido (vigencia legal de 15 días; avisa 3 días antes)
   {
     evento: 'qhse.aviso.art_por_vencer',

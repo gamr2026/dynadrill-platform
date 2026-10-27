@@ -14,6 +14,27 @@ const ART = [
   'vigenteHasta',
   'diasParaVencer',
 ];
+const DOCUMENTO_DE_INGRESO = [
+  'ticketId',
+  'ticketNumero',
+  'pedidoId',
+  'pedidoCodigo',
+  'cliente',
+  'campo',
+  'pozo',
+];
+const PTW_SIN_PT = [
+  'ptwId',
+  'ptwCodigo',
+  'ticketId',
+  'ticketNumero',
+  'pedidoId',
+  'pedidoCodigo',
+  'cliente',
+  'campo',
+  'pozo',
+  'diaOperacion',
+];
 const LEGAL = [
   'requisitoLegalId',
   'tipo',
@@ -61,6 +82,9 @@ const CICLO = [
 const DATOS_DEL_EVENTO: Record<string, string[]> = {
   'qhse.aviso.art_por_vencer': ART,
   'qhse.aviso.art_vencido': ART,
+  'qhse.aviso.pedido_sin_formato_recepcion': DOCUMENTO_DE_INGRESO,
+  'qhse.aviso.personal_asignado_sin_sfi': DOCUMENTO_DE_INGRESO,
+  'qhse.aviso.ptw_sin_pt_hoy': PTW_SIN_PT,
   'qhse.aviso.requisito_legal_por_vencer': LEGAL,
   'qhse.aviso.requisito_legal_vencido': LEGAL,
   'qhse.aviso.inspeccion_vencida': [

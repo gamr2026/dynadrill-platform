@@ -201,6 +201,104 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
     });
   });
 
+  describe('documentos de ingreso y PTW del día', () => {
+    /** Un ticket con (o sin) operadores asignados. */
+    const ticketConOperador = async (conOperador: boolean) => {
+      const ticketId = uuidv7();
+      const pedidoId = uuidv7();
+      entidades.push(ticketId);
+      await sql(
+        "INSERT INTO qhse.ticket_ref (ticket_id, ticket_numero, pedido_id, pedido_codigo, cliente, campo, pozo) VALUES ($1, 7, $2, $3, 'Cliente de prueba', 'Campo de prueba', 'Pozo de prueba')",
+        [ticketId, pedidoId, `PED-DOCS-${n}-${entidades.length}`],
+      );
+      if (conOperador)
+        await sql('INSERT INTO qhse.ticket_operador (ticket_id, usuario_id) VALUES ($1, $2)', [
+          ticketId,
+          OPERADOR.id,
+        ]);
+      return { ticketId, pedidoId };
+    };
+    const documento = async (pedidoId: string, ticketId: string, tipo: string) =>
+      sql(
+        'INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, created_by) VALUES ($1, $2, $3, $4, $5, $6)',
+        [uuidv7(), pedidoId, ticketId, tipo, await archivo('qhse_documento_pedido'), TECNICO.id],
+      );
+    const limpiar = async (ids: { ticketId: string; pedidoId: string }[]) => {
+      for (const { ticketId, pedidoId } of ids) {
+        await sql('DELETE FROM qhse.ptw WHERE ticket_id = $1', [ticketId]);
+        await sql('DELETE FROM qhse.documento_pedido WHERE pedido_id = $1', [pedidoId]);
+        await sql('DELETE FROM qhse.ticket_ref WHERE ticket_id = $1', [ticketId]);
+      }
+    };
+
+    it('avisa una sola vez que falta el Formato de Recepción y el SFI de un servicio con personal asignado', async () => {
+      const sinDocs = await ticketConOperador(true);
+      const sinPersonal = await ticketConOperador(false);
+      const completo = await ticketConOperador(true);
+      await documento(completo.pedidoId, completo.ticketId, 'formato_recepcion');
+      await documento(completo.pedidoId, completo.ticketId, 'sfi');
+      ambito = [sinDocs.ticketId, sinPersonal.ticketId, completo.ticketId];
+
+      expect((await emitir(fechaEn(0))).porTipo).toEqual({
+        'qhse.aviso.pedido_sin_formato_recepcion': 1,
+        'qhse.aviso.personal_asignado_sin_sfi': 1,
+      });
+      expect((await emitir(fechaEn(1))).total).toBe(0);
+      expect((await tipos(sinDocs.ticketId)).sort()).toEqual([
+        'qhse.aviso.pedido_sin_formato_recepcion',
+        'qhse.aviso.personal_asignado_sin_sfi',
+      ]);
+      expect(await tipos(sinPersonal.ticketId)).toEqual([]);
+      expect(await tipos(completo.ticketId)).toEqual([]);
+      expect((await eventosDe(sinDocs.ticketId))[0].datos.data).toMatchObject({
+        ticketNumero: 7,
+        cliente: 'Cliente de prueba',
+        pozo: 'Pozo de prueba',
+      });
+      await limpiar([sinDocs, sinPersonal, completo]);
+    });
+
+    it('un documento anulado cuenta como faltante', async () => {
+      const t1 = await ticketConOperador(true);
+      await documento(t1.pedidoId, t1.ticketId, 'sfi');
+      await sql(
+        "UPDATE qhse.documento_pedido SET anulado_at = now(), anulado_por = $2, motivo_anulacion = 'prueba' WHERE pedido_id = $1",
+        [t1.pedidoId, TECNICO.id],
+      );
+      ambito = [t1.ticketId];
+      expect((await emitir(fechaEn(0))).porTipo).toMatchObject({
+        'qhse.aviso.personal_asignado_sin_sfi': 1,
+      });
+      await limpiar([t1]);
+    });
+
+    it('avisa del PTW de hoy sin el PT del día, una sola vez', async () => {
+      const t2 = await ticketConOperador(true);
+      const ptw = async (extra = '') => {
+        const id = uuidv7();
+        entidades.push(id);
+        await sql(
+          `INSERT INTO qhse.ptw (id, ticket_id, pedido_id, dia_operacion, created_by ${extra ? ',' + extra.split('=')[0] : ''})
+           VALUES ($1, $2, $3, CURRENT_DATE, $4 ${extra ? ',' + extra.split('=')[1] : ''})`,
+          [id, t2.ticketId, t2.pedidoId, TECNICO.id],
+        );
+        return id;
+      };
+      const abierto = await ptw();
+      ambito = [abierto];
+      expect((await emitir(fechaEn(0))).porTipo).toEqual({ 'qhse.aviso.ptw_sin_pt_hoy': 1 });
+      expect((await emitir(fechaEn(0))).total).toBe(0);
+      const ev = (await eventosDe(abierto))[0];
+      expect(ev.datos.data).toMatchObject({
+        ptwId: abierto,
+        pedidoCodigo: `PED-DOCS-${n}-${entidades.length - 1}`,
+        diaOperacion: fechaEn(0),
+      });
+      expect(String(ev.datos.data['ptwCodigo'])).toMatch(/^PTW-\d{6}$/);
+      await limpiar([t2]);
+    });
+  });
+
   describe('requisitos legales', () => {
     it('avisa por vencer (30 días) y vencido; una revisión nueva con otra vigencia vuelve a avisar', async () => {
       const id = uuidv7();

@@ -190,6 +190,12 @@ run('QHSE: Stop Work Authority (base de datos real)', () => {
     expect((await detalle(id)).notificacionCompleta).toBe(true);
 
     // el checklist de reinicio y la reanudación aún no
+    // la bandeja muestra la ubicación y el reconocimiento «Héroe de Seguridad» sin abrir cada SWA
+    const fila = ((await t.http().get('/api/qhse/swa').set(tecnico())).body as Array<Record<string, unknown>>).find(
+      (x) => x['id'] === id,
+    );
+    expect(fila).toMatchObject({ heroeSeguridad: true });
+    expect(fila).toHaveProperty('ubicacion');
     expect((await post(id, 'reanudar')).status).toBe(409);
     expect((await post(id, 'reinicio', { criterioId: d0.criterios[0].criterioId })).status).toBe(
       409,

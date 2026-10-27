@@ -18,10 +18,16 @@ import { DIAS_AVISO_VENCIMIENTO } from '../legal/requisitos-legales-consulta.ser
 import { codigoAspecto } from '../aspectos-ambientales/aspectos-ambientales-consulta.service';
 import { codigoObjetivo } from '../objetivos-ambientales/objetivos-ambientales-consulta.service';
 import { calcularPlazos, codigoInvestigacion, diaEcuador } from '../investigaciones/plazos';
+import { codigoPtw } from '../ptw/ptw-documentos';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** El ART avisa 3 días antes de vencer (igual que la bandeja de documentos). */
 export const DIAS_AVISO_ART = 3;
+/**
+ * Los avisos de documentos de ingreso (recepción, SFI) solo miran servicios con personal asignado y creados en esta ventana: sin ella, el primer
+ * barrido avisaría de todo el historial de tickets ya cerrados.
+ */
+export const DIAS_VENTANA_DOCUMENTOS_INGRESO = 60;
 /** Días de anticipación para avisar que vence el informe final de una investigación. */
 export const DIAS_AVISO_INFORME_INVESTIGACION = 5;
 
@@ -101,6 +107,8 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
       const candidatos = (
         await Promise.all([
           this.art(hoy),
+          this.documentosDeIngresoFaltantes(hoy),
+          this.ptwSinPtDeHoy(hoy),
           this.requisitosLegales(hoy),
           this.inspeccionesVencidas(hoy),
           this.investigaciones(hoy),
@@ -208,6 +216,93 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
         },
       };
     });
+  }
+
+  /**
+   * Formato de Recepción y SFI de los servicios con personal asignado: si el ticket ya tiene operadores y no tiene el documento (no anulado),
+   * se avisa una sola vez por ticket y documento.
+   */
+  private async documentosDeIngresoFaltantes(hoy: string): Promise<Candidato[]> {
+    const desde = aFecha(masDias(hoy, -DIAS_VENTANA_DOCUMENTOS_INGRESO));
+    const tickets = await this.prisma.ticketRef.findMany({
+      where: { createdAt: { gte: desde }, operadores: { some: {} } },
+      select: {
+        ticketId: true,
+        ticketNumero: true,
+        pedidoId: true,
+        pedidoCodigo: true,
+        cliente: true,
+        campo: true,
+        pozo: true,
+        documentos: {
+          where: {
+            anuladoAt: null,
+            tipo: { in: [TipoDocumentoPedido.formato_recepcion, TipoDocumentoPedido.sfi] },
+          },
+          select: { tipo: true },
+        },
+      },
+    });
+    const faltantes: Array<[TipoDocumentoPedido, string]> = [
+      [TipoDocumentoPedido.formato_recepcion, 'qhse.aviso.pedido_sin_formato_recepcion'],
+      [TipoDocumentoPedido.sfi, 'qhse.aviso.personal_asignado_sin_sfi'],
+    ];
+    return tickets.flatMap((t) =>
+      faltantes
+        .filter(([tipo]) => !t.documentos.some((d) => d.tipo === tipo))
+        .map(([, evento]) => ({
+          tipo: evento,
+          entidadId: t.ticketId,
+          fechaLimite: null,
+          datos: {
+            ticketId: t.ticketId,
+            ticketNumero: t.ticketNumero,
+            pedidoId: t.pedidoId,
+            pedidoCodigo: t.pedidoCodigo,
+            cliente: t.cliente,
+            campo: t.campo,
+            pozo: t.pozo,
+          },
+        })),
+    );
+  }
+
+  /** PTW del día todavía sin su PT: un aviso por PTW (la fecha forma parte de la clave, así que cada día es un hecho distinto). */
+  private async ptwSinPtDeHoy(hoy: string): Promise<Candidato[]> {
+    const filas = await this.prisma.ptw.findMany({
+      where: {
+        diaOperacion: aFecha(hoy),
+        anuladoAt: null,
+        documentoPtId: null,
+        fase: { not: 'aprobado' },
+      },
+      select: {
+        id: true,
+        numero: true,
+        ticketId: true,
+        pedidoId: true,
+        ticket: {
+          select: { ticketNumero: true, pedidoCodigo: true, cliente: true, campo: true, pozo: true },
+        },
+      },
+    });
+    return filas.map((p) => ({
+      tipo: 'qhse.aviso.ptw_sin_pt_hoy',
+      entidadId: p.id,
+      fechaLimite: hoy,
+      datos: {
+        ptwId: p.id,
+        ptwCodigo: codigoPtw(p.numero),
+        ticketId: p.ticketId,
+        ticketNumero: p.ticket.ticketNumero,
+        pedidoId: p.pedidoId,
+        pedidoCodigo: p.ticket.pedidoCodigo,
+        cliente: p.ticket.cliente,
+        campo: p.ticket.campo,
+        pozo: p.ticket.pozo,
+        diaOperacion: hoy,
+      },
+    }));
   }
 
   /** Requisitos legales: la revisión vigente de cada matriz que vence en 30 días o ya venció. */

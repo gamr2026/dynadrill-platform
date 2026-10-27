@@ -82,9 +82,11 @@ export class SwaConsultaService {
       ticketNumero: s.ticket?.ticketNumero ?? null,
       pedidoCodigo: s.ticket?.pedidoCodigo ?? null,
       cliente: s.ticket?.cliente ?? null,
+      ubicacion: s.ubicacion,
       activadoPor: s.activador.nombre,
       activadoAt: s.activadoAt,
       riesgoReal: s.riesgoReal,
+      heroeSeguridad: s.heroeSeguridad,
     }));
   }
 
