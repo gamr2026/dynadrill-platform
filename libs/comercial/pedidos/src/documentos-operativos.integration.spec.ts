@@ -792,6 +792,32 @@ run('documentos operativos (base de datos real)', () => {
         expect.objectContaining({ estado: 'stand_by' }),
       ]);
     });
+    it('el Reporte de Herramientas de Pumping llega igual que el de FCR, con origen pumping', async () => {
+      const id = await pedido('pumping');
+      await reporteDiario.consumir(
+        deFcr('operaciones.pumping.reporte_herramientas_completado', id, {
+          herramientas: [
+            {
+              nombre: 'Herramienta por día',
+              codigo: 'HT0001',
+              unidadMedidaId: U('Kilómetro'),
+              cantidad: 2,
+              usos: [
+                { fecha: '2026-11-01', estado: 'operacion', cantidad: 1 },
+                { fecha: '2026-11-02', estado: 'venta', cantidad: 1 },
+              ],
+            },
+          ],
+        }),
+      );
+      const h = (await docs(id)).find((d: { tipo: string }) => d.tipo === 'reporte_herramientas');
+      expect(h).toMatchObject({ origen: 'pumping' });
+      expect(h.herramientas[0]).toMatchObject({ codigo: 'HT0001', cantidad: 2 });
+      expect(h.herramientas[0].usos).toEqual([
+        expect.objectContaining({ fecha: '2026-11-01', estado: 'operacion' }),
+        expect.objectContaining({ fecha: '2026-11-02', estado: 'venta' }),
+      ]);
+    });
     describe('cantidad por día del Reporte de Herramientas', () => {
       const reporte = (herramientas: unknown[]) => ({ herramientas });
 

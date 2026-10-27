@@ -9,6 +9,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
+import type { LineaPedido } from './reporte-herramientas.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
@@ -35,6 +36,8 @@ export interface PedidoAbiertoData {
   /** Representante del cliente en campo (Company Man): solo el id. */
   representanteCampoId?: string | null;
   as2Numero?: string | null;
+  /** Las líneas cotizadas vigentes (código, unidad, cantidad y tipo), de las que sale el Reporte de Herramientas. */
+  lineas?: LineaPedido[];
 }
 
 /** `control_fluidos` -> "Control fluidos" (para leerlo en un correo o en la campanita). */

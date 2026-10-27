@@ -16,7 +16,14 @@ export const EVENTO_REPORTE_DIARIO = 'operaciones.pumping.reporte_diario_complet
 /** FCR: cada día de la bitácora que el operador envía (Reporte Job) y el Reporte de Herramientas al finalizar la ejecución. */
 export const EVENTO_BITACORA_FCR = 'operaciones.fcr.bitacora_enviada';
 export const EVENTO_HERRAMIENTAS_FCR = 'operaciones.fcr.reporte_herramientas_completado';
-const EVENTOS = [EVENTO_REPORTE_DIARIO, EVENTO_BITACORA_FCR, EVENTO_HERRAMIENTAS_FCR];
+/** Pumping arma su Reporte de Herramientas como FCR (desde lo cotizado, repartido por día); llega con la misma forma. */
+export const EVENTO_HERRAMIENTAS_PUMPING = 'operaciones.pumping.reporte_herramientas_completado';
+const EVENTOS = [
+  EVENTO_REPORTE_DIARIO,
+  EVENTO_BITACORA_FCR,
+  EVENTO_HERRAMIENTAS_FCR,
+  EVENTO_HERRAMIENTAS_PUMPING,
+];
 
 /**
  * El Reporte Diario (Reporte Job) de un día que el operador de Pumping completa llega al pedido como documento operativo
@@ -60,7 +67,8 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
     const d = event.data;
     const pedidoId = String(d['pedidoId'] ?? '');
     const userId = event.actor?.userId;
-    const esHerramientas = event.type === EVENTO_HERRAMIENTAS_FCR;
+    const esHerramientas =
+      event.type === EVENTO_HERRAMIENTAS_FCR || event.type === EVENTO_HERRAMIENTAS_PUMPING;
     if (!pedidoId || !userId || (!esHerramientas && !d['fecha'])) {
       this.logger.warn(`${event.type}: falta el pedido, el día o quién lo completó; se ignora`);
       return;
@@ -78,7 +86,10 @@ export class ReporteDiarioConsumer implements OnApplicationBootstrap {
     } as unknown as AuthUser;
     const dto = {
       tipo: esHerramientas ? 'reporte_herramientas' : 'reporte_job',
-      origen: event.type === EVENTO_REPORTE_DIARIO ? 'pumping' : 'fcr',
+      origen:
+        event.type === EVENTO_REPORTE_DIARIO || event.type === EVENTO_HERRAMIENTAS_PUMPING
+          ? 'pumping'
+          : 'fcr',
       ticketRef: d['ticketNumero'] == null ? undefined : String(d['ticketNumero']),
       fecha: esHerramientas ? undefined : String(d['fecha']),
       firmadoPor: d['firmadoPor'] ? String(d['firmadoPor']) : undefined,

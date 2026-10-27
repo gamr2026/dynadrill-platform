@@ -261,8 +261,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await admin.query(`DELETE FROM inventario.movimiento WHERE ticket_pumping_id IN ${deTickets}`, [
       pedidos,
     ]);
-    if (pedidos.length)
+    if (pedidos.length) {
+      // lo reportado de una línea no se borra en cascada (historia): se quita primero
+      await admin.query(
+        'DELETE FROM pumping.reporte_item_dia WHERE linea_id IN (SELECT l.id FROM pumping.ticket_linea l JOIN pumping.ticket t ON t.id = l.ticket_id WHERE t.pedido_id = ANY($1::uuid[]))',
+        [pedidos],
+      );
       await admin.query('DELETE FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
+    }
     await admin.query('DELETE FROM flota.unidad WHERE id = ANY($1::uuid[])', [
       [VEHICULO.unidadId, VEHICULO_2.unidadId, UNIDAD_SIN_VEHICULO.id, UNIDAD_INACTIVA.id],
     ]);
@@ -2460,6 +2466,217 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           [uuidv7(), rep, OP1.id],
         ),
       ).rejects.toThrow(/reporte_diario_actividad_orden_key/);
+    });
+  });
+
+  describe('Reporte de Herramientas de Pumping (OP-1): líneas cotizadas repartidas por día', () => {
+    const DIAS = ['2026-11-05', '2026-11-06', '2026-11-07'];
+    let porDia = '';
+    let porCantidad = '';
+    beforeAll(async () => {
+      const dia = await admin.query(
+        "SELECT id FROM catalogos.unidad_medida WHERE periodo = 'dia' ORDER BY nombre LIMIT 1",
+      );
+      const otra = await admin.query(
+        "SELECT id FROM catalogos.unidad_medida WHERE periodo IS NULL ORDER BY nombre LIMIT 1",
+      );
+      porDia = dia.rows[0].id;
+      porCantidad = otra.rows[0].id;
+    });
+    const lineas = (extra: object[] = []) => [
+      { codigo: `HT-DIA-${n}`, descripcion: 'Herramienta por día', unidadMedidaId: porDia, cantidad: 3, tipoLinea: 'herramienta' },
+      { codigo: `HT-CANT-${n}`, descripcion: 'Material por cantidad', unidadMedidaId: porCantidad, cantidad: 10, tipoLinea: 'material' },
+      { codigo: `MOV-${n}`, descripcion: 'Movilización', unidadMedidaId: porCantidad, cantidad: 1, tipoLinea: 'movilizacion' },
+      ...extra,
+    ];
+    const actualizado = (pedidoId: string, data: Record<string, unknown>): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'comercial.pedido.actualizado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: pedidoId },
+        data,
+      } as EventEnvelope;
+    };
+    const ticket = async (extra: object[] = []) => {
+      const t = await ticketEnTraslado();
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
+        [t.id, 'ejecucion_operativa', DIAS[0], DIAS[2]],
+      );
+      await consumer.consumir(actualizado(t.pedidoId, { lineas: lineas(extra) }));
+      return t;
+    };
+    const url = (t: { url: string }) => `${t.url}/reporte-herramientas`;
+    const ver = (t: { url: string }, h = op1()) => http().get(url(t)).set(h);
+    const marcar = (t: { url: string }, lineaId: string, fecha: string, cuerpo: object, h = op1()) =>
+      http().put(`${url(t)}/lineas/${lineaId}/dias/${fecha}`).set(h).send(cuerpo);
+    const completar = (t: { url: string }, h = op1()) => http().post(`${url(t)}/completar`).set(h);
+    const eventosDe = async (ticketId: string) =>
+      (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_herramientas_completado' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+          [ticketId],
+        )
+      ).rows.map((r) => r.datos.data);
+    const lineaDe = (
+      r: { body: { lineas: Array<{ codigo: string; id: string; cantidad: number }> } },
+      prefijo: string,
+    ) =>
+      r.body.lineas.find((l) => l.codigo.startsWith(prefijo))!;
+
+    it('las líneas del pedido llegan al ticket (al abrirse y cuando el pedido cambia) y la movilización no va en el reporte', async () => {
+      const e = evento({ data: { lineas: lineas() } });
+      await consumer.consumir(e);
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { pedidoId: e.subject.id } });
+      expect(await prisma.ticketLinea.count({ where: { ticketId: t.id } })).toBe(3);
+      // el pedido cambia: sube la cantidad de una, baja otra y trae una nueva; la que ya no viene se quita (no tenía días)
+      await consumer.consumir(
+        actualizado(e.subject.id, {
+          lineas: [
+            { ...lineas()[0], cantidad: 5 },
+            { codigo: `NUEVA-${n}`, descripcion: 'Nueva', unidadMedidaId: porCantidad, cantidad: 2, tipoLinea: 'servicio' },
+          ],
+        }),
+      );
+      const filas = await prisma.ticketLinea.findMany({ where: { ticketId: t.id }, orderBy: { orden: 'asc' } });
+      expect(filas.map((f) => [f.codigo, Number(f.cantidad)])).toEqual([
+        [`HT-DIA-${n}`, 5],
+        [`NUEVA-${n}`, 2],
+      ]);
+    });
+
+    it('lee el reporte: sin movilización, con lo cotizado y lo reportado; la precarga de un servicio de un solo día aplica lo cotizado', async () => {
+      const t = await ticket();
+      const r = await ver(t).expect(200);
+      expect(r.body.lineas.map((l: { codigo: string }) => l.codigo)).toEqual([`HT-DIA-${n}`, `HT-CANT-${n}`]);
+      expect(r.body).toMatchObject({ fechaInicio: DIAS[0], fechaFin: DIAS[2], completadoAt: null });
+      expect(lineaDe(r, 'HT-DIA')).toMatchObject({ porDia: true, cotizado: 3, cantidad: 0, dias: [] });
+
+      // un servicio de un solo día se precarga con lo cotizado
+      const uno = await ticketEnTraslado();
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $3 WHERE id = $1',
+        [uno.id, 'ejecucion_operativa', DIAS[0]],
+      );
+      await consumer.consumir(actualizado(uno.pedidoId, { lineas: lineas() }));
+      const r1 = await ver(uno).expect(200);
+      expect(lineaDe(r1, 'HT-DIA')).toMatchObject({ cantidad: 1, dias: [{ fecha: DIAS[0], estado: 'operacion', cantidad: 1 }] });
+      expect(lineaDe(r1, 'HT-CANT')).toMatchObject({ cantidad: 10 });
+      // la precarga es de una sola vez
+      await ver(uno).expect(200);
+      expect(
+        (await admin.query('SELECT count(*)::int AS c FROM pumping.reporte_item_dia d JOIN pumping.ticket_linea l ON l.id = d.linea_id WHERE l.ticket_id = $1', [uno.id])).rows[0].c,
+      ).toBe(2);
+    });
+
+    it('reparte por día: la marca vale 1 en las líneas por día, las demás piden la cantidad, y no pasa de lo cotizado ni sale del servicio', async () => {
+      const t = await ticket();
+      const r = await ver(t).expect(200);
+      const dia = lineaDe(r, 'HT-DIA');
+      const cant = lineaDe(r, 'HT-CANT');
+      await marcar(t, dia.id, DIAS[0], { estado: 'operacion' }).expect(200);
+      await marcar(t, dia.id, DIAS[1], { estado: 'daily_charge' }).expect(200);
+      const tercera = await marcar(t, dia.id, DIAS[2], { estado: 'venta' }).expect(200);
+      expect(lineaDe(tercera, 'HT-DIA')).toMatchObject({ cantidad: 3 });
+      // lo cotizado son 3 días: un cuarto no existe en el servicio, y repetir un día no suma
+      expect((await marcar(t, dia.id, '2026-11-08', { estado: 'operacion' })).body.code).toBe('FUERA_DEL_SERVICIO');
+      await marcar(t, dia.id, DIAS[0], { estado: 'venta' }).expect(200);
+      expect(lineaDe(await ver(t), 'HT-DIA').cantidad).toBe(3);
+
+      // la línea por cantidad pide cuánto se aplicó
+      expect((await marcar(t, cant.id, DIAS[0], { estado: 'operacion' })).status).toBe(400);
+      await marcar(t, cant.id, DIAS[0], { estado: 'operacion', cantidad: 6 }).expect(200);
+      const sobre = await marcar(t, cant.id, DIAS[1], { estado: 'operacion', cantidad: 5 });
+      expect(sobre.status).toBe(409);
+      expect(sobre.body.code).toBe('CANTIDAD_SUPERA_COTIZADO');
+      await marcar(t, cant.id, DIAS[1], { estado: 'operacion', cantidad: 4 }).expect(200);
+      // corregir un día no cuenta dos veces
+      await marcar(t, cant.id, DIAS[0], { estado: 'venta', cantidad: 6 }).expect(200);
+      expect(lineaDe(await ver(t), 'HT-CANT').cantidad).toBe(10);
+      // quitar la marca libera la cantidad
+      await http().delete(`${url(t)}/lineas/${cant.id}/dias/${DIAS[1]}`).set(op1()).expect(200);
+      expect(lineaDe(await ver(t), 'HT-CANT').cantidad).toBe(6);
+      // una línea de otro ticket no se marca aquí
+      const otro = await ticket();
+      expect((await marcar(otro, cant.id, DIAS[0], { estado: 'operacion', cantidad: 1 })).status).toBe(404);
+    });
+
+    it('solo el equipo del ticket en la Ejecución operativa lo arma; la base también impide pasarse de lo cotizado', async () => {
+      const t = await ticket();
+      const dia = lineaDe(await ver(t).expect(200), 'HT-DIA');
+      expect((await marcar(t, dia.id, DIAS[0], { estado: 'operacion' }, op2())).status).toBe(200); // OP2 también es del equipo
+      const ajeno = como('operador', uuidv7(), 'Otro operador');
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, ajeno)).status).toBe(403);
+      const sinPermiso = como('operador', OP1.id, OP1.nombre, []);
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, sinPermiso)).status).toBe(403);
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [t.id, 'traslado_salida']);
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' })).status).toBe(409);
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [t.id, 'ejecucion_operativa']);
+      // la base: una celda más allá de lo cotizado se rechaza aunque la API no estuviera
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.reporte_item_dia (id, linea_id, fecha, estado, cantidad, created_by) VALUES ($1, $2, $3, 'operacion', 99, $4)",
+          [uuidv7(), dia.id, DIAS[2], OP1.id],
+        ),
+      ).rejects.toThrow(/pasa de lo cotizado/);
+    });
+
+    it('completar exige cantidades y envía a Comercial las líneas reportadas con sus días; tocarlo lo reabre y se completa de nuevo', async () => {
+      const t = await ticket();
+      const r = await ver(t).expect(200);
+      const dia = lineaDe(r, 'HT-DIA');
+      const cant = lineaDe(r, 'HT-CANT');
+      const vacio = await completar(t);
+      expect(vacio.status).toBe(409);
+      expect(vacio.body.code).toBe('REPORTE_VACIO');
+
+      await marcar(t, dia.id, DIAS[0], { estado: 'operacion' }).expect(200);
+      await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }).expect(200);
+      await marcar(t, cant.id, DIAS[1], { estado: 'venta', cantidad: 2.5 }).expect(200);
+      const ok = await completar(t).expect(201);
+      expect(ok.body.completadoAt).not.toBeNull();
+
+      const [e1] = await eventosDe(t.id);
+      expect(e1).toMatchObject({
+        ticketId: t.id,
+        pedidoId: t.pedidoId,
+        supervisorId: SUPERVISORA.id,
+        operadorId: OP1.id,
+      });
+      expect(e1.herramientas).toEqual([
+        {
+          listaPreciosItemId: null,
+          codigo: `HT-DIA-${n}`,
+          nombre: 'Herramienta por día',
+          unidadMedidaId: porDia,
+          cantidad: 2,
+          usos: [
+            { fecha: DIAS[0], estado: 'operacion', cantidad: 1 },
+            { fecha: DIAS[1], estado: 'operacion', cantidad: 1 },
+          ],
+        },
+        {
+          listaPreciosItemId: null,
+          codigo: `HT-CANT-${n}`,
+          nombre: 'Material por cantidad',
+          unidadMedidaId: porCantidad,
+          cantidad: 2.5,
+          usos: [{ fecha: DIAS[1], estado: 'venta', cantidad: 2.5 }],
+        },
+      ]);
+
+      // tocar el reporte lo reabre; completar de nuevo reenvía la versión nueva
+      const reabierto = await marcar(t, dia.id, DIAS[2], { estado: 'operacion' }).expect(200);
+      expect(reabierto.body.completadoAt).toBeNull();
+      await completar(t).expect(201);
+      const eventos2 = await eventosDe(t.id);
+      expect(eventos2).toHaveLength(2);
+      expect(eventos2[1].herramientas[0].cantidad).toBe(3);
     });
   });
 

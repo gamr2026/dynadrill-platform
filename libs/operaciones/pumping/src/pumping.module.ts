@@ -17,6 +17,8 @@ import { QuimicosService } from './services/quimicos.service';
 import { ReporteUnidadService } from './services/reporte-unidad.service';
 import { CambiosItemsService } from './services/cambios-items.service';
 import { DocumentosTicketService } from './services/documentos-ticket.service';
+import { ReporteHerramientasController } from './controllers/reporte-herramientas.controller';
+import { ReporteHerramientasService } from './services/reporte-herramientas.service';
 import { ReportesDiariosService } from './services/reportes-diarios.service';
 import { RevisionSalidaService } from './services/revision-salida.service';
 import { RequisitosService } from './services/requisitos.service';
@@ -38,6 +40,7 @@ import { TicketsService } from './services/tickets.service';
     ReportesDiariosController,
     CambiosItemsController,
     DocumentosTicketController,
+    ReporteHerramientasController,
   ],
   providers: [
     PrismaService,
@@ -51,6 +54,7 @@ import { TicketsService } from './services/tickets.service';
     QuimicosService,
     RevisionSalidaService,
     ReportesDiariosService,
+    ReporteHerramientasService,
     DiaCorregidoConsumer,
     CambiosItemsService,
     DocumentosTicketService,
