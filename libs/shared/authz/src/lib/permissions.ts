@@ -371,6 +371,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     [...ADMIN_ROLE_CODES, RoleCode.TECNICO_HSE, RoleCode.GERENTE_HSE],
   ),
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
+  def('pumpingRead', 'pumping.tickets.ver', 'Consultar el detalle de un ticket de Pumping de solo lectura'),
   def(
     'pumpingDocumentosRead',
     'pumping.documentos.ver',
@@ -783,6 +784,7 @@ export const Permission = {
   FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
   ENCUESTAS_GESTIONAR: 'encuestas.administracion.gestionar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
+  PUMPING_VER: 'pumping.tickets.ver',
   PUMPING_CONTEXTO_CONDUCTOR: 'pumping.tickets.contexto_conductor',
   PUMPING_DOCUMENTOS_VER: 'pumping.documentos.ver',
   PUMPING_TERMINOS_VALIDAR: 'pumping.terminos.validar',

@@ -1025,6 +1025,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     }
   });
 
+  it('lectura del detalle: con `pumping.tickets.ver` (Mantenimiento) se abre el ticket, pero no se lista ni se opera', async () => {
+    const t = await ticketEnTraslado();
+    const soloVer = como('jefe_mantenimiento', CO1.id, CO1.nombre, [P.PUMPING_VER]);
+    const d = (await http().get(`${base}/tickets/${t.id}`).set(soloVer).expect(200)).body as { id: string };
+    expect(d.id).toBe(t.id);
+    await http().get(`${base}/tickets`).set(soloVer).expect(403);
+    await http().post(`${base}/tickets/${t.id}/avanzar`).set(soloVer).send({ hacia: 'x' }).expect(403);
+  });
+
   it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta está asignada como conductor u operador, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
     const t = await ticketEnTraslado();
     const permiso = [P.PUMPING_CONTEXTO_CONDUCTOR];

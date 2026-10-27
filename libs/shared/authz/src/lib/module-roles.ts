@@ -126,6 +126,17 @@ export const ModuleRoles = {
   /** Operaciones · Pumping — acceso al módulo. */
   pumping: withAdmins(RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING, RoleCode.OPERADOR),
   /**
+   * Lectura del detalle de un ticket de Pumping, sin poder operarlo: además de Pumping, Mantenimiento
+   * (Jefe y Operador) lo abre para ver su tarjeta «Mantenimientos». Las acciones siguen en `ModuleRoles.pumping`.
+   */
+  pumpingRead: withAdmins(
+    RoleCode.SUPERVISOR,
+    RoleCode.SUPERVISOR_PUMPING,
+    RoleCode.OPERADOR,
+    RoleCode.JEFE_MANTENIMIENTO,
+    RoleCode.OPERADOR_MANTENIMIENTO,
+  ),
+  /**
    * Lectura de documentos reales subidos al ticket (monitoreo, mezcla de
    * químicos) — además de Pumping, Facturación necesita recuperarlos desde
    * el Pedido (documentos de respaldo antes de "Enviar al cliente"). Subir/

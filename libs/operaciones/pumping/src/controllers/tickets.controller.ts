@@ -118,7 +118,7 @@ export class TicketsController {
     return this.tickets.misViajes(actor.id);
   }
 
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_OPERAR, P.PUMPING_VER)
   @Get('tickets/:id')
   detalle(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     return this.tickets.detalle(id, actor);
