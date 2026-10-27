@@ -131,14 +131,9 @@ export class GuardarLlegadaDto {
   @IsOptional() @IsString() @MaxLength(2000) detalleInterrupcion?: string;
 }
 
-export class CumplirManualDto {
-  @IsString() @MaxLength(500) motivo!: string;
-}
-
 /**
- * Lo que exige el paso Traslado de salida: términos y condiciones, checklist de ingreso a locación y reporte de unidad de salida,
- * más el puente temporal para los requisitos de módulos que todavía no existen (QHSE, Mantenimiento). Ver
- * documentacion/pumping/PLAN-TRASLADO-SALIDA.md.
+ * Lo que exige el paso Traslado de salida: términos y condiciones, checklist de ingreso a locación y reporte de unidad de salida.
+ * Ver documentacion/pumping/PLAN-TRASLADO-SALIDA.md.
  */
 export class PublicarTerminosDto {
   @IsString() @MinLength(5) @MaxLength(200) titulo!: string;
@@ -263,17 +258,5 @@ export class TrasladoSalidaController {
   @Post('tickets/:id/ejecucion/formalizar')
   formalizarEjecucion(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     return this.ejecucion.formalizar(id, actor);
-  }
-
-  // ---- puente temporal para requisitos de módulos que aún no existen
-  @RequirePermission(P.PUMPING_REQUISITOS_PUENTE)
-  @Post('requisitos/:requisitoId/cumplir-manual')
-  async cumplirManual(
-    @Param('requisitoId', ParseUUIDPipe) requisitoId: string,
-    @Body() dto: CumplirManualDto,
-    @CurrentUser() actor: AuthUser,
-  ) {
-    await this.requisitos.cumplirManual(requisitoId, dto.motivo, actor.id);
-    return { ok: true };
   }
 }

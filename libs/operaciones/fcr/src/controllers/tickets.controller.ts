@@ -66,10 +66,6 @@ export class DisponibilidadQueryDto {
   @IsOptional() @IsString() @MaxLength(10) hasta?: string;
 }
 
-export class CumplirRequisitoDto {
-  @IsString() @MinLength(5) @MaxLength(500) motivo!: string;
-}
-
 /** Tickets de servicio de FCR: la bandeja del Supervisor, el Operador FCR, el Supervisor de Operaciones y Bodega. */
 @Controller('operaciones/fcr')
 export class TicketsController {
@@ -145,17 +141,5 @@ export class TicketsController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.asignacion.asignar(id, dto, actor);
-  }
-
-  /** PUENTE TEMPORAL: confirma a mano un requisito de otro módulo que aún no publica su evento. Exige motivo. */
-  @RequirePermission(P.FCR_REQUISITOS_PUENTE)
-  @Post('requisitos/:requisitoId/cumplir')
-  async cumplirRequisito(
-    @Param('requisitoId', ParseUUIDPipe) requisitoId: string,
-    @Body() dto: CumplirRequisitoDto,
-    @CurrentUser() actor: AuthUser,
-  ) {
-    await this.requisitos.cumplirManual(requisitoId, dto.motivo, actor.id);
-    return { ok: true };
   }
 }

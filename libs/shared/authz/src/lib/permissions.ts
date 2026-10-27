@@ -102,6 +102,15 @@ export const PERMISSION_REPLACEMENTS: ReadonlyArray<{
     retired: 'comercial.cierre.gestionar',
     replacedBy: [],
   },
+  {
+    // Los requisitos de otros módulos los cumple el evento de su dueño (QHSE, Flota): el puente manual se retiró el 27/10/2026.
+    retired: 'pumping.requisitos.puente',
+    replacedBy: [],
+  },
+  {
+    retired: 'fcr.requisitos.puente',
+    replacedBy: [],
+  },
 ];
 
 export const PERMISSION_CATALOG: readonly PermissionDef[] = [
@@ -339,11 +348,6 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   ),
   def('fcrRead', 'fcr.tickets.ver', 'Consultar tickets FCR de solo lectura'),
   nuevo(
-    'fcr.requisitos.puente',
-    'Confirmar a mano un requisito de FCR cuyo dato es de otro módulo que aún no publica su evento (puente temporal)',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
-  ),
-  nuevo(
     'fcr.configuracion.gestionar',
     'Configurar qué hace FCR con cada código de la lista de precios de un cliente (herramienta o servicio) y armar su kit de artículos',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.INGENIERIA_VENTAS],
@@ -386,11 +390,6 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'pumpingAprobarCambioItems',
     'pumping.cambios_items.aprobar',
     'Aprobar o rechazar cambios de ítems del pedido',
-  ),
-  nuevo(
-    'pumping.requisitos.puente',
-    'Confirmar a mano un requisito de otro módulo que aún no existe (puente temporal del traslado de salida)',
-    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
   ),
   nuevo(
     'pumping.ejecucion.formalizar',
@@ -779,7 +778,6 @@ export const Permission = {
   FCR_CAMBIOS_SOLICITAR: 'fcr.cambios_items.solicitar',
   FCR_CAMBIOS_APROBAR: 'fcr.cambios_items.aprobar',
   FCR_VER: 'fcr.tickets.ver',
-  FCR_REQUISITOS_PUENTE: 'fcr.requisitos.puente',
   FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
   FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
   ENCUESTAS_GESTIONAR: 'encuestas.administracion.gestionar',
@@ -790,7 +788,6 @@ export const Permission = {
   PUMPING_TERMINOS_VALIDAR: 'pumping.terminos.validar',
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
-  PUMPING_REQUISITOS_PUENTE: 'pumping.requisitos.puente',
   PUMPING_EJECUCION_FORMALIZAR: 'pumping.ejecucion.formalizar',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',

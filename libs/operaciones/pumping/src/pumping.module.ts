@@ -20,7 +20,6 @@ import { DocumentosTicketService } from './services/documentos-ticket.service';
 import { ReporteHerramientasController } from './controllers/reporte-herramientas.controller';
 import { ReporteHerramientasService } from './services/reporte-herramientas.service';
 import { ReportesDiariosService } from './services/reportes-diarios.service';
-import { RevisionSalidaService } from './services/revision-salida.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TerminosService } from './services/terminos.service';
 import { TicketsService } from './services/tickets.service';
@@ -52,7 +51,6 @@ import { TicketsService } from './services/tickets.service';
     ReporteUnidadService,
     EjecucionService,
     QuimicosService,
-    RevisionSalidaService,
     ReportesDiariosService,
     ReporteHerramientasService,
     DiaCorregidoConsumer,

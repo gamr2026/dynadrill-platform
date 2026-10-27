@@ -107,7 +107,7 @@ run(
     const otroOperador = () =>
       token('operador_fcr', OTRO_OPERADOR.nombre, [P.FCR_OPERAR], OTRO_OPERADOR.id);
     const jefe = () =>
-      token('jefe_base', JEFE.nombre, [P.FCR_OPERAR, P.FCR_REQUISITOS_PUENTE], JEFE.id);
+      token('jefe_base', JEFE.nombre, [P.FCR_OPERAR], JEFE.id);
     const sinPermiso = () => token('ingenieria_ventas', 'Vera Ventas', []);
 
     const pedidos: string[] = [];
@@ -408,15 +408,10 @@ run(
         expect(otroPaso.body).toEqual([]);
       });
 
-      it('exige el permiso fcr.tickets.operar (sin él, 403) y el requisito del puente tiene el suyo', async () => {
+      it('exige el permiso fcr.tickets.operar (sin él, 403)', async () => {
         const t = await crear();
         await http().get('/api/operaciones/fcr/tickets').set(sinPermiso()).expect(403);
         await http().get(`/api/operaciones/fcr/tickets/${t.id}`).set(sinPermiso()).expect(403);
-        await http()
-          .post(`/api/operaciones/fcr/requisitos/${uuidv7()}/cumplir`)
-          .set(supervisor())
-          .send({ motivo: 'sin permiso del puente' })
-          .expect(403);
       });
 
       it('el detalle trae el tipo de OT, los pasos siguientes, el equipo y el historial', async () => {
@@ -920,7 +915,7 @@ run(
       });
     });
 
-    describe('catálogos y puente de requisitos', () => {
+    describe('catálogos y requisitos', () => {
       it('lista los catálogos activos de FCR en orden', async () => {
         const r = await http().get('/api/operaciones/fcr/catalogos').set(supervisor()).expect(200);
         expect(r.body.tiposOperador.map((x: { codigo: string }) => x.codigo)).toEqual([
@@ -941,7 +936,7 @@ run(
         ]);
       });
 
-      it('el puente temporal no confirma los requisitos que cumple FCR', async () => {
+      it('el puente manual se retiró: los requisitos solo los cumple el sistema o el evento de su dueño', async () => {
         const t = await crear({ tipoOt: 'servicio' });
         const r = (
           await prisma.ticketRequisito.findFirstOrThrow({
@@ -952,12 +947,7 @@ run(
           .post(`/api/operaciones/fcr/requisitos/${r}/cumplir`)
           .set(jefe())
           .send({ motivo: 'prueba del puente' })
-          .expect(400);
-        await http()
-          .post(`/api/operaciones/fcr/requisitos/${r}/cumplir`)
-          .set(jefe())
-          .send({ motivo: 'x' })
-          .expect(400);
+          .expect(404);
       });
     });
 
@@ -1113,7 +1103,7 @@ run(
         );
       });
 
-      it('un requisito no se repite y el puente exige motivo', async () => {
+      it('un requisito no se repite, no admite el origen manual y el cumplido exige su fecha', async () => {
         const t = await crear({ tipoOt: 'servicio' });
         await rechaza(
           "INSERT INTO fcr.ticket_requisito (id, ticket_id, requisito_codigo) VALUES ($1, $2, 'tipo_operador_definido')",

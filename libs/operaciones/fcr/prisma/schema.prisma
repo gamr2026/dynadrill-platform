@@ -403,8 +403,8 @@ model TicketPersona {
 }
 
 /// Un requisito de un ticket o de uno de sus operadores. Un índice único (en la base de datos) impide duplicados.
-/// Se cumple desde FCR (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con el puente temporal
-/// (`manual_temporal`, con motivo).
+/// Se cumple desde FCR (`sistema`), por un evento de otro módulo (`evento`) (el puente manual `manual_temporal` se retiró: solo queda como
+/// historia).
 model TicketRequisito {
   id              String              @id @db.Uuid
   ticketId        String              @map("ticket_id") @db.Uuid

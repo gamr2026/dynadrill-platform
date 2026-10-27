@@ -481,8 +481,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   const op1 = () => como('operador', OP1.id, OP1.nombre);
   const op2 = () => como('operador', OP2.id, OP2.nombre);
   const supervisora = () => como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre);
-  const jefeConPuente = () =>
-    como('jefe_base', JEFE, 'Jaime Jefe de Base', [P.PUMPING_OPERAR, P.PUMPING_REQUISITOS_PUENTE]);
   const cuerpoAsignacion = {
     supervisorId: SUPERVISORA.id,
     operadores: [
@@ -1233,7 +1231,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await http().patch(url).set(operador()).send({ toolboxTalkRealizado: false }).expect(403); // no es del equipo
   });
 
-  it('requisitos de otros módulos: los cumple el evento de su dueño (idempotente) y, mientras no existan, el puente temporal con motivo', async () => {
+  it('requisitos de otros módulos: los cumple solo el evento de su dueño (idempotente); el puente manual ya no existe', async () => {
     const t = await ticketEnTraslado();
     const e = externo('qhse.epi.despachada', { ticketId: t.id, usuarioId: OP1.id });
     await externos.consumir(e);
@@ -1315,44 +1313,19 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await externos.consumir(externo('qhse.epi.despachada', { usuarioId: OP1.id }));
     await externos.consumir(externo('qhse.otra_cosa', { ticketId: t.id }));
 
-    // puente temporal: exige permiso y motivo, y no sirve para lo que cumple Pumping
+    // el puente manual se retiró (27/10/2026): ni la ruta existe ni la base admite ese origen
     const epiOp2 = req.find((x) => x.codigo === 'epi_despachado' && x.para === OP2.nombre)!;
-    const ingreso = req.find((x) => x.codigo === 'checklist_ingreso_locacion')!;
     await http()
       .post(`${base}/requisitos/${epiOp2.id}/cumplir-manual`)
       .set(jefe())
-      .send({ motivo: 'x' })
-      .expect(403); // sin el permiso
-    await http()
-      .post(`${base}/requisitos/${epiOp2.id}/cumplir-manual`)
-      .set(jefeConPuente())
-      .send({ motivo: '  ' })
-      .expect(400);
-    await http()
-      .post(`${base}/requisitos/${ingreso.id}/cumplir-manual`)
-      .set(jefeConPuente())
-      .send({ motivo: 'prueba' })
-      .expect(400);
-    await http()
-      .post(`${base}/requisitos/${epiOp2.id}/cumplir-manual`)
-      .set(jefeConPuente())
       .send({ motivo: 'QHSE aún no está en el portal nuevo' })
-      .expect(201);
-    await http()
-      .post(`${base}/requisitos/${epiOp2.id}/cumplir-manual`)
-      .set(jefeConPuente())
-      .send({ motivo: 'otra vez' })
-      .expect(409);
-    const fila = (await requisitosDe(t.id)).find((x) => x.id === epiOp2.id);
-    expect(fila).toMatchObject({ estado: 'cumplido', origen: 'manual_temporal' });
-    const bd = await admin.query(
-      'SELECT motivo, cumplido_por FROM pumping.ticket_requisito WHERE id = $1',
-      [epiOp2.id],
-    );
-    expect(bd.rows[0]).toEqual({
-      motivo: 'QHSE aún no está en el portal nuevo',
-      cumplido_por: JEFE,
-    });
+      .expect(404);
+    await expect(
+      admin.query(
+        "UPDATE pumping.ticket_requisito SET origen = 'manual_temporal', motivo = 'x', cumplido_por = $2, cumplido_at = now(), estado = 'cumplido' WHERE id = $1",
+        [epiOp2.id, JEFE],
+      ),
+    ).rejects.toThrow(/ticket_requisito_sin_manual_check/);
   });
 
   it('D9: QHSE valida el texto de los términos o publica una versión nueva; la anterior queda como constancia y solo QHSE puede', async () => {
@@ -2134,42 +2107,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     });
   });
 
-  describe('revisión de reportes de salida: el Supervisor aprueba la inspección de cada unidad (P2)', () => {
-    const aprobar = (t: { url: string }, unidadId: string, h = supervisora()) =>
-      http().post(`${t.url}/revision-salida/inspecciones/${unidadId}/aprobar`).set(h);
+  describe('inspección de vehículo aprobada: la aprueba Flota y llega por evento (ya no hay aprobación en Pumping)', () => {
     const inspeccion = async (id: string, unidadId: string) =>
       (
         await admin.query(
-          "SELECT estado, origen, motivo, cumplido_por FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND unidad_id = $2",
+          "SELECT estado, origen FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND unidad_id = $2",
           [id, unidadId],
         )
       ).rows[0];
 
-    it('solo en su paso, por el Supervisor del equipo, una sola vez por unidad y dejando constancia', async () => {
+    it('el evento de Flota cumple el requisito de esa unidad (y la otra sigue pendiente); un rechazo lo reabre; la ruta vieja ya no existe', async () => {
       const t = await ticketEnTraslado();
-      // fuera de su paso
-      expect((await aprobar(t, VEHICULO.unidadId)).status).toBe(409);
-
-      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
-        t.id,
-        'revision_reportes_salida',
-      ]);
-      expect((await aprobar(t, VEHICULO.unidadId, op1())).status).toBe(403); // el operador no aprueba
-      expect((await aprobar(t, uuidv7())).status).toBe(404); // una unidad que no es del ticket
-
-      const ok = await aprobar(t, VEHICULO.unidadId);
-      expect(ok.status).toBe(201);
-      expect(await inspeccion(t.id, VEHICULO.unidadId)).toMatchObject({
-        estado: 'cumplido',
-        origen: 'manual_temporal',
-        cumplido_por: SUPERVISORA.id,
-      });
-      expect((await inspeccion(t.id, VEHICULO.unidadId)).motivo).toContain('Supervisor');
-      // la otra unidad sigue pendiente
-      expect((await inspeccion(t.id, VEHICULO_2.unidadId)).estado).toBe('pendiente');
-      expect((await aprobar(t, VEHICULO.unidadId)).status).toBe(409); // ya aprobada
-
-      // el evento de Flota, cuando exista, no choca con la aprobación ya hecha
+      expect((await inspeccion(t.id, VEHICULO.unidadId)).estado).toBe('pendiente');
       await externos.consumir(
         externo(
           'flota.inspeccion_vehiculo.aprobada',
@@ -2177,7 +2126,20 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           'flota',
         ),
       );
-      expect((await inspeccion(t.id, VEHICULO.unidadId)).origen).toBe('manual_temporal');
+      expect(await inspeccion(t.id, VEHICULO.unidadId)).toEqual({ estado: 'cumplido', origen: 'evento' });
+      expect((await inspeccion(t.id, VEHICULO_2.unidadId)).estado).toBe('pendiente');
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.rechazada',
+          { ticketId: t.id, unidadId: VEHICULO.unidadId },
+          'flota',
+        ),
+      );
+      expect((await inspeccion(t.id, VEHICULO.unidadId)).estado).toBe('pendiente');
+      await http()
+        .post(`${t.url}/revision-salida/inspecciones/${VEHICULO.unidadId}/aprobar`)
+        .set(supervisora())
+        .expect(404);
     });
   });
 

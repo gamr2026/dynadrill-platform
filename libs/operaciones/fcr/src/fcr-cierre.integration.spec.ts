@@ -596,33 +596,20 @@ run(
         expect(fugas.rowCount).toBe(0);
       });
 
-      it('el puente temporal confirma el Acta con motivo mientras QHSE no la publica', async () => {
+      it('el Acta la cumple solo el evento de QHSE: el puente manual ya no existe', async () => {
         const t = await hastaCierre();
         const req = await prisma.ticketRequisito.findFirstOrThrow({
           where: { ticketId: t.id, requisitoCodigo: 'acta_entrega_locacion' },
         });
         await http()
           .post(`/api/operaciones/fcr/requisitos/${req.id}/cumplir`)
-          .set(supervisor())
-          .send({ motivo: 'sin permiso' })
-          .expect(403);
-        const jefe = tok(JEFE, [P.FCR_OPERAR, P.FCR_REQUISITOS_PUENTE]);
-        await http()
-          .post(`/api/operaciones/fcr/requisitos/${req.id}/cumplir`)
-          .set(jefe)
-          .send({ motivo: 'x' })
-          .expect(400);
-        await http()
-          .post(`/api/operaciones/fcr/requisitos/${req.id}/cumplir`)
-          .set(jefe)
+          .set(tok(JEFE, [P.FCR_OPERAR]))
           .send({ motivo: 'QHSE aún no publica el evento' })
-          .expect(201);
-        const fila = await prisma.ticketRequisito.findUniqueOrThrow({ where: { id: req.id } });
-        expect(fila).toMatchObject({
-          estado: 'cumplido',
-          origen: 'manual_temporal',
-          motivo: 'QHSE aún no publica el evento',
-        });
+          .expect(404);
+        expect(
+          (await prisma.ticketRequisito.findUniqueOrThrow({ where: { id: req.id } })).estado,
+        ).toBe('pendiente');
+        await actaConsumer.consumir(eventoQhse('qhse.acta_entrega.cargada', t.id));
         await avanzar(t.id, 'cerrado').expect(201);
       });
 

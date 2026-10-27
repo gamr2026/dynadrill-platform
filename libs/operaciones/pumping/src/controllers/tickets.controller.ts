@@ -18,7 +18,6 @@ import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AsignacionService } from '../services/asignacion.service';
 import { QuimicosService } from '../services/quimicos.service';
-import { RevisionSalidaService } from '../services/revision-salida.service';
 import { TicketsService } from '../services/tickets.service';
 
 const P = Permission;
@@ -98,7 +97,6 @@ export class TicketsController {
     private readonly tickets: TicketsService,
     private readonly asignacion: AsignacionService,
     private readonly quimicos: QuimicosService,
-    private readonly revisionSalida: RevisionSalidaService,
   ) {}
 
   @RequirePermission(P.PUMPING_OPERAR)
@@ -150,17 +148,6 @@ export class TicketsController {
   @Get('tickets/:id/personal-ocupado')
   personalOcupado(@Param('id', ParseUUIDPipe) id: string) {
     return this.asignacion.personalOcupado(id);
-  }
-
-  /** El Supervisor del equipo aprueba la inspección de una unidad al revisar los reportes de salida. */
-  @RequirePermission(P.PUMPING_OPERAR)
-  @Post('tickets/:id/revision-salida/inspecciones/:unidadId/aprobar')
-  aprobarInspeccion(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('unidadId', ParseUUIDPipe) unidadId: string,
-    @CurrentUser() actor: AuthUser,
-  ) {
-    return this.revisionSalida.aprobarInspeccion(id, unidadId, actor);
   }
 
   /** Químicos del ticket (asignado, usado, devuelto y pendiente) y su documento de mezcla. */

@@ -31,8 +31,7 @@ const textoDe = (nombre: string, para: string | null) => (para ? `${nombre} (${p
 
 /**
  * Requisitos de cada paso (catálogo en la base de datos). Al completar la asignación se crean las filas del ticket; cada una se cumple
- * desde FCR (`sistema`), por un evento de otro módulo (`evento`) o, mientras ese módulo no exista, con el puente temporal
- * (`manual_temporal`, con motivo). Para salir de un paso no puede quedar ninguno pendiente.
+ * desde FCR (`sistema`), por un evento de otro módulo (`evento`). El puente manual (`manual_temporal`) se retiró el 27/10/2026. Para salir de un paso no puede quedar ninguno pendiente.
  */
 @Injectable()
 export class RequisitosService {
@@ -239,37 +238,5 @@ export class RequisitosService {
           a.nombre.localeCompare(b.nombre, 'es') ||
           (a.para ?? '').localeCompare(b.para ?? '', 'es'),
       );
-  }
-
-  /**
-   * PUENTE TEMPORAL: confirma a mano un requisito cuyo dato pertenece a un módulo que todavía no existe en el portal nuevo (QHSE,
-   * Mantenimiento). Exige motivo y queda registrado como `manual_temporal`. Los requisitos de FCR no se confirman así.
-   */
-  async cumplirManual(requisitoId: string, motivo: string, actorId: string): Promise<void> {
-    const texto = motivo?.trim();
-    if (!texto) throw new BadRequestException('El motivo es obligatorio');
-    await this.prisma.$transaction(async (tx) => {
-      const f = await tx.ticketRequisito.findUnique({
-        where: { id: requisitoId },
-        include: { requisito: true },
-      });
-      if (!f) throw new NotFoundException('El requisito no existe');
-      if (f.requisito.modulo === 'fcr') {
-        throw new BadRequestException(
-          'Este requisito lo cumple FCR al registrar su información: no se confirma a mano',
-        );
-      }
-      if (f.estado === 'cumplido') throw new ConflictException('El requisito ya está cumplido');
-      await tx.ticketRequisito.update({
-        where: { id: requisitoId },
-        data: {
-          estado: 'cumplido',
-          cumplidoAt: new Date(),
-          cumplidoPor: actorId,
-          origen: 'manual_temporal',
-          motivo: texto,
-        },
-      });
-    });
   }
 }

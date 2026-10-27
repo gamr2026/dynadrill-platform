@@ -67,7 +67,7 @@ describe('catálogo de permisos', () => {
   it('un permiso retirado sin reemplazo se declara a propósito (lista cerrada)', () => {
     expect(
       PERMISSION_REPLACEMENTS.filter((r) => r.replacedBy.length === 0).map((r) => r.retired),
-    ).toEqual(['comercial.cierre.gestionar']);
+    ).toEqual(['comercial.cierre.gestionar', 'pumping.requisitos.puente', 'fcr.requisitos.puente']);
   });
 
   it('catálogos: la lectura es abierta y las escrituras heredan los roles de la demo', () => {
