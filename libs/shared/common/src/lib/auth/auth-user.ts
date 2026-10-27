@@ -12,9 +12,6 @@ export interface JwtPayload {
   roleCode: RoleCode;
   /** true si el token salió de `switch-role` (solo desarrollo). */
   impersonated?: boolean;
-  /** TRANSICIÓN: ids numéricos del backend demo; el gateway los usa para traducir el token. */
-  legacyId?: number;
-  legacyRoleId?: number;
   /** Permisos del rol al emitir el token (RBAC). Un token sin esta clave se trata como sin permisos. */
   permissions?: string[];
   /** La persona aún debe cambiar su clave: solo puede usar las rutas marcadas `@AllowPendingPasswordChange`. */

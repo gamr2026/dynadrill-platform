@@ -33,15 +33,7 @@ CORS_ORIGIN=http://localhost:4200
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 JWT_PUBLIC_KEY="${publicPem}"
 
-# Backend demo (dynadrill-backend). Todo lo que ningún contenedor nuevo atienda va aquí.
-# Ajuste el puerto si la demo corre en otro (p. ej. PORT=3300 npm run start:prod dentro de dynadrill-backend).
-LEGACY_URL=http://localhost:3000
-
-# TRANSICIÓN (puente de identidad): JWT_SECRET del .env de la demo. Con él el gateway convierte el token
-# nuevo en uno que la demo acepta. Sin él, los módulos que siguen en la demo rechazarán el login nuevo.
-# LEGACY_JWT_SECRET=
-
-# Un contenedor sin URL no recibe tráfico: sus rutas siguen en la demo.
+# Un contenedor sin URL no recibe tráfico: sus rutas responden 404.
 # Descomente cada línea cuando el contenedor tenga listo el módulo que atiende esas rutas.
 # PLATAFORMA_URL=http://localhost:3101
 # COMERCIAL_URL=http://localhost:3102

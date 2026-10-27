@@ -189,35 +189,20 @@ run('identidad (base de datos real)', () => {
       expect(rows[0].token_hash).not.toBe(res.body.refreshToken);
     });
 
-    it('puente de transición: el token y la respuesta llevan legacyId solo si el usuario existe en la demo', async () => {
-      // usuario nuevo (sin equivalente en la demo): sin claims de puente
-      await crearUsuario('sinlegacy', 'operador');
-      const nuevo = (await login('sinlegacy').expect(200)).body;
-      expect(nuevo.user).toMatchObject({ legacyId: null });
-      expect(jwt.decode(nuevo.accessToken)).not.toHaveProperty('legacyId');
-
-      // usuario migrado de la demo: id numérico propio y del rol
-      const u = await crearUsuario('conlegacy', 'operador');
-      const legacyId = 900000 + Math.floor(Math.random() * 99999);
-      const rolLegacy = (await prisma.rol.findUniqueOrThrow({ where: { id: roles['operador'] } }))
-        .legacyId;
-      await admin.query(`UPDATE identidad.usuario SET legacy_id = $1 WHERE id = $2`, [
-        legacyId,
-        u.id,
-      ]);
-      const res = (await login('conlegacy').expect(200)).body;
-      expect(res.user).toMatchObject({ legacyId, roleLegacyId: rolLegacy });
+    it('sin puente con la demo: ni el token ni la respuesta llevan ids del backend demo', async () => {
+      const u = await crearUsuario('sinpuente', 'operador');
+      const res = (await login('sinpuente').expect(200)).body;
+      expect(res.user).not.toHaveProperty('legacyId');
+      expect(res.user).not.toHaveProperty('roleLegacyId');
       const claims = jwt.decode(res.accessToken) as Record<string, unknown>;
-      expect(claims['legacyId']).toBe(legacyId);
-      if (rolLegacy !== null) expect(claims['legacyRoleId']).toBe(rolLegacy);
-
-      // /roles/:code/usuarios también lo expone (los módulos viejos asignan por ese id)
-      const adminUser = await crearUsuario('adminlegacy', 'superadmin');
-      void adminUser;
-      const tk = (await login('adminlegacy').expect(200)).body.accessToken;
-      const lista = (await http().get('/api/roles/operador/usuarios').set(bearer(tk)).expect(200))
-        .body;
-      expect(lista.find((x: { id: string }) => x.id === u.id)).toMatchObject({ legacyId });
+      expect(claims).not.toHaveProperty('legacyId');
+      expect(claims).not.toHaveProperty('legacyRoleId');
+      // las columnas ya no existen en la base
+      const cols = await admin.query(
+        `SELECT 1 FROM information_schema.columns WHERE table_schema = 'identidad' AND column_name = 'legacy_id'`,
+      );
+      expect(cols.rowCount).toBe(0);
+      void u;
     });
 
     it('migra en silencio un hash bcrypt de la demo a Argon2id en el primer login correcto', async () => {
@@ -593,9 +578,8 @@ run('identidad (base de datos real)', () => {
         await http().get('/api/roles/superadmin/usuarios').set(bearer(adminToken)).expect(200)
       ).body;
       expect(list.length).toBeGreaterThan(0);
-      // legacyId es de transición: los módulos viejos asignan por ese id numérico
       for (const item of list) {
-        expect(Object.keys(item).sort()).toEqual(['id', 'legacyId', 'name', 'specialty']);
+        expect(Object.keys(item).sort()).toEqual(['id', 'name', 'specialty']);
       }
     });
   });

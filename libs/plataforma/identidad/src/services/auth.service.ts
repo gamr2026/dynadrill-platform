@@ -220,8 +220,6 @@ export class AuthService {
       roleId: rol.id,
       roleCode: rol.codigo as RoleCode,
       impersonated: true,
-      legacyId: user.legacyId,
-      legacyRoleId: rol.legacyId,
       permissions,
       mustChangePassword: user.debeCambiarClave,
     });
@@ -267,8 +265,6 @@ export class AuthService {
       name: user.nombre,
       roleId: user.rol.id,
       roleCode: user.rol.codigo as RoleCode,
-      legacyId: user.legacyId,
-      legacyRoleId: user.rol.legacyId,
       permissions,
       mustChangePassword: user.debeCambiarClave,
     });
@@ -297,8 +293,6 @@ export class AuthService {
       roleId: rol.id,
       roleName: rol.nombre,
       roleCode: rol.codigo as RoleCode,
-      legacyId: user.legacyId,
-      roleLegacyId: rol.legacyId,
       permissions,
       mustChangePassword: user.debeCambiarClave,
     };

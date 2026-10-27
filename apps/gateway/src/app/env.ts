@@ -3,20 +3,11 @@ import { baseEnvSchema, defineEnv, jwtVerifyEnvSchema } from '@dyn/config';
 
 const url = z.string().url();
 
-/**
- * Un contenedor sin URL no recibe tráfico: sus rutas siguen en `demo-legacy`. Así cada módulo se
- * conmuta a la implementación nueva (agregando su URL) cuando supera su criterio de salida.
- */
+/** Un contenedor sin URL no recibe tráfico: sus rutas responden 404. */
 export const gatewayEnvSchema = defineEnv(
   baseEnvSchema,
   jwtVerifyEnvSchema,
   z.object({
-    LEGACY_URL: url,
-    /**
-     * TRANSICIÓN: secreto HS256 del backend demo (su JWT_SECRET). Si está definido, el gateway traduce
-     * el token nuevo (RS256) a uno que la demo acepte al enrutar hacia ella. Sin él, el token pasa tal cual.
-     */
-    LEGACY_JWT_SECRET: z.string().min(16).optional(),
     PLATAFORMA_URL: url.optional(),
     COMERCIAL_URL: url.optional(),
     OPERACIONES_URL: url.optional(),

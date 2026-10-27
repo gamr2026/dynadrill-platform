@@ -13,9 +13,6 @@ export interface AccessTokenInput {
   roleId: string;
   roleCode: JwtPayload['roleCode'];
   impersonated?: boolean;
-  /** TRANSICIÓN: ids del backend demo, para que el gateway traduzca el token. */
-  legacyId?: number | null;
-  legacyRoleId?: number | null;
   /** Permisos del rol al emitir el token; los servicios autorizan con ellos sin consultar la base. */
   permissions?: string[];
   /** Cambio de clave pendiente (ver `JwtPayload.mustChangePassword`). */
@@ -53,8 +50,6 @@ export class TokenService {
       roleId: input.roleId,
       roleCode: input.roleCode,
       ...(input.impersonated ? { impersonated: true as const } : {}),
-      ...(input.legacyId != null ? { legacyId: input.legacyId } : {}),
-      ...(input.legacyRoleId != null ? { legacyRoleId: input.legacyRoleId } : {}),
       permissions: input.permissions ?? [],
       ...(input.mustChangePassword ? { mustChangePassword: true as const } : {}),
     };

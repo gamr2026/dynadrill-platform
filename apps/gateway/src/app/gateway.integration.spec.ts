@@ -4,7 +4,6 @@ import { Test } from '@nestjs/testing';
 import { generateKeyPairSync } from 'node:crypto';
 import { createServer, IncomingHttpHeaders, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import * as jsonwebtoken from 'jsonwebtoken';
 import request from 'supertest';
 
 interface Seen {
@@ -51,7 +50,6 @@ const { publicKey, privateKey } = keys();
 
 describe('Gateway (proxy real contra servidores falsos)', () => {
   let app: INestApplication;
-  const legacy = fakeUpstream('legacy');
   const plataforma = fakeUpstream('plataforma');
   const signer = new JwtService({
     privateKey,
@@ -66,16 +64,14 @@ describe('Gateway (proxy real contra servidores falsos)', () => {
     });
 
   beforeAll(async () => {
-    const [legacyPort, plataformaPort] = await Promise.all([legacy.listen(), plataforma.listen()]);
+    const plataformaPort = await plataforma.listen();
     Object.assign(process.env, {
       SERVICE_NAME: 'gateway',
       PORT: '3100',
       LOG_LEVEL: 'silent',
       JWT_PUBLIC_KEY: publicKey,
-      LEGACY_URL: `http://127.0.0.1:${legacyPort}`,
       PLATAFORMA_URL: `http://127.0.0.1:${plataformaPort}`,
       COMERCIAL_URL: 'http://127.0.0.1:1', // puerto cerrado: simula un contenedor caído
-      LEGACY_JWT_SECRET: 'secreto-de-la-demo-para-pruebas-123',
       RATE_LIMIT_PER_MINUTE: '60',
       LOGIN_RATE_LIMIT_PER_MINUTE: '4',
     });
@@ -90,98 +86,23 @@ describe('Gateway (proxy real contra servidores falsos)', () => {
 
   afterAll(async () => {
     await app.close();
-    legacy.server.close();
     plataforma.server.close();
   });
 
   it('health lo responde el propio gateway, sin pasar por los destinos', async () => {
     await request(app.getHttpServer()).get('/health/live').expect(200, { status: 'ok' });
-    expect(legacy.seen).toHaveLength(0);
+    expect(plataforma.seen).toHaveLength(0);
   });
 
-  it('ruta sin contenedor nuevo va a demo-legacy sin validar el token (es de la demo)', async () => {
+  it('una ruta que ningún contenedor atiende responde 404 con el formato de error estándar, sin llegar a ningún destino', async () => {
+    const antes = plataforma.seen.length;
     const res = await request(app.getHttpServer())
       .get('/api/facturacion-vieja/algo?x=1')
-      .set('Authorization', 'Bearer token-hs256-de-la-demo')
-      .expect(200);
-    expect(res.body).toEqual({ upstream: 'legacy' });
-    const got = legacy.seen.at(-1);
-    expect(got?.url).toBe('/api/facturacion-vieja/algo?x=1');
-    expect(got?.headers.authorization).toBe('Bearer token-hs256-de-la-demo');
-    expect(got?.headers['x-request-id']).toBeTruthy();
-    expect(got?.headers['x-forwarded-for']).toBeTruthy();
-  });
-
-  it('puente: traduce un token nuevo con legacyId a uno HS256 que la demo acepta', async () => {
-    const nuevo = signer.sign(
-      {
-        sub: '0192f7a4-5c1e-7b3a-9e21-8d4c6a1f0b77',
-        email: 'a@b.c',
-        roleId: 'uuid-rol',
-        roleCode: 'supervisor',
-        legacyId: 7,
-        legacyRoleId: 1,
-      },
-      { expiresIn: 900 },
-    );
-    await request(app.getHttpServer())
-      .get('/api/facturacion-vieja/pedidos')
-      .set('Authorization', `Bearer ${nuevo}`)
-      .expect(200);
-    const sent = (legacy.seen.at(-1)?.headers.authorization ?? '').replace('Bearer ', '');
-    expect(sent).not.toBe(nuevo);
-    const decoded = jsonwebtoken.verify(sent, 'secreto-de-la-demo-para-pruebas-123', {
-      algorithms: ['HS256'],
-    }) as jsonwebtoken.JwtPayload;
-    expect(decoded).toMatchObject({ sub: 7, email: 'a@b.c', roleId: 1, roleCode: 'supervisor' });
-    const original = jsonwebtoken.decode(nuevo) as jsonwebtoken.JwtPayload;
-    expect(decoded.exp).toBe(original.exp); // misma vigencia
-  });
-
-  it('puente: un token con cambio de clave pendiente no llega a la demo (403 PASSWORD_CHANGE_REQUIRED)', async () => {
-    const pendiente = signer.sign(
-      {
-        sub: '0192f7a4-5c1e-7b3a-9e21-8d4c6a1f0b77',
-        email: 'a@b.c',
-        roleId: 'uuid-rol',
-        roleCode: 'operador',
-        legacyId: 7,
-        legacyRoleId: 1,
-        mustChangePassword: true,
-      },
-      { expiresIn: 900 },
-    );
-    const antes = legacy.seen.length;
-    const res = await request(app.getHttpServer())
-      .get('/api/facturacion-vieja/pedidos')
-      .set('Authorization', `Bearer ${pendiente}`)
-      .expect(403);
-    expect(res.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
-    expect(legacy.seen.length).toBe(antes); // la demo ni se enteró
-  });
-
-  it('puente: un token sin vencimiento no se traduce (pasa intacto, sin romper)', async () => {
-    const sinExp = signer.sign({
-      sub: 'x',
-      email: 'a@b.c',
-      roleId: 'r',
-      roleCode: 'operador',
-      legacyId: 7,
-    });
-    await request(app.getHttpServer())
-      .get('/api/facturacion-vieja/pedidos')
-      .set('Authorization', `Bearer ${sinExp}`)
-      .expect(200);
-    expect(legacy.seen.at(-1)?.headers.authorization).toBe(`Bearer ${sinExp}`);
-  });
-
-  it('puente: un token nuevo SIN legacyId (usuario que no existe en la demo) pasa intacto', async () => {
-    const sinLegacy = validToken();
-    await request(app.getHttpServer())
-      .get('/api/facturacion-vieja/pedidos')
-      .set('Authorization', `Bearer ${sinLegacy}`)
-      .expect(200);
-    expect(legacy.seen.at(-1)?.headers.authorization).toBe(`Bearer ${sinLegacy}`);
+      .set('Authorization', `Bearer ${validToken()}`)
+      .expect(404);
+    expect(res.headers['content-type']).toMatch(/problem\+json/);
+    expect(res.body).toMatchObject({ status: 404, statusCode: 404 });
+    expect(plataforma.seen.length).toBe(antes);
   });
 
   it('hacia un contenedor nuevo exige token: 401 sin él y con uno inválido', async () => {

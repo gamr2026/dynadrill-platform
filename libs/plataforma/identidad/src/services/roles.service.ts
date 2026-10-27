@@ -41,12 +41,11 @@ export class RolesService {
   async usuariosPorRol(code: string): Promise<UsuarioPorRolResponse[]> {
     const users = await this.prisma.usuario.findMany({
       where: { activo: true, rol: { codigo: code } },
-      select: { id: true, legacyId: true, nombre: true, especialidad: true },
+      select: { id: true, nombre: true, especialidad: true },
       orderBy: { nombre: 'asc' },
     });
     return users.map((u) => ({
       id: u.id,
-      legacyId: u.legacyId,
       name: u.nombre,
       specialty: u.especialidad,
     }));

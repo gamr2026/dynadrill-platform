@@ -122,8 +122,6 @@ export class UpdateUserDto {
 
 export interface UserResponse {
   id: string;
-  /** TRANSICIÓN: id numérico en el backend demo (null si no existía allí). */
-  legacyId: number | null;
   email: string;
   username: string;
   name: string;
@@ -156,8 +154,6 @@ export interface UserResponse {
 
 export interface RolResponse {
   id: string;
-  /** TRANSICIÓN: id numérico en el backend demo. */
-  legacyId: number | null;
   name: string;
   code: string;
   description: string | null;
@@ -165,8 +161,6 @@ export interface RolResponse {
 
 export interface UsuarioPorRolResponse {
   id: string;
-  /** TRANSICIÓN: los módulos viejos asignan por este id numérico. */
-  legacyId: number | null;
   name: string;
   specialty: string | null;
 }

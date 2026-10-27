@@ -69,9 +69,6 @@ export interface SessionUser {
   roleId: string;
   roleName: string;
   roleCode: RoleCode;
-  /** TRANSICIÓN: id numérico del usuario / del rol en el backend demo (null si no existía allí). */
-  legacyId: number | null;
-  roleLegacyId: number | null;
   /** Códigos de permiso del rol efectivo (RBAC): `<modulo>.<recurso>.<accion>`. */
   permissions: string[];
   /** true: debe elegir su clave (POST /auth/change-password) antes de usar el resto del sistema. */

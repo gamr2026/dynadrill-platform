@@ -24,8 +24,6 @@
     "db:generate": "nx run-many -t prisma-generate",
     "db:test:preparar": "node scripts/preparar-base-de-pruebas.mjs",
     "db:seed:identidad": "tsx --tsconfig tsconfig.base.json libs/plataforma/identidad/prisma/seed.ts",
-    "db:migrate-demo:identidad": "tsx --tsconfig tsconfig.base.json libs/plataforma/identidad/prisma/migrate-from-demo.ts",
-    "db:migrate-demo:comercial": "tsx --tsconfig tsconfig.base.json libs/comercial/pedidos/prisma/migrate-from-demo.ts",
     "db:migrate:comercial": "cd libs/comercial/pedidos && prisma migrate deploy",
     "db:migrate:pumping": "cd libs/operaciones/pumping && prisma migrate deploy",
     "db:migrate:qhse": "cd libs/qhse/seguridad && prisma migrate deploy",
@@ -59,8 +57,7 @@
     "db:migrate:integraciones": "cd libs/plataforma/integraciones && prisma migrate deploy",
     "db:seed:integraciones": "tsx --tsconfig tsconfig.base.json libs/plataforma/integraciones/prisma/seed.ts",
     "db:migrate:catalogos": "cd libs/plataforma/catalogos && prisma migrate deploy",
-    "db:seed:catalogos": "tsx --tsconfig tsconfig.base.json libs/plataforma/catalogos/prisma/seed.ts",
-    "db:migrate-demo:catalogos": "tsx --tsconfig tsconfig.base.json libs/plataforma/catalogos/prisma/migrate-from-demo.ts"
+    "db:seed:catalogos": "tsx --tsconfig tsconfig.base.json libs/plataforma/catalogos/prisma/seed.ts"
   },
   "workspaces": [],
   "devDependencies": {

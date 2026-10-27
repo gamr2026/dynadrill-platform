@@ -445,8 +445,6 @@ model ListaPrecios {
   requiereOrdenTrabajo Boolean @default(false) @map("requiere_orden_trabajo")
   /// Párrafo del contrato que la OT imprime (fijo por contrato).
   textoContrato        String? @map("texto_contrato")
-  /// id numérico de la demo, solo para trazar la migración inicial de listas.
-  legacyId       Int?     @unique @map("legacy_id")
 
   items ListaPreciosItem[]
 

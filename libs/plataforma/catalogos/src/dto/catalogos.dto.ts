@@ -128,15 +128,12 @@ export class PersonasQueryDto {
 // ------------------------------------------------------------ Respuestas
 export interface BloqueResponse {
   id: string;
-  /** TRANSICIÓN: id numérico en el backend demo (null si nació en el backend nuevo). */
-  legacyId: number | null;
   nombre: string;
   habilitado: boolean;
 }
 
 export interface CampoResponse {
   id: string;
-  legacyId: number | null;
   nombre: string;
   /** Zona comercial: su nombre y su id en el catálogo. */
   zona: string | null;
@@ -153,7 +150,6 @@ export interface CatalogoSimpleResponse {
 
 export interface TaladroResponse {
   id: string;
-  legacyId: number | null;
   nombre: string;
   rigContractual: string | null;
   habilitado: boolean;
@@ -161,7 +157,6 @@ export interface TaladroResponse {
 
 export interface PozoResponse {
   id: string;
-  legacyId: number | null;
   codigo: string;
   nombreCompleto: string;
   campoId: string;
@@ -173,7 +168,6 @@ export interface PozoResponse {
 
 export interface ClienteResponse {
   id: string;
-  legacyId: number | null;
   tipoIdentificacion: string;
   identificacion: string;
   nombreComercial: string;
@@ -183,7 +177,6 @@ export interface ClienteResponse {
 
 export interface PersonaResponse {
   id: string;
-  legacyId: number | null;
   tipo: TipoPersona;
   nombre: string;
   cedula?: string;

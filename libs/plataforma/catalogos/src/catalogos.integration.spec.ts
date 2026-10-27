@@ -170,7 +170,6 @@ run('catalogos (base de datos real)', () => {
       expect(pozos.length).toBeGreaterThanOrEqual(1103);
       expect(pozos[0]).toEqual({
         id: expect.any(String),
-        legacyId: expect.any(Number),
         codigo: expect.any(String),
         nombreCompleto: expect.any(String),
         campoId: expect.any(String),
@@ -185,8 +184,7 @@ run('catalogos (base de datos real)', () => {
       const conZona = campos.find((c: { zona: string | null }) => c.zona !== null);
       expect(conZona).toEqual(
         expect.objectContaining({
-          legacyId: expect.any(Number),
-          zona: expect.any(String),
+            zona: expect.any(String),
           zonaId: expect.any(String),
           habilitado: true,
         }),
@@ -201,36 +199,11 @@ run('catalogos (base de datos real)', () => {
   });
 
   describe('datos migrados desde la demo', () => {
-    it('toda fila migrada conserva su id numérico (legacy_id) y los conteos coinciden con la demo', async () => {
-      const q = async (sql: string) => Number((await admin.query(sql)).rows[0].n);
-      expect(
-        await q(
-          `SELECT count(*) n FROM catalogos.pozo WHERE legacy_id IS NULL AND codigo NOT LIKE 'it-%'`,
-        ),
-      ).toBe(0);
-      expect(
-        await q(
-          `SELECT count(*) n FROM catalogos.cliente WHERE legacy_id IS NULL AND identificacion NOT LIKE 'it-%'`,
-        ),
-      ).toBe(0);
-      expect(await q(`SELECT count(*) n FROM catalogos.bloque WHERE legacy_id IS NOT NULL`)).toBe(
-        18,
+    it('los catálogos ya no conservan el id numérico de la demo (sin columnas legacy_id)', async () => {
+      const cols = await admin.query(
+        `SELECT table_name FROM information_schema.columns WHERE table_schema = 'catalogos' AND column_name = 'legacy_id'`,
       );
-      expect(await q(`SELECT count(*) n FROM catalogos.campo WHERE legacy_id IS NOT NULL`)).toBe(
-        82,
-      );
-      expect(await q(`SELECT count(*) n FROM catalogos.taladro WHERE legacy_id IS NOT NULL`)).toBe(
-        71,
-      );
-      expect(await q(`SELECT count(*) n FROM catalogos.pozo WHERE legacy_id IS NOT NULL`)).toBe(
-        1103,
-      );
-      expect(await q(`SELECT count(*) n FROM catalogos.cliente WHERE legacy_id IS NOT NULL`)).toBe(
-        61,
-      );
-      expect(
-        await q(`SELECT count(*) n FROM catalogos.persona_contacto WHERE legacy_id IS NOT NULL`),
-      ).toBe(123);
+      expect(cols.rowCount).toBe(0);
     });
 
     it('cada pozo migrado apunta al campo y al bloque correctos (integridad referencial real)', async () => {
@@ -366,7 +339,6 @@ run('catalogos (base de datos real)', () => {
       ).body;
       expect(bloque).toEqual({
         id: expect.any(String),
-        legacyId: null,
         nombre: `${tag}-b1`,
         habilitado: true,
       });
@@ -458,7 +430,6 @@ run('catalogos (base de datos real)', () => {
         campoId: campo.id,
         bloqueId: bloque.id,
         habilitado: true,
-        legacyId: null,
       });
       expect(pozo.campo.nombre).toBe(`${tag}-c1`);
       expect(pozo.bloque.nombre).toBe(`${tag}-b1`);
@@ -719,7 +690,6 @@ run('catalogos (base de datos real)', () => {
       ).body;
       expect(cli).toEqual({
         id: expect.any(String),
-        legacyId: null,
         tipoIdentificacion: 'Ruc',
         identificacion: `${tag}-0991234567001`,
         nombreComercial: 'Operadora de Prueba',
@@ -765,7 +735,6 @@ run('catalogos (base de datos real)', () => {
         nombre,
         cedula: '1700000001',
         activo: true,
-        legacyId: null,
       });
 
       // mismo nombre en OTRO tipo es válido; en el mismo tipo, 409

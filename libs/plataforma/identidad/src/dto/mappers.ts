@@ -12,7 +12,6 @@ export function toUserResponse(u: Usuario & { perfil?: UsuarioPerfil | null }): 
   const e = u.perfil;
   return {
     id: u.id,
-    legacyId: u.legacyId,
     email: u.email,
     username: u.username,
     name: u.nombre,
@@ -51,7 +50,6 @@ export function toUserResponse(u: Usuario & { perfil?: UsuarioPerfil | null }): 
 export function toRolResponse(r: Rol): RolResponse {
   return {
     id: r.id,
-    legacyId: r.legacyId,
     name: r.nombre,
     code: r.codigo,
     description: r.descripcion,

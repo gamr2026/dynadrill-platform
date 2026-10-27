@@ -22,10 +22,6 @@ model Rol {
   nombre      String
   descripcion String?
 
-  /// TRANSICIÓN: id numérico que este rol tenía en el backend demo. Los módulos aún no migrados
-  /// siguen usando ese id; se elimina cuando el último módulo viejo pase al backend nuevo.
-  legacyId Int? @unique @map("legacy_id")
-
   usuarios  Usuario[]
   permisos  RolPermiso[]
   historial RolPermisoHistorial[]
@@ -51,9 +47,6 @@ model Usuario {
   /// Argon2id; los hashes bcrypt heredados de la demo se aceptan y se reemplazan en el primer login.
   passwordHash  String? @map("password_hash")
   entraObjectId String? @unique @map("entra_object_id") @db.Uuid
-
-  /// TRANSICIÓN: id numérico del usuario en el backend demo (ver Rol.legacyId).
-  legacyId Int? @unique @map("legacy_id")
 
   rolId String @map("rol_id") @db.Uuid
   rol   Rol    @relation(fields: [rolId], references: [id])

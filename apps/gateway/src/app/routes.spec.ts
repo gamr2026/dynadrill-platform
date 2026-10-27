@@ -1,7 +1,6 @@
 import { isPublicPath, resolveTarget, TargetUrls } from './routes';
 
 const all: TargetUrls = {
-  legacy: 'http://legacy',
   plataforma: 'http://plataforma',
   comercial: 'http://comercial',
   operaciones: 'http://operaciones',
@@ -20,42 +19,39 @@ describe('resolveTarget', () => {
     ['/api/as2/crear-cuentas', 'plataforma'],
     ['/api/integraciones/proveedores', 'plataforma'],
     ['/api/archivos/123/contenido', 'plataforma'],
-    ['/api/v2/catalogos/clientes', 'plataforma'], // catálogos nuevos (UUID); /api/catalogos sigue en la demo
+    ['/api/v2/catalogos/clientes', 'plataforma'], // catálogos (UUID)
     ['/api/comercial/secuencias', 'comercial'],
-    ['/api/facturacion/pedidos', 'legacy'], // hasta el corte de Pedidos
     ['/api/avisos', 'plataforma'],
     ['/api/auditoria', 'plataforma'],
     ['/api/firmas', 'plataforma'],
     ['/api/encuestas', 'plataforma'],
     ['/api/operaciones/pumping/tickets', 'operaciones'],
-    ['/api/operations/pumping/tickets', 'legacy'],
-    ['/api/unidades', 'legacy'],
-    ['/api/v2/qhse/epi', 'qhse'], // QHSE nuevo (UUID); /api/qhse sigue en la demo
-    ['/api/qhse/ptw', 'legacy'],
+    ['/api/v2/qhse/epi', 'qhse'],
   ])('%s → %s', (path, expected) => {
-    expect(resolveTarget(path, all).name).toBe(expected);
+    expect(resolveTarget(path, all)?.name).toBe(expected);
   });
 
-  it('catálogos y archivos siguen en demo-legacy hasta que existan sus módulos', () => {
-    expect(resolveTarget('/api/catalogos/pozos', all).name).toBe('legacy');
-    expect(resolveTarget('/api/files/uploads', all).name).toBe('legacy');
+  it.each([
+    '/api/facturacion/pedidos',
+    '/api/operations/pumping/tickets',
+    '/api/unidades',
+    '/api/qhse/ptw',
+    '/api/catalogos/pozos',
+    '/api/files/uploads',
+    '/api/algo-nuevo',
+  ])('%s ya no lo atiende nadie (404): la demo se retiró', (path) => {
+    expect(resolveTarget(path, all)).toBeNull();
   });
 
-  it('lo no asignado cae en demo-legacy', () => {
-    expect(resolveTarget('/api/algo-nuevo', all)).toEqual({ name: 'legacy', url: 'http://legacy' });
-  });
-
-  it('un contenedor sin URL deja sus rutas en demo-legacy', () => {
-    const soloLegacy: TargetUrls = { legacy: 'http://legacy' };
-    expect(resolveTarget('/api/auth/login', soloLegacy).name).toBe('legacy');
-    expect(
-      resolveTarget('/api/facturacion/pedidos', { ...soloLegacy, plataforma: 'http://p' }).name,
-    ).toBe('legacy');
+  it('un contenedor sin URL deja sus rutas sin atender', () => {
+    expect(resolveTarget('/api/auth/login', {})).toBeNull();
+    expect(resolveTarget('/api/comercial/pedidos', { plataforma: 'http://p' })).toBeNull();
+    expect(resolveTarget('/api/auth/login', { plataforma: 'http://p' })?.name).toBe('plataforma');
   });
 
   it('no confunde prefijos parecidos', () => {
-    expect(resolveTarget('/api/authors', all).name).toBe('legacy');
-    expect(resolveTarget('/api/usersx', all).name).toBe('legacy');
+    expect(resolveTarget('/api/authors', all)).toBeNull();
+    expect(resolveTarget('/api/usersx', all)).toBeNull();
   });
 });
 

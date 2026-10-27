@@ -23,12 +23,11 @@ import type {
 
 /**
  * Traducen columnas de la base a las formas que ya lee el frontend (mismos nombres de campo que la demo),
- * más `legacyId` para los módulos que aún usan ids numéricos. Nunca se serializa la entidad completa:
+ * Nunca se serializa la entidad completa:
  * así las columnas de auditoría no se filtran por accidente.
  */
 export const toBloque = (b: Bloque): BloqueResponse => ({
   id: b.id,
-  legacyId: b.legacyId,
   nombre: b.nombre,
   habilitado: b.habilitado,
 });
@@ -38,7 +37,6 @@ export type CampoConRelaciones = Campo & { zona?: Zona | null };
 
 export const toCampo = (c: CampoConRelaciones): CampoResponse => ({
   id: c.id,
-  legacyId: c.legacyId,
   nombre: c.nombre,
   zona: c.zona?.nombre ?? null,
   zonaId: c.zonaId,
@@ -53,7 +51,6 @@ export const toCatalogoSimple = (c: Zona): CatalogoSimpleResponse => ({
 
 export const toTaladro = (t: Taladro): TaladroResponse => ({
   id: t.id,
-  legacyId: t.legacyId,
   nombre: t.nombre,
   rigContractual: t.rigContractual,
   habilitado: t.habilitado,
@@ -63,7 +60,6 @@ export const toPozo = (
   p: Pozo & { campo?: CampoConRelaciones | null; bloque?: Bloque | null },
 ): PozoResponse => ({
   id: p.id,
-  legacyId: p.legacyId,
   codigo: p.codigo,
   nombreCompleto: p.nombreCompleto,
   campoId: p.campoId,
@@ -75,7 +71,6 @@ export const toPozo = (
 
 export const toCliente = (c: Cliente): ClienteResponse => ({
   id: c.id,
-  legacyId: c.legacyId,
   tipoIdentificacion: c.tipoIdentificacion,
   identificacion: c.identificacion,
   nombreComercial: c.nombreComercial,
@@ -85,7 +80,6 @@ export const toCliente = (c: Cliente): ClienteResponse => ({
 
 export const toPersona = (p: PersonaContacto): PersonaResponse => ({
   id: p.id,
-  legacyId: p.legacyId,
   tipo: p.tipo as TipoPersona,
   nombre: p.nombre,
   ...(p.cedula ? { cedula: p.cedula } : {}),
