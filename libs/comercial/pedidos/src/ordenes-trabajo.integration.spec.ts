@@ -98,7 +98,6 @@ run('orden de trabajo y cierre (base de datos real)', () => {
       P.ORDENES_VER,
       P.ORDENES_EMITIR,
       P.ORDENES_FIRMAR,
-      P.CIERRE_GESTIONAR,
     ]);
   const soloVer = () => bearer([P.ORDENES_VER, P.PREFACTURAS_VER]);
 

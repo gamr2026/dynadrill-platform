@@ -1063,6 +1063,27 @@ run('identidad (base de datos real)', () => {
         });
       });
 
+      it('un permiso retirado sin reemplazo se elimina con sus asignaciones y deja el historial de la revocación', async () => {
+        const rolId = rolPrueba!.id;
+        await prisma.rolPermiso.deleteMany({ where: { rolId } });
+        await crearViejoAsignado(rolId);
+        expect(
+          await syncPermisos(prisma, {
+            catalog: [],
+            replacements: [{ retired: viejo, replacedBy: [] }],
+          }),
+        ).toEqual({ nuevos: 0, asignacionesPorDefecto: 0, traspasadas: 0, retirados: 1 });
+        expect(await codigosEnBase(rolId)).toEqual([]);
+        expect(await prisma.permiso.findUnique({ where: { codigo: viejo } })).toBeNull();
+        const h = await admin.query(
+          'SELECT accion FROM identidad.rol_permiso_historial WHERE rol_id = $1 AND permiso_codigo = $2',
+          [rolId, viejo],
+        );
+        // el historial del rol de prueba conserva también las revocaciones de las pruebas anteriores
+        expect(h.rows.length).toBeGreaterThanOrEqual(1);
+        expect(h.rows.every((f: { accion: string }) => f.accion === 'revocado')).toBe(true);
+      });
+
       it('si un reemplazo no existe, falla y deja el permiso viejo y sus asignaciones intactos', async () => {
         const rolId = rolPrueba!.id;
         await prisma.rolPermiso.deleteMany({ where: { rolId } });

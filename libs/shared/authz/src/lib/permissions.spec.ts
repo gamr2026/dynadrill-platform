@@ -56,12 +56,18 @@ describe('catálogo de permisos', () => {
     expect(ALL_PERMISSION_CODES).not.toContain('identidad.roles.administrar');
   });
 
-  it('cada permiso retirado tiene reemplazos que existen y que no son él mismo', () => {
+  it('cada permiso retirado no está en el catálogo y sus reemplazos, si los tiene, existen y no son él mismo', () => {
     for (const { retired, replacedBy } of PERMISSION_REPLACEMENTS) {
       expect(ALL_PERMISSION_CODES).not.toContain(retired);
-      expect(replacedBy.length).toBeGreaterThan(0);
+      expect(replacedBy).not.toContain(retired);
       for (const code of replacedBy) expect(ALL_PERMISSION_CODES).toContain(code);
     }
+  });
+
+  it('un permiso retirado sin reemplazo se declara a propósito (lista cerrada)', () => {
+    expect(
+      PERMISSION_REPLACEMENTS.filter((r) => r.replacedBy.length === 0).map((r) => r.retired),
+    ).toEqual(['comercial.cierre.gestionar']);
   });
 
   it('catálogos: la lectura es abierta y las escrituras heredan los roles de la demo', () => {

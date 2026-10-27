@@ -56,7 +56,7 @@ const nuevo = (
 export const STANDARD_ACTIONS = ['ver', 'crear', 'editar', 'anular', 'inactivar'] as const;
 
 /**
- * Permisos retirados del catálogo y quiénes los reemplazan. La siembra traspasa las asignaciones: todo rol
+ * Permisos retirados del catálogo y quiénes los reemplazan (`replacedBy` vacío: el permiso se retira sin reemplazo porque ya no abre ninguna función). La siembra traspasa las asignaciones: todo rol
  * que tenía el permiso viejo recibe los nuevos (aunque un administrador se lo haya dado desde la app) y
  * luego el viejo se elimina. Así un cambio de catálogo nunca le quita acceso a nadie por sorpresa.
  */
@@ -96,6 +96,11 @@ export const PERMISSION_REPLACEMENTS: ReadonlyArray<{
       'catalogos.personas.editar',
       'catalogos.personas.inactivar',
     ],
+  },
+  {
+    // Los pasos «control de costos» y «listo para facturar» se retiraron el 21/10/2026: el permiso ya no abre nada.
+    retired: 'comercial.cierre.gestionar',
+    replacedBy: [],
   },
 ];
 
@@ -264,11 +269,6 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Generar la orden de trabajo de un pedido',
   ),
   def('facturacion', 'comercial.ordenes_trabajo.firmar', 'Marcar la orden de trabajo como firmada'),
-  def(
-    'facturacion',
-    'comercial.cierre.gestionar',
-    'Enviar a control de costos, dejar listo para facturar y registrar la factura del pedido',
-  ),
   def('pedidos', 'comercial.guias.ver', 'Ver las guías de remisión de un pedido'),
   def(
     'facturacion',
@@ -761,7 +761,6 @@ export const Permission = {
   ORDENES_VER: 'comercial.ordenes_trabajo.ver',
   ORDENES_EMITIR: 'comercial.ordenes_trabajo.emitir',
   ORDENES_FIRMAR: 'comercial.ordenes_trabajo.firmar',
-  CIERRE_GESTIONAR: 'comercial.cierre.gestionar',
   PREFACTURAS_VER: 'comercial.prefacturas.ver',
   PREFACTURAS_GENERAR: 'comercial.prefacturas.generar',
   PREFACTURAS_ENVIAR: 'comercial.prefacturas.enviar',
