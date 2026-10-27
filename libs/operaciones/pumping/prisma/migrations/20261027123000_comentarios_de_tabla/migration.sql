@@ -1,0 +1,27 @@
+-- Estándar de la base de datos: toda tabla lleva su comentario en español (pumping, 26 tablas).
+COMMENT ON TABLE pumping.aceptacion_terminos IS 'Constancia inmutable: la cuenta de cada operador asignado acepta, con hora del servidor, la versión vigente (solo se crea y se lee).';
+COMMENT ON TABLE pumping.gas_limite IS 'Límites de cada gas medido (catálogo). Sin mínimo: seguro si la lectura es menor al máximo; con mínimo: entre ambos, inclusive.';
+COMMENT ON TABLE pumping.inspeccion_item IS 'Ítems fijos del formulario, por sección (catálogo).';
+COMMENT ON TABLE pumping.loto_item IS 'Pasos de bloqueo y etiquetado (LOTO) que se verifican al ingresar (catálogo).';
+COMMENT ON TABLE pumping.paso IS 'Pasos del servicio de Pumping (catálogo): revisión inicial, asignación, traslados, ejecución, cierre...';
+COMMENT ON TABLE pumping.paso_requisito IS 'Requisitos que deben estar cumplidos para SALIR de un paso.';
+COMMENT ON TABLE pumping.paso_rol IS 'Roles que pueden actuar en cada paso (código de rol de identidad).';
+COMMENT ON TABLE pumping.reporte_diario_actividad IS 'Actividad de un día del Reporte Diario de un ticket: hora de inicio y fin, detalle y quién la anotó.';
+COMMENT ON TABLE pumping.reporte_diario_tabla IS 'Tabla dentro de una actividad: encabezados, filas y celdas, sin JSON.';
+COMMENT ON TABLE pumping.reporte_diario_tabla_celda IS 'Celda de una tabla de actividad del Reporte Diario: el valor de una fila en una columna.';
+COMMENT ON TABLE pumping.reporte_diario_tabla_columna IS 'Columna (encabezado) de una tabla de actividad del Reporte Diario.';
+COMMENT ON TABLE pumping.reporte_diario_tabla_fila IS 'Fila de una tabla de actividad del Reporte Diario.';
+COMMENT ON TABLE pumping.reporte_unidad IS 'Una por ticket y unidad. La salida se llena en Traslado de salida (firmada por el operador de la unidad); la llegada, en Traslado de llegada.';
+COMMENT ON TABLE pumping.reporte_unidad_hubodometro IS 'Lectura del hubodómetro por eje (A, B, C...), en el punto de origen o de destino, a la salida y a la llegada.';
+COMMENT ON TABLE pumping.reporte_unidad_inspeccion IS 'Resultado de cada ítem de inspección del reporte de una unidad, a la salida y a la llegada.';
+COMMENT ON TABLE pumping.reporte_unidad_llanta IS 'Estado de cada llanta de la unidad en su reporte, a la salida y a la llegada.';
+COMMENT ON TABLE pumping.requisito IS 'Condiciones que el proceso exige (catálogo): de qué ámbito son y qué módulo es dueño del dato que las cumple.';
+COMMENT ON TABLE pumping.terminos_version IS 'Texto versionado (la huella SHA-256 prueba qué se leyó).';
+COMMENT ON TABLE pumping.ticket_ingreso IS 'Un registro por ticket. Está completo cuando están las cinco confirmaciones, la última lectura de cada gas es segura y todos los ítems LOTO están marcados (se calcula; confirmado_* guarda quién lo completó).';
+COMMENT ON TABLE pumping.ticket_ingreso_gas IS 'Lectura de un gas (se guarda si resultó segura al medirla, porque los límites pueden cambiar).';
+COMMENT ON TABLE pumping.ticket_ingreso_loto IS 'Pasos de bloqueo y etiquetado (LOTO) marcados en el ingreso a la locación de un ticket.';
+COMMENT ON TABLE pumping.ticket_persona IS 'Personas que el Jefe de Base asignó al ticket: un supervisor y uno o más operadores (id de la cuenta + nombre; sin FK entre schemas).';
+COMMENT ON TABLE pumping.ticket_requisito IS 'Un requisito de un ticket, de una de sus unidades o de uno de sus operadores.';
+COMMENT ON TABLE pumping.ticket_tipo_servicio IS 'Tipos de servicio del pedido (código del catálogo de comercial: control_fluidos, nitrogeno...).';
+COMMENT ON TABLE pumping.ticket_unidad IS 'Unidades de Flota asignadas al ticket (D2): FK real a flota.unidad, del mismo contenedor.';
+COMMENT ON TABLE pumping.transicion IS 'Pasos válidos entre dos pasos. Solo existen los que el módulo ya sabe validar (cada fase agrega los suyos).';

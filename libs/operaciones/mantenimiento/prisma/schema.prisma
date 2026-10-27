@@ -241,6 +241,14 @@ enum FlotaCategoriaPeso {
   @@schema("flota")
 }
 
+enum FlotaTipoLectura {
+  horometro
+  odometro
+
+  @@map("tipo_lectura")
+  @@schema("flota")
+}
+
 /// `flota.unidad`: dueño Flota.
 model FlotaUnidad {
   id            String              @id @db.Uuid
@@ -252,8 +260,33 @@ model FlotaUnidad {
   activa        Boolean
 
   reportes ReporteRecibido[]
+  lecturas FlotaUnidadLectura[]
 
   @@map("unidad")
+  @@schema("flota")
+}
+
+/// `flota.unidad_lectura`: espejo de solo lectura (dueño Flota). Las hojas de la orden imprimen el horómetro y el odómetro vigentes.
+model FlotaUnidadLectura {
+  id       String          @id @db.Uuid
+  unidadId String          @map("unidad_id") @db.Uuid
+  unidad   FlotaUnidad     @relation(fields: [unidadId], references: [id])
+  tipo     FlotaTipoLectura
+  valor    Decimal         @db.Decimal
+  leidaAt  DateTime        @map("leida_at") @db.Timestamptz(6)
+
+  anulacion FlotaUnidadLecturaAnulacion?
+
+  @@map("unidad_lectura")
+  @@schema("flota")
+}
+
+/// `flota.unidad_lectura_anulacion`: espejo de solo lectura. Una lectura anulada no cuenta.
+model FlotaUnidadLecturaAnulacion {
+  lecturaId String             @id @map("lectura_id") @db.Uuid
+  lectura   FlotaUnidadLectura @relation(fields: [lecturaId], references: [id])
+
+  @@map("unidad_lectura_anulacion")
   @@schema("flota")
 }
 

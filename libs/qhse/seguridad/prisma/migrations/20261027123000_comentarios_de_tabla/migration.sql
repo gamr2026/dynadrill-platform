@@ -1,0 +1,26 @@
+-- Estándar de la base de datos: toda tabla lleva su comentario en español (qhse, 25 tablas).
+COMMENT ON TABLE qhse.desecho_caracteristica_asignada IS 'Característica (inflamable, corrosivo, tóxico...) asignada a un registro de desecho.';
+COMMENT ON TABLE qhse.emergencia_historial IS 'Rastro de cada cambio de estado de una emergencia (solo se agrega).';
+COMMENT ON TABLE qhse.epi_entrega_historial IS 'Rastro de cada cambio de estado de una entrega (solo se agrega).';
+COMMENT ON TABLE qhse.epi_entrega_item IS 'Ítem entregado en una entrega de EPI: artículo, talla y cantidad.';
+COMMENT ON TABLE qhse.epi_talla IS 'Tallas por tipo (ropa, calzado, guante).';
+COMMENT ON TABLE qhse.inspeccion_criterio IS 'Criterio que se evalúa en un tipo de inspección de equipo (catálogo).';
+COMMENT ON TABLE qhse.inspeccion_resultado IS 'Resultado de cada criterio en una inspección de equipo realizada.';
+COMMENT ON TABLE qhse.inspeccion_tipo IS 'Tipo de equipo que se inspecciona. El comportamiento sale de sus columnas, nunca de su nombre.';
+COMMENT ON TABLE qhse.investigacion_accion_historial IS 'Rastro de estados de la acción: solo se agrega.';
+COMMENT ON TABLE qhse.investigacion_historial IS 'Rastro de estados de la investigación: solo se agrega.';
+COMMENT ON TABLE qhse.iperc_clasificacion_peligro IS 'Clasificación de peligros de la matriz IPERC (catálogo).';
+COMMENT ON TABLE qhse.iperc_cobertura IS 'Qué actividades exige cada tipo de servicio (código de comercial, sin FK: otro contenedor, D1).';
+COMMENT ON TABLE qhse.iperc_control IS 'Control (medida de prevención) propuesto para un peligro de la matriz IPERC.';
+COMMENT ON TABLE qhse.iperc_generado_en IS 'Dónde se generó el peligro en la matriz IPERC (catálogo).';
+COMMENT ON TABLE qhse.iperc_matriz_evaluador IS 'Personas que evaluaron una matriz IPERC.';
+COMMENT ON TABLE qhse.iperc_peligro IS 'Peligro identificado en una tarea de la matriz IPERC, con su evaluación de riesgo.';
+COMMENT ON TABLE qhse.iperc_proceso IS 'Catálogos de la matriz IPERC.';
+COMMENT ON TABLE qhse.iperc_tarea IS 'Tarea (actividad) evaluada dentro de una matriz IPERC.';
+COMMENT ON TABLE qhse.iperc_tarea_cargo IS 'Cargo que ejecuta una tarea de la matriz IPERC.';
+COMMENT ON TABLE qhse.iperc_zona IS 'Zona o lugar de trabajo de la matriz IPERC (catálogo).';
+COMMENT ON TABLE qhse.stop_historial IS 'Rastro de cada cambio de estado de una tarjeta STOP (solo se agrega).';
+COMMENT ON TABLE qhse.stop_item IS 'Ítem observado en una tarjeta STOP: subcategoría, si fue seguro o inseguro y el comentario.';
+COMMENT ON TABLE qhse.stop_subcategoria IS 'Subcategoría de la tarjeta STOP (por bloque: acciones o condiciones), del formato DYN-SGI-RE-008.';
+COMMENT ON TABLE qhse.swa_criterio_reinicio IS 'Criterio del checklist de reinicio (catálogo).';
+COMMENT ON TABLE qhse.swa_tipo_peligro IS 'Tipo de peligro que motiva una SWA (catálogo).';

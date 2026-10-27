@@ -1,0 +1,20 @@
+-- Estándar de la base de datos: toda tabla lleva su comentario en español (flota, 19 tablas).
+COMMENT ON TABLE flota.conductor_permiso_anulacion IS 'Anulación de un permiso o documento de un conductor (el permiso no se edita ni se borra: se anula).';
+COMMENT ON TABLE flota.gerenciamiento_viaje IS 'Gerenciamiento de Viaje firmado por el Conductor.';
+COMMENT ON TABLE flota.gerenciamiento_viaje_comunicacion IS 'Plan de comunicación de un gerenciamiento de viaje: frecuencia y persona de contacto.';
+COMMENT ON TABLE flota.gerenciamiento_viaje_parada IS 'Parada planificada de un gerenciamiento de viaje: lugar, horas y detalle de pernocta.';
+COMMENT ON TABLE flota.gerenciamiento_viaje_respuesta IS 'Respuesta elegida por el conductor a cada pregunta del cuestionario de riesgo de un viaje, con los puntos que sumó.';
+COMMENT ON TABLE flota.inspeccion_caso IS 'Una unidad de transporte asignada a un ticket de Pumping.';
+COMMENT ON TABLE flota.inspeccion_vehiculo IS 'Inspección firmada (DYN-SGI-RE-068). Solo admite que se le marque la anulación.';
+COMMENT ON TABLE flota.inspeccion_vehiculo_resultado IS 'Resultado de cada ítem (vehículo y equipo) en una inspección de vehículo firmada.';
+COMMENT ON TABLE flota.inspeccion_vehiculo_revision IS 'Revisión del Supervisor. Se agrega, nunca se cambia: vale la última de cada inspección.';
+COMMENT ON TABLE flota.item_inspeccion_vehiculo IS 'Los 24 ítems del vehículo y los 6 del equipo del formato DYN-SGI-RE-068.';
+COMMENT ON TABLE flota.opcion_riesgo_viaje IS 'Opción de respuesta de una pregunta del cuestionario de riesgo del viaje, con sus puntos y si impide conducir.';
+COMMENT ON TABLE flota.pregunta_riesgo_viaje IS 'Las 12 preguntas del cuestionario de riesgo del viaje (DYN-SGI-RE-049).';
+COMMENT ON TABLE flota.proveedor_mantenimiento IS 'Proveedores externos de mantenimiento.';
+COMMENT ON TABLE flota.regla_preventiva IS 'Reglas del Plan de Mantenimiento 2026 (MAN-002): qué se controla, cada cuánto y con qué tolerancia.';
+COMMENT ON TABLE flota.tipo_permiso_conductor IS 'Documentos que se exigen a un conductor. conVigencia = false: solo se tiene o no se tiene (sin fecha de vencimiento).';
+COMMENT ON TABLE flota.umbral_riesgo_viaje IS 'El nivel es el de mayor desdePuntos que no supere el puntaje; permisoAutoriza autoriza ese nivel.';
+COMMENT ON TABLE flota.unidad_lectura_anulacion IS 'Anulación de una lectura (la lectura no se edita ni se borra: se anula y se registra otra).';
+COMMENT ON TABLE flota.unidad_preventivo IS 'Mantenimiento preventivo ejecutado. El horómetro o kilometraje de ese momento es una lectura, no una columna.';
+COMMENT ON TABLE flota.unidad_preventivo_anulacion IS 'Anulación de un preventivo (misma regla: historia inmutable).';

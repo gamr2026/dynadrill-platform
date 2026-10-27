@@ -1,0 +1,21 @@
+-- Estándar de la base de datos: toda tabla lleva su comentario en español (comercial, 20 tablas).
+COMMENT ON TABLE comercial.ciudad_ot IS 'Ciudades que lleva el número de la OT (948-OPR-POZO-UIO-2026).';
+COMMENT ON TABLE comercial.documento_operativo_actividad IS 'Actividad de la bitácora de un Reporte Job (DYN-SGI-RE-047).';
+COMMENT ON TABLE comercial.documento_operativo_actividad_tabla IS 'Tabla dentro de una actividad del Reporte Job (por ejemplo, de monitoreo): encabezados, filas y celdas, sin JSON.';
+COMMENT ON TABLE comercial.documento_operativo_herramienta IS 'Herramienta de un Reporte de Herramientas (DYN-FCR-RE-008). codigo es el de la lista de precios (con él se factura).';
+COMMENT ON TABLE comercial.documento_operativo_tabla_celda IS 'Celda de una tabla de actividad de un documento operativo (Reporte Job): el valor de una fila en una columna.';
+COMMENT ON TABLE comercial.documento_operativo_tabla_columna IS 'Columna (encabezado) de una tabla de actividad de un documento operativo.';
+COMMENT ON TABLE comercial.documento_operativo_tabla_fila IS 'Fila de una tabla de actividad de un documento operativo.';
+COMMENT ON TABLE comercial.documento_operativo_uso IS 'Estado de una herramienta en un día.';
+COMMENT ON TABLE comercial.firmante_contratista IS 'Quién firma la OT por Dynadrill (representante de la contratista).';
+COMMENT ON TABLE comercial.guia_firma_digital IS 'Una firma digital encontrada en el PDF firmado de la guía.';
+COMMENT ON TABLE comercial.guia_remision_item IS 'Ítem despachado en una guía de remisión: artículo, cantidad y unidad.';
+COMMENT ON TABLE comercial.lista_precios_item IS 'Ítem de una lista de precios: código, descripción, unidad, tipo (material o servicio) y precio. Con el código se factura.';
+COMMENT ON TABLE comercial.lugar_despacho IS 'Lugares desde donde se despacha (p. ej. la base de Dynadrill).';
+COMMENT ON TABLE comercial.orden_trabajo IS 'Orden de trabajo / resumen de costos: se genera de la prefactura firmada, solo para los clientes que la requieren (una por pedido).';
+COMMENT ON TABLE comercial.orden_trabajo_item IS 'Línea de la orden de trabajo (resumen de costos), copiada de la prefactura firmada.';
+COMMENT ON TABLE comercial.pedido_subtipo_servicio IS 'Subtipo elegido en un pedido. Cuelga de un tipo que el MISMO pedido tiene elegido (FK compuesta) y de un subtipo que pertenece a ESE tipo (FK compuesta al catálogo).';
+COMMENT ON TABLE comercial.pedido_tipo_servicio IS 'Tipo de servicio elegido en un pedido.';
+COMMENT ON TABLE comercial.prefactura_advertencia IS 'Aviso al calcular (p. ej. una herramienta sin código o sin coincidencia en la lista) para que Facturación lo revise.';
+COMMENT ON TABLE comercial.prefactura_firma IS 'Firma de la prefactura: quién firmó (company man del pedido, cliente o Dynadrill), con el archivo firmado.';
+COMMENT ON TABLE comercial.prefactura_item IS 'Línea de una prefactura: lo que se factura por herramienta, material o personal, con su precio de la lista del cliente.';

@@ -279,17 +279,16 @@ export class OrdenesService {
     if (!o) throw new NotFoundException('La orden no existe');
     const r = o.reporte;
     const p = r.pumpingReporteUnidad;
-    const lecturas = await this.prisma.$queryRaw<
-      Array<{ tipo: 'horometro' | 'odometro'; valor: Prisma.Decimal; leida_at: Date }>
-    >`SELECT DISTINCT ON (l.tipo) l.tipo::text AS tipo, l.valor, l.leida_at
-        FROM flota.unidad_lectura l
-       WHERE l.unidad_id = ${r.unidadId}::uuid AND l.leida_at <= ${o.createdAt}
-         AND NOT EXISTS (SELECT 1 FROM flota.unidad_lectura_anulacion a WHERE a.lectura_id = l.id)
-       ORDER BY l.tipo, l.leida_at DESC`;
-    const lectura = (tipo: 'horometro' | 'odometro') => {
-      const l = lecturas.find((x) => x.tipo === tipo);
-      return l ? { valor: Number(l.valor), leidaAt: l.leida_at } : null;
+    // la lectura vigente (no anulada) más reciente de cada tipo al crearse la orden
+    const vigente = async (tipo: 'horometro' | 'odometro') => {
+      const l = await this.prisma.flotaUnidadLectura.findFirst({
+        where: { unidadId: r.unidadId, tipo, leidaAt: { lte: o.createdAt }, anulacion: null },
+        orderBy: { leidaAt: 'desc' },
+        select: { valor: true, leidaAt: true },
+      });
+      return l ? { valor: Number(l.valor), leidaAt: l.leidaAt } : null;
     };
+    const [horometro, odometro] = await Promise.all([vigente('horometro'), vigente('odometro')]);
     const personas = p
       ? await this.prisma.$queryRaw<Array<{ rol: string; nombre: string }>>`
           SELECT t.rol::text AS rol, u.nombre
@@ -303,7 +302,7 @@ export class OrdenesService {
       orden: { id: o.id, codigo: vista.codigo, estado: vista.estado, creadaAt: o.createdAt },
       unidad: vista.unidad,
       ticket: vista.ticket,
-      lecturas: { horometro: lectura('horometro'), odometro: lectura('odometro') },
+      lecturas: { horometro, odometro },
       salida: {
         base: p?.origenBodega?.nombre ?? null,
         operadores: personas.filter((x) => x.rol === 'operador').map((x) => x.nombre),
