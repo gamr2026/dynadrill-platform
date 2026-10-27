@@ -142,6 +142,14 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         [tipo, id],
       )
     ).rows.map((r: { data: Record<string, unknown> }) => r.data);
+  /** Las firmas que el viaje deja en Firmas (contrato 4.14): la del Conductor al solicitar y la de quien decide. */
+  const firmas = async (id: string) =>
+    (
+      await admin.query(
+        "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'flota.gerenciamiento_viaje.firmado' AND datos->'data'->>'documentoId' = $1 ORDER BY id",
+        [id],
+      )
+    ).rows.map((r: { datos: { data: Record<string, unknown>; actor: { userId: string } } }) => r.datos);
   const rechazoDeBase = async (promesa: Promise<unknown>) => {
     let error: unknown = null;
     try {
@@ -329,6 +337,16 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect(r.body.codigo).toMatch(/^GV-\d{4,}$/);
       const ev = await eventos('flota.gerenciamiento_viaje.solicitado', r.body.id);
       expect(ev[0]).toMatchObject({ ticketId: tickets[0], tipo: 'salida', nivel: 'bajo' });
+      // el Conductor firma la solicitud con su cuenta
+      const [firma] = await firmas(r.body.id);
+      expect(firma.data).toMatchObject({
+        documentoTipo: 'flota_gerenciamiento_viaje',
+        documentoId: r.body.id,
+        rolFirmante: 'conductor',
+        metodo: 'linea',
+      });
+      expect(firma.data['hashDocumento']).toMatch(/^[0-9a-f]{64}$/);
+      expect(firma.actor.userId).toBe(CONDUCTOR.id);
       // el aviso va al Supervisor (el nivel bajo lo autoriza con `flota.viajes.aprobar`), con los textos ya resueltos
       const aviso = await eventos('flota.gerenciamiento_viaje.por_autorizar_supervisor', r.body.id);
       expect(aviso[0]).toMatchObject({
@@ -397,6 +415,10 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       const ev = await eventos('flota.gerenciamiento_viaje.aprobado', v.id);
       expect(ev).toHaveLength(1);
       expect(ev[0]).toMatchObject({ ticketId: tickets[0], tipo: 'salida' });
+      // quien autoriza firma con su cuenta
+      const firmasViaje = await firmas(v.id);
+      expect(firmasViaje.map((f) => f.data['rolFirmante'])).toEqual(['conductor', 'aprobador']);
+      expect(firmasViaje[1].actor.userId).toBe(SUPERVISOR.id);
       const fuente = await admin.query(
         "SELECT datos->>'source' AS source FROM msg_operaciones.outbox WHERE tipo = 'flota.gerenciamiento_viaje.aprobado' AND datos->'data'->>'gerenciamientoId' = $1",
         [v.id],

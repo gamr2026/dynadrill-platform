@@ -9,7 +9,7 @@ import {
 import { Permission } from '@dyn/authz';
 import { currentTraceparent } from '@dyn/common';
 import { createEvent, EventBus } from '@dyn/messaging';
-import { uuidv7 } from '@dyn/utils';
+import { firmaDeUnaLinea, uuidv7 } from '@dyn/utils';
 import type {
   DecisionViaje,
   NivelRiesgoViaje,
@@ -296,6 +296,24 @@ export class ViajesService {
           })),
         });
       }
+      // la solicitud la firma el Conductor con su cuenta (contrato 4.14): queda como evidencia en Firmas
+      await this.publicar(
+        tx,
+        'firmado',
+        id,
+        actor,
+        firmaDeUnaLinea(
+          'flota_gerenciamiento_viaje',
+          id,
+          'conductor',
+          actor.id,
+          viaje.createdAt,
+          codigoDeViaje(viaje.numero),
+          entrada.fecha,
+          String(puntos),
+          nivel,
+        ),
+      );
       await this.publicar(tx, 'solicitado', id, actor, {
         gerenciamientoId: id,
         codigo: codigoDeViaje(viaje.numero),
@@ -620,9 +638,10 @@ export class ViajesService {
           code: 'nivel_requiere_otro_rol',
         });
       }
+      const decididoAt = new Date();
       const n = await tx.gerenciamientoViaje.updateMany({
         where: { id, decision: null },
-        data: { decision, decididoPor: actor.id, decididoAt: new Date(), motivoDecision: motivo },
+        data: { decision, decididoPor: actor.id, decididoAt, motivoDecision: motivo },
       });
       if (n.count === 0) {
         throw new ConflictException({
@@ -630,6 +649,23 @@ export class ViajesService {
           code: 'viaje_ya_decidido',
         });
       }
+      // quien autoriza o rechaza firma con su cuenta (contrato 4.14); la decisión y el motivo entran en la huella
+      await this.publicar(
+        tx,
+        'firmado',
+        id,
+        actor,
+        firmaDeUnaLinea(
+          'flota_gerenciamiento_viaje',
+          id,
+          'aprobador',
+          actor.id,
+          decididoAt,
+          codigoDeViaje(v.numero),
+          decision,
+          motivo ?? '',
+        ),
+      );
       // Pumping solo entiende el hecho cuando hay ticket: es la condición del paso (revisión de salida / control de retorno).
       if (v.ticketId) {
         await this.publicar(tx, decision === 'autorizado' ? 'aprobado' : 'rechazado', id, actor, {
@@ -717,7 +753,8 @@ export class ViajesService {
       | 'rechazado'
       | 'por_autorizar_supervisor'
       | 'por_autorizar_gerente'
-      | 'decidido',
+      | 'decidido'
+      | 'firmado',
     id: string,
     actor: ActorViaje,
     data: Record<string, unknown>,

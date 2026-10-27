@@ -17,6 +17,7 @@ export const DOCUMENTOS_FIRMABLES: readonly EntradaCatalogo[] = [
   { codigo: 'qhse_entrega_epi', descripcion: 'Entrega de equipo de protección personal' },
   { codigo: 'fcr_inspeccion', descripcion: 'Inspección y reparación de herramientas de FCR' },
   { codigo: 'pumping_reporte_diario', descripcion: 'Reporte Diario de Actividades de Pumping (DYN-SGI-RE-047)' },
+  { codigo: 'flota_gerenciamiento_viaje', descripcion: 'Gerenciamiento de viaje (DYN-SGI-RE-046)' },
 ];
 
 /** Papeles de quien firma: los que hoy usan PTW, la entrega de EPI y la inspección de FCR. */
@@ -35,4 +36,6 @@ export const ROLES_FIRMANTE: readonly EntradaCatalogo[] = [
   { codigo: 'recibido_por', descripcion: 'Recibido por (manifiesto de desechos)' },
   { codigo: 'supervisor', descripcion: 'Supervisor de Dynadrill' },
   { codigo: 'representante_cliente', descripcion: 'Representante del cliente (Company Man)' },
+  { codigo: 'conductor', descripcion: 'Conductor que solicita el viaje' },
+  { codigo: 'aprobador', descripcion: 'Quien autoriza o rechaza el viaje' },
 ];
