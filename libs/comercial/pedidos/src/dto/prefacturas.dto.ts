@@ -1,14 +1,18 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 export const MEDIOS_ENVIO = ['email', 'portal'] as const;
@@ -65,9 +69,29 @@ export class FirmarPrefacturaDto {
   @IsOptional() @IsString() @MaxLength(500) razonRetraso?: string;
 }
 
+/** Un ítem de la prefactura que el cliente observó. */
+export class ItemObservadoDto {
+  @IsUUID() itemId!: string;
+  @IsString() @Matches(/\S/, { message: 'La observación no puede estar vacía' }) @MaxLength(1000) observacion!: string;
+}
+
 export class RechazarPrefacturaDto {
   @IsString() @MinLength(5) @MaxLength(1000) motivo!: string;
   @IsIn(AREAS_DEVOLUCION) devueltoA!: (typeof AREAS_DEVOLUCION)[number];
+  /** La persona a quien se devuelve la corrección (el área va en `devueltoA`). */
+  @IsOptional() @IsUUID() devueltoAUsuarioId?: string;
+  /** Los ítems que el cliente observó. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ItemObservadoDto)
+  items?: ItemObservadoDto[];
+}
+
+/** Un avance de la corrección de una prefactura rechazada. */
+export class SeguimientoPrefacturaDto {
+  @IsString() @Matches(/\S/, { message: 'La nota no puede estar vacía' }) @MaxLength(2000) nota!: string;
 }
 
 export class ReemplazarFirmaDto {

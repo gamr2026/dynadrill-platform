@@ -17,6 +17,7 @@ import {
   FirmaCompanyManDto,
   FirmarPrefacturaDto,
   RechazarPrefacturaDto,
+  SeguimientoPrefacturaDto,
   ReemplazarFirmaDto,
 } from '../dto/prefacturas.dto';
 import type { Prisma } from '../generated/client';
@@ -53,11 +54,16 @@ const INCLUDE = {
     orderBy: { createdAt: 'asc' },
     include: { archivo: true },
   },
+  rechazoItems: { orderBy: { createdAt: 'asc' } },
+  seguimiento: { orderBy: { createdAt: 'asc' } },
 } as const;
 
 type PrefacturaCompleta = Prisma.PrefacturaGetPayload<{ include: typeof INCLUDE }>;
 
-const aDto = (p: PrefacturaCompleta) => ({
+/** Nombres de las personas que aparecen en el rechazo (a quien se devuelve y quien anota el seguimiento). */
+type Nombres = Map<string, string>;
+
+const aDto = (p: PrefacturaCompleta, nombres: Nombres = new Map()) => ({
   id: p.id,
   pedidoId: p.pedidoId,
   version: p.version,
@@ -83,9 +89,35 @@ const aDto = (p: PrefacturaCompleta) => ({
   razonRetraso: p.razonRetraso,
   firmadaAt: p.firmadaAt,
   rechazo: p.rechazadaAt
-    ? { at: p.rechazadaAt, motivo: p.rechazoMotivo, devueltoA: p.rechazoDevueltoA }
+    ? {
+        at: p.rechazadaAt,
+        motivo: p.rechazoMotivo,
+        devueltoA: p.rechazoDevueltoA,
+        devueltoAUsuario: p.rechazoDevueltoAUsuarioId
+          ? { id: p.rechazoDevueltoAUsuarioId, nombre: nombres.get(p.rechazoDevueltoAUsuarioId) ?? null }
+          : null,
+        /** Los ítems que el cliente observó, con su observación. */
+        items: p.rechazoItems.map((o) => {
+          const item = p.items.find((i) => i.id === o.prefacturaItemId);
+          return {
+            itemId: o.prefacturaItemId,
+            orden: item?.orden ?? null,
+            codigo: item?.codigo ?? null,
+            descripcion: item?.descripcion ?? null,
+            observacion: o.observacion,
+          };
+        }),
+      }
     : null,
+  /** Seguimiento de la corrección, en orden de fecha. */
+  seguimiento: p.seguimiento.map((n) => ({
+    id: n.id,
+    nota: n.nota,
+    at: n.createdAt,
+    por: { id: n.createdBy, nombre: nombres.get(n.createdBy) ?? null },
+  })),
   items: p.items.map((i) => ({
+    id: i.id,
     orden: i.orden,
     codigo: i.codigo,
     descripcion: i.descripcion,
@@ -182,11 +214,27 @@ export class PrefacturasService {
       include: INCLUDE,
       orderBy: { version: 'desc' },
     });
-    return filas.map(aDto);
+    return filas.map((f) => aDto(f));
   }
 
   async detalle(id: string) {
-    return aDto(await this.cargar(id));
+    const p = await this.cargar(id);
+    return aDto(p, await this.nombresDe(p));
+  }
+
+  private async nombresDe(p: PrefacturaCompleta): Promise<Nombres> {
+    const ids = [
+      ...new Set([
+        ...(p.rechazoDevueltoAUsuarioId ? [p.rechazoDevueltoAUsuarioId] : []),
+        ...p.seguimiento.map((n) => n.createdBy),
+      ]),
+    ];
+    if (!ids.length) return new Map();
+    const filas = await this.prisma.idUsuario.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, nombre: true },
+    });
+    return new Map(filas.map((u) => [u.id, u.nombre]));
   }
 
   /** Líneas de la prefactura firmada en el formato de la plantilla de carga de AS2. */
@@ -291,7 +339,8 @@ export class PrefacturasService {
       include: INCLUDE,
     });
     const avance = await this.documentos.avance(pedidoId);
-    if (vigente) return { preliminar: false, prefactura: aDto(vigente), avance };
+    if (vigente)
+      return { preliminar: false, prefactura: aDto(vigente, await this.nombresDe(vigente)), avance };
     const calculo = await this.prisma.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUniqueOrThrow({
         where: { id: pedidoId },
@@ -709,6 +758,20 @@ export class PrefacturasService {
     const p = await this.cargar(id);
     if (p.estado !== 'enviada_para_firmas')
       throw new ConflictException('Solo se rechaza una prefactura enviada al cliente');
+    const observados = dto.items ?? [];
+    const ids = observados.map((o) => o.itemId);
+    if (new Set(ids).size !== ids.length)
+      throw new BadRequestException('Un ítem no se puede observar dos veces');
+    if (ids.some((i) => !p.items.some((x) => x.id === i)))
+      throw new BadRequestException('Hay ítems que no son de esta prefactura');
+    if (dto.devueltoAUsuarioId) {
+      const u = await this.prisma.idUsuario.findUnique({
+        where: { id: dto.devueltoAUsuarioId },
+        select: { activo: true },
+      });
+      if (!u?.activo)
+        throw new BadRequestException('La persona a quien se devuelve no existe o está inactiva');
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.prefactura.update({
         where: { id },
@@ -718,8 +781,20 @@ export class PrefacturasService {
           rechazadaPor: ctx.actor.id,
           rechazoMotivo: dto.motivo.trim(),
           rechazoDevueltoA: dto.devueltoA,
+          rechazoDevueltoAUsuarioId: dto.devueltoAUsuarioId ?? null,
         },
       });
+      if (observados.length) {
+        await tx.prefacturaRechazoItem.createMany({
+          data: observados.map((o) => ({
+            id: uuidv7(),
+            prefacturaId: id,
+            prefacturaItemId: o.itemId,
+            observacion: o.observacion.trim(),
+            createdBy: ctx.actor.id,
+          })),
+        });
+      }
       await this.estados.pasar(
         tx,
         p.pedidoId,
@@ -739,6 +814,17 @@ export class PrefacturasService {
       await this.publicar(tx, 'comercial.prefactura.rechazada', p.pedidoId, id, ctx.actor, {
         devueltoA: dto.devueltoA,
       });
+    });
+    return this.detalle(id);
+  }
+
+  /** Anota un avance de la corrección de una prefactura rechazada. Las notas quedan fechadas y no se editan. */
+  async anotarSeguimiento(id: string, dto: SeguimientoPrefacturaDto, ctx: ContextoPrefactura) {
+    const p = await this.cargar(id);
+    if (p.estado !== 'rechazada')
+      throw new ConflictException('Solo se da seguimiento a una prefactura rechazada');
+    await this.prisma.prefacturaSeguimiento.create({
+      data: { id: uuidv7(), prefacturaId: id, nota: dto.nota.trim(), createdBy: ctx.actor.id },
     });
     return this.detalle(id);
   }

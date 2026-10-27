@@ -9,6 +9,7 @@ import {
   ListarPrefacturasQuery,
   ReemplazarFirmaDto,
   RechazarPrefacturaDto,
+  SeguimientoPrefacturaDto,
   RegistrarTicketDto,
 } from '../dto/prefacturas.dto';
 import { ContextoPrefactura, PrefacturasService } from '../services/prefacturas.service';
@@ -168,5 +169,16 @@ export class PrefacturasController {
     @Headers('authorization') auth?: string,
   ) {
     return this.prefacturas.rechazar(id, dto, this.ctx(actor, auth));
+  }
+
+  @RequirePermission(P.PREFACTURAS_RECHAZAR)
+  @Post('prefacturas/:id/seguimiento')
+  anotarSeguimiento(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SeguimientoPrefacturaDto,
+    @CurrentUser() actor: AuthUser,
+    @Headers('authorization') auth?: string,
+  ) {
+    return this.prefacturas.anotarSeguimiento(id, dto, this.ctx(actor, auth));
   }
 }

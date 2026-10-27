@@ -1084,23 +1084,39 @@ run('prefactura (base de datos real)', () => {
       .set(fact())
       .send({ motivo: 'Cantidad de días incorrecta', devueltoA: 'otra' })
       .expect(400);
-    const rec = await http()
-      .post(`/api/comercial/prefacturas/${v1.id}/rechazar`)
-      .set(fact())
-      .send({ motivo: 'Cantidad de días incorrecta', devueltoA: 'operaciones' })
-      .expect(201);
+    // CM-2: ítems observados, persona a quien se devuelve y seguimiento de la corrección
+    const item = await prisma.prefacturaItem.findFirstOrThrow({ where: { prefacturaId: v1.id } });
+    const rechazar = (cuerpo: object) =>
+      http().post(`/api/comercial/prefacturas/${v1.id}/rechazar`).set(fact()).send(cuerpo);
+    const base = { motivo: 'Cantidad de días incorrecta', devueltoA: 'operaciones' };
+    await rechazar({ ...base, items: [{ itemId: uuidv7(), observacion: 'Ajeno' }] }).expect(400); // no es de esta prefactura
+    await rechazar({
+      ...base,
+      items: [
+        { itemId: item.id, observacion: 'Una' },
+        { itemId: item.id, observacion: 'Otra' },
+      ],
+    }).expect(400); // repetido
+    await rechazar({ ...base, devueltoAUsuarioId: uuidv7() }).expect(400); // persona inexistente
+    const rec = await rechazar({
+      ...base,
+      devueltoAUsuarioId: ACTOR,
+      items: [{ itemId: item.id, observacion: 'Días de más' }],
+    }).expect(201);
     expect(rec.body).toMatchObject({
       estado: 'rechazada',
-      rechazo: { motivo: 'Cantidad de días incorrecta', devueltoA: 'operaciones' },
+      rechazo: {
+        motivo: 'Cantidad de días incorrecta',
+        devueltoA: 'operaciones',
+        devueltoAUsuario: { id: ACTOR },
+        items: [{ itemId: item.id, codigo: item.codigo, observacion: 'Días de más' }],
+      },
+      seguimiento: [],
     });
-    // CM-2: ítems observados y seguimiento de la corrección (la base los exige en una prefactura rechazada)
-    const item = await prisma.prefacturaItem.findFirstOrThrow({ where: { prefacturaId: v1.id } });
-    await prisma.prefacturaRechazoItem.create({
-      data: { id: uuidv7(), prefacturaId: v1.id, prefacturaItemId: item.id, observacion: 'Días de más', createdBy: ACTOR },
-    });
-    await prisma.prefacturaSeguimiento.create({
-      data: { id: uuidv7(), prefacturaId: v1.id, nota: 'Se avisó a Operaciones', createdBy: ACTOR },
-    });
+    const url2 = `/api/comercial/prefacturas/${v1.id}/seguimiento`;
+    await http().post(url2).set(fact()).send({ nota: '  ' }).expect(400);
+    const seg = await http().post(url2).set(fact()).send({ nota: 'Se avisó a Operaciones' }).expect(201);
+    expect(seg.body.seguimiento).toMatchObject([{ nota: 'Se avisó a Operaciones', por: { id: ACTOR } }]);
     await expect(
       prisma.prefacturaRechazoItem.create({
         data: { id: uuidv7(), prefacturaId: v1.id, prefacturaItemId: item.id, observacion: 'Otra vez', createdBy: ACTOR },
