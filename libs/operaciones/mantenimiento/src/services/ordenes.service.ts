@@ -253,6 +253,81 @@ export class OrdenesService {
   }
 
   /**
+   * Los datos que piden las hojas imprimibles de la orden (Orden de Mantenimiento General y Operativa, e Informe DYN-MNT-RE-008): la orden con
+   * sus sub-órdenes y repuestos, las lecturas de horómetro y odómetro de la unidad al abrirse la orden (las de Flota, no anuladas), la base de
+   * salida, el operador y el supervisor del servicio, las novedades que dieron origen y quién devolvió la unidad.
+   */
+  async hoja(id: string) {
+    const o = await this.prisma.orden.findUnique({
+      where: { id },
+      include: {
+        ...INCLUIR_ORDEN,
+        retornador: { select: { id: true, nombre: true } },
+        reporte: {
+          include: {
+            unidad: true,
+            pumpingReporteUnidad: {
+              include: {
+                ticket: { select: { id: true, ticketNumero: true } },
+                origenBodega: { select: { nombre: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!o) throw new NotFoundException('La orden no existe');
+    const r = o.reporte;
+    const p = r.pumpingReporteUnidad;
+    const lecturas = await this.prisma.$queryRaw<
+      Array<{ tipo: 'horometro' | 'odometro'; valor: Prisma.Decimal; leida_at: Date }>
+    >`SELECT DISTINCT ON (l.tipo) l.tipo::text AS tipo, l.valor, l.leida_at
+        FROM flota.unidad_lectura l
+       WHERE l.unidad_id = ${r.unidadId}::uuid AND l.leida_at <= ${o.createdAt}
+         AND NOT EXISTS (SELECT 1 FROM flota.unidad_lectura_anulacion a WHERE a.lectura_id = l.id)
+       ORDER BY l.tipo, l.leida_at DESC`;
+    const lectura = (tipo: 'horometro' | 'odometro') => {
+      const l = lecturas.find((x) => x.tipo === tipo);
+      return l ? { valor: Number(l.valor), leidaAt: l.leida_at } : null;
+    };
+    const personas = p
+      ? await this.prisma.$queryRaw<Array<{ rol: string; nombre: string }>>`
+          SELECT t.rol::text AS rol, u.nombre
+            FROM pumping.ticket_persona t JOIN identidad.usuario u ON u.id = t.usuario_id
+           WHERE t.ticket_id = ${p.ticketId}::uuid
+             AND ((t.rol = 'operador' AND t.unidad_id = ${r.unidadId}::uuid) OR t.rol = 'supervisor')
+           ORDER BY u.nombre`
+      : [];
+    const vista = this.vista(o);
+    return {
+      orden: { id: o.id, codigo: vista.codigo, estado: vista.estado, creadaAt: o.createdAt },
+      unidad: vista.unidad,
+      ticket: vista.ticket,
+      lecturas: { horometro: lectura('horometro'), odometro: lectura('odometro') },
+      salida: {
+        base: p?.origenBodega?.nombre ?? null,
+        operadores: personas.filter((x) => x.rol === 'operador').map((x) => x.nombre),
+        supervisor: personas.find((x) => x.rol === 'supervisor')?.nombre ?? null,
+      },
+      novedades: p
+        ? {
+            mecanica: p.novedadesMecanica,
+            instrumentacion: p.novedadesInstrumentacion,
+            operaciones: p.novedadesOperaciones,
+          }
+        : { mecanica: null, instrumentacion: null, operaciones: null },
+      subordenes: vista.subordenes,
+      retorno: vista.retorno
+        ? {
+            ...vista.retorno,
+            estadoFinalNombre: vista.retorno.estadoFinal === 'disponible' ? 'Disponible' : 'Con restricciones',
+            responsable: o.retornador?.nombre ?? null,
+          }
+        : null,
+    };
+  }
+
+  /**
    * Todas las sub-órdenes de una unidad (no solo las que originó un ticket): alimenta la tarjeta «Mantenimientos» del ticket de
    * Pumping, visible siempre y sin bloquear nada.
    */

@@ -1217,6 +1217,60 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         ).status,
       ).toBe(409);
 
+      // los datos de las hojas imprimibles: orden, unidad, lecturas de Flota al abrirse la orden, novedades, repuestos y quién devolvió la unidad
+      const unidadId = orden.body.unidad.id;
+      const lectura = async (tipo: string, valor: number, haceDias: number, anulada = false) => {
+        const lid = uuidv7();
+        await admin.query(
+          `INSERT INTO flota.unidad_lectura (id, unidad_id, tipo, valor, leida_at, fuente)
+           VALUES ($1, $2, $3::flota.tipo_lectura, $4, now() - ($5 || ' days')::interval, 'manual')`,
+          [lid, unidadId, tipo, valor, String(haceDias)],
+        );
+        if (anulada) {
+          await admin.query(
+            "INSERT INTO flota.unidad_lectura_anulacion (lectura_id, anulada_por, motivo) VALUES ($1, $2, 'Lectura errónea')",
+            [lid, JEFE.id],
+          );
+        }
+        return lid;
+      };
+      // una unidad de servicio mide horómetro y una de transporte, odómetro (la base lo exige)
+      const medida = orden.body.unidad.tipo === 'servicio' ? 'horometro' : 'odometro';
+      const otra = medida === 'horometro' ? 'odometro' : 'horometro';
+      const lecturaIds = [
+        await lectura(medida, 1200.5, 5),
+        await lectura(medida, 9999, 2, true), // anulada: no cuenta
+        await lectura(medida, 46000, -3), // posterior a la orden: no cuenta
+      ];
+      try {
+        const hoja = await http().get(`${base}/ordenes/${cerrada.body.ordenId}/hoja`).set(jefe());
+        expect(hoja.status).toBe(200);
+        expect(hoja.body).toMatchObject({
+          orden: { id: cerrada.body.ordenId, estado: 'cerrada' },
+          unidad: { id: unidadId },
+          lecturas: { [medida]: { valor: 1200.5 }, [otra]: null },
+          salida: { operadores: expect.any(Array), supervisor: null },
+          retorno: {
+            estadoFinal: 'con_restricciones',
+            estadoFinalNombre: 'Con restricciones',
+            responsable: JEFE.nombre,
+          },
+        });
+        expect(hoja.body.subordenes[0].repuestos).toHaveLength(2);
+        expect(hoja.body.subordenes[0].diagnostico).toBe('Filtro saturado');
+        expect(
+          (await http().get(`${base}/ordenes/${uuidv7()}/hoja`).set(jefe())).status,
+        ).toBe(404);
+      } finally {
+        await admin.query(
+          'DELETE FROM flota.unidad_lectura_anulacion WHERE lectura_id = ANY($1::uuid[])',
+          [lecturaIds],
+        );
+        await admin.query('DELETE FROM flota.unidad_lectura WHERE id = ANY($1::uuid[])', [
+          lecturaIds,
+        ]);
+      }
+
       // el renglón con salida ya no se puede cambiar ni borrar (ni siquiera la base lo permite)
       await expect(
         admin.query('UPDATE mantenimiento.suborden_repuesto SET cantidad = 9 WHERE id = $1', [

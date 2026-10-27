@@ -145,6 +145,13 @@ export class MantenimientoController {
     return this.ordenes.listar(q);
   }
 
+  /** Datos de las hojas imprimibles de la orden (General, Operativa e Informe DYN-MNT-RE-008). */
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
+  @Get('ordenes/:id/hoja')
+  hojaDeOrden(@Param('id', ParseUUIDPipe) id: string) {
+    return this.ordenes.hoja(id);
+  }
+
   @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
   @Get('ordenes/:id')
   obtenerOrden(@Param('id', ParseUUIDPipe) id: string) {
