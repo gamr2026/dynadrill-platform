@@ -2411,6 +2411,96 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect(eventos2[1].actividades[0].detalle).toBe('Corregido por el operador');
     });
 
+    describe('adjunto y firmas del día (D-PD)', () => {
+      const archivos: string[] = [];
+      const nuevoArchivo = async () => {
+        const id = uuidv7();
+        archivos.push(id);
+        await admin.query(
+          `INSERT INTO archivos.archivo (id, modulo_id, nombre_original, mime_type, tamano_bytes, sha256, blob_key, escaneo, subido_por)
+           SELECT $1::uuid, mo.id, 'firmado.pdf', 'application/pdf', 10, encode(sha256($1::text::bytea), 'hex'), 'prueba/' || $1::text, 'omitido', $2::uuid
+             FROM archivos.modulo_archivo mo WHERE mo.codigo = 'pedido_documento'`,
+          [id, JEFE],
+        );
+        return id;
+      };
+      afterAll(async () => {
+        await admin.query('DELETE FROM pumping.reporte_diario_adjunto WHERE archivo_id = ANY($1::uuid[])', [archivos]);
+        await admin.query('DELETE FROM pumping.reporte_diario WHERE ticket_id IN (SELECT id FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[]))', [pedidos]);
+        await admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [archivos]);
+      });
+      const firmas = async (documentoId: string) =>
+        (
+          await admin.query(
+            "SELECT tipo, datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_diario.firmado' AND datos->'data'->>'documentoId' = $1 ORDER BY id",
+            [documentoId],
+          )
+        ).rows.map((r) => r.datos);
+      const firmar = (t: { url: string }, cuerpo: object, h = op1()) =>
+        http().post(`${url(t)}/firmas`).set(h).send(cuerpo);
+      const adjuntar = (t: { url: string }, archivoId: string, h = op1()) =>
+        http().post(`${url(t)}/adjuntos`).set(h).send({ archivoId });
+
+      it('adjunta archivos al día (uno solo una vez, que exista) y los devuelve con el reporte', async () => {
+        const t = await enEjecucion();
+        const a = await nuevoArchivo();
+        expect((await adjuntar(t, a)).status).toBe(404); // el día aún no existe
+        await guardar(t, { actividades: [actividad()] });
+        const ok = await adjuntar(t, a);
+        expect(ok.status).toBe(201);
+        expect(ok.body.adjuntos).toEqual([
+          { archivoId: a, at: expect.any(String), por: { id: OP1.id, nombre: OP1.nombre } },
+        ]);
+        expect((await adjuntar(t, a)).status).toBe(409);
+        expect((await adjuntar(t, uuidv7())).status).toBe(400);
+        expect((await adjuntar(t, await nuevoArchivo(), como('operador', uuidv7(), 'Ajeno'))).status).toBe(403);
+      });
+
+      it('el Supervisor firma el día completado «de una línea» y el representante del cliente con su documento firmado; ambos llegan a Firmas', async () => {
+        const t = await enEjecucion();
+        await guardar(t, { actividades: [actividad()] });
+        const reporte = (await http().get(url(t)).set(op1())).body.id as string;
+        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe('DIA_SIN_COMPLETAR');
+        await completar(t).expect(201);
+
+        // solo el Supervisor del ticket firma como Supervisor, y sin archivo
+        expect((await firmar(t, { rol: 'supervisor' })).status).toBe(403);
+        expect((await firmar(t, { rol: 'supervisor', archivoId: uuidv7() }, supervisora())).status).toBe(400);
+        const ok = await firmar(t, { rol: 'supervisor' }, supervisora());
+        expect(ok.status).toBe(201);
+        const [f1] = await firmas(reporte);
+        expect(f1.data).toMatchObject({
+          documentoTipo: 'pumping_reporte_diario',
+          documentoId: reporte,
+          rolFirmante: 'supervisor',
+          metodo: 'linea',
+          ticketId: t.id,
+          fecha: FECHA,
+        });
+        expect(f1.data.hashDocumento).toMatch(/^[0-9a-f]{64}$/);
+        expect(f1.actor.userId).toBe(SUPERVISORA.id);
+
+        // el representante del cliente firma en papel: el equipo sube el documento firmado
+        expect((await firmar(t, { rol: 'representante_cliente' })).status).toBe(400); // falta el archivo
+        expect((await firmar(t, { rol: 'representante_cliente', archivoId: uuidv7() })).status).toBe(400);
+        expect((await firmar(t, { rol: 'otro' })).status).toBe(400);
+        const firmado = await nuevoArchivo();
+        await firmar(t, { rol: 'representante_cliente', archivoId: firmado }).expect(201);
+        const todas = await firmas(reporte);
+        expect(todas).toHaveLength(2);
+        expect(todas[1].data).toMatchObject({
+          rolFirmante: 'representante_cliente',
+          metodo: 'manuscrita',
+          archivoId: firmado,
+        });
+        expect(todas[1].data.hashDocumento).toBeUndefined();
+
+        // editar el día lo reabre: hay que completarlo antes de volver a firmar
+        await guardar(t, { actividades: [actividad({ detalle: 'Otro trabajo' })] });
+        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe('DIA_SIN_COMPLETAR');
+      });
+    });
+
     it('si Facturación corrige el día (evento de Comercial), el ticket ya no lo edita ni lo reenvía; el evento es idempotente y solo cuenta el de Pumping', async () => {
       const t = await enEjecucion();
       await guardar(t, { actividades: [actividad()] });

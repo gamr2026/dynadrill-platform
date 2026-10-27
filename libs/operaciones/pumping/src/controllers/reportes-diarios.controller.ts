@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -57,6 +58,16 @@ export class GuardarReporteDiarioDto {
   @IsOptional() @IsString() @MaxLength(4000) observaciones?: string;
 }
 
+export class AdjuntarReporteDto {
+  @IsUUID() archivoId!: string;
+}
+
+export class FirmarReporteDto {
+  @IsIn(['supervisor', 'representante_cliente']) rol!: 'supervisor' | 'representante_cliente';
+  /** Solo el representante del cliente: el documento firmado, ya subido a `archivos`. */
+  @IsOptional() @IsUUID() archivoId?: string;
+}
+
 /** Reporte Diario de Actividades (DYN-SGI-RE-047, el «Reporte Job») de un ticket. */
 @Controller('operaciones/pumping/tickets/:id/reportes-diarios')
 export class ReportesDiariosController {
@@ -96,5 +107,29 @@ export class ReportesDiariosController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.reportes.completar(id, fecha, actor);
+  }
+
+  /** Adjunta un archivo (ya subido a `archivos`) al día. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post(':fecha/adjuntos')
+  adjuntar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: AdjuntarReporteDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reportes.adjuntar(id, fecha, dto.archivoId, actor);
+  }
+
+  /** Firma del día (Supervisor o representante del cliente): se registra como evidencia en Firmas. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post(':fecha/firmas')
+  firmar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: FirmarReporteDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reportes.firmar(id, fecha, dto.rol, dto.archivoId, actor);
   }
 }

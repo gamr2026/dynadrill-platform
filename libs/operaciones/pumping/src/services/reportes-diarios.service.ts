@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
-import { uuidv7 } from '@dyn/utils';
+import { firmaDeUnaLinea, uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
@@ -40,6 +40,10 @@ export interface ReporteDiarioEntrada {
 
 const INCLUIR = {
   representante: { select: { id: true, nombre: true } },
+  adjuntos: {
+    orderBy: { createdAt: 'asc' },
+    include: { autor: { select: { id: true, nombre: true } } },
+  },
   actividades: {
     orderBy: { orden: 'asc' },
     include: {
@@ -207,6 +211,115 @@ export class ReportesDiariosService {
               })),
             })),
           },
+          actor: { userId: actor.id, role: actor.roleCode },
+          traceparent: currentTraceparent(),
+        }),
+      );
+    });
+    return this.obtener(ticketId, fecha);
+  }
+
+  /**
+   * Adjunta un archivo al día (por ejemplo, la plantilla DYN-SGI-RE-047 llenada). El archivo ya está en `archivos`; los adjuntos son historia:
+   * una corrección es otro archivo. El día debe existir y no estar corregido por Facturación.
+   */
+  async adjuntar(ticketId: string, fecha: string, archivoId: string, actor: AuthUser) {
+    this.exigirFecha(fecha);
+    await this.prisma.$transaction(async (tx) => {
+      await this.exigirEquipo(tx, ticketId, actor);
+      const r = await tx.reporteDiario.findUnique({
+        where: { ticketId_fecha: { ticketId, fecha: deDia(fecha) } },
+      });
+      if (!r) throw new NotFoundException('Ese día todavía no tiene reporte: guárdelo primero');
+      if (r.corregidoAt) this.diaCorregido();
+      if (!(await tx.archivoRef.findUnique({ where: { id: archivoId } }))) {
+        throw new BadRequestException('El archivo indicado no existe');
+      }
+      if (await tx.reporteDiarioAdjunto.findFirst({ where: { reporteId: r.id, archivoId } })) {
+        throw new ConflictException('Ese archivo ya está adjunto a este día');
+      }
+      await tx.reporteDiarioAdjunto.create({
+        data: { id: uuidv7(), reporteId: r.id, archivoId, createdBy: actor.id },
+      });
+    });
+    return this.obtener(ticketId, fecha);
+  }
+
+  /**
+   * Firma del día, que se registra en `plataforma/firmas` (contrato 4.14) por el evento `operaciones.pumping.reporte_diario.firmado`:
+   * - `supervisor`: lo firma en el portal el Supervisor del ticket (o el Superadmin), «de una línea».
+   * - `representante_cliente`: el Company Man firma en papel; quien lo registra (del equipo del ticket) sube el documento firmado, que Firmas
+   *   guarda como firma manuscrita con la huella del archivo.
+   * El día debe estar completado y no corregido por Facturación; firmar otra vez es otra firma (vale la más reciente).
+   */
+  async firmar(
+    ticketId: string,
+    fecha: string,
+    rol: 'supervisor' | 'representante_cliente',
+    archivoId: string | undefined,
+    actor: AuthUser,
+  ) {
+    this.exigirFecha(fecha);
+    await this.prisma.$transaction(async (tx) => {
+      // se firma en cualquier paso (el día se completa en la ejecución y la firma puede llegar después): basta ser del equipo del ticket
+      const t = await tx.ticket.findUnique({
+        where: { id: ticketId },
+        select: { pedidoId: true, ticketNumero: true, personas: { select: { usuarioId: true, rol: true } } },
+      });
+      if (!t) throw new NotFoundException('El ticket no existe');
+      const delEquipo = t.personas.some((p) => p.usuarioId === actor.id);
+      if (!delEquipo && !['superadmin', 'jefe_base'].includes(actor.roleCode)) {
+        throw new ForbiddenException('Solo el equipo asignado a este ticket puede hacerlo');
+      }
+      const r = await tx.reporteDiario.findUnique({
+        where: { ticketId_fecha: { ticketId, fecha: deDia(fecha) } },
+      });
+      if (!r) throw new NotFoundException('Ese día todavía no tiene reporte');
+      if (r.corregidoAt) this.diaCorregido();
+      if (!r.completadoAt) {
+        throw new ConflictException({
+          message: 'Complete el día antes de firmarlo',
+          code: 'DIA_SIN_COMPLETAR',
+        });
+      }
+      const ahora = new Date();
+      let prueba: Record<string, unknown>;
+      if (rol === 'supervisor') {
+        const esSupervisor = t.personas.some((p) => p.rol === 'supervisor' && p.usuarioId === actor.id);
+        if (!esSupervisor && actor.roleCode !== 'superadmin') {
+          throw new ForbiddenException('Solo el Supervisor asignado a este ticket firma el reporte del día');
+        }
+        if (archivoId) throw new BadRequestException('La firma del Supervisor se hace en el portal: no lleva archivo');
+        prueba = firmaDeUnaLinea(
+          'pumping_reporte_diario',
+          r.id,
+          rol,
+          actor.id,
+          ahora,
+          fecha,
+          r.completadoAt.toISOString(),
+        );
+      } else {
+        if (!archivoId) {
+          throw new BadRequestException('Suba el documento firmado por el representante del cliente');
+        }
+        if (!(await tx.archivoRef.findUnique({ where: { id: archivoId } }))) {
+          throw new BadRequestException('El archivo indicado no existe');
+        }
+        prueba = {
+          documentoTipo: 'pumping_reporte_diario',
+          documentoId: r.id,
+          rolFirmante: rol,
+          metodo: 'manuscrita',
+          archivoId,
+        };
+      }
+      await this.bus.publish(
+        tx,
+        this.bus.create({
+          type: 'operaciones.pumping.reporte_diario.firmado',
+          subject: { type: 'pumping_reporte_diario', id: r.id },
+          data: { ...prueba, ticketId, ticketNumero: t.ticketNumero, pedidoId: t.pedidoId, fecha },
           actor: { userId: actor.id, role: actor.roleCode },
           traceparent: currentTraceparent(),
         }),
@@ -422,6 +535,8 @@ export class ReportesDiariosService {
 
   private vista(r: ReporteConDatos) {
     return {
+      /** Id del reporte del día: es el `documentoId` de sus firmas en `GET /api/firmas?documentoTipo=pumping_reporte_diario`. */
+      id: r.id,
       fecha: aDia(r.fecha),
       estado: this.estado(r),
       representante: r.representante,
@@ -431,6 +546,7 @@ export class ReportesDiariosService {
       totalHoras: this.total(r.actividades),
       completadoAt: r.completadoAt,
       corregidoAt: r.corregidoAt,
+      adjuntos: r.adjuntos.map((a) => ({ archivoId: a.archivoId, at: a.createdAt, por: a.autor })),
       actividades: r.actividades.map((a) => ({
         horaInicio: aHora(a.horaInicio),
         horaFin: aHora(a.horaFin),
