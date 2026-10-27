@@ -411,6 +411,22 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       expect(sinStock.body).toHaveLength(0);
     });
 
+    it('el resumen del tablero cuenta los artículos activos y los agotados; exige `articulos.ver`', async () => {
+      const ruta = '/api/operaciones/inventario/articulos/resumen';
+      const r = await http().get(ruta).set(lector()).expect(200);
+      const lista = (await http().get('/api/operaciones/inventario/articulos').set(lector())).body as Array<{
+        activo: boolean;
+        stockActual: number;
+      }>;
+      const activos = lista.filter((a) => a.activo);
+      expect(r.body).toEqual({
+        activos: activos.length,
+        agotados: activos.filter((a) => a.stockActual <= 0).length,
+        enRegla: activos.filter((a) => a.stockActual > 0).length,
+      });
+      expect((await http().get(ruta).set(sinPermisos())).status).toBe(403);
+    });
+
     it('un lector no administra y quien no tiene permisos no entra', async () => {
       expect(
         (

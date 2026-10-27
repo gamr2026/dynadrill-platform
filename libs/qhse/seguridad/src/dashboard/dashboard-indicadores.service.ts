@@ -31,6 +31,31 @@ const mismoMes = (a: Date, b: Date) =>
 export class DashboardIndicadoresService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Lo que muestra la tarjeta de QHSE del tablero general: eventos abiertos (investigaciones abiertas, emergencias activas, SWA y derrames
+   * activos), equipos cuya última inspección ya venció y matrices IPERC que aún esperan aprobación.
+   */
+  async resumen() {
+    const hoy = hoyEcuador();
+    const [investigaciones, emergencias, swa, derrames, ultimas, ipercSinAprobar] = await Promise.all([
+      this.prisma.investigacion.count({ where: { estado: 'abierta' } }),
+      this.prisma.emergencia.count({ where: { estado: 'activa' } }),
+      this.prisma.swa.count({ where: { estado: 'activo' } }),
+      this.prisma.derrame.count({ where: { estado: 'activo' } }),
+      this.prisma.inspeccion.findMany({
+        distinct: ['equipoId'],
+        orderBy: [{ equipoId: 'asc' }, { fecha: 'desc' }, { numero: 'desc' }],
+        select: { vigenteHasta: true },
+      }),
+      this.prisma.ipercMatriz.count({ where: { estado: { in: ['borrador', 'en_evaluacion', 'en_revision'] } } }),
+    ]);
+    return {
+      incidentesAbiertos: investigaciones + emergencias + swa + derrames,
+      inspeccionesPendientes: ultimas.filter((i) => aDia(i.vigenteHasta) < hoy).length,
+      ipercSinAprobar,
+    };
+  }
+
   async indicadores() {
     const ahora = new Date();
     const hoy = hoyEcuador();

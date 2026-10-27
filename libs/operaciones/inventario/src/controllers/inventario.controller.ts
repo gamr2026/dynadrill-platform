@@ -63,6 +63,13 @@ export class InventarioController {
     return this.articulos.listar(q);
   }
 
+  /** Resumen para el tablero general (antes de `articulos/:id`, para que no se tome «resumen» como un id). */
+  @RequirePermission(P.ARTICULOS_VER)
+  @Get('articulos/resumen')
+  resumenArticulos() {
+    return this.articulos.resumen();
+  }
+
   /** Selector de repuestos de Mantenimiento (antes de `articulos/:id`, para que no se tome «repuestos» como un id). */
   @RequirePermission(P.ARTICULOS_VER, P.MANTENIMIENTO_TAREAS)
   @Get('articulos/repuestos')

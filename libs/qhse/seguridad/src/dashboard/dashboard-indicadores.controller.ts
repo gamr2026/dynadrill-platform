@@ -8,6 +8,13 @@ import { DashboardIndicadoresService } from './dashboard-indicadores.service';
 export class DashboardIndicadoresController {
   constructor(private readonly indicadores: DashboardIndicadoresService) {}
 
+  /** Tarjeta de QHSE del tablero general. */
+  @RequirePermission(Permission.QHSE_GESTIONAR)
+  @Get('resumen')
+  resumen() {
+    return this.indicadores.resumen();
+  }
+
   @RequirePermission(Permission.QHSE_GESTIONAR)
   @Get('indicadores')
   obtener() {

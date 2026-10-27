@@ -93,6 +93,16 @@ export class ArticulosService {
     return new Map(filas.map((f) => [f.articulo_id, Number(f.stock)]));
   }
 
+  /** Para el tablero general: artículos activos y cuántos de ellos están agotados (existencia total en cero). */
+  async resumen() {
+    const [activos, stock] = await Promise.all([
+      this.prisma.articulo.findMany({ where: { activo: true }, select: { id: true } }),
+      this.stockPorArticulo(),
+    ]);
+    const agotados = activos.filter((a) => (stock.get(a.id) ?? 0) <= 0).length;
+    return { activos: activos.length, agotados, enRegla: activos.length - agotados };
+  }
+
   async listar(f: ListarArticulosDto) {
     const q = f.q?.trim();
     const where: Prisma.ArticuloWhereInput = {

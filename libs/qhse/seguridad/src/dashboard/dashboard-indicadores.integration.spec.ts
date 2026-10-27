@@ -35,6 +35,27 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
     await t.http().get(ruta).set(operador()).expect(403);
   });
 
+  it('el resumen de la tarjeta de QHSE cuenta lo abierto, las inspecciones vencidas y los IPERC por aprobar', async () => {
+    await t.http().get('/api/qhse/dashboard/resumen').set(operador()).expect(403);
+    const r = (await t.http().get('/api/qhse/dashboard/resumen').set(tecnico()).expect(200)).body;
+    const n = async (sql: string) => (await t.admin.query(sql)).rows[0].n as number;
+    const abiertos =
+      (await n("SELECT count(*)::int AS n FROM qhse.investigacion WHERE estado = 'abierta'")) +
+      (await n("SELECT count(*)::int AS n FROM qhse.emergencia WHERE estado = 'activa'")) +
+      (await n("SELECT count(*)::int AS n FROM qhse.swa WHERE estado = 'activo'")) +
+      (await n("SELECT count(*)::int AS n FROM qhse.derrame WHERE estado = 'activo'"));
+    expect(r.incidentesAbiertos).toBe(abiertos);
+    expect(r.ipercSinAprobar).toBe(
+      await n("SELECT count(*)::int AS n FROM qhse.iperc_matriz WHERE estado IN ('borrador','en_evaluacion','en_revision')"),
+    );
+    expect(r.inspeccionesPendientes).toBe(
+      await n(
+        `SELECT count(*)::int AS n FROM (SELECT DISTINCT ON (equipo_id) vigente_hasta FROM qhse.inspeccion
+          ORDER BY equipo_id, fecha DESC, numero DESC) u WHERE vigente_hasta < (now() AT TIME ZONE 'America/Guayaquil')::date`,
+      ),
+    );
+  });
+
   it('devuelve los indicadores calculables, el estado de EPI y PTW y lo que pone el semáforo en rojo', async () => {
     const r = (await t.http().get(ruta).set(tecnico()).expect(200)).body;
     // los once calculables; los que no se pueden calcular (TRIR, LTIR, participación en STOP, capacitados, IPERC por trabajo) no vienen
