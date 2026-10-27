@@ -86,6 +86,14 @@ export const MODULOS_ARCHIVO = [
     tamanoMaxMb: 25,
   },
   {
+    codigo: 'ticket_reporte_diario_documento',
+    nombre: 'Adjunto y documento firmado del Reporte Diario de un ticket de Pumping',
+    permisoSubir: 'pumping.tickets.operar',
+    permisoVer: 'pumping.documentos.ver',
+    tiposMime: DOCUMENTOS,
+    tamanoMaxMb: 25,
+  },
+  {
     codigo: 'ticket_fcr_documento',
     nombre: 'Documento adjunto de un ticket de FCR (inspección, dimensionamiento, dureza y QAQC)',
     permisoSubir: 'fcr.tickets.operar',
