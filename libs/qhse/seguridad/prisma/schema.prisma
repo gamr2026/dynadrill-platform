@@ -1606,7 +1606,7 @@ model DesechoAviso {
   desecho    Desecho          @relation(fields: [desechoId], references: [id], onDelete: Cascade)
   tipo       TipoAvisoDesecho
   emitidoAt  DateTime         @default(now()) @map("emitido_at") @db.Timestamptz(6)
-  emitidoPor String           @map("emitido_por") @db.Uuid
+  emitidoPor String?          @map("emitido_por") @db.Uuid
 
   @@unique([desechoId, tipo])
   @@map("desecho_aviso")

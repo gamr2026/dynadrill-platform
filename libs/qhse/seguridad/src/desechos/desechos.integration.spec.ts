@@ -5,6 +5,7 @@
 import { Permission } from '@dyn/authz';
 import { uuidv7 } from '@dyn/utils';
 import { VerificadorFirmasHttp, type LecturaFirma } from '../documentos/verificador-firmas';
+import { AvisosProgramadosService } from '../avisos/avisos-programados.service';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 
@@ -719,6 +720,30 @@ run('QHSE: Desechos (base de datos real)', () => {
         const r2 = await revisar();
         expect(r2.body.limiteVencido).toBe(0);
         expect(r2.body.limiteProximo).toBe(0);
+        expect(await eventosDe('qhse.desecho.limite_vencido', vencido)).toHaveLength(1);
+        expect(await eventosDe('qhse.desecho.limite_proximo', porVencer)).toHaveLength(1);
+      });
+
+      it('la revisión automática de avisos por vencimiento también avisa el límite de desechos, sin quien lo dispare, y no repite lo ya avisado', async () => {
+        const vencido = await insertarDirecto(400);
+        const porVencer = await insertarDirecto(345);
+        const lejos = await insertarDirecto(10);
+        const programados = t.app.get(AvisosProgramadosService);
+        const r1 = await programados.emitir(undefined, [vencido, porVencer, lejos]);
+        expect(r1.porTipo['qhse.desecho.limite_vencido']).toBe(1);
+        expect(r1.porTipo['qhse.desecho.limite_proximo']).toBe(1);
+        const [ev] = await eventosDe('qhse.desecho.limite_vencido', vencido);
+        expect(ev.datos.data).toMatchObject({ desechoId: vencido });
+        expect((ev.datos as { actor?: unknown }).actor).toBeUndefined(); // lo emite el sistema
+        const fila = await sql('SELECT emitido_por FROM qhse.desecho_aviso WHERE desecho_id = $1', [
+          vencido,
+        ]);
+        expect(fila.rows).toEqual([{ emitido_por: null }]);
+        expect(await eventosDe('qhse.desecho.limite_proximo', lejos)).toHaveLength(0);
+        // otra vuelta, o la revisión manual después, no repite
+        const r2 = await programados.emitir(undefined, [vencido, porVencer, lejos]);
+        expect(r2.total).toBe(0);
+        await revisar();
         expect(await eventosDe('qhse.desecho.limite_vencido', vencido)).toHaveLength(1);
         expect(await eventosDe('qhse.desecho.limite_proximo', porVencer)).toHaveLength(1);
       });

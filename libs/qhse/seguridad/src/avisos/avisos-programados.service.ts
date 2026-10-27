@@ -12,6 +12,7 @@ import {
   EstadoRequisitoLegal,
   TipoDocumentoPedido,
 } from '../generated/client';
+import { DesechosAvisosService } from '../desechos/desechos-avisos.service';
 import { InspeccionesConsultaService } from '../inspecciones/inspecciones-consulta.service';
 import { DIAS_AVISO_VENCIMIENTO } from '../legal/requisitos-legales-consulta.service';
 import { codigoAspecto } from '../aspectos-ambientales/aspectos-ambientales-consulta.service';
@@ -47,7 +48,7 @@ export interface ResumenAvisos {
  * Emisor de avisos por vencimiento. Lo que depende del tiempo no lo dispara ningún evento de negocio, así que esta revisión (cada cierto
  * tiempo, o a pedido) busca lo vencido o por vencer y publica un evento `qhse.aviso.*` por cada hecho **nuevo**; el módulo de Avisos de la plataforma
  * decide a quién y con qué texto (reglas y plantillas). Una tabla de claves (`aviso_programado`) impide avisar dos veces el mismo hecho. El aviso
- * del límite de almacenamiento de desechos es de otra sesión y no se emite aquí.
+ * del límite de almacenamiento de desechos y del certificado de disposición los emite `DesechosAvisosService` (con su propia tabla de claves) en esta misma revisión.
  */
 @Injectable()
 export class AvisosProgramadosService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -60,6 +61,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
     private readonly inspecciones: InspeccionesConsultaService,
+    private readonly desechos: DesechosAvisosService,
     cfg: ConfigService,
   ) {
     // 0 apaga la revisión programada (en pruebas está apagada por defecto); sin valor, cada hora
@@ -116,6 +118,17 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
           porTipo[c.tipo] = (porTipo[c.tipo] ?? 0) + 1;
           total++;
         }
+      }
+      // desechos: límite de 12 meses próximo o vencido y certificado de disposición fuera de plazo (los emite el propio servicio de desechos)
+      const d = await this.desechos.revisar(null, entidades);
+      for (const [tipo, n] of [
+        ['qhse.desecho.limite_proximo', d.limiteProximo],
+        ['qhse.desecho.limite_vencido', d.limiteVencido],
+        ['qhse.desecho.certificado_vencido', d.certificadoVencido],
+      ] as const) {
+        if (!n) continue;
+        porTipo[tipo] = n;
+        total += n;
       }
       if (total) this.logger.log(`Avisos por vencimiento emitidos: ${JSON.stringify(porTipo)}`);
       return { total, porTipo };

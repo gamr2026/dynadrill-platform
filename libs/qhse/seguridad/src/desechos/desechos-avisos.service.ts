@@ -14,8 +14,8 @@ export interface ResultadoRevision {
 }
 
 /**
- * Avisos de vencimiento de desechos. QHSE no tiene aún un temporizador: la revisión la dispara quien tiene el permiso (o un temporizador
- * externo que llame a la ruta) y es **idempotente**: cada aviso se emite una sola vez por desecho (clave única `desecho_aviso`). Cada aviso es
+ * Avisos de vencimiento de desechos. La revisión corre sola con la de los demás avisos por vencimiento (`AvisosProgramadosService`) y también
+ * la dispara quien tiene el permiso; es **idempotente**: cada aviso se emite una sola vez por desecho (clave única `desecho_aviso`). Cada aviso es
  * un evento `qhse.desecho.*` que el módulo de Avisos de la plataforma convierte en aviso y correo con sus plantillas.
  */
 @Injectable()
@@ -29,7 +29,11 @@ export class DesechosAvisosService {
    * Emite lo que falta: límite de 12 meses próximo (faltan {@link DIAS_AVISO_LIMITE} días o menos) o vencido, y certificado de disposición
    * fuera del plazo de {@link PLAZO_CERTIFICADO_DIAS} días desde el manifiesto. Solo desechos que no están dispuestos.
    */
-  async revisar(actor: AuthUser): Promise<ResultadoRevision> {
+  async revisar(
+    actor: AuthUser | null,
+    /** Limita la revisión a esos desechos (pruebas); sin valor, revisa todos. */
+    desechos?: readonly string[],
+  ): Promise<ResultadoRevision> {
     const hoy = hoyEcuador();
     const resultado: ResultadoRevision = {
       limiteProximo: 0,
@@ -38,6 +42,7 @@ export class DesechosAvisosService {
     };
     const abiertos = await this.prisma.desecho.findMany({
       where: {
+        ...(desechos ? { id: { in: [...desechos] } } : {}),
         estado: { codigo: { not: 'dispuesto' } },
         limiteAlmacenamientoHasta: {
           lte: new Date(`${masDias(hoy, DIAS_AVISO_LIMITE)}T00:00:00.000Z`),
@@ -58,7 +63,11 @@ export class DesechosAvisosService {
     }
 
     const conManifiesto = await this.prisma.desecho.findMany({
-      where: { estado: { codigo: 'con_manifiesto' }, manifiesto: { isNot: null } },
+      where: {
+        ...(desechos ? { id: { in: [...desechos] } } : {}),
+        estado: { codigo: 'con_manifiesto' },
+        manifiesto: { isNot: null },
+      },
       select: { id: true, manifiesto: { select: { fecha: true } } },
     });
     for (const d of conManifiesto) {
@@ -78,12 +87,12 @@ export class DesechosAvisosService {
   private async emitir(
     desechoId: string,
     tipo: TipoAvisoDesecho,
-    actor: AuthUser,
+    actor: AuthUser | null,
     extra: Record<string, unknown>,
   ): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
       const ya = await tx.desechoAviso.createMany({
-        data: [{ id: uuidv7(), desechoId, tipo, emitidoPor: actor.id }],
+        data: [{ id: uuidv7(), desechoId, tipo, emitidoPor: actor?.id ?? null }],
         skipDuplicates: true,
       });
       if (ya.count === 0) return false;

@@ -14,7 +14,8 @@ export class DesechosEventosService {
     tx: Tx,
     tipo: string,
     desechoId: string,
-    actor: AuthUser,
+    /** Quien hizo el cambio; vacío en lo que emite el sistema (la revisión automática de avisos). */
+    actor: AuthUser | null,
     extra: Record<string, unknown> = {},
   ) {
     const d = await tx.desecho.findUniqueOrThrow({
@@ -52,7 +53,7 @@ export class DesechosEventosService {
             : {}),
           ...extra,
         },
-        actor: { userId: actor.id, role: actor.roleCode },
+        ...(actor ? { actor: { userId: actor.id, role: actor.roleCode } } : {}),
         traceparent: currentTraceparent(),
       }),
     );
