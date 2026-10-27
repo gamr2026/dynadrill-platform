@@ -69,7 +69,7 @@ const ESTADOS: EstadoDef[] = [
     rol: 'facturacion',
   },
   { codigo: 'ticket_firmado', nombre: 'Ticket firmado', macro: 'en_proceso', rol: 'facturacion' },
-  { codigo: 'aot_generada', nombre: 'AOT generada', macro: 'en_proceso', rol: 'facturacion' },
+  { codigo: 'aot_generada', nombre: 'OT generada', macro: 'en_proceso', rol: 'facturacion' },
   { codigo: 'facturado', nombre: 'Facturado', macro: 'aprobado', rol: null, terminal: true },
   { codigo: 'anulado', nombre: 'Anulado', macro: 'rechazado', rol: null, terminal: true },
 ];
