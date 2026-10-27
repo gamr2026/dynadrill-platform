@@ -1387,6 +1387,31 @@ run('pedidos (base de datos real)', () => {
       await http().get(`/api/comercial/pedidos/${id()}`).set(ventas()).expect(404);
     });
 
+    it('crea la cabecera de una lista de precios: solo Facturación, con un cliente del catálogo y sin repetir el contrato', async () => {
+      const admin = () => ({
+        Authorization: `Bearer ${token(U.admin, 'Admin Root', 'superadmin', [...comunes, P.FACTURACION_GESTIONAR])}`,
+      });
+      const sufijo = Date.now() % 100000;
+      const cuerpo = { clienteId: OTRO_CLIENTE.id, numeroContrato: `CT-NUEVO-${sufijo}`, vigenteDesde: '2026-11-01' };
+      await http().post('/api/comercial/listas-precios').set(soloLectura()).send(cuerpo).expect(403);
+      await http().post('/api/comercial/listas-precios').set(admin()).send({ ...cuerpo, clienteId: id() }).expect(400);
+      await http().post('/api/comercial/listas-precios').set(admin()).send({ ...cuerpo, vigenteDesde: 'mañana' }).expect(400);
+      const ok = await http().post('/api/comercial/listas-precios').set(admin()).send(cuerpo).expect(201);
+      expect(ok.body).toMatchObject({
+        clienteId: OTRO_CLIENTE.id,
+        numeroContrato: `CT-NUEVO-${sufijo}`,
+        vigenteDesde: '2026-11-01',
+        activa: true,
+        items: 0,
+      });
+      // el mismo contrato del mismo cliente, sin importar mayúsculas, no se repite
+      await http()
+        .post('/api/comercial/listas-precios')
+        .set(admin())
+        .send({ ...cuerpo, numeroContrato: `ct-nuevo-${sufijo}` })
+        .expect(409);
+    });
+
     it('consulta las listas de precios del cliente y sus ítems elegibles', async () => {
       const ls = await http()
         .get(`/api/comercial/listas-precios?clienteId=${CLIENTE.id}`)

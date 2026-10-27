@@ -221,6 +221,15 @@ export class ListasPreciosQueryDto {
   @IsOptional() @IsIn(['true', 'false']) activa?: 'true' | 'false';
 }
 
+/** Alta de la cabecera de una lista de precios (cliente y contrato). Los ítems llegan después, por la carga de datos reales. */
+export class CrearListaPreciosDto {
+  @IsUUID() clienteId!: string;
+  @IsString() @MinLength(1) @MaxLength(120) numeroContrato!: string;
+  /** Desde cuándo rige (AAAA-MM-DD). */
+  @IsDateString() vigenteDesde!: string;
+  @IsOptional() @IsBoolean() activa?: boolean;
+}
+
 export class ItemsListaQueryDto {
   /** Solo en `GET /listas-precios/items` (los ítems elegibles de un cliente). */
   @IsOptional() @IsUUID() clienteId?: string;

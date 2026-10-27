@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ItemsListaQueryDto, ListasPreciosQueryDto } from '../dto/pedidos.dto';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { AuthUser } from '@dyn/common';
+import { uuidv7 } from '@dyn/utils';
+import { CrearListaPreciosDto, ItemsListaQueryDto, ListasPreciosQueryDto } from '../dto/pedidos.dto';
 import { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -19,6 +21,35 @@ export class ListasPreciosService {
     });
     const porTipo = await this.totalesPorTipo(filas.map((l) => l.id));
     return filas.map((l) => ({ ...this.cabecera(l), items: l._count.items, ...porTipo.get(l.id) }));
+  }
+
+  /**
+   * Alta de la cabecera de una lista: cliente del catálogo, número de contrato y desde cuándo rige. No se repite el contrato de un mismo
+   * cliente (lo exige también un índice único). Los ítems no se escriben aquí: llegan con la carga de datos reales.
+   */
+  async crear(dto: CrearListaPreciosDto, actor: AuthUser) {
+    const cliente = await this.prisma.catCliente.findUnique({ where: { id: dto.clienteId } });
+    if (!cliente) throw new BadRequestException('El cliente indicado no existe en el catálogo');
+    const contrato = dto.numeroContrato.trim();
+    if (!contrato) throw new BadRequestException('Indique el número de contrato');
+    const repetida = await this.prisma.listaPrecios.findFirst({
+      where: { clienteId: dto.clienteId, numeroContrato: { equals: contrato, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (repetida) throw new ConflictException('Ese cliente ya tiene una lista de precios con ese número de contrato');
+    const id = uuidv7();
+    await this.prisma.listaPrecios.create({
+      data: {
+        id,
+        clienteId: dto.clienteId,
+        numeroContrato: contrato,
+        vigenteDesde: new Date(`${dto.vigenteDesde.slice(0, 10)}T00:00:00.000Z`),
+        activa: dto.activa ?? true,
+        createdBy: actor.id,
+        updatedBy: actor.id,
+      },
+    });
+    return this.detalle(id);
   }
 
   /** La lista con sus totales por tipo (cantidad de ítems y suma de precios unitarios), sin traer los ítems. */

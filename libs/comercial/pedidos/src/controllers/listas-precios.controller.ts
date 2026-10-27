@@ -1,7 +1,7 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Permission } from '@dyn/authz';
-import { RequirePermission } from '@dyn/common';
-import { ItemsListaQueryDto, ListasPreciosQueryDto } from '../dto/pedidos.dto';
+import { CurrentUser, RequirePermission, type AuthUser } from '@dyn/common';
+import { CrearListaPreciosDto, ItemsListaQueryDto, ListasPreciosQueryDto } from '../dto/pedidos.dto';
 import { ListasPreciosService } from '../services/listas-precios.service';
 
 /** Consulta de listas de precios. Los ítems de un pedido salen siempre de aquí. */
@@ -13,6 +13,13 @@ export class ListasPreciosController {
   @Get()
   listar(@Query() q: ListasPreciosQueryDto) {
     return this.listas.listar(q);
+  }
+
+  /** Alta de la cabecera de una lista de precios (cliente, contrato y vigencia). */
+  @RequirePermission(Permission.FACTURACION_GESTIONAR)
+  @Post()
+  crear(@Body() dto: CrearListaPreciosDto, @CurrentUser() actor: AuthUser) {
+    return this.listas.crear(dto, actor);
   }
 
   /** Ítems elegibles para un pedido de ese cliente: `?clienteId=<uuid>&q=&tipo=&page=&limit=`. */
