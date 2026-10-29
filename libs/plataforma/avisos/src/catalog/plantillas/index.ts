@@ -1,4 +1,5 @@
 import type { PlantillaDef } from './tipos';
+import { PLANTILLAS_COMERCIAL } from './comercial';
 import { PLANTILLAS_FCR } from './fcr';
 import { PLANTILLAS_FLOTA } from './flota';
 import { PLANTILLAS_MANTENIMIENTO } from './mantenimiento';
@@ -18,4 +19,5 @@ export const PLANTILLAS: PlantillaDef[] = [
   ...PLANTILLAS_MANTENIMIENTO,
   // ...PLANTILLAS_INVENTARIO,
   ...PLANTILLAS_FCR,
+  ...PLANTILLAS_COMERCIAL,
 ];

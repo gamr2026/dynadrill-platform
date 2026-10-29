@@ -445,9 +445,12 @@ export class PedidosService {
         },
       });
       await this.publicar(tx, 'comercial.pedido.analista_asignado', id, ctx, {
+        pedidoId: id,
         codigo: p.codigo,
         analistaId: analista.id,
         reasignado: p.analistaFacturacionId !== null,
+        // el aviso es solo para la cuenta del analista elegido (no para todo Facturación)
+        asignados: [{ usuarioId: analista.id, rolCodigo: 'facturacion' }],
       });
     });
     return this.detalle(id, ctx);

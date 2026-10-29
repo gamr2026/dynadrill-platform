@@ -82,10 +82,19 @@ export async function requisitosDeGabinete(
       const ultimo = candidatos
         .filter((d) => d.vigenteHasta)
         .sort((a, b) => (b.vigenteHasta as Date).getTime() - (a.vigenteHasta as Date).getTime())[0];
+      if (!ultimo) return falta('No hay un ART cargado para este pedido');
+      const desde = ultimo.fecha ? aDia(ultimo.fecha) : null;
+      const hasta = aDia(ultimo.vigenteHasta as Date);
+      // la vigencia es un rango: puede no cubrir el día porque ya venció o porque todavía no empieza
+      const rango = desde ? `del ${desde} al ${hasta}` : `hasta el ${hasta}`;
+      const porque =
+        desde && diaTexto < desde
+          ? 'todavía no empieza a regir'
+          : diaTexto > hasta
+            ? 'ya venció'
+            : 'no cubre ese día';
       return falta(
-        ultimo
-          ? `El ART más reciente vale hasta el ${aDia(ultimo.vigenteHasta as Date)} y no cubre el ${diaTexto}: cargue un ART nuevo (un ART vencido bloquea)`
-          : 'No hay un ART cargado para este pedido',
+        `El ART más reciente vale ${rango} y ${porque} para el ${diaTexto}: cargue un ART que cubra ese día (un ART vencido bloquea)`,
       );
     }
     if (tipo === TipoDocumentoPedido.pt) {

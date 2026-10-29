@@ -31,6 +31,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.fcr.inspeccion_rechazada',
     ],
   },
+  { source: 'comercial', patterns: ['comercial.pedido.analista_asignado'] },
   {
     source: 'flota',
     patterns: [
