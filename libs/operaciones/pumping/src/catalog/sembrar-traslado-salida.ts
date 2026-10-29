@@ -48,7 +48,7 @@ export const REQUISITOS: RequisitoDef[] = [
   {
     codigo: REQ.inspeccionRealizada,
     nombre: 'Inspección de vehículos realizada',
-    descripcion: 'El operador realizó la Inspección de Vehículos (DYN-SGI-RE-068) de su unidad.',
+    descripcion: 'El conductor de la unidad realizó la Inspección de Vehículos (DYN-SGI-RE-068) desde Flota.',
     ambito: 'unidad',
     modulo: 'flota',
     paso: 'traslado_salida',
