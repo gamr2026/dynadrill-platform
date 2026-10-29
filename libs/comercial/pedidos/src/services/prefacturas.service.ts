@@ -52,7 +52,7 @@ const INCLUDE = {
   firmas: {
     where: { reemplazadaPorId: null },
     orderBy: { createdAt: 'asc' },
-    include: { archivo: true },
+    include: { archivo: true, firmasDigitales: { orderBy: { orden: 'asc' } } },
   },
   rechazoItems: { orderBy: { createdAt: 'asc' } },
   seguimiento: { orderBy: { createdAt: 'asc' } },
@@ -146,6 +146,26 @@ const aDto = (p: PrefacturaCompleta, nombres: Nombres = new Map()) => ({
     verificacionConfianza: num(f.verificacionConfianza),
     verificacionAt: f.verificacionAt,
     nombreCoincide: f.nombreCoincide,
+    /** Validación criptográfica de las firmas digitales del PDF (ayuda para revisar; sin revocación). */
+    firmaElectronica: f.firmaElectronicaEstado
+      ? {
+          estado: f.firmaElectronicaEstado,
+          resumen: f.firmaElectronicaResumen,
+          at: f.firmaElectronicaAt,
+          firmas: f.firmasDigitales.map((d) => ({
+            firmanteNombre: d.firmanteNombre,
+            firmanteIdentificacion: d.firmanteIdentificacion,
+            emisor: d.emisor,
+            integridad: d.integridad,
+            firmaValida: d.firmaValida,
+            firmanteVerificado: d.firmanteVerificado,
+            vigenteAlFirmar: d.vigenteAlFirmar,
+            fechaFirma: d.fechaFirma,
+            origenFecha: d.origenFecha,
+            conclusion: d.conclusion,
+          })),
+        }
+      : null,
   })),
 });
 
@@ -691,10 +711,75 @@ export class PrefacturasService {
   }
 
   /**
-   * Pide la lectura de la firma y guarda el resultado. Si el servicio no responde, deja constancia del intento (sin
-   * resultado) y NO falla: la verificación es una ayuda, nunca un requisito.
+   * Dos ayudas independientes sobre el documento firmado: la lectura de la firma manuscrita (PDF o imagen) y, solo en PDF, la
+   * validación de la firma electrónica. Ninguna bloquea ni condiciona nada.
    */
   private async verificarEnSegundoPlano(
+    firmaId: string,
+    archivoId: string,
+    nombre: string,
+    cargo: string | null,
+    token: string,
+  ): Promise<void> {
+    let esPdf = false;
+    try {
+      esPdf = (await this.directorio.archivo(archivoId, token))?.mimeType === 'application/pdf';
+    } catch {
+      // sin el tipo del archivo solo se lee la firma manuscrita
+    }
+    await Promise.all([
+      this.leerManuscrita(firmaId, archivoId, nombre, cargo, token),
+      esPdf ? this.validarElectronica(firmaId, archivoId, token) : Promise.resolve(),
+    ]);
+  }
+
+  /** Valida las firmas digitales del PDF y guarda el resultado (borra y vuelve a crear las de esa firma). */
+  private async validarElectronica(
+    firmaId: string,
+    archivoId: string,
+    token: string,
+  ): Promise<void> {
+    try {
+      const r = await this.directorio.verificarFirmaElectronica(archivoId, token);
+      if (!r) return;
+      await this.prisma.$transaction(async (tx) => {
+        await tx.prefacturaFirmaDigital.deleteMany({ where: { prefacturaFirmaId: firmaId } });
+        await tx.prefacturaFirmaDigital.createMany({
+          data: r.firmas.map((f, i) => ({
+            id: uuidv7(),
+            prefacturaFirmaId: firmaId,
+            orden: i + 1,
+            firmanteNombre: f.firmanteNombre,
+            firmanteIdentificacion: f.firmanteIdentificacion,
+            emisor: f.emisor,
+            integridad: f.integridad,
+            firmaValida: f.firmaValida,
+            firmanteVerificado: f.firmanteVerificado,
+            vigenteAlFirmar: f.vigenteAlFirmar,
+            fechaFirma: f.fechaFirma ? new Date(f.fechaFirma) : null,
+            origenFecha: f.origenFecha,
+            conclusion: f.conclusion,
+          })),
+        });
+        await tx.prefacturaFirma.update({
+          where: { id: firmaId },
+          data: {
+            firmaElectronicaEstado: r.estado,
+            firmaElectronicaResumen: r.resumen,
+            firmaElectronicaAt: new Date(),
+          },
+        });
+      });
+    } catch {
+      // es una ayuda: si falla, la firma queda registrada sin resultado y se puede reintentar
+    }
+  }
+
+  /**
+   * Pide la lectura de la firma manuscrita y guarda el resultado. Si el servicio no responde, deja constancia del intento (sin
+   * resultado) y NO falla: la verificación es una ayuda, nunca un requisito.
+   */
+  private async leerManuscrita(
     firmaId: string,
     archivoId: string,
     nombre: string,

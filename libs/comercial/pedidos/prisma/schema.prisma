@@ -1004,6 +1004,11 @@ model PrefacturaFirma {
   verificacionAt        DateTime? @map("verificacion_at") @db.Timestamptz(6)
   /// `null` si no se comparó el nombre; si no, si apareció junto a la firma.
   nombreCoincide        Boolean?  @map("nombre_coincide")
+  /// Validación criptográfica de las firmas digitales del PDF (ayuda para revisar; sin revocación). `null` = sin resultado aún o no es PDF.
+  firmaElectronicaEstado  EstadoFirmaElectronica? @map("firma_electronica_estado")
+  firmaElectronicaResumen String?                 @map("firma_electronica_resumen")
+  firmaElectronicaAt      DateTime?               @map("firma_electronica_at") @db.Timestamptz(6)
+  firmasDigitales         PrefacturaFirmaDigital[]
   registradoPor String            @map("registrado_por") @db.Uuid
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   /// La firma que sustituyó a esta (la vigente no tiene reemplazo).
@@ -1014,6 +1019,28 @@ model PrefacturaFirma {
   @@unique([prefacturaId, archivoId])
   @@index([prefacturaId])
   @@map("prefactura_firma")
+  @@schema("comercial")
+}
+
+/// Una firma digital encontrada en el documento firmado de la prefactura.
+model PrefacturaFirmaDigital {
+  id                     String                 @id @db.Uuid
+  prefacturaFirmaId      String                 @map("prefactura_firma_id") @db.Uuid
+  prefacturaFirma        PrefacturaFirma        @relation(fields: [prefacturaFirmaId], references: [id], onDelete: Cascade)
+  orden                  Int
+  firmanteNombre         String?                @map("firmante_nombre")
+  firmanteIdentificacion String?                @map("firmante_identificacion")
+  emisor                 String?
+  integridad             IntegridadFirmaDigital
+  firmaValida            Boolean                @map("firma_valida")
+  firmanteVerificado     Boolean                @map("firmante_verificado")
+  vigenteAlFirmar        Boolean?               @map("vigente_al_firmar")
+  fechaFirma             DateTime?              @map("fecha_firma") @db.Timestamptz(6)
+  origenFecha            OrigenFechaFirma       @map("origen_fecha")
+  conclusion             String
+
+  @@unique([prefacturaFirmaId, orden])
+  @@map("prefactura_firma_digital")
   @@schema("comercial")
 }
 
