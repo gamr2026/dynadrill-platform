@@ -151,6 +151,11 @@ export class PtwConsultaService {
       gabineteCompleta:
         requisitos.every((r) => r.documentoId !== null) &&
         matrices.every((m) => m.matrizId !== null),
+      /** Resumen de cumplimiento: lo que todavía falta para validar el PTW (vacío = información completa). */
+      faltantes: [
+        ...requisitos.filter((r) => r.documentoId === null).map((r) => r.falta ?? r.nombre),
+        ...matrices.filter((m) => m.matrizId === null).map((m) => m.falta ?? m.actividad),
+      ],
       firmas: p.firmas.map((f) => ({
         tipo: f.tipo,
         nombre: f.usuario.nombre,

@@ -105,12 +105,19 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
               ? inicio.slice(0, 10)
               : null;
           const quienAbre = event.actor?.userId;
-          if (
-            dia &&
-            quienAbre &&
-            esUuid(quienAbre) &&
-            (await tx.idUsuario.count({ where: { id: quienAbre } }))
+          if (!dia) {
+            this.logger.warn(
+              `Ticket ${datos.ticketNumero ?? ticketId}: el evento no trae fechaInicioServicio; no se abre el PTW (QHSE lo abre a mano)`,
+            );
+          } else if (
+            !quienAbre ||
+            !esUuid(quienAbre) ||
+            !(await tx.idUsuario.count({ where: { id: quienAbre } }))
           ) {
+            this.logger.warn(
+              `Ticket ${datos.ticketNumero ?? ticketId}: la cuenta que originó el evento no existe en identidad; no se abre el PTW (QHSE lo abre a mano)`,
+            );
+          } else {
             const id = await this.ptw.abrirDelPrimerDia(tx, ticketId, dia, {
               id: quienAbre,
               roleCode: (event.actor?.role ?? 'sistema') as AuthUser['roleCode'],
