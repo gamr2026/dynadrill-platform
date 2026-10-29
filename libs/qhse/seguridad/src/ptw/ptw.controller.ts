@@ -3,14 +3,11 @@ import { Transform } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
-import { FasePtw, TipoFirmaPtw } from '../generated/client';
+import { FasePtw } from '../generated/client';
 import { PtwConsultaService } from './ptw-consulta.service';
 import { PtwService } from './ptw.service';
 
 const P = Permission;
-/** Las confirmaciones de la formalización; la aprobación tiene su propia ruta y permiso. */
-const CONFIRMACIONES = Object.values(TipoFirmaPtw).filter((t) => t !== TipoFirmaPtw.aprobacion);
-
 export class ListarPtwDto {
   @IsOptional() @IsIn(Object.values(FasePtw)) fase?: FasePtw;
   @IsOptional() @IsUUID() pedidoId?: string;
@@ -26,10 +23,6 @@ export class AbrirPtwDto {
   @IsUUID() ticketId!: string;
   /** Día de operación (AAAA-MM-DD). */
   @Matches(/^\d{4}-\d{2}-\d{2}$/) diaOperacion!: string;
-}
-
-export class ConfirmarPtwDto {
-  @IsIn(CONFIRMACIONES) tipo!: TipoFirmaPtw;
 }
 
 export class AnularPtwDto {
@@ -66,16 +59,6 @@ export class PtwController {
   @Post(':id/validar-documentos')
   validarDocumentos(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     return this.ptw.validarDocumentos(id, actor);
-  }
-
-  @RequirePermission(P.PTW_GESTIONAR)
-  @Post(':id/confirmaciones')
-  confirmar(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ConfirmarPtwDto,
-    @CurrentUser() actor: AuthUser,
-  ) {
-    return this.ptw.confirmar(id, dto.tipo, actor);
   }
 
   @RequirePermission(P.PTW_APROBAR)

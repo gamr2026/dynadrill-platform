@@ -194,7 +194,7 @@ run('QHSE: Stop Work Authority (base de datos real)', () => {
     const fila = ((await t.http().get('/api/qhse/swa').set(tecnico())).body as Array<Record<string, unknown>>).find(
       (x) => x['id'] === id,
     );
-    expect(fila).toMatchObject({ heroeSeguridad: true });
+    expect(fila).toMatchObject({ heroeSeguridad: false }); // se marca al reanudar
     expect(fila).toHaveProperty('ubicacion');
     expect((await post(id, 'reanudar')).status).toBe(409);
     expect((await post(id, 'reinicio', { criterioId: d0.criterios[0].criterioId })).status).toBe(
@@ -236,6 +236,11 @@ run('QHSE: Stop Work Authority (base de datos real)', () => {
       heroeSeguridad: true,
       reanudadoPor: TECNICO.nombre,
     });
+    // la bandeja muestra el reconocimiento «Héroe de Seguridad» una vez reanudado
+    const filaCerrada = ((await t.http().get('/api/qhse/swa').set(tecnico())).body as Array<Record<string, unknown>>).find(
+      (x) => x['id'] === id,
+    );
+    expect(filaCerrada).toMatchObject({ heroeSeguridad: true });
     const cerrado = await eventos('qhse.swa.cerrado', id);
     expect(cerrado).toHaveLength(1);
     expect(cerrado[0].datos.data).toMatchObject({

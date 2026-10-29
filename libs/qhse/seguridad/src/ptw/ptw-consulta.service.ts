@@ -28,7 +28,7 @@ const CON_TICKET = {
   },
 } satisfies Prisma.PtwInclude;
 
-/** Lectura de PTW: la bandeja y el detalle con lo que falta, las confirmaciones y el historial. */
+/** Lectura de PTW: la bandeja y el detalle con lo que falta, la aprobación y el historial. */
 @Injectable()
 export class PtwConsultaService {
   constructor(private readonly prisma: PrismaService) {}
@@ -99,7 +99,7 @@ export class PtwConsultaService {
     });
     if (!p) throw new NotFoundException('El PTW no existe');
 
-    // En gabinete se calcula qué documento serviría hoy; después de pasar a formalización quedan fijados los que se usaron.
+    // En gabinete se calcula qué documento serviría hoy; después de pasar a aprobación quedan fijados los que se usaron.
     const requisitos =
       p.fase === FasePtw.gabinete && !p.anuladoAt
         ? await requisitosDeGabinete(this.prisma, p.pedidoId, p.diaOperacion)

@@ -16,21 +16,14 @@ import { codigoPtw, requisitosDeGabinete } from './ptw-documentos';
 import { requisitosIperc } from './ptw-iperc';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
-/** Las tres confirmaciones de la formalización; al completarse el PTW pasa solo a aprobación y se publica `qhse.ptw.formalizado`. */
-const FORMALIZACION: TipoFirmaPtw[] = [
-  TipoFirmaPtw.ptw_en_sitio,
-  TipoFirmaPtw.acta_recibimiento,
-  TipoFirmaPtw.barricadas,
-];
-
 /** Quien actúa sobre el PTW: una cuenta autenticada o, cuando lo abre un evento, la cuenta que lo originó. */
 type ActorPtw = Pick<AuthUser, 'id' | 'roleCode'>;
 const enActor = (a: ActorPtw) => ({ userId: a.id, role: a.roleCode });
 
 /**
- * Permiso de Trabajo (HSE-SITIO-001): uno vigente por pedido y día de operación. Ciclo: gabinete → formalización → aprobación →
- * aprobado. Cada paso publica su evento por el outbox en la misma transacción: `qhse.ptw.abierto`, `.firmado` (formalización
- * completa), `.cerrado` (aprobado por QHSE) y `.anulado`. Las reglas de las fases las garantiza además la base (trigger `ptw_validar`).
+ * Permiso de Trabajo (HSE-SITIO-001): uno vigente por pedido y día de operación. Ciclo (como la demo): gabinete → aprobación → aprobado.
+ * Cada paso publica su evento por el outbox en la misma transacción: `qhse.ptw.abierto`, `.firmado` (la aprobación de QHSE), `.cerrado`
+ * (aprobado por QHSE) y `.anulado`. Las reglas de las fases las garantiza además la base (trigger `ptw_validar`).
  */
 @Injectable()
 export class PtwService {
@@ -98,7 +91,7 @@ export class PtwService {
     return id;
   }
 
-  /** Pasa de gabinete a formalización: fija los cuatro documentos que sirven para ese día (el ART vencido bloquea). */
+  /** Pasa de gabinete a aprobación: fija los cuatro documentos que sirven para ese día (el ART vencido bloquea). */
   async validarDocumentos(id: string, actor: AuthUser) {
     await this.prisma.$transaction(async (tx) => {
       const p = await this.vigente(tx, id);
@@ -108,14 +101,14 @@ export class PtwService {
       const faltan = requisitos.filter((r) => r.documentoId === null);
       if (faltan.length)
         throw new ConflictException(
-          `No se puede pasar a formalización. ${faltan.map((f) => f.falta).join('. ')}`,
+          `No se puede pasar a aprobación. ${faltan.map((f) => f.falta).join('. ')}`,
         );
       // las matrices IPERC aprobadas y vigentes de las actividades que exige el tipo de servicio del ticket (una vencida bloquea)
       const iperc = await requisitosIperc(tx, p.ticketId, p.diaOperacion);
       const sinMatriz = iperc.filter((r) => r.matrizId === null);
       if (sinMatriz.length)
         throw new ConflictException(
-          `No se puede pasar a formalización. ${sinMatriz.map((f) => f.falta).join('. ')}`,
+          `No se puede pasar a aprobación. ${sinMatriz.map((f) => f.falta).join('. ')}`,
         );
       const por = (tipo: string) => requisitos.find((r) => r.tipo === tipo)?.documentoId as string;
       // se fijan las matrices usadas (la base exige que estén aprobadas, vigentes ese día y sean de una actividad exigida)
@@ -127,7 +120,7 @@ export class PtwService {
       const cambio = await tx.ptw.updateMany({
         where: { id, fase: FasePtw.gabinete },
         data: {
-          fase: FasePtw.formalizacion,
+          fase: FasePtw.aprobacion,
           documentoRecepcionId: por('formato_recepcion'),
           documentoArtId: por('art'),
           documentoPtId: por('pt'),
@@ -142,40 +135,12 @@ export class PtwService {
     return this.consulta.detalle(id);
   }
 
-  /** Confirma «de una línea» el PTW firmado en sitio, el acta de recibimiento o las barricadas; con las tres pasa a aprobación. */
-  async confirmar(id: string, tipo: TipoFirmaPtw, actor: AuthUser) {
-    if (!FORMALIZACION.includes(tipo))
-      throw new BadRequestException('Esa confirmación no es de la formalización');
-    await this.prisma.$transaction(async (tx) => {
-      const p = await this.vigente(tx, id);
-      if (p.fase !== FasePtw.formalizacion)
-        throw new ConflictException('Las confirmaciones se registran en la fase de formalización');
-      if (await tx.ptwFirma.count({ where: { ptwId: id, tipo } }))
-        throw new ConflictException('Esa confirmación ya está registrada');
-      const firmada = await tx.ptwFirma.create({
-        data: { id: uuidv7(), ptwId: id, tipo, usuarioId: actor.id },
-      });
-      await this.publicarFirma(tx, id, tipo, actor, firmada.firmadoAt);
-      const hechas = await tx.ptwFirma.count({ where: { ptwId: id, tipo: { in: FORMALIZACION } } });
-      if (hechas < FORMALIZACION.length) return;
-      // el cambio de fase lo gana una sola petición aunque dos confirmaciones lleguen a la vez
-      const cambio = await tx.ptw.updateMany({
-        where: { id, fase: FasePtw.formalizacion },
-        data: { fase: FasePtw.aprobacion, updatedBy: actor.id },
-      });
-      if (cambio.count !== 1) return;
-      await this.historia(tx, id, AccionPtw.firmado, actor);
-      await this.publicar(tx, 'qhse.ptw.formalizado', id, actor);
-    });
-    return this.consulta.detalle(id);
-  }
-
   /** La aprobación de QHSE: cierra el PTW del día. */
   async aprobar(id: string, actor: AuthUser) {
     await this.prisma.$transaction(async (tx) => {
       const p = await this.vigente(tx, id);
       if (p.fase !== FasePtw.aprobacion)
-        throw new ConflictException('El PTW debe tener la formalización completa para aprobarlo');
+        throw new ConflictException('Valide los documentos del PTW antes de aprobarlo');
       const firmada = await tx.ptwFirma.create({
         data: { id: uuidv7(), ptwId: id, tipo: TipoFirmaPtw.aprobacion, usuarioId: actor.id },
       });
@@ -242,8 +207,8 @@ export class PtwService {
   }
 
   /**
-   * Evidencia de una confirmación (contrato 4.14): el evento `qhse.ptw.firmado` lleva al PTW y la prueba «de una línea». Firmas lo
-   * registra; aquí la confirmación sigue guardada porque de ella depende el avance de fase.
+   * Evidencia de la aprobación (contrato 4.14): el evento `qhse.ptw.firmado` lleva al PTW y la prueba «de una línea». Firmas lo
+   * registra; aquí la firma sigue guardada porque de ella depende el avance de fase.
    */
   private async publicarFirma(
     tx: Tx,

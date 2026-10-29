@@ -520,7 +520,7 @@ run('QHSE: matriz IPERC maestra y PTW (base de datos real)', () => {
         .post(`/api/qhse/ptw/${conCobertura.ptwId}/validar-documentos`)
         .set(hse());
       expect(ok.status).toBe(201);
-      expect(ok.body.fase).toBe('formalizacion');
+      expect(ok.body.fase).toBe('aprobacion');
       expect(ok.body.matricesIperc).toEqual([
         expect.objectContaining({ actividadId, matrizId, falta: null }),
       ]);
@@ -630,7 +630,7 @@ run('QHSE: matriz IPERC maestra y PTW (base de datos real)', () => {
         t.prisma.ptw.update({
           where: { id: p.ptwId },
           data: {
-            fase: 'formalizacion',
+            fase: 'aprobacion',
             documentoRecepcionId: de('formato_recepcion'),
             documentoArtId: de('art'),
             documentoPtId: de('pt'),

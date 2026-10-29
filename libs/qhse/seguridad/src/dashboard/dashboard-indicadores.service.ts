@@ -12,7 +12,7 @@ export const DIAS_PTW_SIN_ACTIVIDAD = 3;
 /** Horas desde el incidente para notificar a Ministerio del Trabajo / IESS. */
 const HORAS_NOTIFICACION_LEGAL = 24;
 
-const FASES_PTW = ['gabinete', 'formalizacion', 'aprobacion'] as const;
+const FASES_PTW = ['gabinete', 'aprobacion'] as const;
 const ESTADOS_EPI = ['solicitado', 'aprobado', 'despachado', 'rechazado'] as const;
 
 const redondear = (n: number, decimales: number) => {

@@ -104,8 +104,6 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     t.http().post('/api/qhse/ptw').set(quien).send({ ticketId, diaOperacion });
   const accion = (id: string, ruta: string, cuerpo: Record<string, unknown> = {}, quien = hse()) =>
     t.http().post(`/api/qhse/ptw/${id}/${ruta}`).set(quien).send(cuerpo);
-  const confirmar = (id: string, tipo: string, quien = hse()) =>
-    accion(id, 'confirmaciones', { tipo }, quien);
   const eventos = async (tipo: string, ticketId: string) =>
     (
       await t.admin.query(
@@ -113,8 +111,8 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
         [tipo, ticketId],
       )
     ).rows as Salida[];
-  /** Un PTW listo en formalización. */
-  const enFormalizacion = async (dia = hoy) => {
+  /** Un PTW con los documentos validados, listo para que QHSE lo apruebe. */
+  const enAprobacion = async (dia = hoy) => {
     const { ticketId, pedidoId } = await ticketNuevo();
     await documentosCompletos(pedidoId, dia);
     const p = await abrir(ticketId, dia);
@@ -148,7 +146,7 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
 
   // ------------------------------------------------------------------------------------------------ ciclo completo
 
-  it('ciclo completo: abrir, validar la gabinete, formalizar, aprobar; cada hito publica su evento con ticketId y pedidoId', async () => {
+  it('ciclo completo (como la demo): abrir, validar la gabinete y aprobar; cada hito publica su evento con ticketId y pedidoId', async () => {
     const { ticketId, pedidoId } = await ticketNuevo();
     await documentosCompletos(pedidoId, hoy);
 
@@ -172,49 +170,20 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
       fase: 'gabinete',
     });
 
-    // las confirmaciones aún no se aceptan, y la aprobación tampoco
-    expect((await confirmar(id, 'barricadas')).status).toBe(409);
+    // la aprobación aún no se acepta, y la formalización ya no existe
     expect((await accion(id, 'aprobar', {}, gerente())).status).toBe(409);
+    expect((await accion(id, 'confirmaciones', { tipo: 'barricadas' })).status).toBe(404);
 
-    const formal = await accion(id, 'validar-documentos');
-    expect(formal.status).toBe(201);
-    expect(formal.body.fase).toBe('formalizacion');
-    expect(formal.body.requisitos.every((r: { documentoId: string | null }) => r.documentoId)).toBe(
-      true,
-    );
+    const validado = await accion(id, 'validar-documentos');
+    expect(validado.status).toBe(201);
+    expect(validado.body.fase).toBe('aprobacion');
+    expect(
+      validado.body.requisitos.every((r: { documentoId: string | null }) => r.documentoId),
+    ).toBe(true);
     expect((await accion(id, 'validar-documentos')).status).toBe(409);
-
-    expect((await confirmar(id, 'ptw_en_sitio')).status).toBe(201);
-    expect((await confirmar(id, 'ptw_en_sitio')).status).toBe(409);
-    expect((await confirmar(id, 'acta_recibimiento')).status).toBe(201);
-    // cada confirmación publica su evidencia (contrato 4.14); la formalización completa, su propio evento
+    // ya no se publica la formalización ni queda evidencia de confirmaciones
     expect(await eventos('qhse.ptw.formalizado', ticketId)).toHaveLength(0);
-    expect(await eventos('qhse.ptw.firmado', ticketId)).toHaveLength(2);
-    const firmado = await confirmar(id, 'barricadas');
-    expect(firmado.status).toBe(201);
-    expect(firmado.body.fase).toBe('aprobacion');
-    expect(firmado.body.firmas.map((f: { nombre: string }) => f.nombre)).toEqual([
-      TECNICO.nombre,
-      TECNICO.nombre,
-      TECNICO.nombre,
-    ]);
-    const ev = await eventos('qhse.ptw.formalizado', ticketId);
-    expect(ev).toHaveLength(1);
-    expect(ev[0].datos.data).toMatchObject({ ptwId: id, ticketId, pedidoId, fase: 'aprobacion' });
-    const evidencias = await eventos('qhse.ptw.firmado', ticketId);
-    expect(evidencias).toHaveLength(3);
-    expect(evidencias.map((e) => e.datos.data['rolFirmante']).sort()).toEqual([
-      'acta_recibimiento',
-      'barricadas',
-      'ptw_en_sitio',
-    ]);
-    expect(evidencias[0].datos.actor?.userId).toBe(TECNICO.id);
-    expect(evidencias[0].datos.data).toMatchObject({
-      documentoTipo: 'qhse_ptw',
-      documentoId: id,
-      metodo: 'linea',
-      hashDocumento: expect.stringMatching(/^[0-9a-f]{64}$/),
-    });
+    expect(await eventos('qhse.ptw.firmado', ticketId)).toHaveLength(0);
 
     // aprueba quien tiene el permiso de aprobar, no quien solo gestiona
     expect((await accion(id, 'aprobar', {}, hse())).status).toBe(403);
@@ -241,10 +210,9 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     expect(aprobado.body.historial.map((h: { accion: string }) => h.accion)).toEqual([
       'abierto',
       'documentos_validados',
-      'firmado',
       'aprobado',
     ]);
-    expect(aprobado.body.firmas).toHaveLength(4);
+    expect(aprobado.body.firmas).toHaveLength(1);
     expect((await accion(id, 'aprobar', {}, gerente())).status).toBe(409);
   });
 
@@ -304,7 +272,7 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     expect((await doc(pedidoId, { tipo: 'art', fecha: fechaEn(-20) })).status).toBe(201);
     const vencido = await accion(p.body.id, 'validar-documentos');
     expect(vencido.status).toBe(409);
-    expect(vencido.body.detail).toMatch(/no cubre el .*un ART vencido bloquea/);
+    expect(vencido.body.detail).toMatch(/ya venció para el .*un ART vencido bloquea/);
     // el PT de otro día tampoco sirve
     const otroDia = await abrir(ticketId, fechaEn(3));
     expect(otroDia.body.requisitos.find((r: { tipo: string }) => r.tipo === 'pt').falta).toMatch(
@@ -332,7 +300,7 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
   });
 
   it('un documento en uso por un PTW vigente no se anula hasta anular el PTW', async () => {
-    const { id, pedidoId } = await enFormalizacion();
+    const { id, pedidoId } = await enAprobacion();
     const pt = (
       await t.http().get('/api/qhse/documentos').query({ pedidoId, tipo: 'pt' }).set(hse())
     ).body[0];
@@ -397,12 +365,16 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
       await expect(
         t.prisma.ptw.update({ where: { id: p.body.id }, data: { fase: 'aprobado' } }),
       ).rejects.toThrow(/Cambio de fase no permitido/);
+      // pasar a aprobación sin documentos fijados se rechaza, y la formalización ya no es una fase válida
+      await expect(
+        t.prisma.ptw.update({ where: { id: p.body.id }, data: { fase: 'aprobacion' } }),
+      ).rejects.toThrow(/ptw_documentos_check|Falta el documento/);
       await expect(
         t.prisma.ptw.update({ where: { id: p.body.id }, data: { fase: 'formalizacion' } }),
-      ).rejects.toThrow(/ptw_documentos_check|Falta el documento/);
+      ).rejects.toThrow(/Cambio de fase no permitido/);
     });
 
-    it('al pasar a formalización cada documento debe ser del tipo, del pedido y estar vigente', async () => {
+    it('al pasar a aprobación cada documento debe ser del tipo, del pedido y estar vigente', async () => {
       const a = await ticketNuevo();
       const b = await ticketNuevo();
       await documentosCompletos(a.pedidoId, hoy);
@@ -421,7 +393,7 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
         t.prisma.ptw.update({
           where: { id: p.body.id },
           data: {
-            fase: 'formalizacion',
+            fase: 'aprobacion',
             documentoRecepcionId: da['formato_recepcion'],
             documentoArtId: da['art'],
             documentoPtId: da['pt'],
@@ -449,7 +421,7 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     });
 
     it('lo fijado queda congelado, el ticket y el día no cambian y la aplicación no puede editar esas columnas ni borrar', async () => {
-      const { id } = await enFormalizacion();
+      const { id } = await enAprobacion();
       const otro = await archivo();
       void otro;
       await expect(
@@ -469,26 +441,17 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
       ).rejects.toThrow(/no se pueden cambiar/);
     });
 
-    it('para pasar a aprobación hacen falta las tres confirmaciones y para aprobar la de QHSE', async () => {
-      const { id } = await enFormalizacion();
-      await expect(
-        t.prisma.ptw.update({ where: { id }, data: { fase: 'aprobacion' } }),
-      ).rejects.toThrow(/faltan el PTW firmado/);
-      for (const tipo of ['ptw_en_sitio', 'acta_recibimiento', 'barricadas'] as const) {
-        await t.prisma.ptwFirma.create({
-          data: { id: uuidv7(), ptwId: id, tipo, usuarioId: TECNICO.id },
-        });
-      }
-      await t.prisma.ptw.update({ where: { id }, data: { fase: 'aprobacion' } });
+    it('para aprobar hace falta la aprobación de QHSE', async () => {
+      const { id } = await enAprobacion();
       await expect(
         t.prisma.ptw.update({ where: { id }, data: { fase: 'aprobado' } }),
       ).rejects.toThrow(/Falta la aprobación de QHSE/);
     });
 
-    it('una confirmación solo cabe en su fase y la historia no se edita ni se borra', async () => {
+    it('la aprobación solo cabe en su fase y la historia no se edita ni se borra', async () => {
       const { ticketId } = await ticketNuevo();
       const p = await abrir(ticketId, hoy);
-      // en gabinete no se acepta ninguna confirmación
+      // en gabinete no se acepta ni la aprobación ni las confirmaciones de la formalización retirada
       await expect(
         t.prisma.ptwFirma.create({
           data: { id: uuidv7(), ptwId: p.body.id, tipo: 'barricadas', usuarioId: TECNICO.id },
@@ -499,13 +462,13 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
           data: { id: uuidv7(), ptwId: p.body.id, tipo: 'aprobacion', usuarioId: TECNICO.id },
         }),
       ).rejects.toThrow(/fase de aprobación/);
-      const { id } = await enFormalizacion();
+      const { id } = await enAprobacion();
       const f = await t.prisma.ptwFirma.create({
-        data: { id: uuidv7(), ptwId: id, tipo: 'barricadas', usuarioId: TECNICO.id },
+        data: { id: uuidv7(), ptwId: id, tipo: 'aprobacion', usuarioId: TECNICO.id },
       });
       await expect(
         t.prisma.ptwFirma.create({
-          data: { id: uuidv7(), ptwId: id, tipo: 'barricadas', usuarioId: TECNICO.id },
+          data: { id: uuidv7(), ptwId: id, tipo: 'aprobacion', usuarioId: TECNICO.id },
         }),
       ).rejects.toThrow(/Unique|unique/);
       await expect(

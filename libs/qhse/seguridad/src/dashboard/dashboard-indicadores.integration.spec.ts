@@ -91,7 +91,7 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
       'rechazado',
     ]);
     expect(r.epi.total).toBe(r.epi.porEstado.reduce((a: number, e: { cantidad: number }) => a + e.cantidad, 0));
-    expect(r.ptw.porFase.map((f: { fase: string }) => f.fase)).toEqual(['gabinete', 'formalizacion', 'aprobacion']);
+    expect(r.ptw.porFase.map((f: { fase: string }) => f.fase)).toEqual(['gabinete', 'aprobacion']);
     expect(r.ptw.abiertos).toBe(r.ptw.porFase.reduce((a: number, f: { cantidad: number }) => a + f.cantidad, 0));
     expect(Array.isArray(r.incumplimientoLegal)).toBe(true);
   });
