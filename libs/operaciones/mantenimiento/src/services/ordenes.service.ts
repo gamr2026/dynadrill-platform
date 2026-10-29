@@ -269,7 +269,6 @@ export class OrdenesService {
             pumpingReporteUnidad: {
               include: {
                 ticket: { select: { id: true, ticketNumero: true } },
-                origenBodega: { select: { nombre: true } },
               },
             },
           },
@@ -304,7 +303,7 @@ export class OrdenesService {
       ticket: vista.ticket,
       lecturas: { horometro, odometro },
       salida: {
-        base: p?.origenBodega?.nombre ?? null,
+        base: p?.origen ?? null,
         operadores: personas.filter((x) => x.rol === 'operador').map((x) => x.nombre),
         supervisor: personas.find((x) => x.rol === 'supervisor')?.nombre ?? null,
       },

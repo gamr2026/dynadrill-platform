@@ -371,15 +371,9 @@ model InspeccionVehiculo {
   unidad          Unidad            @relation(fields: [unidadId], references: [id])
   momento         MomentoInspeccion @default(salida)
   fecha           DateTime          @db.Timestamptz(6)
-  /// Punto de partida y destino: cada extremo es una bodega o un pozo (el de partida es obligatorio y uno solo; el destino, a lo más uno).
-  partidaBodegaId String?           @map("partida_bodega_id") @db.Uuid
-  partidaBodega   CatBodega?        @relation("inspeccionPartidaBodega", fields: [partidaBodegaId], references: [id])
-  partidaPozoId   String?           @map("partida_pozo_id") @db.Uuid
-  partidaPozo     CatPozo?          @relation("inspeccionPartidaPozo", fields: [partidaPozoId], references: [id])
-  destinoBodegaId String?           @map("destino_bodega_id") @db.Uuid
-  destinoBodega   CatBodega?        @relation("inspeccionDestinoBodega", fields: [destinoBodegaId], references: [id])
-  destinoPozoId   String?           @map("destino_pozo_id") @db.Uuid
-  destinoPozo     CatPozo?          @relation("inspeccionDestinoPozo", fields: [destinoPozoId], references: [id])
+  /// Punto de partida (obligatorio) y destino (opcional): texto libre, como en la demo (no son bodegas: una base, un pozo, una ciudad…).
+  puntoPartida    String            @map("punto_partida")
+  destino         String?
   conductorId     String            @map("conductor_id") @db.Uuid
   conductor       IdUsuario         @relation("inspeccionConductor", fields: [conductorId], references: [id])
   observaciones   String?
@@ -544,14 +538,9 @@ model GerenciamientoViaje {
   inspeccion               InspeccionVehiculo? @relation(fields: [inspeccionId], references: [id])
   fecha                    DateTime           @db.Date
   motivo                   String
-  origenBodegaId           String?            @map("origen_bodega_id") @db.Uuid
-  origenBodega             CatBodega?         @relation("viajeOrigenBodega", fields: [origenBodegaId], references: [id])
-  origenPozoId             String?            @map("origen_pozo_id") @db.Uuid
-  origenPozo               CatPozo?           @relation("viajeOrigenPozo", fields: [origenPozoId], references: [id])
-  destinoBodegaId          String?            @map("destino_bodega_id") @db.Uuid
-  destinoBodega            CatBodega?         @relation("viajeDestinoBodega", fields: [destinoBodegaId], references: [id])
-  destinoPozoId            String?            @map("destino_pozo_id") @db.Uuid
-  destinoPozo              CatPozo?           @relation("viajeDestinoPozo", fields: [destinoPozoId], references: [id])
+  /// Origen y destino en texto libre. Con ticket quedan nulos y se toman de la inspección de salida (al revés en el retorno).
+  origen                   String?
+  destino                  String?
   puntajeTotal             Int                @map("puntaje_total")
   nivel                    NivelRiesgoViaje
   pasajeros                String?
@@ -618,49 +607,6 @@ model GerenciamientoViajeComunicacion {
   @@id([gerenciamientoId, orden])
   @@map("gerenciamiento_viaje_comunicacion")
   @@schema("flota")
-}
-
-/// `catalogos.bodega`: solo id, nombre y habilitado.
-model CatBodega {
-  id         String  @id @db.Uuid
-  nombre     String
-  habilitado Boolean @default(true)
-
-  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenBodega")
-  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoBodega")
-  inspeccionesPartida InspeccionVehiculo[] @relation("inspeccionPartidaBodega")
-  inspeccionesDestino InspeccionVehiculo[] @relation("inspeccionDestinoBodega")
-
-  @@map("bodega")
-  @@schema("catalogos")
-}
-
-/// `catalogos.campo`: solo id y nombre.
-model CatCampo {
-  id     String    @id @db.Uuid
-  nombre String
-  pozos  CatPozo[]
-
-  @@map("campo")
-  @@schema("catalogos")
-}
-
-/// `catalogos.pozo`: lo necesario para nombrar el origen o el destino de un viaje.
-model CatPozo {
-  id             String    @id @db.Uuid
-  codigo         String?
-  nombreCompleto String    @map("nombre_completo")
-  campoId        String?   @map("campo_id") @db.Uuid
-  campo          CatCampo? @relation(fields: [campoId], references: [id])
-  habilitado     Boolean   @default(true)
-
-  viajesOrigen  GerenciamientoViaje[] @relation("viajeOrigenPozo")
-  viajesDestino GerenciamientoViaje[] @relation("viajeDestinoPozo")
-  inspeccionesPartida InspeccionVehiculo[] @relation("inspeccionPartidaPozo")
-  inspeccionesDestino InspeccionVehiculo[] @relation("inspeccionDestinoPozo")
-
-  @@map("pozo")
-  @@schema("catalogos")
 }
 
 // ---------------------------------------------------------------------------------------------------------------

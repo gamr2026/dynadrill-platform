@@ -22,10 +22,6 @@ const INCLUIR = {
   pumpingReporteUnidad: {
     include: {
       ticket: { select: { id: true, ticketNumero: true } },
-      origenBodega: { select: { nombre: true } },
-      origenPozo: { select: { nombreCompleto: true } },
-      destinoBodega: { select: { nombre: true } },
-      destinoPozo: { select: { nombreCompleto: true } },
     },
   },
 } satisfies Prisma.ReporteRecibidoInclude;
@@ -297,8 +293,8 @@ export class ReportesService {
             mecanica: p.novedadesMecanica,
             instrumentacion: p.novedadesInstrumentacion,
             operaciones: p.novedadesOperaciones,
-            origen: p.origenBodega?.nombre ?? p.origenPozo?.nombreCompleto ?? null,
-            destino: p.destinoBodega?.nombre ?? p.destinoPozo?.nombreCompleto ?? null,
+            origen: p.origen,
+            destino: p.destino,
             fechaLlegada: p.llegadaFecha,
             operacionInterrumpida: p.operacionInterrumpida,
             detalleInterrupcion: p.detalleInterrupcion,

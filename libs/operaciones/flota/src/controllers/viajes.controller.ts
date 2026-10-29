@@ -24,11 +24,6 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const HORA = /^\d{2}:\d{2}$/;
 const actorDe = (u: AuthUser) => ({ id: u.id, roleCode: u.roleCode, permissions: u.permissions });
 
-export class ExtremoViajeDto {
-  @IsOptional() @IsUUID() bodegaId?: string;
-  @IsOptional() @IsUUID() pozoId?: string;
-}
-
 export class RespuestaRiesgoDto {
   @IsUUID() preguntaId!: string;
   @IsUUID() opcionId!: string;
@@ -60,8 +55,9 @@ export class SolicitarViajeDto {
   @Matches(FECHA) fecha!: string;
   @IsString() @MinLength(3) @MaxLength(500) motivo!: string;
   /** Con ticket se omiten: salen de la inspección de salida de la unidad. */
-  @IsOptional() @ValidateNested() @Type(() => ExtremoViajeDto) origen?: ExtremoViajeDto;
-  @IsOptional() @ValidateNested() @Type(() => ExtremoViajeDto) destino?: ExtremoViajeDto;
+  /** Sin ticket: texto libre y obligatorio. Con ticket se omiten (salen de la inspección de salida). */
+  @IsOptional() @IsString() @MaxLength(200) origen?: string;
+  @IsOptional() @IsString() @MaxLength(200) destino?: string;
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(50)
@@ -123,12 +119,6 @@ export class ViajesController {
   @Get('unidades')
   unidades() {
     return this.viajes.unidades();
-  }
-
-  @RequirePermission(P.VIAJES_SOLICITAR)
-  @Get('bodegas')
-  bodegas() {
-    return this.viajes.bodegas();
   }
 
   @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR)

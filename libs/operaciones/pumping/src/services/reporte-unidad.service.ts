@@ -37,33 +37,17 @@ export interface LlegadaEntrada {
   detalleInterrupcion?: string;
 }
 
-/** Un extremo del traslado: una bodega o un pozo del catálogo (uno solo). */
-export interface ExtremoEntrada {
-  bodegaId?: string | null;
-  pozoId?: string | null;
-}
-
 export interface SalidaEntrada {
   /** Día de la salida (`AAAA-MM-DD`). */
   fecha: string;
   combustible: number;
-  origen: ExtremoEntrada;
-  destino: ExtremoEntrada;
+  /** Origen y destino del traslado: texto libre. */
+  origen: string;
+  destino: string;
   hubodometros: Array<{ eje: string; punto: PuntoHubodometro; salida: number | null }>;
   llantas: Array<{ posicion: PosicionLlanta; salida: string | null }>;
   inspecciones: Array<{ itemId: string; resultado: ResultadoInspeccion }>;
 }
-
-/** Origen o destino para mostrar: la bodega o el pozo con su nombre. */
-const extremo = (
-  bodega?: { id: string; nombre: string } | null,
-  pozo?: { id: string; nombreCompleto: string } | null,
-) =>
-  bodega
-    ? { tipo: 'bodega' as const, id: bodega.id, nombre: bodega.nombre }
-    : pozo
-      ? { tipo: 'pozo' as const, id: pozo.id, nombre: pozo.nombreCompleto }
-      : null;
 
 const num = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
 
@@ -124,10 +108,6 @@ export class ReporteUnidadService {
           hubodometros: { orderBy: [{ eje: 'asc' }, { punto: 'asc' }] },
           llantas: true,
           inspecciones: true,
-          origenBodega: true,
-          origenPozo: true,
-          destinoBodega: true,
-          destinoPozo: true,
         },
       }),
       this.prisma.inspeccionItem.findMany({
@@ -157,8 +137,8 @@ export class ReporteUnidadService {
       operador: firmante
         ? { usuarioId: firmante.usuarioId, nombre: firmante.usuario.nombre }
         : null,
-      origen: extremo(reporte?.origenBodega, reporte?.origenPozo),
-      destino: extremo(reporte?.destinoBodega, reporte?.destinoPozo),
+      origen: reporte?.origen ?? null,
+      destino: reporte?.destino ?? null,
       salida: {
         fecha: reporte?.salidaFecha ? reporte.salidaFecha.toISOString().slice(0, 10) : null,
         combustible: num(reporte?.salidaCombustible ?? null),
@@ -197,13 +177,13 @@ export class ReporteUnidadService {
     };
   }
 
-  /** Cada extremo del traslado es una bodega o un pozo, uno solo. */
-  private exigirExtremo(x: ExtremoEntrada | undefined, cual: 'origen' | 'destino') {
-    const bodegaId = x?.bodegaId || null;
-    const pozoId = x?.pozoId || null;
-    if (!bodegaId === !pozoId)
-      throw new BadRequestException(`Indique el ${cual} del traslado: una bodega o un pozo`);
-    return { bodegaId, pozoId };
+  /** Cada extremo del traslado es un texto libre, obligatorio, de hasta 200 caracteres. */
+  private exigirExtremo(x: string | undefined, cual: 'origen' | 'destino'): string {
+    const texto = typeof x === 'string' ? x.trim() : '';
+    if (!texto) throw new BadRequestException(`Indique el ${cual} del traslado`);
+    if (texto.length > 200)
+      throw new BadRequestException(`El ${cual} del traslado no puede pasar de 200 caracteres`);
+    return texto;
   }
 
   async guardarSalida(ticketId: string, unidadId: string, e: SalidaEntrada, actor: AuthUser) {
@@ -271,17 +251,9 @@ export class ReporteUnidadService {
       if (new Set(e.llantas.map((l) => l.posicion)).size !== e.llantas.length)
         throw new BadRequestException('Hay una llanta repetida');
 
-      for (const x of [origen, destino]) {
-        const existe = x.bodegaId
-          ? await tx.catBodega.findUnique({ where: { id: x.bodegaId }, select: { id: true } })
-          : await tx.catPozo.findUnique({ where: { id: x.pozoId! }, select: { id: true } });
-        if (!existe) throw new BadRequestException('La bodega o el pozo indicado no existe');
-      }
       const datos = {
-        origenBodegaId: origen.bodegaId ?? null,
-        origenPozoId: origen.pozoId ?? null,
-        destinoBodegaId: destino.bodegaId ?? null,
-        destinoPozoId: destino.pozoId ?? null,
+        origen,
+        destino,
         salidaFecha: new Date(`${e.fecha}T00:00:00.000Z`),
         salidaCombustible: e.combustible,
         salidaFirmadaPor: actor.id,

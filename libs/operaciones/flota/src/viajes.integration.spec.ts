@@ -96,8 +96,6 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
   const unidades: string[] = [];
   let unidadId = '';
   let servicioId = '';
-  let bodegaId = '';
-  let pozoId = '';
   type Pregunta = {
     id: string;
     codigo: string;
@@ -122,8 +120,8 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
     unidadId,
     fecha: hoy,
     motivo: 'Traslado de equipo al pozo',
-    origen: { bodegaId },
-    destino: { pozoId },
+    origen: 'Base Coco',
+    destino: 'Pozo Beta-9',
     respuestas: respuestas(),
     horaSalida: '06:00',
     horaLlegada: '10:30',
@@ -170,9 +168,6 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         [t, uuidv7(), `PED-VJ-${n}-${t.slice(-4)}`],
       );
     }
-    bodegaId = (await admin.query("SELECT id FROM catalogos.bodega WHERE nombre = 'Bodega Matriz'"))
-      .rows[0].id;
-    pozoId = (await admin.query('SELECT id FROM catalogos.pozo LIMIT 1')).rows[0].id;
     Object.assign(process.env, {
       SERVICE_NAME: 'operaciones-test',
       PORT: '3195',
@@ -285,7 +280,7 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         .get(`${base}/preguntas`)
         .set(token('ingenieria_ventas', 'Vera', [], uuidv7()))
         .expect(403);
-      await http().get(`${base}/bodegas`).set(conductor()).expect(200);
+      await http().get(`${base}/bodegas`).set(conductor()).expect(400); // el selector de bodegas ya no existe (`bodegas` ya no es una ruta: cae en `:id`)
       // el Conductor elige la unidad de su viaje sin tener el permiso de ver unidades
       const us = (await http().get(`${base}/unidades`).set(conductor()).expect(200)).body as Array<{
         id: string;
@@ -317,8 +312,9 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       const r999 = await solicitar(cuerpo({ respuestas: detenerse }));
       expect([r999.status, r999.body.code]).toEqual([422, 'conductor_no_debe_conducir']);
 
-      const doble = await solicitar(cuerpo({ origen: { bodegaId, pozoId } }));
-      expect(doble.status).toBe(400);
+      // punto 8: el origen y el destino son texto libre de hasta 200 caracteres
+      expect((await solicitar(cuerpo({ origen: 'x'.repeat(201) }))).status).toBe(400);
+      expect((await solicitar(cuerpo({ destino: '   ' }))).status).toBe(400);
       const servicio = await solicitar(cuerpo({ unidadId: servicioId }));
       expect([servicio.status, servicio.body.code]).toEqual([409, 'unidad_no_es_transporte']);
       const hay = await admin.query(
@@ -362,15 +358,14 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect([otra.status, otra.body.code]).toEqual([409, 'viaje_ya_solicitado']);
       // el retorno es otro gerenciamiento del mismo ticket
       const retorno = await solicitar(
-        cuerpo({ tipo: 'retorno', origen: { pozoId }, destino: { bodegaId } }),
+        cuerpo({ tipo: 'retorno', origen: 'Pozo Beta-9', destino: 'Base Coco' }),
       );
       expect(retorno.status).toBe(201);
 
       const d = (await http().get(`${base}/${r.body.id}`).set(conductor()).expect(200)).body;
       expect(d).toMatchObject({ tipo: 'salida', estado: 'pendiente', nivel: 'bajo' });
       expect(d.respuestas).toHaveLength(12);
-      expect(d.origen).toMatchObject({ tipo: 'bodega', nombre: 'Bodega Matriz' });
-      expect(d.destino.tipo).toBe('pozo');
+      expect([d.origen, d.destino]).toEqual(['Base Coco', 'Pozo Beta-9']);
       expect(d.unidad.placa).toBe(VEHICULO.placa);
       expect(d.paradas).toEqual([
         { lugar: 'Peaje Pifo', horaLlegada: '07:00', horaSalida: '07:10', detallePernocta: null },
@@ -590,16 +585,16 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       ).toMatch(/decide_otro_check/);
     });
 
-    it('el origen y el destino son una base o un pozo, nunca ambos ni ninguno; una opción debe ser de su pregunta', async () => {
-      const insertar = (origenBodega: string | null, origenPozo: string | null) =>
+    it('sin inspección, el origen y el destino son texto no vacío; una opción debe ser de su pregunta', async () => {
+      const insertar = (origen: string | null, destino: string | null) =>
         admin.query(
-          `INSERT INTO flota.gerenciamiento_viaje (id, tipo, conductor_id, unidad_id, fecha, motivo, origen_bodega_id, origen_pozo_id,
-                                                   destino_pozo_id, puntaje_total, nivel, created_by)
-           VALUES ($1, 'salida', $2, $3, current_date, 'Prueba', $4, $5, $6, 0, 'bajo', $2)`,
-          [uuidv7(), CONDUCTOR_2.id, unidadId, origenBodega, origenPozo, pozoId],
+          `INSERT INTO flota.gerenciamiento_viaje (id, tipo, conductor_id, unidad_id, fecha, motivo, origen, destino,
+                                                   puntaje_total, nivel, created_by)
+           VALUES ($1, 'salida', $2, $3, current_date, 'Prueba', $4, $5, 0, 'bajo', $2)`,
+          [uuidv7(), CONDUCTOR_2.id, unidadId, origen, destino],
         );
-      expect(await rechazoDeBase(insertar(bodegaId, pozoId))).toMatch(/origen_check/);
-      expect(await rechazoDeBase(insertar(null, null))).toMatch(/origen_check/);
+      expect(await rechazoDeBase(insertar(null, 'Pozo'))).toMatch(/origen_check/);
+      expect(await rechazoDeBase(insertar('Base', '  '))).toMatch(/destino_check/);
       expect(
         await rechazoDeBase(
           admin.query(
@@ -614,19 +609,19 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect(
         await rechazoDeBase(
           admin.query(
-            `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen_bodega_id,
-                                                     destino_pozo_id, puntaje_total, nivel, created_by)
+            `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen,
+                                                     destino, puntaje_total, nivel, created_by)
              VALUES ($1, 'salida', $2, $3, $4, current_date, 'Prueba', $5, $6, 0, 'bajo', $3)`,
-            [uuidv7(), tickets[0], CONDUCTOR.id, unidadId, bodegaId, pozoId],
+            [uuidv7(), tickets[0], CONDUCTOR.id, unidadId, 'Base Coco', 'Pozo Beta-9'],
           ),
         ),
       ).toMatch(/ticket_tipo_unidad_vigente_key/);
       // cada conductor solicita el de su unidad: otra unidad del mismo ticket y tipo sí cabe
       await admin.query(
-        `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen_bodega_id,
-                                                 destino_pozo_id, puntaje_total, nivel, created_by)
+        `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen,
+                                                 destino, puntaje_total, nivel, created_by)
          VALUES ($1, 'salida', $2, $3, $4, current_date, 'Prueba', $5, $6, 0, 'bajo', $3)`,
-        [uuidv7(), tickets[0], CONDUCTOR_2.id, servicioId, bodegaId, pozoId],
+        [uuidv7(), tickets[0], CONDUCTOR_2.id, servicioId, 'Base Coco', 'Pozo Beta-9'],
       );
     });
 
@@ -650,26 +645,25 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect([sin.status, sin.body.code]).toEqual([409, 'sin_inspeccion_de_salida']);
 
       await admin.query(
-        `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, partida_bodega_id, destino_pozo_id, conductor_id, created_by)
+        `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, punto_partida, destino, conductor_id, created_by)
          VALUES ($1, $2, $3, 'salida', now(), $5, $6, $4, $4)`,
-        [uuidv7(), caso, unidadId, CONDUCTOR.id, bodegaId, pozoId],
+        [uuidv7(), caso, unidadId, CONDUCTOR.id, 'Base Coco', 'Pozo Beta-9'],
       );
       const ok = await solicitar(sinOrigen());
       expect(ok.status).toBe(201);
       const salida = (await http().get(`${base}/${ok.body.id}`).set(conductor()).expect(200)).body;
-      expect(salida.origen).toMatchObject({ tipo: 'bodega', id: bodegaId, nombre: 'Bodega Matriz' });
-      expect(salida.destino).toMatchObject({ tipo: 'pozo', id: pozoId });
+      expect([salida.origen, salida.destino]).toEqual(['Base Coco', 'Pozo Beta-9']);
       // la bandeja muestra el origen y el destino de la inspección
       const fila = (
         await http().get(`${base}?ticketId=${ticket}`).set(conductor()).expect(200)
       ).body.find((x: { id: string }) => x.id === ok.body.id);
-      expect([fila.origen, fila.destino]).toEqual(['Bodega Matriz', salida.destino.nombre]);
+      expect([fila.origen, fila.destino]).toEqual(['Base Coco', 'Pozo Beta-9']);
       // en el retorno el recorrido va al revés
       const retorno = await solicitar(sinOrigen({ tipo: 'retorno' }));
       expect(retorno.status).toBe(201);
       const volver = (await http().get(`${base}/${retorno.body.id}`).set(conductor()).expect(200))
         .body;
-      expect([volver.origen.nombre, volver.destino.nombre]).toEqual([salida.destino.nombre, 'Bodega Matriz']);
+      expect([volver.origen, volver.destino]).toEqual(['Pozo Beta-9', 'Base Coco']);
       // con un solo extremo indicado hay que indicar los dos
       const mitad = await solicitar(
         cuerpo({ ticketId: ticket, tipo: 'retorno', destino: undefined }),

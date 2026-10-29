@@ -18,32 +18,15 @@ export interface ActorInspeccion {
   roleCode: string;
 }
 
-/** Bodega o pozo para mostrar. */
-export const extremoVista = (
-  bodega?: { id: string; nombre: string } | null,
-  pozo?: { id: string; nombreCompleto: string } | null,
-) =>
-  bodega
-    ? { tipo: 'bodega' as const, id: bodega.id, nombre: bodega.nombre }
-    : pozo
-      ? { tipo: 'pozo' as const, id: pozo.id, nombre: pozo.nombreCompleto }
-      : null;
-
-/** Un extremo de la inspección: una bodega o un pozo del catálogo (uno solo). */
-export interface ExtremoInspeccion {
-  bodegaId?: string | null;
-  pozoId?: string | null;
-}
-
 export interface RegistrarInspeccionEntrada {
   /** Caso del ticket (la unidad se toma de él). Sin caso la inspección es suelta y exige `unidadId`. */
   casoId?: string;
   unidadId?: string;
   momento?: MomentoInspeccion;
   fecha?: Date;
-  /** Una bodega o un pozo del catálogo. */
-  puntoPartida: ExtremoInspeccion;
-  destino?: ExtremoInspeccion | null;
+  /** Punto de partida y destino: texto libre (el de partida es obligatorio; el destino, no). */
+  puntoPartida: string;
+  destino?: string | null;
   conductorId: string;
   /** Lectura del odómetro al momento de la inspección. */
   km: number;
@@ -95,19 +78,18 @@ export class InspeccionesService {
     });
   }
 
-  /** Un extremo es una bodega o un pozo, uno solo; vacío si no se indicó ninguno. */
-  private extremo(x: ExtremoInspeccion, cual: string) {
-    const bodegaId = x?.bodegaId || null;
-    const pozoId = x?.pozoId || null;
-    if (bodegaId && pozoId) throw new BadRequestException(`Para ${cual} indique una bodega o un pozo, no ambos`);
-    return bodegaId || pozoId ? { bodegaId, pozoId } : null;
+  /** Un extremo es un texto libre de hasta 200 caracteres; `null` si no se indicó. */
+  private extremo(x: string | null | undefined, cual: string): string | null {
+    const texto = typeof x === 'string' ? x.trim() : '';
+    if (texto.length > 200) throw new BadRequestException(`Para ${cual} use hasta 200 caracteres`);
+    return texto || null;
   }
 
   async registrar(entrada: RegistrarInspeccionEntrada, actor: ActorInspeccion) {
     const momento = entrada.momento ?? 'salida';
     const partida = this.extremo(entrada.puntoPartida, 'el punto de partida');
-    if (!partida) throw new BadRequestException('Indique el punto de partida: una bodega o un pozo');
-    const destino = entrada.destino ? this.extremo(entrada.destino, 'el destino') : null;
+    if (!partida) throw new BadRequestException('Indique el punto de partida');
+    const destino = this.extremo(entrada.destino, 'el destino');
 
     return this.prisma.$transaction(async (tx) => {
       const caso = entrada.casoId
@@ -175,14 +157,6 @@ export class InspeccionesService {
       // Sin documentos vigentes del conductor no se guarda (formato DYN-SGI-RE-068, sección «Conductor»).
       await this.conductores.exigirCondiciones(entrada.conductorId, tx);
 
-      for (const x of [partida, destino]) {
-        if (!x) continue;
-        const existe = x.bodegaId
-          ? await tx.catBodega.findUnique({ where: { id: x.bodegaId }, select: { id: true } })
-          : await tx.catPozo.findUnique({ where: { id: x.pozoId! }, select: { id: true } });
-        if (!existe) throw new BadRequestException('La bodega o el pozo indicado no existe');
-      }
-
       const id = uuidv7();
       const fecha = entrada.fecha ?? new Date();
       await tx.inspeccionVehiculo.create({
@@ -192,10 +166,8 @@ export class InspeccionesService {
           unidadId,
           momento,
           fecha,
-          partidaBodegaId: partida.bodegaId,
-          partidaPozoId: partida.pozoId,
-          destinoBodegaId: destino?.bodegaId ?? null,
-          destinoPozoId: destino?.pozoId ?? null,
+          puntoPartida: partida,
+          destino,
           conductorId: entrada.conductorId,
           observaciones: entrada.observaciones?.trim() || null,
           createdBy: actor.id,
@@ -342,10 +314,6 @@ export class InspeccionesService {
     const i = await this.prisma.inspeccionVehiculo.findUnique({
       where: { id },
       include: {
-        partidaBodega: { select: { id: true, nombre: true } },
-        partidaPozo: { select: { id: true, nombreCompleto: true } },
-        destinoBodega: { select: { id: true, nombre: true } },
-        destinoPozo: { select: { id: true, nombreCompleto: true } },
         unidad: {
           select: {
             id: true,
@@ -377,8 +345,8 @@ export class InspeccionesService {
       id: i.id,
       momento: i.momento,
       fecha: i.fecha,
-      puntoPartida: extremoVista(i.partidaBodega, i.partidaPozo),
-      destino: extremoVista(i.destinoBodega, i.destinoPozo),
+      puntoPartida: i.puntoPartida,
+      destino: i.destino,
       observaciones: i.observaciones,
       km: i.lectura ? Number(i.lectura.valor) : null,
       unidad: {

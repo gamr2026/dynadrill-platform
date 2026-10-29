@@ -26,21 +26,15 @@ export interface ActorViaje {
   permissions: string[];
 }
 
-/** Un extremo del viaje: una bodega (la base) o un pozo; exactamente uno. */
-export interface ExtremoViaje {
-  bodegaId?: string;
-  pozoId?: string;
-}
-
 export interface SolicitarViajeEntrada {
   tipo: TipoGerenciamiento;
   ticketId?: string;
   unidadId: string;
   fecha: string;
   motivo: string;
-  /** Sin ticket: una base o un pozo. Con ticket se omiten: salen de la inspección de salida de la unidad. */
-  origen?: ExtremoViaje;
-  destino?: ExtremoViaje;
+  /** Sin ticket: texto libre. Con ticket se omiten: salen de la inspección de salida de la unidad. */
+  origen?: string;
+  destino?: string;
   respuestas: Array<{ preguntaId: string; opcionId: string }>;
   pasajeros?: string | null;
   puedeCombinarViajes?: boolean | null;
@@ -124,15 +118,6 @@ export class ViajesService {
     });
   }
 
-  /** Bodegas (la base) entre las que se elige el origen o el destino que no es el pozo del ticket. */
-  bodegas() {
-    return this.prisma.catBodega.findMany({
-      where: { habilitado: true },
-      orderBy: { nombre: 'asc' },
-      select: { id: true, nombre: true },
-    });
-  }
-
   /** Unidades de transporte activas entre las que el Conductor elige la de su viaje (sin abrirle el permiso de ver unidades). */
   async unidades() {
     const filas = await this.prisma.unidad.findMany({
@@ -160,13 +145,15 @@ export class ViajesService {
 
   async solicitar(entrada: SolicitarViajeEntrada, actor: ActorViaje) {
     // con ticket, el origen y el destino ya se definieron en la inspección de salida; sin ticket se indican aquí
-    const delTicket = !!entrada.ticketId && !entrada.origen && !entrada.destino;
+    const origenTexto = entrada.origen?.trim() ?? '';
+    const destinoTexto = entrada.destino?.trim() ?? '';
+    const delTicket = !!entrada.ticketId && !origenTexto && !destinoTexto;
     if (!delTicket) {
-      if (!entrada.origen || !entrada.destino) {
+      if (!origenTexto || !destinoTexto) {
         throw new BadRequestException('Indique el origen y el destino del viaje');
       }
-      this.validarExtremo(entrada.origen, 'origen');
-      this.validarExtremo(entrada.destino, 'destino');
+      this.validarExtremo(origenTexto, 'origen');
+      this.validarExtremo(destinoTexto, 'destino');
     }
     const motivo = entrada.motivo.trim();
     if (!motivo) throw new BadRequestException('Indique el motivo del viaje');
@@ -250,10 +237,8 @@ export class ViajesService {
           fecha: new Date(`${entrada.fecha}T00:00:00.000Z`),
           motivo,
           inspeccionId,
-          origenBodegaId: entrada.origen?.bodegaId ?? null,
-          origenPozoId: entrada.origen?.pozoId ?? null,
-          destinoBodegaId: entrada.destino?.bodegaId ?? null,
-          destinoPozoId: entrada.destino?.pozoId ?? null,
+          origen: delTicket ? null : origenTexto,
+          destino: delTicket ? null : destinoTexto,
           puntajeTotal: puntos,
           nivel,
           pasajeros: entrada.pasajeros?.trim() || null,
@@ -388,18 +373,7 @@ export class ViajesService {
         include: {
           conductor: { select: { id: true, nombre: true } },
           unidad: { select: { id: true, codigo: true, vehiculoId: true } },
-          inspeccion: {
-            select: {
-              partidaBodega: { select: { nombre: true } },
-              partidaPozo: { select: { nombreCompleto: true } },
-              destinoBodega: { select: { nombre: true } },
-              destinoPozo: { select: { nombreCompleto: true } },
-            },
-          },
-          origenBodega: { select: { nombre: true } },
-          origenPozo: { select: { nombreCompleto: true } },
-          destinoBodega: { select: { nombre: true } },
-          destinoPozo: { select: { nombreCompleto: true } },
+          inspeccion: { select: { puntoPartida: true, destino: true } },
         },
         orderBy: { createdAt: 'desc' },
         take: 200,
@@ -416,18 +390,12 @@ export class ViajesService {
       unidad: v.unidad,
       // el viaje de un ticket toma sus extremos de la inspección de salida (al revés en el retorno)
       origen:
-        v.origenBodega?.nombre ??
-        v.origenPozo?.nombreCompleto ??
-        (v.tipo === 'salida'
-          ? (v.inspeccion?.partidaBodega?.nombre ?? v.inspeccion?.partidaPozo?.nombreCompleto)
-          : (v.inspeccion?.destinoBodega?.nombre ?? v.inspeccion?.destinoPozo?.nombreCompleto)) ??
+        v.origen ??
+        (v.tipo === 'salida' ? v.inspeccion?.puntoPartida : v.inspeccion?.destino) ??
         '—',
       destino:
-        v.destinoBodega?.nombre ??
-        v.destinoPozo?.nombreCompleto ??
-        (v.tipo === 'salida'
-          ? (v.inspeccion?.destinoBodega?.nombre ?? v.inspeccion?.destinoPozo?.nombreCompleto)
-          : (v.inspeccion?.partidaBodega?.nombre ?? v.inspeccion?.partidaPozo?.nombreCompleto)) ??
+        v.destino ??
+        (v.tipo === 'salida' ? v.inspeccion?.destino : v.inspeccion?.puntoPartida) ??
         '—',
       puntajeTotal: v.puntajeTotal,
       nivel: v.nivel,
@@ -454,26 +422,7 @@ export class ViajesService {
           },
         },
         ticket: { select: { ticketNumero: true } },
-        inspeccion: {
-          select: {
-            partidaBodega: { select: { id: true, nombre: true } },
-            partidaPozo: {
-              select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
-            },
-            destinoBodega: { select: { id: true, nombre: true } },
-            destinoPozo: {
-              select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
-            },
-          },
-        },
-        origenBodega: { select: { id: true, nombre: true } },
-        origenPozo: {
-          select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
-        },
-        destinoBodega: { select: { id: true, nombre: true } },
-        destinoPozo: {
-          select: { id: true, nombreCompleto: true, campo: { select: { nombre: true } } },
-        },
+        inspeccion: { select: { puntoPartida: true, destino: true } },
         respuestas: { include: { pregunta: true, opcion: true } },
         paradas: { orderBy: { orden: 'asc' } },
         comunicaciones: { orderBy: { orden: 'asc' } },
@@ -483,30 +432,10 @@ export class ViajesService {
       throw new NotFoundException('El gerenciamiento de viaje no existe');
     }
     const umbrales = await this.umbrales();
-    type Bodega = { id: string; nombre: string } | null;
-    type Pozo = { id: string; nombreCompleto: string; campo: { nombre: string } | null } | null;
     // el viaje de un ticket toma sus extremos de la inspección de salida: en el retorno van al revés
-    const extremo = (bodega: Bodega, pozo: Pozo, alterno: { bodega: Bodega; pozo: Pozo } | null) => {
-      const b = bodega ?? (pozo ? null : (alterno?.bodega ?? null));
-      const p = bodega ? null : (pozo ?? alterno?.pozo ?? null);
-      return b
-        ? { tipo: 'bodega' as const, id: b.id, nombre: b.nombre }
-        : p
-          ? {
-              tipo: 'pozo' as const,
-              id: p.id,
-              nombre: p.nombreCompleto,
-              campo: p.campo?.nombre ?? null,
-            }
-          : { tipo: 'texto' as const, nombre: '—' };
-    };
     const salida = v.tipo === 'salida';
-    const partida = v.inspeccion
-      ? { bodega: v.inspeccion.partidaBodega, pozo: v.inspeccion.partidaPozo }
-      : null;
-    const llegada = v.inspeccion
-      ? { bodega: v.inspeccion.destinoBodega, pozo: v.inspeccion.destinoPozo }
-      : null;
+    const partida = v.inspeccion?.puntoPartida ?? null;
+    const llegada = v.inspeccion?.destino ?? null;
     return {
       id: v.id,
       codigo: codigoDeViaje(v.numero),
@@ -523,8 +452,8 @@ export class ViajesService {
         categoriaPeso: v.unidad.categoriaPeso,
         placa: v.unidad.vehiculo?.placa ?? null,
       },
-      origen: extremo(v.origenBodega, v.origenPozo, salida ? partida : llegada),
-      destino: extremo(v.destinoBodega, v.destinoPozo, salida ? llegada : partida),
+      origen: v.origen ?? (salida ? partida : llegada) ?? '—',
+      destino: v.destino ?? (salida ? llegada : partida) ?? '—',
       puntajeTotal: v.puntajeTotal,
       nivel: v.nivel,
       descripcionNivel: umbrales.find((u) => u.nivel === v.nivel)?.descripcion ?? null,
@@ -737,11 +666,9 @@ export class ViajesService {
     return { puntos, nivel: nivelDePuntaje(puntos, umbrales) };
   }
 
-  private validarExtremo(e: ExtremoViaje, nombre: string): void {
-    if ((e.bodegaId ? 1 : 0) + (e.pozoId ? 1 : 0) !== 1) {
-      throw new BadRequestException(
-        `Indique una sola base o un solo pozo como ${nombre} del viaje`,
-      );
+  private validarExtremo(texto: string, nombre: string): void {
+    if (texto.length > 200) {
+      throw new BadRequestException(`El ${nombre} del viaje no puede pasar de 200 caracteres`);
     }
   }
 
