@@ -24,6 +24,8 @@ export const REQ = {
   gerenciamientoSalida: 'gerenciamiento_viaje_salida_aprobado',
   gerenciamientoRetorno: 'gerenciamiento_viaje_retorno_aprobado',
   ejecucionFormalizada: 'ejecucion_formalizada',
+  /** El Operador completó el Reporte de Herramientas de la ejecución (al menos una cantidad anotada en algún día del servicio). */
+  reporteHerramientas: 'reporte_herramientas_completado',
   reporteLlegada: 'reporte_unidad_llegada',
   actaEntregaLocacion: 'acta_entrega_locacion',
   /** QHSE: ninguna Stop Work Authority activa en el ticket (nace cumplido; la SWA lo reabre). */
@@ -110,6 +112,15 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'unidad',
     modulo: 'flota',
     paso: 'control_retorno',
+  },
+  {
+    codigo: REQ.reporteHerramientas,
+    nombre: 'Reporte de herramientas completado',
+    descripcion:
+      'El Operador anotó en el Reporte de Herramientas lo usado en cada día del servicio (no hace falta usar todo cada día, pero debe haber al menos una cantidad) y lo completó. Sin esto el ticket no sale de la Ejecución operativa.',
+    ambito: 'ticket',
+    modulo: 'pumping',
+    paso: 'ejecucion_operativa',
   },
   {
     codigo: REQ.ejecucionFormalizada,

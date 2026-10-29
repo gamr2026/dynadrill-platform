@@ -711,7 +711,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     );
     // lo que el proceso exige: del ticket 3 (checklist de ingreso, formalización de la ejecución, acta de entrega), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(5 + 6 * 2 + 2 * 2); // los del ticket incluyen la SWA y el PTW de QHSE
+    expect(req).toHaveLength(6 + 6 * 2 + 2 * 2); // los del ticket incluyen la SWA y el PTW de QHSE, y el reporte de herramientas
     expect(
       req.filter((x) => x.codigo !== 'swa_sin_activar').every((x) => x.estado === 'pendiente'),
     ).toBe(true);
@@ -1730,6 +1730,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       where: { ticketId: t.id, requisitoCodigo: 'checklist_ingreso_locacion' },
       data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
     });
+    // sin el reporte de herramientas completado el ticket tampoco sale de la ejecución (su prueba propia lo cubre)
+    const faltaReporte = await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'control_retorno' })
+      .expect(409);
+    expect(faltaReporte.body.detail).toContain('Reporte de herramientas completado');
+    await prisma.ticketRequisito.updateMany({
+      where: { ticketId: t.id, requisitoCodigo: 'reporte_herramientas_completado' },
+      data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
+    });
     await http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' }).expect(201);
 
     // control de retorno: gerenciamiento de viaje de retorno aprobado
@@ -2680,6 +2691,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await marcar(t, dia.id, DIAS[0], { estado: 'operacion' }, op2())).status).toBe(200); // OP2 también es del equipo
       const ajeno = como('operador', uuidv7(), 'Otro operador');
       expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, ajeno)).status).toBe(403);
+      // el Supervisor asignado tampoco lo llena: el reporte es del Operador
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, supervisora())).status).toBe(403);
+      expect((await completar(t, supervisora())).status).toBe(403);
       const sinPermiso = como('operador', OP1.id, OP1.nombre, []);
       expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, sinPermiso)).status).toBe(403);
       await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [t.id, 'traslado_salida']);
@@ -2706,8 +2720,13 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await marcar(t, dia.id, DIAS[0], { estado: 'operacion' }).expect(200);
       await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }).expect(200);
       await marcar(t, cant.id, DIAS[1], { estado: 'venta', cantidad: 2.5 }).expect(200);
+      const reporteReq = async () =>
+        (await requisitosDe(t.id)).find((x) => x.codigo === 'reporte_herramientas_completado');
+      expect(await reporteReq()).toMatchObject({ estado: 'pendiente' }); // anotar cantidades no basta: hay que completarlo
       const ok = await completar(t).expect(201);
       expect(ok.body.completadoAt).not.toBeNull();
+      expect(await reporteReq()).toMatchObject({ estado: 'cumplido', origen: 'sistema' });
+      // sin el reporte completado el ticket no sale de la Ejecución operativa: con él, ese requisito ya no falta
 
       const [e1] = await eventosDe(t.id);
       expect(e1).toMatchObject({
@@ -2741,7 +2760,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       // tocar el reporte lo reabre; completar de nuevo reenvía la versión nueva
       const reabierto = await marcar(t, dia.id, DIAS[2], { estado: 'operacion' }).expect(200);
       expect(reabierto.body.completadoAt).toBeNull();
+      expect(await reporteReq()).toMatchObject({ estado: 'pendiente' }); // tocarlo reabre también el requisito
       await completar(t).expect(201);
+      expect(await reporteReq()).toMatchObject({ estado: 'cumplido' });
       const eventos2 = await eventosDe(t.id);
       expect(eventos2).toHaveLength(2);
       expect(eventos2[1].herramientas[0].cantidad).toBe(3);

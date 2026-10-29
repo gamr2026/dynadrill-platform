@@ -10,6 +10,8 @@ import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { EstadoItemReporte, Prisma, TipoLineaItem } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { REQ } from '../catalog/sembrar-traslado-salida';
+import { RequisitosService } from './requisitos.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
 
 const PASO = 'ejecucion_operativa';
@@ -51,6 +53,7 @@ export class ReporteHerramientasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly requisitos: RequisitosService,
   ) {}
 
   /** `actorId`: quien consulta; si el reporte aún no se precargó y el ticket está en la ejecución, se precarga una sola vez. */
@@ -193,6 +196,8 @@ export class ReporteHerramientasService {
           reporteHerramientasCompletadoPor: actor.id,
         },
       });
+      // sin un reporte completo (con al menos una cantidad) el ticket no sale de la Ejecución operativa
+      await this.requisitos.fijar(tx, ticketId, REQ.reporteHerramientas, 'cumplido', 'sistema', actor.id);
       const personas = await tx.ticketPersona.findMany({
         where: { ticketId, rol: { in: ['supervisor', 'operador'] } },
         select: { usuarioId: true, rol: true },
@@ -363,10 +368,12 @@ export class ReporteHerramientasService {
 
   /** Tocar el reporte ya completado lo reabre: hay que completarlo de nuevo para que Comercial reciba la versión nueva. */
   private async reabrir(tx: Prisma.TransactionClient, ticketId: string) {
-    await tx.ticket.updateMany({
+    const r = await tx.ticket.updateMany({
       where: { id: ticketId, reporteHerramientasCompletadoAt: { not: null } },
       data: { reporteHerramientasCompletadoAt: null, reporteHerramientasCompletadoPor: null },
     });
+    if (r.count > 0)
+      await this.requisitos.fijar(tx, ticketId, REQ.reporteHerramientas, 'pendiente', 'sistema');
   }
 
   private exigirFecha(fecha: string): void {
@@ -388,7 +395,7 @@ export class ReporteHerramientasService {
         fechaInicioServicio: true,
         fechaFinServicio: true,
         paso: { select: { nombre: true, roles: true } },
-        personas: { select: { usuarioId: true } },
+        personas: { select: { usuarioId: true, rol: true } },
       },
     });
     if (!t) throw new NotFoundException('El ticket no existe');
@@ -400,6 +407,15 @@ export class ReporteHerramientasService {
     }
     if (!puedeActuarEn(t, actor)) {
       throw new ForbiddenException('Solo el equipo asignado a este ticket puede hacerlo');
+    }
+    // el reporte lo llena el Operador asignado (el superadmin queda como excepción de plataforma)
+    if (
+      actor.roleCode !== 'superadmin' &&
+      !t.personas.some((p) => p.usuarioId === actor.id && p.rol === 'operador')
+    ) {
+      throw new ForbiddenException(
+        'Solo el Operador asignado a este ticket puede llenar el reporte de herramientas',
+      );
     }
     return t;
   }
