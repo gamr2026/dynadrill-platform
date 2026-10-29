@@ -14,7 +14,8 @@ import { RequisitosService } from './requisitos.service';
 
 /** El checklist se llena al llegar al sitio, al iniciar la ejecución (en la demo: «Ingreso a locación... al inicio de la Ejecución»). */
 const PASO = 'ejecucion_operativa';
-const COORDINAN = ['superadmin', 'jefe_base'];
+/** El checklist lo llena el Operador del equipo; el superadmin queda como excepción de plataforma. */
+const COORDINAN = ['superadmin'];
 
 export interface Confirmaciones {
   toolboxTalkRealizado: boolean;
@@ -228,7 +229,7 @@ export class IngresoService {
     else await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.ingresoLocacion });
   }
 
-  /** Solo el equipo del ticket (o quien coordina) y solo mientras el ticket está en Ejecución operativa. */
+  /** Solo el Operador asignado al ticket (o el superadmin) y solo mientras el ticket está en Ejecución operativa. */
   private async exigirPuedeEditar(
     tx: Prisma.TransactionClient,
     ticketId: string,
@@ -240,9 +241,9 @@ export class IngresoService {
       const p = await tx.ticketPersona.findUnique({
         where: { ticketId_usuarioId: { ticketId, usuarioId: actor.id } },
       });
-      if (!p)
+      if (!p || p.rol !== 'operador')
         throw new ForbiddenException(
-          'Solo el equipo asignado a este ticket puede llenar el checklist de ingreso',
+          'Solo el Operador asignado a este ticket puede llenar el checklist de ingreso',
         );
     }
     if (t.pasoCodigo !== PASO)

@@ -1151,20 +1151,20 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const t = await ticketEnTraslado();
     const url = `${t.url}/ingreso`;
     // en el traslado de salida todavía no se llena
-    await http().patch(url).set(supervisora()).send({ toolboxTalkRealizado: true }).expect(409);
+    await http().patch(url).set(op1()).send({ toolboxTalkRealizado: true }).expect(409);
     // la ejecución llega con sus pasos propios (aún sin construir): aquí se lleva el ticket a ese paso
     await admin.query(
       "UPDATE pumping.ticket SET paso_codigo = 'ejecucion_operativa' WHERE id = $1",
       [t.id],
     );
-    const inicial = (await http().get(url).set(supervisora()).expect(200)).body;
+    const inicial = (await http().get(url).set(op1()).expect(200)).body;
     expect(inicial.completo).toBe(false);
     expect(inicial.loto).toHaveLength(4);
     expect(inicial.limites.map((l: { gas: string }) => l.gas)).toEqual(['h2s', 'lel', 'o2', 'co']);
 
     await http()
       .patch(url)
-      .set(supervisora())
+      .set(op1())
       .send({
         toolboxTalkRealizado: true,
         walkaroundCompletado: true,
@@ -1177,7 +1177,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const insegura = (
       await http()
         .patch(url)
-        .set(supervisora())
+        .set(op1())
         .send({ nuevaLectura: { gas: 'h2s', lectura: 15 } })
         .expect(200)
     ).body;
@@ -1185,7 +1185,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       gas: 'h2s',
       lectura: 15,
       seguro: false,
-      medidoPor: SUPERVISORA.nombre,
+      medidoPor: OP1.nombre,
     });
     for (const l of [
       { gas: 'h2s', lectura: 3 },
@@ -1193,14 +1193,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       { gas: 'o2', lectura: 19.5 },
       { gas: 'co', lectura: 24.9 },
     ]) {
-      await http().patch(url).set(supervisora()).send({ nuevaLectura: l }).expect(200);
+      await http().patch(url).set(op1()).send({ nuevaLectura: l }).expect(200);
     }
-    const sinLoto = (await http().get(url).set(supervisora()).expect(200)).body;
+    const sinLoto = (await http().get(url).set(op1()).expect(200)).body;
     expect(sinLoto.completo).toBe(false);
     expect(sinLoto.lecturas.filter((l: { gas: string }) => l.gas === 'o2')[0].seguro).toBe(true); // 19.5 es el mínimo, inclusive
     for (const l of sinLoto.loto)
       await http().patch(`${url}/loto/${l.itemId}`).set(op1()).expect(200);
-    const completo = (await http().get(url).set(supervisora()).expect(200)).body;
+    const completo = (await http().get(url).set(op1()).expect(200)).body;
     expect(completo).toMatchObject({ completo: true, confirmadoPor: expect.any(String) });
     expect(completo.lotoNotificadoClienteAt).not.toBeNull();
     expect(
@@ -1209,7 +1209,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
     // desmarcar un ítem lo deja incompleto y reabre el requisito
     await http().patch(`${url}/loto/${completo.loto[0].itemId}`).set(op1()).expect(200);
-    expect((await http().get(url).set(supervisora()).expect(200)).body).toMatchObject({
+    expect((await http().get(url).set(op1()).expect(200)).body).toMatchObject({
       completo: false,
       confirmadoPor: null,
     });
@@ -1220,15 +1220,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // validaciones
     await http()
       .patch(url)
-      .set(supervisora())
+      .set(op1())
       .send({ nuevaLectura: { gas: 'xx', lectura: 1 } })
       .expect(400);
     await http()
       .patch(url)
-      .set(supervisora())
+      .set(op1())
       .send({ nuevaLectura: { gas: 'co', lectura: -1 } })
       .expect(400);
     await http().patch(url).set(operador()).send({ toolboxTalkRealizado: false }).expect(403); // no es del equipo
+    // el Supervisor del ticket tampoco lo llena: el checklist es del Operador
+    await http().patch(url).set(supervisora()).send({ toolboxTalkRealizado: false }).expect(403);
   });
 
   it('requisitos de otros módulos: los cumple solo el evento de su dueño (idempotente); el puente manual ya no existe', async () => {
