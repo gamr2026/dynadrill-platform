@@ -44,7 +44,7 @@ const LINEA_CON_DIAS = {
 /**
  * Reporte de Herramientas de un ticket de Pumping (como el de FCR, pero sin selección de herramientas ni inspecciones): las filas son las
  * líneas cotizadas del pedido (menos la movilización) y el operador reparte la cantidad de cada una en los días del servicio, con una marca que
- * vale 1 en las líneas por día y la cantidad aplicada ese día en las demás. Lo reportado de una línea no puede pasar de lo cotizado (lo vigila
+ * vale 1 en las líneas por día (o cuántas personas o piezas fueron ese día) y la cantidad aplicada ese día en las demás. Lo reportado de una línea no puede pasar de lo cotizado (lo vigila
  * también la base). Al completarlo se publica `operaciones.pumping.reporte_herramientas_completado` con la misma forma que el de FCR y Comercial
  * lo recibe como documento operativo.
  */
@@ -136,8 +136,17 @@ export class ReporteHerramientasService {
       if (estado === null) {
         if (previo) await tx.reporteItemDia.delete({ where: { id: previo.id } });
       } else {
+        // en una línea por día la marca vale 1 (una persona o pieza ese día) salvo que se indique cuántas fueron: así una línea de varias
+        // personas (el pedido repite el código y el ticket las suma) se puede reportar completa; en las demás hay que escribir la cantidad
         let valor = 1;
-        if (!esUnidadPorDia(l.unidadMedida)) {
+        if (esUnidadPorDia(l.unidadMedida)) {
+          if (cantidad !== undefined) {
+            if (!(typeof cantidad === 'number' && cantidad > 0)) {
+              throw new BadRequestException('La cantidad de ese día debe ser mayor que cero');
+            }
+            valor = cantidad;
+          }
+        } else {
           if (!(typeof cantidad === 'number' && cantidad > 0)) {
             throw new BadRequestException(
               'Escriba la cantidad aplicada ese día (mayor que cero)',
@@ -354,7 +363,7 @@ export class ReporteHerramientasService {
             lineaId: l.id,
             fecha: t.fechaInicioServicio,
             estado: 'operacion',
-            cantidad: esUnidadPorDia(l.unidadMedida) ? 1 : Number(l.cantidad),
+            cantidad: Number(l.cantidad),
             createdBy: quien,
           },
         });

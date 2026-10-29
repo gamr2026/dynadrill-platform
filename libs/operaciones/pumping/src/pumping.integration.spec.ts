@@ -2644,7 +2644,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       await consumer.consumir(actualizado(uno.pedidoId, { lineas: lineas() }));
       const r1 = await ver(uno).expect(200);
-      expect(lineaDe(r1, 'HT-DIA')).toMatchObject({ cantidad: 1, dias: [{ fecha: DIAS[0], estado: 'operacion', cantidad: 1 }] });
+      expect(lineaDe(r1, 'HT-DIA')).toMatchObject({ cantidad: 3, dias: [{ fecha: DIAS[0], estado: 'operacion', cantidad: 3 }] });
       expect(lineaDe(r1, 'HT-CANT')).toMatchObject({ cantidad: 10 });
       // la precarga es de una sola vez
       await ver(uno).expect(200);
@@ -2683,6 +2683,22 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       // una línea de otro ticket no se marca aquí
       const otro = await ticket();
       expect((await marcar(otro, cant.id, DIAS[0], { estado: 'operacion', cantidad: 1 })).status).toBe(404);
+    });
+
+    it('una línea por día admite cuántas personas o piezas fueron ese día (el pedido repite el código y el ticket las suma)', async () => {
+      const t = await ticket();
+      const dia = lineaDe(await ver(t).expect(200), 'HT-DIA'); // cotizado: 3
+      await marcar(t, dia.id, DIAS[0], { estado: 'operacion', cantidad: 2 }).expect(200);
+      expect(lineaDe(await ver(t), 'HT-DIA')).toMatchObject({ cantidad: 2 });
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 2 })).body.code).toBe(
+        'CANTIDAD_SUPERA_COTIZADO',
+      );
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 0 })).status).toBe(400);
+      await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 1 }).expect(200);
+      expect(lineaDe(await ver(t), 'HT-DIA').cantidad).toBe(3);
+      // sin indicar cantidad, la marca vuelve a valer 1
+      await marcar(t, dia.id, DIAS[0], { estado: 'daily_charge' }).expect(200);
+      expect(lineaDe(await ver(t), 'HT-DIA').cantidad).toBe(2);
     });
 
     it('solo el equipo del ticket en la Ejecución operativa lo arma; la base también impide pasarse de lo cotizado', async () => {
