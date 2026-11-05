@@ -375,7 +375,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     [...ADMIN_ROLE_CODES, RoleCode.TECNICO_HSE, RoleCode.GERENTE_HSE],
   ),
   def('pumping', 'pumping.tickets.operar', 'Operar el flujo de tickets de Pumping'),
-  def('pumpingRead', 'pumping.tickets.ver', 'Consultar el detalle de un ticket de Pumping de solo lectura'),
+  def(
+    'pumpingRead',
+    'pumping.tickets.ver',
+    'Consultar el detalle de un ticket de Pumping de solo lectura',
+  ),
   def(
     'pumpingDocumentosRead',
     'pumping.documentos.ver',
@@ -396,6 +400,23 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Formalizar la ejecución: confirmar que el Company Man aprobó el inicio del trabajo',
     [RoleCode.SUPERADMIN, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
   ),
+  // jornadas (un día de operación del ticket); registrar «día sin operación» lo hace quien opera (`pumping.tickets.operar`)
+  nuevo(
+    'pumping.jornadas.aceptar_company_man',
+    'Marcar que el Company Man aceptó trabajar en la jornada del día',
+    [RoleCode.SUPERADMIN, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
+  ),
+  nuevo('pumping.jornadas.cerrar', 'Cerrar la jornada del día de un ticket de Pumping', [
+    RoleCode.SUPERADMIN,
+    RoleCode.SUPERVISOR,
+    RoleCode.SUPERVISOR_PUMPING,
+  ]),
+  nuevo('pumping.jornadas.reabrir', 'Reabrir con motivo una jornada ya cerrada o sin operación', [
+    RoleCode.SUPERADMIN,
+    RoleCode.JEFE_BASE,
+    RoleCode.SUPERVISOR,
+    RoleCode.SUPERVISOR_PUMPING,
+  ]),
   // flota
   def(
     'vehicleInspectionApprove',
@@ -789,6 +810,9 @@ export const Permission = {
   PUMPING_CAMBIOS_SOLICITAR: 'pumping.cambios_items.solicitar',
   PUMPING_CAMBIOS_APROBAR: 'pumping.cambios_items.aprobar',
   PUMPING_EJECUCION_FORMALIZAR: 'pumping.ejecucion.formalizar',
+  PUMPING_JORNADA_ACEPTAR_COMPANY_MAN: 'pumping.jornadas.aceptar_company_man',
+  PUMPING_JORNADA_CERRAR: 'pumping.jornadas.cerrar',
+  PUMPING_JORNADA_REABRIR: 'pumping.jornadas.reabrir',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',

@@ -27,6 +27,7 @@ import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
+import { JornadasService } from './services/jornadas.service';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -995,7 +996,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
   it('lo firmado con la asignación (términos aceptados, reporte de unidad) no se borra al reasignar ni en cascada (auditoría de la base)', async () => {
     const t = await ticketEnTraslado();
-    const version = (await admin.query('SELECT codigo FROM pumping.terminos_version LIMIT 1')).rows[0].codigo;
+    const version = (await admin.query('SELECT codigo FROM pumping.terminos_version LIMIT 1'))
+      .rows[0].codigo;
     await admin.query(
       'INSERT INTO pumping.aceptacion_terminos (id, ticket_id, usuario_id, version_codigo) VALUES ($1, $2, $3, $4)',
       [uuidv7(), t.id, OP1.id, version],
@@ -1005,13 +1007,25 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await admin.query('DELETE FROM pumping.ticket_requisito WHERE ticket_id = $1', [t.id]);
       // la base no deja borrar a la persona que ya aceptó los términos
       await expect(
-        admin.query('DELETE FROM pumping.ticket_persona WHERE ticket_id = $1 AND usuario_id = $2', [t.id, OP1.id]),
+        admin.query('DELETE FROM pumping.ticket_persona WHERE ticket_id = $1 AND usuario_id = $2', [
+          t.id,
+          OP1.id,
+        ]),
       ).rejects.toThrow(/aceptacion_terminos_persona_fkey/);
       // y si el ticket vuelve a Asignación, reasignar se rechaza antes de tocar nada
-      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'asignacion' WHERE id = $1", [t.id]);
-      const r = await http().post(`${t.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(409);
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'asignacion' WHERE id = $1", [
+        t.id,
+      ]);
+      const r = await http()
+        .post(`${t.url}/asignar`)
+        .set(jefe())
+        .send(cuerpoAsignacion)
+        .expect(409);
       expect(r.body.code).toBe('ASIGNACION_CON_REGISTROS');
-      const quedan = await admin.query('SELECT count(*)::int n FROM pumping.ticket_persona WHERE ticket_id = $1', [t.id]);
+      const quedan = await admin.query(
+        'SELECT count(*)::int n FROM pumping.ticket_persona WHERE ticket_id = $1',
+        [t.id],
+      );
       expect(quedan.rows[0].n).toBeGreaterThan(0);
       // la historia del ticket no se cambia ni se borra desde la aplicación
       const priv = await admin.query(
@@ -1026,10 +1040,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   it('lectura del detalle: con `pumping.tickets.ver` (Mantenimiento) se abre el ticket, pero no se lista ni se opera', async () => {
     const t = await ticketEnTraslado();
     const soloVer = como('jefe_mantenimiento', CO1.id, CO1.nombre, [P.PUMPING_VER]);
-    const d = (await http().get(`${base}/tickets/${t.id}`).set(soloVer).expect(200)).body as { id: string };
+    const d = (await http().get(`${base}/tickets/${t.id}`).set(soloVer).expect(200)).body as {
+      id: string;
+    };
     expect(d.id).toBe(t.id);
     await http().get(`${base}/tickets`).set(soloVer).expect(403);
-    await http().post(`${base}/tickets/${t.id}/avanzar`).set(soloVer).send({ hacia: 'x' }).expect(403);
+    await http()
+      .post(`${base}/tickets/${t.id}/avanzar`)
+      .set(soloVer)
+      .send({ hacia: 'x' })
+      .expect(403);
   });
 
   it('mis-viajes (portal del Conductor): solo los tickets donde la cuenta está asignada como conductor u operador, con los datos mínimos y el supervisor; exige su propio permiso', async () => {
@@ -2144,7 +2164,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           'flota',
         ),
       );
-      expect(await inspeccion(t.id, VEHICULO.unidadId)).toEqual({ estado: 'cumplido', origen: 'evento' });
+      expect(await inspeccion(t.id, VEHICULO.unidadId)).toEqual({
+        estado: 'cumplido',
+        origen: 'evento',
+      });
       expect((await inspeccion(t.id, VEHICULO_2.unidadId)).estado).toBe('pendiente');
       await externos.consumir(
         externo(
@@ -2219,10 +2242,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         // sin indicarlo se conserva el del día; con null se deja vacío
         const r = await guardar(t, cuerpo);
         expect(r.body.representante).toMatchObject({ id: COMPANY_MAN.id });
-        expect((await guardar(t, { ...cuerpo, representanteId: null })).body.representante).toBeNull();
+        expect(
+          (await guardar(t, { ...cuerpo, representanteId: null })).body.representante,
+        ).toBeNull();
         expect((await guardar(t, cuerpo)).body.representante).toBeNull();
         await expect(
-          admin.query('UPDATE pumping.reporte_diario SET representante_id = $2 WHERE ticket_id = $1', [t.id, otro.id]),
+          admin.query(
+            'UPDATE pumping.reporte_diario SET representante_id = $2 WHERE ticket_id = $1',
+            [t.id, otro.id],
+          ),
         ).rejects.toThrow(/representante de campo/);
       } finally {
         await admin.query('DELETE FROM pumping.reporte_diario WHERE ticket_id = $1', [t.id]);
@@ -2414,8 +2442,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         return id;
       };
       afterAll(async () => {
-        await admin.query('DELETE FROM pumping.reporte_diario_adjunto WHERE archivo_id = ANY($1::uuid[])', [archivos]);
-        await admin.query('DELETE FROM pumping.reporte_diario WHERE ticket_id IN (SELECT id FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[]))', [pedidos]);
+        await admin.query(
+          'DELETE FROM pumping.reporte_diario_adjunto WHERE archivo_id = ANY($1::uuid[])',
+          [archivos],
+        );
+        await admin.query(
+          'DELETE FROM pumping.reporte_diario WHERE ticket_id IN (SELECT id FROM pumping.ticket WHERE pedido_id = ANY($1::uuid[]))',
+          [pedidos],
+        );
         await admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [archivos]);
       });
       const firmas = async (documentoId: string) =>
@@ -2426,9 +2460,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           )
         ).rows.map((r) => r.datos);
       const firmar = (t: { url: string }, cuerpo: object, h = op1()) =>
-        http().post(`${url(t)}/firmas`).set(h).send(cuerpo);
+        http()
+          .post(`${url(t)}/firmas`)
+          .set(h)
+          .send(cuerpo);
       const adjuntar = (t: { url: string }, archivoId: string, h = op1()) =>
-        http().post(`${url(t)}/adjuntos`).set(h).send({ archivoId });
+        http()
+          .post(`${url(t)}/adjuntos`)
+          .set(h)
+          .send({ archivoId });
 
       it('adjunta archivos al día (uno solo una vez, que exista) y los devuelve con el reporte', async () => {
         const t = await enEjecucion();
@@ -2442,19 +2482,25 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ]);
         expect((await adjuntar(t, a)).status).toBe(409);
         expect((await adjuntar(t, uuidv7())).status).toBe(400);
-        expect((await adjuntar(t, await nuevoArchivo(), como('operador', uuidv7(), 'Ajeno'))).status).toBe(403);
+        expect(
+          (await adjuntar(t, await nuevoArchivo(), como('operador', uuidv7(), 'Ajeno'))).status,
+        ).toBe(403);
       });
 
       it('el Supervisor firma el día completado «de una línea» y el representante del cliente con su documento firmado; ambos llegan a Firmas', async () => {
         const t = await enEjecucion();
         await guardar(t, { actividades: [actividad()] });
         const reporte = (await http().get(url(t)).set(op1())).body.id as string;
-        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe('DIA_SIN_COMPLETAR');
+        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe(
+          'DIA_SIN_COMPLETAR',
+        );
         await completar(t).expect(201);
 
         // solo el Supervisor del ticket firma como Supervisor, y sin archivo
         expect((await firmar(t, { rol: 'supervisor' })).status).toBe(403);
-        expect((await firmar(t, { rol: 'supervisor', archivoId: uuidv7() }, supervisora())).status).toBe(400);
+        expect(
+          (await firmar(t, { rol: 'supervisor', archivoId: uuidv7() }, supervisora())).status,
+        ).toBe(400);
         const ok = await firmar(t, { rol: 'supervisor' }, supervisora());
         expect(ok.status).toBe(201);
         const [f1] = await firmas(reporte);
@@ -2471,7 +2517,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
         // el representante del cliente firma en papel: el equipo sube el documento firmado
         expect((await firmar(t, { rol: 'representante_cliente' })).status).toBe(400); // falta el archivo
-        expect((await firmar(t, { rol: 'representante_cliente', archivoId: uuidv7() })).status).toBe(400);
+        expect(
+          (await firmar(t, { rol: 'representante_cliente', archivoId: uuidv7() })).status,
+        ).toBe(400);
         expect((await firmar(t, { rol: 'otro' })).status).toBe(400);
         const firmado = await nuevoArchivo();
         await firmar(t, { rol: 'representante_cliente', archivoId: firmado }).expect(201);
@@ -2486,7 +2534,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
         // editar el día lo reabre: hay que completarlo antes de volver a firmar
         await guardar(t, { actividades: [actividad({ detalle: 'Otro trabajo' })] });
-        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe('DIA_SIN_COMPLETAR');
+        expect((await firmar(t, { rol: 'supervisor' }, supervisora())).body.code).toBe(
+          'DIA_SIN_COMPLETAR',
+        );
       });
     });
 
@@ -2557,15 +2607,33 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         "SELECT id FROM catalogos.unidad_medida WHERE periodo = 'dia' ORDER BY nombre LIMIT 1",
       );
       const otra = await admin.query(
-        "SELECT id FROM catalogos.unidad_medida WHERE periodo IS NULL ORDER BY nombre LIMIT 1",
+        'SELECT id FROM catalogos.unidad_medida WHERE periodo IS NULL ORDER BY nombre LIMIT 1',
       );
       porDia = dia.rows[0].id;
       porCantidad = otra.rows[0].id;
     });
     const lineas = (extra: object[] = []) => [
-      { codigo: `HT-DIA-${n}`, descripcion: 'Herramienta por día', unidadMedidaId: porDia, cantidad: 3, tipoLinea: 'herramienta' },
-      { codigo: `HT-CANT-${n}`, descripcion: 'Material por cantidad', unidadMedidaId: porCantidad, cantidad: 10, tipoLinea: 'material' },
-      { codigo: `MOV-${n}`, descripcion: 'Movilización', unidadMedidaId: porCantidad, cantidad: 1, tipoLinea: 'movilizacion' },
+      {
+        codigo: `HT-DIA-${n}`,
+        descripcion: 'Herramienta por día',
+        unidadMedidaId: porDia,
+        cantidad: 3,
+        tipoLinea: 'herramienta',
+      },
+      {
+        codigo: `HT-CANT-${n}`,
+        descripcion: 'Material por cantidad',
+        unidadMedidaId: porCantidad,
+        cantidad: 10,
+        tipoLinea: 'material',
+      },
+      {
+        codigo: `MOV-${n}`,
+        descripcion: 'Movilización',
+        unidadMedidaId: porCantidad,
+        cantidad: 1,
+        tipoLinea: 'movilizacion',
+      },
       ...extra,
     ];
     const actualizado = (pedidoId: string, data: Record<string, unknown>): EventEnvelope => {
@@ -2592,9 +2660,21 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     };
     const url = (t: { url: string }) => `${t.url}/reporte-herramientas`;
     const ver = (t: { url: string }, h = op1()) => http().get(url(t)).set(h);
-    const marcar = (t: { url: string }, lineaId: string, fecha: string, cuerpo: object, h = op1()) =>
-      http().put(`${url(t)}/lineas/${lineaId}/dias/${fecha}`).set(h).send(cuerpo);
-    const completar = (t: { url: string }, h = op1()) => http().post(`${url(t)}/completar`).set(h);
+    const marcar = (
+      t: { url: string },
+      lineaId: string,
+      fecha: string,
+      cuerpo: object,
+      h = op1(),
+    ) =>
+      http()
+        .put(`${url(t)}/lineas/${lineaId}/dias/${fecha}`)
+        .set(h)
+        .send(cuerpo);
+    const completar = (t: { url: string }, h = op1()) =>
+      http()
+        .post(`${url(t)}/completar`)
+        .set(h);
     const eventosDe = async (ticketId: string) =>
       (
         await admin.query(
@@ -2605,8 +2685,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const lineaDe = (
       r: { body: { lineas: Array<{ codigo: string; id: string; cantidad: number }> } },
       prefijo: string,
-    ) =>
-      r.body.lineas.find((l) => l.codigo.startsWith(prefijo))!;
+    ) => r.body.lineas.find((l) => l.codigo.startsWith(prefijo))!;
 
     it('las líneas del pedido llegan al ticket (al abrirse y cuando el pedido cambia) y la movilización no va en el reporte', async () => {
       const e = evento({ data: { lineas: lineas() } });
@@ -2618,11 +2697,20 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         actualizado(e.subject.id, {
           lineas: [
             { ...lineas()[0], cantidad: 5 },
-            { codigo: `NUEVA-${n}`, descripcion: 'Nueva', unidadMedidaId: porCantidad, cantidad: 2, tipoLinea: 'servicio' },
+            {
+              codigo: `NUEVA-${n}`,
+              descripcion: 'Nueva',
+              unidadMedidaId: porCantidad,
+              cantidad: 2,
+              tipoLinea: 'servicio',
+            },
           ],
         }),
       );
-      const filas = await prisma.ticketLinea.findMany({ where: { ticketId: t.id }, orderBy: { orden: 'asc' } });
+      const filas = await prisma.ticketLinea.findMany({
+        where: { ticketId: t.id },
+        orderBy: { orden: 'asc' },
+      });
       expect(filas.map((f) => [f.codigo, Number(f.cantidad)])).toEqual([
         [`HT-DIA-${n}`, 5],
         [`NUEVA-${n}`, 2],
@@ -2632,9 +2720,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     it('lee el reporte: sin movilización, con lo cotizado y lo reportado; la precarga de un servicio de un solo día aplica lo cotizado', async () => {
       const t = await ticket();
       const r = await ver(t).expect(200);
-      expect(r.body.lineas.map((l: { codigo: string }) => l.codigo)).toEqual([`HT-DIA-${n}`, `HT-CANT-${n}`]);
+      expect(r.body.lineas.map((l: { codigo: string }) => l.codigo)).toEqual([
+        `HT-DIA-${n}`,
+        `HT-CANT-${n}`,
+      ]);
       expect(r.body).toMatchObject({ fechaInicio: DIAS[0], fechaFin: DIAS[2], completadoAt: null });
-      expect(lineaDe(r, 'HT-DIA')).toMatchObject({ porDia: true, cotizado: 3, cantidad: 0, dias: [] });
+      expect(lineaDe(r, 'HT-DIA')).toMatchObject({
+        porDia: true,
+        cotizado: 3,
+        cantidad: 0,
+        dias: [],
+      });
 
       // un servicio de un solo día se precarga con lo cotizado
       const uno = await ticketEnTraslado();
@@ -2644,12 +2740,20 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       await consumer.consumir(actualizado(uno.pedidoId, { lineas: lineas() }));
       const r1 = await ver(uno).expect(200);
-      expect(lineaDe(r1, 'HT-DIA')).toMatchObject({ cantidad: 3, dias: [{ fecha: DIAS[0], estado: 'operacion', cantidad: 3 }] });
+      expect(lineaDe(r1, 'HT-DIA')).toMatchObject({
+        cantidad: 3,
+        dias: [{ fecha: DIAS[0], estado: 'operacion', cantidad: 3 }],
+      });
       expect(lineaDe(r1, 'HT-CANT')).toMatchObject({ cantidad: 10 });
       // la precarga es de una sola vez
       await ver(uno).expect(200);
       expect(
-        (await admin.query('SELECT count(*)::int AS c FROM pumping.reporte_item_dia d JOIN pumping.ticket_linea l ON l.id = d.linea_id WHERE l.ticket_id = $1', [uno.id])).rows[0].c,
+        (
+          await admin.query(
+            'SELECT count(*)::int AS c FROM pumping.reporte_item_dia d JOIN pumping.ticket_linea l ON l.id = d.linea_id WHERE l.ticket_id = $1',
+            [uno.id],
+          )
+        ).rows[0].c,
       ).toBe(2);
     });
 
@@ -2663,7 +2767,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const tercera = await marcar(t, dia.id, DIAS[2], { estado: 'venta' }).expect(200);
       expect(lineaDe(tercera, 'HT-DIA')).toMatchObject({ cantidad: 3 });
       // lo cotizado son 3 días: un cuarto no existe en el servicio, y repetir un día no suma
-      expect((await marcar(t, dia.id, '2026-11-08', { estado: 'operacion' })).body.code).toBe('FUERA_DEL_SERVICIO');
+      expect((await marcar(t, dia.id, '2026-11-08', { estado: 'operacion' })).body.code).toBe(
+        'FUERA_DEL_SERVICIO',
+      );
       await marcar(t, dia.id, DIAS[0], { estado: 'venta' }).expect(200);
       expect(lineaDe(await ver(t), 'HT-DIA').cantidad).toBe(3);
 
@@ -2678,11 +2784,16 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await marcar(t, cant.id, DIAS[0], { estado: 'venta', cantidad: 6 }).expect(200);
       expect(lineaDe(await ver(t), 'HT-CANT').cantidad).toBe(10);
       // quitar la marca libera la cantidad
-      await http().delete(`${url(t)}/lineas/${cant.id}/dias/${DIAS[1]}`).set(op1()).expect(200);
+      await http()
+        .delete(`${url(t)}/lineas/${cant.id}/dias/${DIAS[1]}`)
+        .set(op1())
+        .expect(200);
       expect(lineaDe(await ver(t), 'HT-CANT').cantidad).toBe(6);
       // una línea de otro ticket no se marca aquí
       const otro = await ticket();
-      expect((await marcar(otro, cant.id, DIAS[0], { estado: 'operacion', cantidad: 1 })).status).toBe(404);
+      expect(
+        (await marcar(otro, cant.id, DIAS[0], { estado: 'operacion', cantidad: 1 })).status,
+      ).toBe(404);
     });
 
     it('una línea por día admite cuántas personas o piezas fueron ese día (el pedido repite el código y el ticket las suma)', async () => {
@@ -2690,10 +2801,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const dia = lineaDe(await ver(t).expect(200), 'HT-DIA'); // cotizado: 3
       await marcar(t, dia.id, DIAS[0], { estado: 'operacion', cantidad: 2 }).expect(200);
       expect(lineaDe(await ver(t), 'HT-DIA')).toMatchObject({ cantidad: 2 });
-      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 2 })).body.code).toBe(
-        'CANTIDAD_SUPERA_COTIZADO',
+      expect(
+        (await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 2 })).body.code,
+      ).toBe('CANTIDAD_SUPERA_COTIZADO');
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 0 })).status).toBe(
+        400,
       );
-      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 0 })).status).toBe(400);
       await marcar(t, dia.id, DIAS[1], { estado: 'operacion', cantidad: 1 }).expect(200);
       expect(lineaDe(await ver(t), 'HT-DIA').cantidad).toBe(3);
       // sin indicar cantidad, la marca vuelve a valer 1
@@ -2708,13 +2821,23 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const ajeno = como('operador', uuidv7(), 'Otro operador');
       expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, ajeno)).status).toBe(403);
       // el Supervisor asignado tampoco lo llena: el reporte es del Operador
-      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, supervisora())).status).toBe(403);
+      expect(
+        (await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, supervisora())).status,
+      ).toBe(403);
       expect((await completar(t, supervisora())).status).toBe(403);
       const sinPermiso = como('operador', OP1.id, OP1.nombre, []);
-      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, sinPermiso)).status).toBe(403);
-      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [t.id, 'traslado_salida']);
+      expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' }, sinPermiso)).status).toBe(
+        403,
+      );
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'traslado_salida',
+      ]);
       expect((await marcar(t, dia.id, DIAS[1], { estado: 'operacion' })).status).toBe(409);
-      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [t.id, 'ejecucion_operativa']);
+      await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+        t.id,
+        'ejecucion_operativa',
+      ]);
       // la base: una celda más allá de lo cotizado se rechaza aunque la API no estuviera
       await expect(
         admin.query(
@@ -3089,6 +3212,337 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         /ticket_documento_fecha_check/,
       );
       await insertar('monitoreo', '2026-11-06');
+    });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------
+  // Jornadas (etapa 1): un día de operación del ticket
+  // ------------------------------------------------------------------------------------------------------------------
+  describe('Jornadas del ticket: un día de operación', () => {
+    const DIAS = ['2026-11-05', '2026-11-06', '2026-11-07'];
+    const permisosSup = [
+      P.PUMPING_OPERAR,
+      P.PUMPING_JORNADA_ACEPTAR_COMPANY_MAN,
+      P.PUMPING_JORNADA_CERRAR,
+      P.PUMPING_JORNADA_REABRIR,
+    ];
+    const sup = () => como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, permisosSup);
+    // un supervisor con los permisos pero que no es el asignado a este ticket
+    const supAjeno = () =>
+      como('supervisor_pumping', SUPERVISOR_PUMPING.id, SUPERVISOR_PUMPING.nombre, permisosSup);
+    const jefeBase = () =>
+      como('jefe_base', JEFE, 'Jaime Jefe de Base', [P.PUMPING_JORNADA_REABRIR, P.PUMPING_VER]);
+    let hoy = DIAS[1];
+    beforeAll(() => {
+      const svc = app.get(JornadasService) as unknown as { hoy: () => string };
+      jest.spyOn(svc, 'hoy').mockImplementation(() => hoy);
+    });
+    beforeEach(() => {
+      hoy = DIAS[1];
+    });
+
+    const enEjecucion = async (inicio = DIAS[0], fin = DIAS[2]) => {
+      const t = await ticketEnTraslado();
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
+        [t.id, 'ejecucion_operativa', inicio, fin],
+      );
+      return { ...t, jornadas: `${t.url}/jornadas` };
+    };
+    const ver = (t: { jornadas: string }, h = op1()) => http().get(t.jornadas).set(h);
+    const aceptar = (t: { jornadas: string }, f: string, h = sup()) =>
+      http().post(`${t.jornadas}/${f}/aceptacion-company-man`).set(h);
+    const sinOp = (t: { jornadas: string }, f: string, cuerpo: object, h = op1()) =>
+      http().post(`${t.jornadas}/${f}/sin-operacion`).set(h).send(cuerpo);
+    const cerrar = (t: { jornadas: string }, f: string, h = sup()) =>
+      http().post(`${t.jornadas}/${f}/cerrar`).set(h);
+    const reabrir = (t: { jornadas: string }, f: string, cuerpo: object, h = jefeBase()) =>
+      http().post(`${t.jornadas}/${f}/reabrir`).set(h).send(cuerpo);
+    const motivo = async (codigo = 'clima') =>
+      (
+        await admin.query('SELECT id FROM pumping.cat_motivo_sin_operacion WHERE codigo = $1', [
+          codigo,
+        ])
+      ).rows[0].id as string;
+    const estados = (r: { body: { jornadas: Array<{ estadoVisible: string }> } }) =>
+      r.body.jornadas.map((j) => j.estadoVisible);
+
+    it('al pedirlas en la Ejecución operativa se crea una jornada por día del rango y el estado de hoy se deduce de la fecha', async () => {
+      const t = await enEjecucion();
+      const r = await ver(t).expect(200);
+      expect(r.body).toMatchObject({
+        hoy: DIAS[1],
+        total: 3,
+        diaActual: 2,
+        cerradas: 0,
+        sinOperacion: 0,
+        fechaInicio: DIAS[0],
+        fechaFin: DIAS[2],
+      });
+      expect(
+        r.body.jornadas.map((j: { fecha: string; numero: number }) => [j.fecha, j.numero]),
+      ).toEqual([
+        [DIAS[0], 1],
+        [DIAS[1], 2],
+        [DIAS[2], 3],
+      ]);
+      expect(estados(r)).toEqual(['con_pendientes', 'hoy', 'pendiente']);
+      // pedirlas otra vez no duplica
+      await ver(t).expect(200);
+      expect(await prisma.ticketJornada.count({ where: { ticketId: t.id } })).toBe(3);
+      // hoy no es día del servicio
+      hoy = '2026-12-01';
+      expect((await ver(t)).body.diaActual).toBeNull();
+    });
+
+    it('antes de la Ejecución operativa todavía no hay jornadas, y sin permiso no se ven', async () => {
+      const t = await ticketEnTraslado();
+      const r = await http().get(`${t.url}/jornadas`).set(op1()).expect(200);
+      expect(r.body).toMatchObject({ total: 0, jornadas: [] });
+      expect(await prisma.ticketJornada.count({ where: { ticketId: t.id } })).toBe(0);
+      const e = await enEjecucion();
+      expect((await http().get(e.jornadas).set(sinPermiso())).status).toBe(403);
+    });
+
+    it('el catálogo de motivos de un día sin operación está sembrado', async () => {
+      const r = await http().get(`${base}/jornadas/motivos-sin-operacion`).set(op1()).expect(200);
+      expect(r.body.map((m: { codigo: string }) => m.codigo)).toEqual([
+        'clima',
+        'espera_cliente',
+        'falla_equipo',
+        'orden_cliente',
+        'otro',
+      ]);
+    });
+
+    it('la aceptación del Company Man la marca el Supervisor asignado, el mismo día, y abre la jornada', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      expect((await aceptar(t, DIAS[1], op1())).status).toBe(403); // el operador no tiene el permiso
+      expect((await aceptar(t, DIAS[1], supAjeno())).status).toBe(403); // tiene el permiso pero no es el asignado
+      expect((await aceptar(t, DIAS[2])).status).toBe(409); // un día futuro
+      expect((await aceptar(t, DIAS[0])).status).toBe(409); // un día pasado
+      expect((await aceptar(t, '2026-11-09')).status).toBe(404); // fuera del servicio
+      expect((await aceptar(t, 'hoy')).status).toBe(400);
+      expect((await aceptar(t, '2026-02-31')).status).toBe(400); // no existe en el calendario
+      const r = await aceptar(t, DIAS[1]).expect(201);
+      expect(r.body).toMatchObject({ ok: true, yaMarcada: false });
+      expect((await aceptar(t, DIAS[1])).body.yaMarcada).toBe(true); // marcarla otra vez no cambia nada
+      const hoyJ = (await ver(t)).body.jornadas[1];
+      expect(hoyJ).toMatchObject({
+        estado: 'abierta',
+        estadoVisible: 'abierta',
+        companyManAcepto: true,
+        companyManAceptoPor: SUPERVISORA.id,
+      });
+      expect(
+        (await prisma.ticketJornadaHistorial.findMany({ where: { jornadaId: hoyJ.id } })).map(
+          (h) => h.accion,
+        ),
+      ).toEqual(['abierta']);
+    });
+
+    it('un día sin operación pide motivo del catálogo y detalle, lo registra quien opera el servicio y no se registra en un día futuro', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const m = await motivo();
+      const cuerpo = { motivoId: m, detalle: 'Lluvia fuerte en la locación, el cliente suspendió' };
+      const ajeno = como('operador', OPERADOR_QUE_ACTUA, 'Oscar Operador');
+      expect((await sinOp(t, DIAS[1], cuerpo, ajeno)).status).toBe(403); // no es del ticket
+      expect((await sinOp(t, DIAS[1], { motivoId: m, detalle: 'ab' })).status).toBe(400);
+      expect(
+        (await sinOp(t, DIAS[1], { motivoId: uuidv7(), detalle: 'Detalle válido' })).status,
+      ).toBe(400);
+      expect((await sinOp(t, DIAS[1], { detalle: 'Detalle válido' })).status).toBe(400);
+      expect((await sinOp(t, DIAS[2], cuerpo)).status).toBe(409); // todavía no llega
+      await sinOp(t, DIAS[1], cuerpo).expect(201);
+      const r = await ver(t);
+      expect(r.body).toMatchObject({ sinOperacion: 1 });
+      expect(r.body.jornadas[1]).toMatchObject({
+        estado: 'sin_operacion',
+        estadoVisible: 'sin_operacion',
+        sinOperacion: {
+          motivo: { codigo: 'clima' },
+          detalle: cuerpo.detalle,
+          registradoPor: OP1.id,
+        },
+      });
+      // una jornada sin operación ya no se acepta ni se cierra
+      expect((await aceptar(t, DIAS[1])).status).toBe(409);
+      expect((await cerrar(t, DIAS[1])).status).toBe(409);
+      // el pasado también se puede registrar (un día que se olvidó)
+      await sinOp(t, DIAS[0], {
+        motivoId: await motivo('otro'),
+        detalle: 'Espera de permisos del cliente',
+      }).expect(201);
+    });
+
+    it('solo se cierra una jornada abierta y nunca la de un día que todavía no llega', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      expect((await cerrar(t, DIAS[1])).status).toBe(409); // falta la aceptación del Company Man
+      await aceptar(t, DIAS[1]).expect(201);
+      expect((await cerrar(t, DIAS[1], op1())).status).toBe(403);
+      expect((await cerrar(t, DIAS[1], supAjeno())).status).toBe(403);
+      await cerrar(t, DIAS[1]).expect(201);
+      const r = await ver(t);
+      expect(r.body).toMatchObject({ cerradas: 1 });
+      expect(r.body.jornadas[1]).toMatchObject({
+        estado: 'cerrada',
+        estadoVisible: 'cerrada',
+        cerradaPor: SUPERVISORA.id,
+      });
+      expect((await cerrar(t, DIAS[1])).status).toBe(409); // ya cerrada
+      // un día futuro: aunque estuviera abierto, no se cierra (decisión del cliente)
+      hoy = DIAS[2];
+      await aceptar(t, DIAS[2]).expect(201);
+      hoy = DIAS[1];
+      expect((await cerrar(t, DIAS[2])).status).toBe(409);
+    });
+
+    it('reabrir pide motivo, solo aplica a una jornada cerrada o sin operación y queda en la bitácora', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await aceptar(t, DIAS[1]).expect(201);
+      await cerrar(t, DIAS[1]).expect(201);
+      expect((await reabrir(t, DIAS[1], { motivo: 'ab' })).status).toBe(400);
+      expect(
+        (await reabrir(t, DIAS[1], { motivo: 'Faltó registrar una actividad' }, op1())).status,
+      ).toBe(403);
+      await reabrir(t, DIAS[1], { motivo: 'Faltó registrar una actividad' }).expect(201);
+      const jornada = (await ver(t)).body.jornadas[1];
+      // tenía la aceptación del Company Man: vuelve abierta, sin datos de cierre
+      expect(jornada).toMatchObject({
+        estado: 'abierta',
+        cerradaAt: null,
+        cerradaPor: null,
+        companyManAcepto: true,
+      });
+      expect((await reabrir(t, DIAS[1], { motivo: 'Otra vez sin necesidad' })).status).toBe(409); // ya está abierta
+      expect(
+        (
+          await prisma.ticketJornadaHistorial.findMany({
+            where: { jornadaId: jornada.id },
+            orderBy: { createdAt: 'asc' },
+          })
+        ).map((h) => [h.accion, h.motivo]),
+      ).toEqual([
+        ['abierta', null],
+        ['cerrada', null],
+        ['reabierta', 'Faltó registrar una actividad'],
+      ]);
+
+      // un día sin operación se reabre y limpia sus datos (queda en la bitácora)
+      await sinOp(t, DIAS[0], {
+        motivoId: await motivo('falla_equipo'),
+        detalle: 'Falló el compresor',
+      }).expect(201);
+      await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
+      expect((await ver(t)).body.jornadas[0]).toMatchObject({
+        estado: 'pendiente',
+        sinOperacion: null,
+      });
+    });
+
+    it('si las fechas del servicio cambian, las jornadas se ajustan: las que salen pasan a «no aplica» y las que trabajaron no se tocan', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
+        201,
+      );
+      // se acorta a dos días
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[1],
+      ]);
+      let r = await ver(t);
+      expect(r.body).toMatchObject({ total: 2 });
+      expect(r.body.jornadas.map((j: { estado: string }) => j.estado)).toEqual([
+        'sin_operacion',
+        'pendiente',
+        'no_aplica',
+      ]);
+      expect((await aceptar(t, DIAS[2])).status).toBe(409); // una jornada «no aplica» no se gestiona
+      // se vuelve a ampliar: la jornada recuperada vuelve a ser pendiente
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        '2026-11-08',
+      ]);
+      r = await ver(t);
+      expect(r.body).toMatchObject({ total: 4 });
+      expect(
+        r.body.jornadas.map((j: { estado: string; numero: number }) => [j.estado, j.numero]),
+      ).toEqual([
+        ['sin_operacion', 1],
+        ['pendiente', 2],
+        ['pendiente', 3],
+        ['pendiente', 4],
+      ]);
+      // si el inicio se corre, la numeración sigue al rango y la jornada que ya trabajó se conserva
+      await admin.query('UPDATE pumping.ticket SET fecha_inicio_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[1],
+      ]);
+      r = await ver(t);
+      expect(
+        r.body.jornadas.map((j: { fecha: string; numero: number; estado: string }) => [
+          j.fecha,
+          j.numero,
+          j.estado,
+        ]),
+      ).toEqual([
+        [DIAS[0], 1, 'sin_operacion'],
+        [DIAS[1], 1, 'pendiente'],
+        [DIAS[2], 2, 'pendiente'],
+        ['2026-11-08', 3, 'pendiente'],
+      ]);
+    });
+
+    it('la base exige la coherencia de cada jornada y la bitácora solo se agrega', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const j = await prisma.ticketJornada.findFirstOrThrow({
+        where: { ticketId: t.id },
+        orderBy: { fecha: 'asc' },
+      });
+      const actualizar = (set: string, valores: unknown[] = []) =>
+        admin.query(`UPDATE pumping.ticket_jornada SET ${set} WHERE id = $1`, [j.id, ...valores]);
+      await expect(actualizar("estado = 'sin_operacion'")).rejects.toThrow(
+        /ticket_jornada_sin_operacion_estado_check/,
+      );
+      await expect(actualizar("estado = 'abierta'")).rejects.toThrow(
+        /ticket_jornada_abierta_check/,
+      );
+      await expect(actualizar("estado = 'cerrada'")).rejects.toThrow(
+        /ticket_jornada_cierre_estado_check/,
+      );
+      await expect(actualizar('company_man_acepto_at = now()')).rejects.toThrow(
+        /ticket_jornada_company_man_check/,
+      );
+      await expect(actualizar('numero = 0')).rejects.toThrow(/ticket_jornada_numero_check/);
+      await expect(
+        admin.query(
+          'INSERT INTO pumping.ticket_jornada (id, ticket_id, fecha, numero) VALUES ($1, $2, $3, 9)',
+          [uuidv7(), t.id, j.fecha.toISOString().slice(0, 10)],
+        ),
+      ).rejects.toThrow(/ticket_jornada_dia_key/);
+      await expect(
+        actualizar(
+          "estado = 'sin_operacion', sin_operacion_motivo_id = $2, sin_operacion_detalle = 'x', sin_operacion_at = now(), sin_operacion_por = $3",
+          [await motivo(), JEFE],
+        ),
+      ).rejects.toThrow(/ticket_jornada_sin_operacion_detalle_check/);
+      // la bitácora: la app puede agregar y leer, no cambiar ni borrar
+      const h = uuidv7();
+      await prisma.ticketJornadaHistorial.create({
+        data: { id: h, jornadaId: j.id, accion: 'abierta', actorId: JEFE },
+      });
+      await expect(
+        prisma.$executeRaw`UPDATE pumping.ticket_jornada_historial SET motivo = 'x' WHERE id = ${h}::uuid`,
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        prisma.$executeRaw`DELETE FROM pumping.ticket_jornada_historial WHERE id = ${h}::uuid`,
+      ).rejects.toThrow(/permission denied/);
     });
   });
 });

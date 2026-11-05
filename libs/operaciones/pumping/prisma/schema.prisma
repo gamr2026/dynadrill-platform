@@ -224,6 +224,7 @@ model Ticket {
   reportesDiarios        ReporteDiario[]
   solicitudesCambioItems SolicitudCambioItems[]
   lineas                 TicketLinea[]
+  jornadas               TicketJornada[]
 
   /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
   reportePrecargadoAt              DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
@@ -657,6 +658,95 @@ model TicketRequisito {
   @@index([requisitoCodigo])
   @@index([usuarioId])
   @@map("ticket_requisito")
+  @@schema("pumping")
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Jornadas: un día de operación de un ticket (ver documentacion/modulos/DISENO-JORNADA-BACKEND.md)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Estado guardado de una jornada. «Hoy», «bloqueada» y «con pendientes» no se guardan: se calculan al leer.
+enum EstadoJornada {
+  pendiente
+  abierta
+  sin_operacion
+  cerrada
+  no_aplica
+
+  @@map("estado_jornada")
+  @@schema("pumping")
+}
+
+enum AccionJornada {
+  abierta
+  sin_operacion
+  cerrada
+  reabierta
+  no_aplica
+
+  @@map("accion_jornada")
+  @@schema("pumping")
+}
+
+/// Motivos para registrar un día sin operación (lluvia, espera de cliente, falla de equipo…).
+model MotivoSinOperacion {
+  id     String  @id @db.Uuid
+  codigo String  @unique
+  nombre String
+  orden  Int     @default(0) @db.SmallInt
+  activo Boolean @default(true)
+
+  jornadas TicketJornada[]
+
+  @@map("cat_motivo_sin_operacion")
+  @@schema("pumping")
+}
+
+/// Una fila por ticket y día del servicio. Las personas (`*_por`) son FK a `identidad.usuario` solo en la base de datos.
+model TicketJornada {
+  id       String        @id @db.Uuid
+  ticketId String        @map("ticket_id") @db.Uuid
+  ticket   Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha    DateTime      @db.Date
+  /// Día N del servicio (1..M); las jornadas «no aplica» conservan el número que tenían.
+  numero   Int           @db.SmallInt
+  estado   EstadoJornada @default(pendiente)
+
+  companyManAceptoAt  DateTime? @map("company_man_acepto_at") @db.Timestamptz(6)
+  companyManAceptoPor String?   @map("company_man_acepto_por") @db.Uuid
+
+  sinOperacionMotivoId String?             @map("sin_operacion_motivo_id") @db.Uuid
+  sinOperacionMotivo   MotivoSinOperacion? @relation(fields: [sinOperacionMotivoId], references: [id])
+  sinOperacionDetalle  String?             @map("sin_operacion_detalle")
+  sinOperacionAt       DateTime?           @map("sin_operacion_at") @db.Timestamptz(6)
+  sinOperacionPor      String?             @map("sin_operacion_por") @db.Uuid
+
+  cerradaAt  DateTime? @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor String?   @map("cerrada_por") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  historial TicketJornadaHistorial[]
+
+  @@unique([ticketId, fecha], map: "ticket_jornada_dia_key")
+  @@index([sinOperacionMotivoId])
+  @@map("ticket_jornada")
+  @@schema("pumping")
+}
+
+/// Bitácora de lo que se hizo a cada jornada (solo se agrega; no se edita).
+model TicketJornadaHistorial {
+  id        String        @id @db.Uuid
+  jornadaId String        @map("jornada_id") @db.Uuid
+  jornada   TicketJornada @relation(fields: [jornadaId], references: [id], onDelete: Cascade)
+  accion    AccionJornada
+  motivo    String?
+  actorId   String        @map("actor_id") @db.Uuid
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([jornadaId, createdAt])
+  @@map("ticket_jornada_historial")
   @@schema("pumping")
 }
 
