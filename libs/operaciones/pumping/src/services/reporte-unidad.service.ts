@@ -16,11 +16,18 @@ import type {
   ResultadoInspeccion,
 } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { JornadasService } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 import { UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 const PASO = 'traslado_salida';
-const PASO_LLEGADA = 'traslado_llegada';
+/** Pasos del ticket en los que se firma la salida y la llegada de una unidad (en la ejecución, cada día es una jornada). */
+const PASOS_SALIDA = [PASO, 'ejecucion_operativa'];
+const PASOS_LLEGADA = ['ejecucion_operativa', 'control_retorno', 'traslado_llegada'];
+const EJECUCION = 'ejecucion_operativa';
+const aDia = (f: string) => new Date(`${f}T00:00:00.000Z`);
+const fechaOk = (f: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(f) && !Number.isNaN(Date.parse(`${f}T00:00:00Z`));
 
 export interface LlegadaEntrada {
   /** Día de la llegada (`AAAA-MM-DD`). */
@@ -52,7 +59,7 @@ export interface SalidaEntrada {
 const num = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
 
 /**
- * Reporte de unidad (DYN-MNT-RE-012): uno por ticket y unidad. Aquí se registra la SALIDA, que firma el operador asignado a esa unidad
+ * Reporte de unidad (DYN-MNT-RE-012): uno por ticket, unidad y día de servicio (los equipos regresan a base cada día). Aquí se registra la SALIDA, que firma el operador asignado a esa unidad
  * al guardarla. Solo se puede guardar cuando los demás requisitos del traslado de salida ya están cumplidos (es la firma final del
  * traslado). Al guardarla cumple el requisito `reporte_unidad_salida` de la unidad. La llegada se agrega en Traslado de llegada.
  */
@@ -62,10 +69,14 @@ export class ReporteUnidadService {
     private readonly prisma: PrismaService,
     private readonly requisitos: RequisitosService,
     private readonly bus: EventBus,
+    private readonly jornadas: JornadasService,
   ) {}
 
-  /** Las unidades del ticket con su operador y si el reporte de salida ya está firmado. */
-  async listar(ticketId: string) {
+  /**
+   * Las unidades del ticket con su operador y si el reporte de salida ya está firmado ese día (sin día, el del reporte más reciente de cada
+   * unidad).
+   */
+  async listar(ticketId: string, fecha?: string) {
     const [unidades, personas, reportes] = await Promise.all([
       this.prisma.ticketUnidad.findMany({
         where: { ticketId },
@@ -76,10 +87,13 @@ export class ReporteUnidadService {
         where: { ticketId, rol: 'operador' },
         include: { usuario: true },
       }),
-      this.prisma.reporteUnidad.findMany({ where: { ticketId } }),
+      this.prisma.reporteUnidad.findMany({
+        where: { ticketId, ...(fecha ? { fecha: aDia(fecha) } : {}) },
+        orderBy: { fecha: 'desc' },
+      }),
     ]);
     return unidades.map((u) => {
-      const r = reportes.find((x) => x.unidadId === u.unidadId);
+      const r = reportes.find((x) => x.unidadId === u.unidadId); // el más reciente (están ordenados por día)
       const o = personas.find((p) => p.unidadId === u.unidadId);
       return {
         unidadId: u.unidadId,
@@ -88,22 +102,25 @@ export class ReporteUnidadService {
         // la placa del vehículo enlazado a la unidad (nula si no tiene); para nombrarla en pantalla: `placa ?? codigo`
         placa: u.unidad.vehiculo?.placa ?? null,
         operador: o ? { usuarioId: o.usuarioId, nombre: o.usuario.nombre } : null,
+        fecha: r ? r.fecha.toISOString().slice(0, 10) : (fecha ?? null),
         salidaFirmada: !!r?.salidaFirmadaAt,
+        llegadaFirmada: !!r?.llegadaFirmadaAt,
         salidaFirmadaAt: r?.salidaFirmadaAt ?? null,
       };
     });
   }
 
-  /** El reporte de una unidad (vacío si todavía no se llenó) con todos los ítems del formulario. */
-  async obtener(ticketId: string, unidadId: string) {
+  /** El reporte de una unidad de un día (el más reciente si no se indica; vacío si todavía no se llenó) con todos los ítems del formulario. */
+  async obtener(ticketId: string, unidadId: string, fecha?: string) {
     const unidad = await this.prisma.ticketUnidad.findUnique({
       where: { ticketId_unidadId: { ticketId, unidadId } },
       include: { unidad: UNIDAD_CON_PLACA },
     });
     if (!unidad) throw new NotFoundException('Esa unidad no está asignada al ticket');
     const [reporte, items, firmante] = await Promise.all([
-      this.prisma.reporteUnidad.findUnique({
-        where: { ticketId_unidadId: { ticketId, unidadId } },
+      this.prisma.reporteUnidad.findFirst({
+        where: { ticketId, unidadId, ...(fecha ? { fecha: aDia(fecha) } : {}) },
+        orderBy: { fecha: 'desc' },
         include: {
           hubodometros: { orderBy: [{ eje: 'asc' }, { punto: 'asc' }] },
           llantas: true,
@@ -131,6 +148,7 @@ export class ReporteUnidadService {
     return {
       ticketId,
       unidadId,
+      fecha: reporte ? reporte.fecha.toISOString().slice(0, 10) : (fecha ?? null),
       codigo: unidad.unidad.codigo,
       nombre: unidad.unidad.nombre,
       placa: unidad.unidad.vehiculo?.placa ?? null,
@@ -186,8 +204,9 @@ export class ReporteUnidadService {
     return texto;
   }
 
+  /** `e.fecha` es el día de la salida y también el día del servicio al que pertenece el reporte. */
   async guardarSalida(ticketId: string, unidadId: string, e: SalidaEntrada, actor: AuthUser) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.fecha) || Number.isNaN(Date.parse(`${e.fecha}T00:00:00Z`))) {
+    if (!fechaOk(e.fecha)) {
       throw new BadRequestException('La fecha de salida no es válida');
     }
     if (!Number.isFinite(e.combustible) || e.combustible < 0)
@@ -198,10 +217,13 @@ export class ReporteUnidadService {
     await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({ where: { id: ticketId }, include: { paso: true } });
       if (!t) throw new NotFoundException('El ticket no existe');
-      if (t.pasoCodigo !== PASO)
+      if (!PASOS_SALIDA.includes(t.pasoCodigo))
         throw new ConflictException(
-          'El reporte de salida se registra en el paso de Traslado de salida',
+          'El reporte de salida se registra en el Traslado de salida o durante la Ejecución operativa',
         );
+      // durante la ejecución cada día es una jornada: debe estar activa y ya haber llegado
+      if (t.pasoCodigo === EJECUCION)
+        await this.jornadas.exigirDiaDeTrabajo(tx, ticketId, e.fecha, 'el reporte de unidad');
       const unidad = await tx.ticketUnidad.findUnique({
         where: { ticketId_unidadId: { ticketId, unidadId } },
       });
@@ -215,8 +237,11 @@ export class ReporteUnidadService {
             'Solo el operador asignado a esta unidad puede firmar su reporte de salida',
           );
       }
-      // el reporte es la firma final: antes deben estar cumplidos los demás requisitos del paso
-      const faltan = await this.requisitos.pendientes(tx, ticketId, PASO, [REQ.reporteSalida]);
+      // en el Traslado de salida el reporte es la firma final: antes deben estar cumplidos los demás requisitos del paso
+      const faltan =
+        t.pasoCodigo === PASO
+          ? await this.requisitos.pendientes(tx, ticketId, PASO, [REQ.reporteSalida])
+          : [];
       if (faltan.length) {
         throw new ConflictException({
           message: `Antes de firmar el reporte de unidad falta: ${faltan.map((f) => f.texto).join('; ')}.`,
@@ -260,8 +285,8 @@ export class ReporteUnidadService {
         salidaFirmadaAt: new Date(),
       };
       const reporte = await tx.reporteUnidad.upsert({
-        where: { ticketId_unidadId: { ticketId, unidadId } },
-        create: { id: uuidv7(), ticketId, unidadId, ...datos },
+        where: { ticketId_unidadId_fecha: { ticketId, unidadId, fecha: aDia(e.fecha) } },
+        create: { id: uuidv7(), ticketId, unidadId, fecha: aDia(e.fecha), ...datos },
         update: datos,
       });
       await tx.reporteUnidadHubodometro.deleteMany({ where: { reporteId: reporte.id } });
@@ -296,7 +321,7 @@ export class ReporteUnidadService {
         actor.id,
       );
     });
-    return this.obtener(ticketId, unidadId);
+    return this.obtener(ticketId, unidadId, e.fecha);
   }
 
   /**
@@ -305,10 +330,18 @@ export class ReporteUnidadService {
    * publica `operaciones.pumping.reporte_unidad_llegada` (contrato 4.2) en la misma transacción, para que Mantenimiento reciba
    * el reporte si hay novedades.
    */
-  async guardarLlegada(ticketId: string, unidadId: string, e: LlegadaEntrada, actor: AuthUser) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.fecha) || Number.isNaN(Date.parse(`${e.fecha}T00:00:00Z`))) {
+  async guardarLlegada(
+    ticketId: string,
+    unidadId: string,
+    e: LlegadaEntrada,
+    actor: AuthUser,
+    /** Día del servicio del reporte; sin él, el reporte más reciente que aún espera su llegada. */
+    dia?: string,
+  ) {
+    if (!fechaOk(e.fecha)) {
       throw new BadRequestException('La fecha de llegada no es válida');
     }
+    if (dia !== undefined && !fechaOk(dia)) throw new BadRequestException('El día no es válido');
     if (!Number.isFinite(e.combustible) || e.combustible < 0)
       throw new BadRequestException('El combustible debe ser un número mayor o igual a cero');
     const detalle = e.detalleInterrupcion?.trim() || null;
@@ -318,9 +351,9 @@ export class ReporteUnidadService {
     await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({ where: { id: ticketId } });
       if (!t) throw new NotFoundException('El ticket no existe');
-      if (t.pasoCodigo !== PASO_LLEGADA)
+      if (!PASOS_LLEGADA.includes(t.pasoCodigo))
         throw new ConflictException(
-          'El reporte de llegada se registra en el paso de Traslado de llegada',
+          'El reporte de llegada se registra durante la Ejecución operativa o en el Traslado de llegada',
         );
       const asignada = await tx.ticketUnidad.findUnique({
         where: { ticketId_unidadId: { ticketId, unidadId } },
@@ -336,9 +369,18 @@ export class ReporteUnidadService {
             'Solo el operador asignado a esta unidad puede firmar su reporte de llegada',
           );
       }
-      const previo = await tx.reporteUnidad.findUnique({
-        where: { ticketId_unidadId: { ticketId, unidadId } },
-      });
+      const previo = dia
+        ? await tx.reporteUnidad.findUnique({
+            where: { ticketId_unidadId_fecha: { ticketId, unidadId, fecha: aDia(dia) } },
+          })
+        : ((await tx.reporteUnidad.findFirst({
+            where: { ticketId, unidadId, salidaFirmadaAt: { not: null }, llegadaFirmadaAt: null },
+            orderBy: { fecha: 'desc' },
+          })) ??
+          (await tx.reporteUnidad.findFirst({
+            where: { ticketId, unidadId },
+            orderBy: { fecha: 'desc' },
+          })));
       if (!previo?.salidaFirmadaAt)
         throw new ConflictException('La unidad no tiene un reporte de salida firmado');
 
@@ -423,6 +465,7 @@ export class ReporteUnidadService {
             unidadId,
             vehiculoId: asignada.unidad.vehiculoId,
             reporteUnidadId: reporte.id,
+            fecha: reporte.fecha.toISOString().slice(0, 10),
             hayNovedades,
           },
           actor: { userId: actor.id, role: actor.roleCode },
@@ -430,6 +473,6 @@ export class ReporteUnidadService {
         }),
       );
     });
-    return this.obtener(ticketId, unidadId);
+    return this.obtener(ticketId, unidadId, dia);
   }
 }

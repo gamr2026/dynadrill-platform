@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -134,6 +145,13 @@ export class PublicarTerminosDto {
   @IsString() @MinLength(50) @MaxLength(20000) texto!: string;
 }
 
+/** El día del servicio de una ruta: `AAAA-MM-DD`. */
+const diaValido = (f: string): string => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || Number.isNaN(Date.parse(`${f}T00:00:00Z`)))
+    throw new BadRequestException('El día debe tener el formato AAAA-MM-DD');
+  return f;
+};
+
 @Controller('operaciones/pumping')
 export class TrasladoSalidaController {
   constructor(
@@ -237,11 +255,47 @@ export class TrasladoSalidaController {
     return this.ingreso.alternarLoto(id, itemId, actor);
   }
 
-  // ---- reporte de unidad
+  // ---- reporte de unidad (uno por unidad y día del servicio; las rutas sin día usan el reporte más reciente)
   @RequirePermission(P.PUMPING_OPERAR)
   @Get('tickets/:id/reportes-unidad')
-  reportesDelTicket(@Param('id', ParseUUIDPipe) id: string) {
-    return this.reportes.listar(id);
+  reportesDelTicket(@Param('id', ParseUUIDPipe) id: string, @Query('fecha') fecha?: string) {
+    return this.reportes.listar(id, fecha === undefined ? undefined : diaValido(fecha));
+  }
+
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('tickets/:id/reportes-unidad/:unidadId/:fecha')
+  reporteDelDia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
+    @Param('fecha') fecha: string,
+  ) {
+    return this.reportes.obtener(id, unidadId, diaValido(fecha));
+  }
+
+  /** Salida de la unidad de un día del servicio: el día del reporte es el de la ruta. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Put('tickets/:id/reportes-unidad/:unidadId/:fecha/salida')
+  guardarSalidaDelDia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: GuardarSalidaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reportes.guardarSalida(id, unidadId, { ...dto, fecha: diaValido(fecha) }, actor);
+  }
+
+  /** Llegada de la unidad de un día del servicio. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Put('tickets/:id/reportes-unidad/:unidadId/:fecha/llegada')
+  guardarLlegadaDelDia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: GuardarLlegadaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.reportes.guardarLlegada(id, unidadId, dto, actor, diaValido(fecha));
   }
 
   @RequirePermission(P.PUMPING_OPERAR)

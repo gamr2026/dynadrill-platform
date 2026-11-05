@@ -876,7 +876,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await intenta(
       'INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id) VALUES ($1, $2, $3)',
       [uuidv7(), t.id, VEHICULO.unidadId],
-      /reporte_unidad_ticket_unidad_key/,
+      /reporte_unidad_ticket_unidad_fecha_key/,
     );
     // una unidad en uso por un ticket no se borra de Flota
     await intenta(
@@ -1507,7 +1507,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           nombre: `Unidad de prueba ${VEHICULO.placa}`,
           placa: VEHICULO.placa,
           operador: { usuarioId: OP1.id, nombre: OP1.nombre },
+          fecha: null,
           salidaFirmada: false,
+          llegadaFirmada: false,
           salidaFirmadaAt: null,
         },
         {
@@ -1516,7 +1518,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           nombre: `Unidad de prueba ${VEHICULO_2.placa}`,
           placa: VEHICULO_2.placa,
           operador: { usuarioId: OP2.id, nombre: OP2.nombre },
+          fecha: null,
           salidaFirmada: false,
+          llegadaFirmada: false,
           salidaFirmadaAt: null,
         },
       ].sort((a, b) => a.placa.localeCompare(b.placa)),
@@ -4566,6 +4570,125 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           adelantado: false,
         });
         expect(await avisosDe(alRitmo.id)).toEqual([]);
+      });
+    });
+
+    describe('reporte de unidad por día: salida y llegada de cada jornada', () => {
+      const unidad = VEHICULO.unidadId;
+      const urlDia = (t: { url: string }, fecha: string) =>
+        `${t.url}/reportes-unidad/${unidad}/${fecha}`;
+      const items = async (t: { url: string }, fecha: string) =>
+        (
+          (await http().get(urlDia(t, fecha)).set(supervisora()).expect(200)).body
+            .inspecciones as Array<{ itemId: string }>
+        )
+          .slice(0, 3)
+          .map((i) => ({ itemId: i.itemId, resultado: 'conforme' }));
+      const cuerpoSalida = async (t: { url: string }, fecha: string) => ({
+        fecha: '2000-01-01', // la ruta manda: el día del reporte es el de la ruta
+        combustible: 80.5,
+        origen: 'Base Coco',
+        destino: 'Pozo Beta-9',
+        hubodometros: [{ eje: 'A', punto: 'origen', salida: 1000 }],
+        llantas: [{ posicion: 'delantera_izquierda', salida: '80 PSI' }],
+        inspecciones: await items(t, fecha),
+      });
+      const cuerpoLlegada = async (t: { url: string }, fecha: string) => ({
+        fecha,
+        combustible: 20,
+        hubodometros: [{ eje: 'A', punto: 'destino', llegada: 1100 }],
+        llantas: [{ posicion: 'delantera_izquierda', llegada: '78 PSI' }],
+        inspecciones: await items(t, fecha),
+        unidadLista: true,
+        operacionInterrumpida: false,
+      });
+      const reportes = async (id: string) =>
+        (
+          await admin.query(
+            'SELECT fecha::text AS fecha, salida_firmada_at IS NOT NULL AS salida, llegada_firmada_at IS NOT NULL AS llegada FROM pumping.reporte_unidad WHERE ticket_id = $1 ORDER BY fecha',
+            [id],
+          )
+        ).rows as Array<{ fecha: string; salida: boolean; llegada: boolean }>;
+
+      it('cada día de la ejecución tiene su propio reporte: salida y llegada se firman por separado', async () => {
+        const t = await enEjecucion();
+        for (const dia of [DIAS[0], DIAS[1]]) {
+          const cuerpo = await cuerpoSalida(t, dia);
+          await http()
+            .put(`${urlDia(t, dia)}/salida`)
+            .set(op1())
+            .send(cuerpo)
+            .expect(200);
+        }
+        expect(await reportes(t.id)).toEqual([
+          { fecha: DIAS[0], salida: true, llegada: false },
+          { fecha: DIAS[1], salida: true, llegada: false },
+        ]);
+
+        // la llegada del día 1 no toca la del día 2
+        const cuerpoDia1 = await cuerpoLlegada(t, DIAS[0]);
+        const llegada = await http()
+          .put(`${urlDia(t, DIAS[0])}/llegada`)
+          .set(op1())
+          .send(cuerpoDia1)
+          .expect(200);
+        expect(llegada.body.llegada.firmadaAt).not.toBeNull();
+        expect((await http().get(urlDia(t, DIAS[1])).set(op1()).expect(200)).body).toMatchObject({
+          fecha: DIAS[1],
+          llegada: { firmadaAt: null },
+        });
+        expect(await reportes(t.id)).toEqual([
+          { fecha: DIAS[0], salida: true, llegada: true },
+          { fecha: DIAS[1], salida: true, llegada: false },
+        ]);
+
+        // el listado por día muestra el estado de cada unidad ese día
+        const lista = (
+          await http()
+            .get(`${t.url}/reportes-unidad`)
+            .query({ fecha: DIAS[1] })
+            .set(op1())
+            .expect(200)
+        ).body as Array<{
+          unidadId: string;
+          fecha: string;
+          salidaFirmada: boolean;
+          llegadaFirmada: boolean;
+        }>;
+        expect(lista.find((u) => u.unidadId === unidad)).toMatchObject({
+          fecha: DIAS[1],
+          salidaFirmada: true,
+          llegadaFirmada: false,
+        });
+        // el aviso a Mantenimiento lleva el día del reporte
+        const avisos = (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_unidad_llegada' AND datos->'data'->>'ticketId' = $1",
+            [t.id],
+          )
+        ).rows.map((x) => x.d);
+        expect(avisos).toHaveLength(1);
+        expect(avisos[0]).toMatchObject({ unidadId: unidad, fecha: DIAS[0] });
+      });
+
+      it('no se firma un día futuro ni fuera del servicio, ni con un día mal escrito, ni por quien no es el operador', async () => {
+        const t = await enEjecucion(); // hoy es el día 2 de 3
+        const cuerpo = await cuerpoSalida(t, DIAS[0]);
+        const salida = (dia: string, h = op1()) =>
+          http()
+            .put(`${urlDia(t, dia)}/salida`)
+            .set(h)
+            .send(cuerpo);
+        expect((await salida(DIAS[2])).status).toBe(409); // el día 3 todavía no llega
+        expect((await salida('2026-11-10')).status).toBe(404); // fuera del servicio
+        expect((await salida('ayer')).status).toBe(400);
+        expect((await salida(DIAS[0], op2())).status).toBe(403); // la unidad es de otro operador
+        expect(await reportes(t.id)).toEqual([]);
+        // un día que se registró sin operación ya no admite reportes
+        await sinOp(t, DIAS[1], { motivoId: await motivo(), detalle: 'Lluvia todo el día' }).expect(
+          201,
+        );
+        expect((await salida(DIAS[1])).status).toBe(409);
       });
     });
   });

@@ -940,6 +940,8 @@ model ReporteUnidad {
   ticket                   Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   unidadId                 String      @map("unidad_id") @db.Uuid
   unidad                   FlotaUnidad @relation(fields: [unidadId], references: [id])
+  /// Día del servicio al que pertenece el reporte: uno por ticket, unidad y día (los equipos regresan a base cada día).
+  fecha                    DateTime    @default(dbgenerated("((now() AT TIME ZONE 'America/Guayaquil'::text))::date")) @db.Date
   /// Origen y destino del traslado: texto libre (una base, un pozo, una ciudad…), no un catálogo. Se llenan al firmar la salida.
   origen                   String?
   destino                  String?
@@ -966,7 +968,7 @@ model ReporteUnidad {
   llantas      ReporteUnidadLlanta[]
   inspecciones ReporteUnidadInspeccion[]
 
-  @@unique([ticketId, unidadId])
+  @@unique([ticketId, unidadId, fecha])
   @@map("reporte_unidad")
   @@schema("pumping")
 }
