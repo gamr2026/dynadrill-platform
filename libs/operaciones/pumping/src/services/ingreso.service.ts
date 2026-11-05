@@ -7,11 +7,9 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
-import { REQ } from '../catalog/sembrar-traslado-salida';
 import type { GasIngreso, Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { diasEntre, fechaValida, JornadasService } from './jornadas.service';
-import { RequisitosService } from './requisitos.service';
 
 /** El checklist se llena al llegar al sitio, al iniciar la ejecución (en la demo: «Ingreso a locación... al inicio de la Ejecución»). */
 const PASO = 'ejecucion_operativa';
@@ -61,7 +59,6 @@ const deDia = (f: string): Date => new Date(`${f}T00:00:00Z`);
 export class IngresoService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly requisitos: RequisitosService,
     private readonly jornadas: JornadasService,
   ) {}
 
@@ -241,8 +238,7 @@ export class IngresoService {
   }
 
   /**
-   * Recalcula si el checklist del día está completo y mantiene al día `confirmado_*`, el requisito de apertura de esa jornada y el requisito
-   * anterior de ticket (`checklist_ingreso_locacion`: cumplido mientras algún día tenga su checklist completo; se retira en la etapa 4).
+   * Recalcula si el checklist del día está completo y mantiene al día `confirmado_*` y el requisito de apertura de esa jornada.
    */
   private async reevaluar(
     tx: Prisma.TransactionClient,
@@ -275,16 +271,6 @@ export class IngresoService {
         data: { confirmadoPor: null, confirmadoAt: null },
       });
     }
-    const algunoCompleto =
-      (await tx.ticketIngreso.count({ where: { ticketId, confirmadoAt: { not: null } } })) > 0;
-    if (algunoCompleto)
-      await this.requisitos.marcar(
-        tx,
-        { ticketId, codigo: REQ.ingresoLocacion },
-        'sistema',
-        actor.id,
-      );
-    else await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.ingresoLocacion });
     // el requisito de ese día (y la apertura de la jornada, si era lo último que faltaba)
     await this.jornadas.sincronizar(tx, ticketId, actor.id);
   }

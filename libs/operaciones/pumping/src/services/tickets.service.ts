@@ -11,6 +11,7 @@ import { uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import type { LineaPedido } from './reporte-herramientas.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { JornadasService } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
@@ -57,6 +58,7 @@ const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 /** Orden de los pasos desde los que al Conductor le toca su gerenciamiento de viaje (ver `pumping.paso`). */
 const ORDEN_TRASLADO_SALIDA = 30;
 const ORDEN_EJECUCION = 50;
+const PASO_EJECUCION = 'ejecucion_operativa';
 const NOMBRES = {
   cliente: true,
   campo: true,
@@ -147,6 +149,7 @@ export class TicketsService {
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
     private readonly requisitos: RequisitosService,
+    private readonly jornadas: JornadasService,
   ) {}
 
   /** Crea el ticket de un pedido de Pumping abierto. `null` si el pedido no es de Pumping o ya tiene su ticket. */
@@ -344,6 +347,8 @@ export class TicketsService {
       // para salir del paso deben estar cumplidos todos sus requisitos (la lista de lo que falta va en la respuesta)
       if (salida.exigeRequisitos) {
         await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
+        // y de la Ejecución operativa solo se sale con todas las jornadas del servicio resueltas
+        if (t.pasoCodigo === PASO_EJECUCION) await this.jornadas.exigirResueltas(tx, id);
       }
       const r = await tx.ticket.updateMany({
         where: { id, pasoCodigo: t.pasoCodigo },

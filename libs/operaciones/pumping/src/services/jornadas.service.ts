@@ -261,6 +261,27 @@ export class JornadasService {
   }
 
   /**
+   * Para salir de la Ejecución operativa: todas las jornadas del servicio deben estar cerradas, sin operación o no aplicar. Si el servicio
+   * debe terminar antes, el Jefe de Base lo acorta y las jornadas sobrantes pasan a «no aplica» (etapa 6).
+   */
+  async exigirResueltas(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    await this.generar(tx, ticketId);
+    const abiertas = await tx.ticketJornada.findMany({
+      where: { ticketId, estado: { in: ['pendiente', 'abierta'] } },
+      orderBy: { fecha: 'asc' },
+      select: { numero: true, fecha: true },
+    });
+    if (abiertas.length === 0) return;
+    const dia = (f: Date) => `${aFecha(f).slice(8, 10)}/${aFecha(f).slice(5, 7)}`;
+    throw new ConflictException({
+      message: `No se puede continuar desde "Ejecución operativa". Faltan jornadas por cerrar: ${abiertas
+        .map((j) => `Día ${j.numero} (${dia(j.fecha)})`)
+        .join('; ')}. Ciérrelas o regístrelas como día sin operación.`,
+      code: 'JORNADAS_PENDIENTES',
+    });
+  }
+
+  /**
    * Para registrar trabajo de un día (checklist de seguridad, job log…): el día debe ser una jornada activa (pendiente o abierta) y ya haber
    * llegado. Crea las jornadas que falten. `queCosa` completa el mensaje.
    */
@@ -408,6 +429,8 @@ export class JornadasService {
       /** Día N de M de hoy; `null` si hoy no es día de servicio. */
       diaActual: hoyActiva?.numero ?? null,
       cerradas: activas.filter((j) => j.estado === 'cerrada').length,
+      /** Jornadas que todavía hay que cerrar (o registrar sin operación) para poder salir de la Ejecución operativa. */
+      porCerrar: activas.filter((j) => j.estado === 'pendiente' || j.estado === 'abierta').length,
       sinOperacion: activas.filter((j) => j.estado === 'sin_operacion').length,
       pendientesPorArea,
       jornadas,
@@ -425,32 +448,36 @@ export class JornadasService {
 
   /** El Supervisor asignado marca que el Company Man aceptó trabajar hoy. La jornada queda abierta cuando además se cumplen los demás requisitos de apertura. */
   async aceptarCompanyMan(ticketId: string, fecha: string, actor: AuthUser) {
-    return this.enJornada(ticketId, fecha, async (tx, j, t) => {
-      this.exigirSupervisorAsignado(t.personas, actor);
-      this.exigirEstado(
-        j.estado,
-        ['pendiente', 'abierta'],
-        'La aceptación del Company Man se marca en una jornada pendiente o abierta',
-      );
-      if (fecha !== this.hoy()) {
-        throw new ConflictException(
-          'La aceptación del Company Man se marca el mismo día de la jornada',
+    return this.enJornada(
+      ticketId,
+      fecha,
+      (p) => this.exigirSupervisorAsignado(p, actor),
+      async (tx, j) => {
+        this.exigirEstado(
+          j.estado,
+          ['pendiente', 'abierta'],
+          'La aceptación del Company Man se marca en una jornada pendiente o abierta',
         );
-      }
-      if (j.companyManAceptoAt)
-        return { ok: true, yaMarcada: true, abierta: j.estado === 'abierta' };
-      await tx.ticketJornada.update({
-        where: { id: j.id },
-        data: { companyManAceptoAt: new Date(), companyManAceptoPor: actor.id },
-      });
-      // cumple el requisito de apertura y, si era el último, abre la jornada
-      await this.sincronizar(tx, ticketId, actor.id);
-      const despues = await tx.ticketJornada.findUniqueOrThrow({
-        where: { id: j.id },
-        select: { estado: true },
-      });
-      return { ok: true, yaMarcada: false, abierta: despues.estado === 'abierta' };
-    });
+        if (fecha !== this.hoy()) {
+          throw new ConflictException(
+            'La aceptación del Company Man se marca el mismo día de la jornada',
+          );
+        }
+        if (j.companyManAceptoAt)
+          return { ok: true, yaMarcada: true, abierta: j.estado === 'abierta' };
+        await tx.ticketJornada.update({
+          where: { id: j.id },
+          data: { companyManAceptoAt: new Date(), companyManAceptoPor: actor.id },
+        });
+        // cumple el requisito de apertura y, si era el último, abre la jornada
+        await this.sincronizar(tx, ticketId, actor.id);
+        const despues = await tx.ticketJornada.findUniqueOrThrow({
+          where: { id: j.id },
+          select: { estado: true },
+        });
+        return { ok: true, yaMarcada: false, abierta: despues.estado === 'abierta' };
+      },
+    );
   }
 
   /** Registra un día sin operación (lluvia, espera de cliente…): no exige PTW, checklist ni job log; cuenta como día transcurrido. */
@@ -464,66 +491,74 @@ export class JornadasService {
     const texto = detalle.trim();
     if (texto.length < 3)
       throw new BadRequestException('Escriba el detalle de lo ocurrido (mínimo 3 caracteres)');
-    return this.enJornada(ticketId, fecha, async (tx, j, t) => {
-      this.exigirParticipante(t.personas, actor);
-      this.exigirEstado(
-        j.estado,
-        ['pendiente', 'abierta'],
-        'Solo una jornada pendiente o abierta se registra sin operación',
-      );
-      if (fecha > this.hoy()) {
-        throw new ConflictException(
-          'No se puede registrar sin operación un día que todavía no llega',
+    return this.enJornada(
+      ticketId,
+      fecha,
+      (p) => this.exigirParticipante(p, actor),
+      async (tx, j) => {
+        this.exigirEstado(
+          j.estado,
+          ['pendiente', 'abierta'],
+          'Solo una jornada pendiente o abierta se registra sin operación',
         );
-      }
-      const motivo = await tx.motivoSinOperacion.findFirst({
-        where: { id: motivoId, activo: true },
-        select: { id: true },
-      });
-      if (!motivo) throw new BadRequestException('El motivo no existe o está inactivo');
-      await tx.ticketJornada.update({
-        where: { id: j.id },
-        data: {
-          estado: 'sin_operacion',
-          sinOperacionMotivoId: motivo.id,
-          sinOperacionDetalle: texto,
-          sinOperacionAt: new Date(),
-          sinOperacionPor: actor.id,
-        },
-      });
-      await this.anotar(tx, j.id, 'sin_operacion', texto, actor.id);
-      await this.sincronizar(tx, ticketId, actor.id);
-      return { ok: true };
-    });
+        if (fecha > this.hoy()) {
+          throw new ConflictException(
+            'No se puede registrar sin operación un día que todavía no llega',
+          );
+        }
+        const motivo = await tx.motivoSinOperacion.findFirst({
+          where: { id: motivoId, activo: true },
+          select: { id: true },
+        });
+        if (!motivo) throw new BadRequestException('El motivo no existe o está inactivo');
+        await tx.ticketJornada.update({
+          where: { id: j.id },
+          data: {
+            estado: 'sin_operacion',
+            sinOperacionMotivoId: motivo.id,
+            sinOperacionDetalle: texto,
+            sinOperacionAt: new Date(),
+            sinOperacionPor: actor.id,
+          },
+        });
+        await this.anotar(tx, j.id, 'sin_operacion', texto, actor.id);
+        await this.sincronizar(tx, ticketId, actor.id);
+        return { ok: true };
+      },
+    );
   }
 
   /** El Supervisor cierra la jornada de hoy (o de un día pasado). Un día futuro no se cierra. */
   async cerrar(ticketId: string, fecha: string, actor: AuthUser) {
-    return this.enJornada(ticketId, fecha, async (tx, j, t) => {
-      this.exigirSupervisorAsignado(t.personas, actor);
-      if (fecha > this.hoy()) {
-        throw new ConflictException('No se puede cerrar una jornada que todavía no llega');
-      }
-      this.exigirEstado(
-        j.estado,
-        ['abierta'],
-        'Solo una jornada abierta se puede cerrar (falta la aceptación del Company Man)',
-      );
-      const faltan = await this.pendientesDeCierre(tx, ticketId, fecha);
-      if (faltan.length) {
-        throw new ConflictException({
-          message: `No se puede cerrar la jornada. Falta: ${faltan.map((f) => f.nombre).join('; ')}.`,
-          code: 'REQUISITOS_PENDIENTES',
-          pendientes: faltan,
+    return this.enJornada(
+      ticketId,
+      fecha,
+      (p) => this.exigirSupervisorAsignado(p, actor),
+      async (tx, j) => {
+        if (fecha > this.hoy()) {
+          throw new ConflictException('No se puede cerrar una jornada que todavía no llega');
+        }
+        this.exigirEstado(
+          j.estado,
+          ['abierta'],
+          'Solo una jornada abierta se puede cerrar (falta la aceptación del Company Man)',
+        );
+        const faltan = await this.pendientesDeCierre(tx, ticketId, fecha);
+        if (faltan.length) {
+          throw new ConflictException({
+            message: `No se puede cerrar la jornada. Falta: ${faltan.map((f) => f.nombre).join('; ')}.`,
+            code: 'REQUISITOS_PENDIENTES',
+            pendientes: faltan,
+          });
+        }
+        await tx.ticketJornada.update({
+          where: { id: j.id },
+          data: { estado: 'cerrada', cerradaAt: new Date(), cerradaPor: actor.id },
         });
-      }
-      await tx.ticketJornada.update({
-        where: { id: j.id },
-        data: { estado: 'cerrada', cerradaAt: new Date(), cerradaPor: actor.id },
-      });
-      await this.anotar(tx, j.id, 'cerrada', null, actor.id);
-      return { ok: true };
-    });
+        await this.anotar(tx, j.id, 'cerrada', null, actor.id);
+        return { ok: true };
+      },
+    );
   }
 
   /** Reabre una jornada cerrada o sin operación, con motivo. Vuelve a «abierta» si ya tenía la aceptación del Company Man, si no a «pendiente». */
@@ -531,7 +566,7 @@ export class JornadasService {
     const texto = motivo.trim();
     if (texto.length < 3)
       throw new BadRequestException('Escriba el motivo de la reapertura (mínimo 3 caracteres)');
-    return this.enJornada(ticketId, fecha, async (tx, j) => {
+    return this.enJornada(ticketId, fecha, null, async (tx, j) => {
       this.exigirEstado(
         j.estado,
         ['cerrada', 'sin_operacion'],
@@ -561,6 +596,8 @@ export class JornadasService {
   private async enJornada<R>(
     ticketId: string,
     fecha: string,
+    /** Quién puede hacerlo; se comprueba antes de mirar el día, para no responder «no existe» a quien no tiene permiso. */
+    autorizar: ((personas: { usuarioId: string; rol: string }[]) => void) | null,
     accion: (
       tx: Prisma.TransactionClient,
       jornada: NonNullable<
@@ -577,6 +614,7 @@ export class JornadasService {
         select: { pasoCodigo: true, personas: { select: { usuarioId: true, rol: true } } },
       });
       if (!t) throw new NotFoundException('El ticket no existe');
+      autorizar?.(t.personas);
       if (t.pasoCodigo !== PASO) {
         throw new ConflictException('Las jornadas se gestionan en el paso de Ejecución operativa');
       }

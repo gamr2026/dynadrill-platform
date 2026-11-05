@@ -710,9 +710,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa).sort()).toEqual(
       [VEHICULO.placa, VEHICULO_2.placa].sort(),
     );
-    // lo que el proceso exige: del ticket 3 (checklist de ingreso, formalización de la ejecución, acta de entrega), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
+    // lo que el proceso exige: del ticket 4 (acta de entrega, SWA, PTW del primer día y reporte de herramientas; el checklist y la aceptación del Company Man son de cada jornada), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(6 + 6 * 2 + 2 * 2); // los del ticket incluyen la SWA y el PTW de QHSE, y el reporte de herramientas
+    expect(req).toHaveLength(4 + 6 * 2 + 2 * 2);
+    expect(req.map((x) => x.codigo)).not.toContain('checklist_ingreso_locacion');
+    expect(req.map((x) => x.codigo)).not.toContain('ejecucion_formalizada');
     expect(
       req.filter((x) => x.codigo !== 'swa_sin_activar').every((x) => x.estado === 'pendiente'),
     ).toBe(true);
@@ -1223,20 +1225,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const completo = (await http().get(url).set(op1()).expect(200)).body;
     expect(completo).toMatchObject({ completo: true, confirmadoPor: expect.any(String) });
     expect(completo.lotoNotificadoClienteAt).not.toBeNull();
-    expect(
-      (await requisitosDe(t.id)).find((x) => x.codigo === 'checklist_ingreso_locacion'),
-    ).toMatchObject({ estado: 'cumplido', origen: 'sistema' });
-
-    // desmarcar un ítem lo deja incompleto y reabre el requisito
+    // desmarcar un ítem lo deja incompleto
     await http().patch(`${url}/loto/${completo.loto[0].itemId}`).set(op1()).expect(200);
     expect((await http().get(url).set(op1()).expect(200)).body).toMatchObject({
       completo: false,
       confirmadoPor: null,
     });
-    expect(
-      (await requisitosDe(t.id)).find((x) => x.codigo === 'checklist_ingreso_locacion'),
-    ).toMatchObject({ estado: 'pendiente' });
-
     // validaciones
     await http()
       .patch(url)
@@ -1729,28 +1723,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'ejecucion_operativa' })
       .expect(201);
 
-    // ejecución: checklist de ingreso (su prueba propia lo cubre; aquí se da por cumplido) y formalización del Supervisor
-    const faltaEjecucion = await http()
-      .post(`${t.url}/avanzar`)
-      .set(op1())
-      .send({ hacia: 'control_retorno' })
-      .expect(409);
-    expect(faltaEjecucion.body.detail).toContain('Formalización de la ejecución');
-    const formalizar = `${t.url}/ejecucion/formalizar`;
-    await http().post(formalizar).set(op1()).expect(403); // sin el permiso
-    await http()
-      .post(formalizar)
-      .set(como('supervisor', OP1.id, OP1.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
-      .expect(403); // con el permiso, pero no es el supervisor asignado
-    await http()
-      .post(formalizar)
-      .set(como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
-      .expect(201);
-    await prisma.ticketRequisito.updateMany({
-      where: { ticketId: t.id, requisitoCodigo: 'checklist_ingreso_locacion' },
-      data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
-    });
-    // sin el reporte de herramientas completado el ticket tampoco sale de la ejecución (su prueba propia lo cubre)
+    // ejecución: para salir hace falta el Reporte de Herramientas completo y todas las jornadas resueltas (el checklist de seguridad y la
+    // aceptación del Company Man son requisitos de cada día: tienen su prueba propia)
     const faltaReporte = await http()
       .post(`${t.url}/avanzar`)
       .set(op1())
@@ -1761,6 +1735,29 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       where: { ticketId: t.id, requisitoCodigo: 'reporte_herramientas_completado' },
       data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
     });
+    const faltanJornadas = await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'control_retorno' })
+      .expect(409);
+    expect(faltanJornadas.body.code).toBe('JORNADAS_PENDIENTES');
+    expect(faltanJornadas.body.detail).toContain('Faltan jornadas por cerrar: Día 1');
+    // la ruta anterior «formalizar» marca la aceptación del Company Man de hoy
+    const formalizar = `${t.url}/ejecucion/formalizar`;
+    await http().post(formalizar).set(op1()).expect(403); // sin el permiso
+    await http()
+      .post(formalizar)
+      .set(como('supervisor', OP1.id, OP1.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
+      .expect(403); // con el permiso, pero no es el supervisor asignado
+    await http()
+      .post(formalizar)
+      .set(como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [P.PUMPING_EJECUCION_FORMALIZAR]))
+      .expect(404); // hoy no es día de servicio de este ticket de prueba
+    await http().get(`${t.url}/jornadas`).set(op1()).expect(200);
+    await admin.query(
+      "UPDATE pumping.ticket_jornada SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE ticket_id = $1 AND estado IN ('pendiente', 'abierta')",
+      [t.id, JEFE],
+    );
     await http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' }).expect(201);
 
     // control de retorno: gerenciamiento de viaje de retorno aprobado
@@ -3879,24 +3876,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         .set(op1())
         .expect(200);
       expect(await estadoReq(t.id, DIAS[0], 'checklist_seguridad_dia')).toBe('pendiente');
-      // el requisito anterior de ticket (para salir de la ejecución) sigue mientras algún día esté completo: ya no hay ninguno
-      expect(
-        (
-          await admin.query(
-            "SELECT estado FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'checklist_ingreso_locacion' AND fecha IS NULL",
-            [t.id],
-          )
-        ).rows[0].estado,
-      ).toBe('pendiente');
       await completarChecklist(t, DIAS[1]);
-      expect(
-        (
-          await admin.query(
-            "SELECT estado FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'checklist_ingreso_locacion' AND fecha IS NULL",
-            [t.id],
-          )
-        ).rows[0].estado,
-      ).toBe('cumplido');
+      expect(await estadoReq(t.id, DIAS[1], 'checklist_seguridad_dia')).toBe('cumplido');
+      expect(await estadoReq(t.id, DIAS[0], 'checklist_seguridad_dia')).toBe('pendiente');
     });
 
     it('el checklist de un día solo se llena ese día o después, en una jornada activa del servicio y por el Operador del ticket', async () => {
@@ -3969,6 +3951,70 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           )
         ).rows[0].c,
       ).toBe(4); // el del otro día
+    });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 4: salida de la Ejecución operativa por jornadas
+    // ----------------------------------------------------------------------------------------------------------------
+    /** El ticket sale de la ejecución solo con el Reporte de Herramientas completo (aquí se da por cumplido) y las jornadas resueltas. */
+    const reporteCompleto = (t: { id: string }) =>
+      prisma.ticketRequisito.updateMany({
+        where: { ticketId: t.id, requisitoCodigo: 'reporte_herramientas_completado' },
+        data: { estado: 'cumplido', cumplidoAt: new Date(), origen: 'sistema' },
+      });
+    const avanzar = (t: { url: string }) =>
+      http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' });
+
+    it('el ticket no sale de la Ejecución operativa mientras haya jornadas por cerrar; un día sin operación o que no aplica no estorba', async () => {
+      const t = await enEjecucion();
+      await reporteCompleto(t);
+      const r0 = await ver(t);
+      expect(r0.body).toMatchObject({ total: 3, porCerrar: 3 });
+      const bloqueado = await avanzar(t).expect(409);
+      expect(bloqueado.body.code).toBe('JORNADAS_PENDIENTES');
+      expect(bloqueado.body.detail).toContain(
+        'Faltan jornadas por cerrar: Día 1 (05/11); Día 2 (06/11); Día 3 (07/11)',
+      );
+
+      // el día 1 sin operación, el día 2 trabajado y cerrado
+      await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
+        201,
+      );
+      await abrirDia(t, DIAS[1]);
+      await cumplirCierre(t, DIAS[1]);
+      await cerrar(t, DIAS[1]).expect(201);
+      expect((await ver(t)).body).toMatchObject({ porCerrar: 1, cerradas: 1, sinOperacion: 1 });
+      expect((await avanzar(t).expect(409)).body.detail).toContain(
+        'Faltan jornadas por cerrar: Día 3 (07/11)',
+      );
+
+      // el servicio se acorta a dos días: el tercero ya no aplica y no estorba
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[1],
+      ]);
+      expect((await ver(t)).body).toMatchObject({ total: 2, porCerrar: 0 });
+      await avanzar(t).expect(201);
+      expect(
+        (await admin.query('SELECT paso_codigo FROM pumping.ticket WHERE id = $1', [t.id])).rows[0]
+          .paso_codigo,
+      ).toBe('control_retorno');
+    });
+
+    it('además de las jornadas se sigue exigiendo el Reporte de Herramientas completo, y el aviso dice qué falta', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await admin.query(
+        "UPDATE pumping.ticket_jornada SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE ticket_id = $1",
+        [t.id, JEFE],
+      );
+      const falta = await avanzar(t).expect(409);
+      expect(falta.body.code).toBe('REQUISITOS_PENDIENTES');
+      expect(falta.body.detail).toContain('Reporte de herramientas completado');
+      expect(falta.body.detail).not.toContain('Checklist de ingreso');
+      expect(falta.body.detail).not.toContain('Formalización');
+      await reporteCompleto(t);
+      await avanzar(t).expect(201);
     });
   });
 });
