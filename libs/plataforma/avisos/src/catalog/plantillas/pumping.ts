@@ -177,4 +177,33 @@ export const PLANTILLAS_PUMPING: PlantillaDef[] = [
     evento: 'operaciones.pumping.inspeccion_realizada',
     rol: 'supervisor',
   },
+  {
+    codigo: 'pumping_avance_adelantado_jefe_base',
+    descripcion:
+      'El avance real de un servicio de Pumping va adelantado del plan: el Jefe de Base decide si acorta la duración (una vez por servicio).',
+    asunto: 'El servicio va adelantado: {{pedidoCodigo}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>Como <strong>{{cargo}}</strong>, debe saber que el servicio del pedido <strong>{{pedidoCodigo}}</strong> <strong>va adelantado</strong>: lleva {{avanceReal}} % de lo cotizado y ya pasó el día {{diaActual}} de {{diasTotal}} (el plan era {{avancePlan}} %).</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Avance real', 'avanceReal') +
+      FILA('Avance planificado', 'avancePlan') +
+      '</table>' +
+      '<p>Revise el avance en el ticket y decida si <strong>acorta la duración</strong> del servicio (si cambia lo cotizado, también puede modificar la cotización).</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nComo {{cargo}}, debe saber que el servicio del pedido {{pedidoCodigo}} va adelantado: lleva {{avanceReal}} % de lo cotizado y ya pasó el día {{diaActual}} de {{diasTotal}} (el plan era {{avancePlan}} %).\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nAvance real: {{avanceReal}}\nAvance planificado: {{avancePlan}}\n\n' +
+      'Revise el avance en el ticket y decida si acorta la duración del servicio (si cambia lo cotizado, también puede modificar la cotización).',
+    tituloAviso: 'El servicio va adelantado: {{pedidoCodigo}}',
+    detalleAviso:
+      '{{cliente}} · Pozo {{pozo}} — {{avanceReal}} % real frente a {{avancePlan}} % planificado',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'warning',
+    evento: 'operaciones.pumping.avance_adelantado',
+    rol: 'jefe_base',
+  },
 ];
