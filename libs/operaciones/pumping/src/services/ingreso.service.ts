@@ -10,6 +10,7 @@ import { uuidv7 } from '@dyn/utils';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import type { GasIngreso, Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { diasEntre, fechaValida, JornadasService } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 
 /** El checklist se llena al llegar al sitio, al iniciar la ejecución (en la demo: «Ingreso a locación... al inicio de la Ejecución»). */
@@ -44,50 +45,93 @@ export interface CambiosIngreso extends Partial<Confirmaciones> {
   nuevaLectura?: { gas: GasIngreso; lectura: number };
 }
 
+const aFecha = (d: Date): string => d.toISOString().slice(0, 10);
+const deDia = (f: string): Date => new Date(`${f}T00:00:00Z`);
+
 /**
- * Checklist de ingreso a locación + verificaciones de seguridad (uno por ticket). Lo llena el equipo del ticket al llegar al sitio, al iniciar la
- * ejecución. Queda completo cuando están las cinco confirmaciones, la última lectura de cada gas es segura y todos los ítems LOTO están
- * marcados; entonces cumple el requisito `checklist_ingreso_locacion` (y lo reabre si vuelve a quedar incompleto).
+ * Checklist de ingreso a locación + verificaciones de seguridad: uno por ticket y por DÍA (las lecturas de gas y el LOTO del día anterior no
+ * valen para hoy). Lo llena el Operador del equipo al llegar al sitio. Queda completo cuando están las cinco confirmaciones, la última lectura
+ * de cada gas es segura y todos los ítems LOTO están marcados; entonces cumple el requisito de apertura `checklist_seguridad_dia` de esa jornada
+ * (y lo reabre si vuelve a quedar incompleto).
+ *
+ * Las rutas sin fecha se conservan por compatibilidad: trabajan con el día de hoy si es día de servicio y, si no, con el primer día; ahí no se
+ * exige la jornada. Las rutas con fecha sí exigen que ese día sea una jornada activa del servicio y que ya haya llegado.
  */
 @Injectable()
 export class IngresoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requisitos: RequisitosService,
+    private readonly jornadas: JornadasService,
   ) {}
 
-  /** Crea el checklist del ticket con sus ítems LOTO (idempotente). */
-  async crear(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
-    await tx.ticketIngreso.upsert({ where: { ticketId }, create: { ticketId }, update: {} });
+  /** Crea el checklist del día con sus ítems LOTO (idempotente). */
+  async crear(tx: Prisma.TransactionClient, ticketId: string, fecha: string): Promise<void> {
+    await tx.ticketIngreso.upsert({
+      where: { ticketId_fecha: { ticketId, fecha: deDia(fecha) } },
+      create: { ticketId, fecha: deDia(fecha) },
+      update: {},
+    });
     const items = await tx.lotoItem.findMany({ where: { activo: true }, select: { id: true } });
     await tx.ticketIngresoLoto.createMany({
-      data: items.map((i) => ({ ticketId, lotoItemId: i.id })),
+      data: items.map((i) => ({ ticketId, fecha: deDia(fecha), lotoItemId: i.id })),
       skipDuplicates: true,
     });
   }
 
-  /** Carga el checklist (con sus lecturas y ítems LOTO); si el ticket aún no lo tiene, lo crea. */
-  private async cargar(ticketId: string) {
+  /**
+   * Qué día es el del checklist. Con fecha: debe existir en el calendario y estar dentro del servicio del ticket. Sin fecha (ruta anterior):
+   * hoy si es día de servicio; si no, el primer día; y si el ticket no tiene fechas, hoy.
+   */
+  private async resolverDia(
+    db: Prisma.TransactionClient | PrismaService,
+    ticketId: string,
+    fecha?: string,
+  ): Promise<{ dia: string; explicito: boolean }> {
+    const t = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    if (!t) throw new NotFoundException('El ticket no existe');
+    const hoy = this.jornadas.hoy();
+    if (fecha !== undefined) {
+      if (!fechaValida(fecha))
+        throw new BadRequestException('La fecha debe tener el formato AAAA-MM-DD');
+      if (
+        t.fechaInicioServicio &&
+        t.fechaFinServicio &&
+        !diasEntre(aFecha(t.fechaInicioServicio), aFecha(t.fechaFinServicio)).includes(fecha)
+      ) {
+        throw new NotFoundException('Ese día no está dentro del rango del servicio');
+      }
+      return { dia: fecha, explicito: true };
+    }
+    if (!t.fechaInicioServicio) return { dia: hoy, explicito: false };
+    const inicio = aFecha(t.fechaInicioServicio);
+    const fin = t.fechaFinServicio ? aFecha(t.fechaFinServicio) : inicio;
+    return { dia: hoy >= inicio && hoy <= fin ? hoy : inicio, explicito: false };
+  }
+
+  /** Carga el checklist del día (con sus lecturas y ítems LOTO); si todavía no existe, lo crea. */
+  private async cargar(ticketId: string, dia: string) {
     const incluir = {
       gases: { orderBy: { medidoAt: 'asc' } },
       loto: { include: { item: true }, orderBy: { item: { orden: 'asc' } } },
     } as const;
-    const ingreso = await this.prisma.ticketIngreso.findUnique({
-      where: { ticketId },
-      include: incluir,
-    });
+    const donde = { ticketId_fecha: { ticketId, fecha: deDia(dia) } };
+    const ingreso = await this.prisma.ticketIngreso.findUnique({ where: donde, include: incluir });
     if (ingreso) return ingreso;
-    const existe = await this.prisma.ticket.findUnique({
-      where: { id: ticketId },
-      select: { id: true },
-    });
-    if (!existe) throw new NotFoundException('El ticket no existe');
-    await this.prisma.$transaction((tx) => this.crear(tx, ticketId));
-    return this.prisma.ticketIngreso.findUniqueOrThrow({ where: { ticketId }, include: incluir });
+    await this.prisma.$transaction((tx) => this.crear(tx, ticketId, dia));
+    return this.prisma.ticketIngreso.findUniqueOrThrow({ where: donde, include: incluir });
   }
 
-  async obtener(ticketId: string) {
-    const ingreso = await this.cargar(ticketId);
+  async obtener(ticketId: string, fecha?: string) {
+    const { dia } = await this.resolverDia(this.prisma, ticketId, fecha);
+    return this.leer(ticketId, dia);
+  }
+
+  private async leer(ticketId: string, dia: string) {
+    const ingreso = await this.cargar(ticketId, dia);
     const [limites, nombres] = await Promise.all([
       this.prisma.gasLimite.findMany({ orderBy: { gas: 'asc' } }),
       this.nombresDe([
@@ -104,6 +148,7 @@ export class IngresoService {
     const lotoOk = ingreso.loto.length > 0 && ingreso.loto.every((l) => l.marcado);
     return {
       ticketId,
+      fecha: dia,
       ...confirmaciones,
       limites: limites.map((l) => ({
         gas: l.gas,
@@ -131,13 +176,14 @@ export class IngresoService {
     };
   }
 
-  async actualizar(ticketId: string, cambios: CambiosIngreso, actor: AuthUser) {
-    await this.prisma.$transaction(async (tx) => {
-      await this.exigirPuedeEditar(tx, ticketId, actor);
-      await this.crear(tx, ticketId);
+  async actualizar(ticketId: string, cambios: CambiosIngreso, actor: AuthUser, fecha?: string) {
+    const { dia } = await this.prisma.$transaction(async (tx) => {
+      const r = await this.exigirPuedeEditar(tx, ticketId, actor, fecha);
+      await this.crear(tx, ticketId, r.dia);
+      const clave = { ticketId_fecha: { ticketId, fecha: deDia(r.dia) } };
       const data: Prisma.TicketIngresoUpdateInput = {};
       for (const k of CLAVES) if (cambios[k] !== undefined) data[k] = cambios[k];
-      if (Object.keys(data).length) await tx.ticketIngreso.update({ where: { ticketId }, data });
+      if (Object.keys(data).length) await tx.ticketIngreso.update({ where: clave, data });
 
       if (cambios.nuevaLectura) {
         const limite = await tx.gasLimite.findUnique({ where: { gas: cambios.nuevaLectura.gas } });
@@ -149,6 +195,7 @@ export class IngresoService {
           data: {
             id: uuidv7(),
             ticketId,
+            fecha: deDia(r.dia),
             gas: limite.gas,
             lectura: cambios.nuevaLectura.lectura,
             seguro: lecturaSegura(limite, cambios.nuevaLectura.lectura),
@@ -156,47 +203,56 @@ export class IngresoService {
           },
         });
       }
-      await this.reevaluar(tx, ticketId, actor);
+      await this.reevaluar(tx, ticketId, r.dia, actor);
+      return r;
     });
-    return this.obtener(ticketId);
+    return this.leer(ticketId, dia);
   }
 
   /** Marca o desmarca un ítem LOTO. Al quedar todos marcados por primera vez se anota la notificación al cliente. */
-  async alternarLoto(ticketId: string, itemId: string, actor: AuthUser) {
-    await this.prisma.$transaction(async (tx) => {
-      await this.exigirPuedeEditar(tx, ticketId, actor);
-      await this.crear(tx, ticketId);
-      const fila = await tx.ticketIngresoLoto.findUnique({
-        where: { ticketId_lotoItemId: { ticketId, lotoItemId: itemId } },
-      });
+  async alternarLoto(ticketId: string, itemId: string, actor: AuthUser, fecha?: string) {
+    const { dia } = await this.prisma.$transaction(async (tx) => {
+      const r = await this.exigirPuedeEditar(tx, ticketId, actor, fecha);
+      await this.crear(tx, ticketId, r.dia);
+      const f = deDia(r.dia);
+      const clave = { ticketId_fecha_lotoItemId: { ticketId, fecha: f, lotoItemId: itemId } };
+      const fila = await tx.ticketIngresoLoto.findUnique({ where: clave });
       if (!fila) throw new NotFoundException('Ese ítem LOTO no existe');
       await tx.ticketIngresoLoto.update({
-        where: { ticketId_lotoItemId: { ticketId, lotoItemId: itemId } },
+        where: clave,
         data: fila.marcado
           ? { marcado: false, marcadoPor: null, marcadoAt: null }
           : { marcado: true, marcadoPor: actor.id, marcadoAt: new Date() },
       });
-      const todos = await tx.ticketIngresoLoto.findMany({ where: { ticketId } });
-      const ingreso = await tx.ticketIngreso.findUniqueOrThrow({ where: { ticketId } });
+      const todos = await tx.ticketIngresoLoto.findMany({ where: { ticketId, fecha: f } });
+      const ingreso = await tx.ticketIngreso.findUniqueOrThrow({
+        where: { ticketId_fecha: { ticketId, fecha: f } },
+      });
       if (todos.every((l) => l.marcado) && !ingreso.lotoNotificadoClienteAt) {
         await tx.ticketIngreso.update({
-          where: { ticketId },
+          where: { ticketId_fecha: { ticketId, fecha: f } },
           data: { lotoNotificadoClienteAt: new Date() },
         });
       }
-      await this.reevaluar(tx, ticketId, actor);
+      await this.reevaluar(tx, ticketId, r.dia, actor);
+      return r;
     });
-    return this.obtener(ticketId);
+    return this.leer(ticketId, dia);
   }
 
-  /** Recalcula si está completo y mantiene al día `confirmado_*` y el requisito. */
+  /**
+   * Recalcula si el checklist del día está completo y mantiene al día `confirmado_*`, el requisito de apertura de esa jornada y el requisito
+   * anterior de ticket (`checklist_ingreso_locacion`: cumplido mientras algún día tenga su checklist completo; se retira en la etapa 4).
+   */
   private async reevaluar(
     tx: Prisma.TransactionClient,
     ticketId: string,
+    dia: string,
     actor: AuthUser,
   ): Promise<void> {
+    const clave = { ticketId_fecha: { ticketId, fecha: deDia(dia) } };
     const ingreso = await tx.ticketIngreso.findUniqueOrThrow({
-      where: { ticketId },
+      where: clave,
       include: { gases: { orderBy: { medidoAt: 'asc' } }, loto: true },
     });
     const limites = await tx.gasLimite.findMany();
@@ -210,16 +266,18 @@ export class IngresoService {
 
     if (completo && !ingreso.confirmadoAt) {
       await tx.ticketIngreso.update({
-        where: { ticketId },
+        where: clave,
         data: { confirmadoPor: actor.id, confirmadoAt: new Date() },
       });
     } else if (!completo && ingreso.confirmadoAt) {
       await tx.ticketIngreso.update({
-        where: { ticketId },
+        where: clave,
         data: { confirmadoPor: null, confirmadoAt: null },
       });
     }
-    if (completo)
+    const algunoCompleto =
+      (await tx.ticketIngreso.count({ where: { ticketId, confirmadoAt: { not: null } } })) > 0;
+    if (algunoCompleto)
       await this.requisitos.marcar(
         tx,
         { ticketId, codigo: REQ.ingresoLocacion },
@@ -227,14 +285,20 @@ export class IngresoService {
         actor.id,
       );
     else await this.requisitos.reabrir(tx, { ticketId, codigo: REQ.ingresoLocacion });
+    // el requisito de ese día (y la apertura de la jornada, si era lo último que faltaba)
+    await this.jornadas.sincronizar(tx, ticketId, actor.id);
   }
 
-  /** Solo el Operador asignado al ticket (o el superadmin) y solo mientras el ticket está en Ejecución operativa. */
+  /**
+   * Solo el Operador asignado al ticket (o el superadmin) y solo mientras el ticket está en Ejecución operativa. Con fecha, además, el día debe
+   * ser una jornada activa que ya llegó.
+   */
   private async exigirPuedeEditar(
     tx: Prisma.TransactionClient,
     ticketId: string,
     actor: AuthUser,
-  ): Promise<void> {
+    fecha?: string,
+  ): Promise<{ dia: string; explicito: boolean }> {
     const t = await tx.ticket.findUnique({ where: { id: ticketId }, select: { pasoCodigo: true } });
     if (!t) throw new NotFoundException('El ticket no existe');
     if (!COORDINAN.includes(actor.roleCode)) {
@@ -250,6 +314,10 @@ export class IngresoService {
       throw new ConflictException(
         'El checklist de ingreso se llena en el paso de Ejecución operativa',
       );
+    const r = await this.resolverDia(tx, ticketId, fecha);
+    if (r.explicito)
+      await this.jornadas.exigirDiaDeTrabajo(tx, ticketId, r.dia, 'el checklist de seguridad');
+    return r;
   }
 
   private async nombresDe(ids: string[]): Promise<Map<string, string>> {

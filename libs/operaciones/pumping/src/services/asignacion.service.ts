@@ -11,7 +11,6 @@ import { MovimientosService, type LineaDeTicket } from '@dyn/inventario';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
-import { IngresoService } from './ingreso.service';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
@@ -64,7 +63,6 @@ export class AsignacionService {
     private readonly bus: EventBus,
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
-    private readonly ingreso: IngresoService,
     private readonly inventario: MovimientosService,
   ) {}
 
@@ -287,9 +285,8 @@ export class AsignacionService {
         },
       });
 
-      // lo que el paso siguiente exige y el checklist de ingreso que se llenará allí
+      // lo que el paso siguiente exige (el checklist de seguridad se crea por día, cuando se empieza a llenar)
       await this.requisitos.generar(tx, id);
-      await this.ingreso.crear(tx, id);
 
       // químicos: salen de bodega a cargo del ticket (todos o ninguno); el documento de mezcla queda adjunto al ticket
       if (quimicos.length) {

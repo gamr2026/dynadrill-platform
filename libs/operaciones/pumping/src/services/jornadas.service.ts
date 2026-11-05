@@ -32,6 +32,12 @@ export function diasEntre(inicio: string, fin: string): string[] {
 
 const aFecha = (d: Date): string => d.toISOString().slice(0, 10);
 
+/** AAAA-MM-DD que además existe en el calendario (el 31 de febrero no): la fecha vuelve igual al pasar por Date. */
+export const fechaValida = (fecha: string): boolean =>
+  FECHA.test(fecha) &&
+  !Number.isNaN(Date.parse(`${fecha}T00:00:00Z`)) &&
+  new Date(`${fecha}T00:00:00Z`).toISOString().slice(0, 10) === fecha;
+
 /**
  * Lo que ve la pantalla: el estado guardado más lo que se deduce de la fecha de hoy y de los requisitos. «hoy», «bloqueada»,
  * «con_pendientes» y «pendiente» no se guardan (una jornada que nadie toca no cambia de estado sola).
@@ -72,8 +78,8 @@ export function estadoVisible(
 export class JornadasService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Hoy en Ecuador. Aparte para que las pruebas puedan fijar el día. */
-  protected hoy(): string {
+  /** Hoy en Ecuador. Aparte (y público) para que todo lo que depende de «hoy» use el mismo reloj y las pruebas puedan fijar el día. */
+  hoy(): string {
     return hoyEnGuayaquil();
   }
 
@@ -169,6 +175,14 @@ export class JornadasService {
         })
       ).map((r) => aFecha(r.fecha)),
     );
+    const conChecklist = new Set(
+      (
+        await tx.ticketIngreso.findMany({
+          where: { ticketId, confirmadoAt: { not: null } },
+          select: { fecha: true },
+        })
+      ).map((r) => aFecha(r.fecha)),
+    );
     /** Lo que dicen los datos de Pumping de ese requisito ese día; `undefined` si lo cumple otra área o una etapa posterior. */
     const verdad = (
       codigo: string,
@@ -176,6 +190,7 @@ export class JornadasService {
       fecha: string,
     ): boolean | undefined => {
       if (codigo === JREQ.companyMan) return j.companyManAceptoAt !== null;
+      if (codigo === JREQ.checklist) return conChecklist.has(fecha);
       if (codigo === JREQ.jobLog) return conJobLog.has(fecha);
       if (codigo === JREQ.herramientas) return conHerramientas.has(fecha);
       return undefined;
@@ -242,6 +257,34 @@ export class JornadasService {
       if (!todos) continue;
       await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'abierta' } });
       await this.anotar(tx, j.id, 'abierta', null, actorId);
+    }
+  }
+
+  /**
+   * Para registrar trabajo de un día (checklist de seguridad, job log…): el día debe ser una jornada activa (pendiente o abierta) y ya haber
+   * llegado. Crea las jornadas que falten. `queCosa` completa el mensaje.
+   */
+  async exigirDiaDeTrabajo(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    fecha: string,
+    queCosa: string,
+  ): Promise<void> {
+    await this.generar(tx, ticketId);
+    const j = await tx.ticketJornada.findUnique({
+      where: { ticketId_fecha: { ticketId, fecha: new Date(`${fecha}T00:00:00Z`) } },
+      select: { estado: true },
+    });
+    if (!j) throw new NotFoundException('Ese día no está dentro del rango del servicio');
+    if (j.estado !== 'pendiente' && j.estado !== 'abierta') {
+      throw new ConflictException(
+        `Esa jornada está ${j.estado.replace('_', ' ')}: ya no admite ${queCosa}`,
+      );
+    }
+    if (fecha > this.hoy()) {
+      throw new ConflictException(
+        `${queCosa[0].toUpperCase()}${queCosa.slice(1)} se registra el mismo día de la jornada`,
+      );
     }
   }
 
@@ -526,12 +569,8 @@ export class JornadasService {
       ticket: { personas: { usuarioId: string; rol: string }[] },
     ) => Promise<R>,
   ): Promise<R> {
-    // además del formato, que exista en el calendario (31 de febrero no): la fecha vuelve igual al pasar por Date
-    const valida =
-      FECHA.test(fecha) &&
-      !Number.isNaN(Date.parse(`${fecha}T00:00:00Z`)) &&
-      new Date(`${fecha}T00:00:00Z`).toISOString().slice(0, 10) === fecha;
-    if (!valida) throw new BadRequestException('La fecha debe tener el formato AAAA-MM-DD');
+    if (!fechaValida(fecha))
+      throw new BadRequestException('La fecha debe tener el formato AAAA-MM-DD');
     return this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({
         where: { id: ticketId },

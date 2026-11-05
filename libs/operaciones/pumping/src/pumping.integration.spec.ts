@@ -3216,7 +3216,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   });
 
   // ------------------------------------------------------------------------------------------------------------------
-  // Jornadas (etapa 1): un día de operación del ticket
+  // Jornadas: un día de operación del ticket (etapas 1 a 3)
   // ------------------------------------------------------------------------------------------------------------------
   describe('Jornadas del ticket: un día de operación', () => {
     const DIAS = ['2026-11-05', '2026-11-06', '2026-11-07'];
@@ -3241,7 +3241,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       hoy = DIAS[1];
     });
 
-    const enEjecucion = async (inicio = DIAS[0], fin = DIAS[2]) => {
+    type Ticket = { id: string; url: string; jornadas: string };
+    const enEjecucion = async (inicio = DIAS[0], fin = DIAS[2]): Promise<Ticket> => {
       const t = await ticketEnTraslado();
       await admin.query(
         'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
@@ -3266,6 +3267,52 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ).rows[0].id as string;
     const estados = (r: { body: { jornadas: Array<{ estadoVisible: string }> } }) =>
       r.body.jornadas.map((j) => j.estadoVisible);
+    const requisitosDe = async (ticketId: string, fecha?: string) =>
+      (
+        await admin.query(
+          `SELECT r.requisito_codigo AS codigo, r.estado, r.fecha::text AS fecha, q.momento, q.modulo
+             FROM pumping.ticket_requisito r JOIN pumping.requisito q ON q.codigo = r.requisito_codigo
+            WHERE r.ticket_id = $1 AND r.fecha IS NOT NULL ${fecha ? 'AND r.fecha = $2' : ''}
+            ORDER BY r.fecha, r.requisito_codigo`,
+          fecha ? [ticketId, fecha] : [ticketId],
+        )
+      ).rows as Array<{
+        codigo: string;
+        estado: string;
+        fecha: string;
+        momento: string;
+        modulo: string;
+      }>;
+    const estadoReq = async (ticketId: string, fecha: string, codigo: string) =>
+      (await requisitosDe(ticketId, fecha)).find((f) => f.codigo === codigo)?.estado;
+
+    /** Llena el checklist de seguridad de un día por su pantalla: confirmaciones, lecturas seguras de los cuatro gases y todo el LOTO. */
+    const completarChecklist = async (t: { url: string }, fecha: string) => {
+      const url = `${t.url}/ingreso/${fecha}`;
+      await http()
+        .patch(url)
+        .set(op1())
+        .send({
+          toolboxTalkRealizado: true,
+          walkaroundCompletado: true,
+          lineaBaseAmbientalDocumentada: true,
+          rutasEmergenciaVerificadas: true,
+          simopsConfirmado: true,
+        })
+        .expect(200);
+      for (const l of [
+        { gas: 'h2s', lectura: 3 },
+        { gas: 'lel', lectura: 0 },
+        { gas: 'o2', lectura: 20.9 },
+        { gas: 'co', lectura: 5 },
+      ]) {
+        await http().patch(url).set(op1()).send({ nuevaLectura: l }).expect(200);
+      }
+      const antes = (await http().get(url).set(op1()).expect(200)).body;
+      for (const l of antes.loto)
+        await http().patch(`${url}/loto/${l.itemId}`).set(op1()).expect(200);
+      return (await http().get(url).set(op1()).expect(200)).body;
+    };
     /** Marca una herramienta usada ese día (en la base: el reparto por la pantalla ya tiene sus pruebas en otro bloque). */
     const marcarHerramienta = async (t: { id: string }, fecha: string) => {
       let linea = (
@@ -3289,10 +3336,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
     };
     /** Cumple lo que pide el cierre de un día: el job log completado (por su pantalla) y una herramienta marcada. */
-    const cumplirCierre = async (
-      t: { id: string; url: string; jornadas: string },
-      fecha: string,
-    ) => {
+    const cumplirCierre = async (t: Ticket, fecha: string) => {
       const dia = `${t.url}/reportes-diarios/${fecha}`;
       await http()
         .put(dia)
@@ -3303,7 +3347,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         .expect(200);
       await http().post(`${dia}/completar`).set(op1()).expect(201);
       await marcarHerramienta(t, fecha);
-      await http().get(t.jornadas).set(op1()).expect(200); // pedir las jornadas deja los requisitos al día
+      await ver(t).expect(200); // pedir las jornadas deja los requisitos al día
+    };
+    /** Deja un día listo para trabajar: el Company Man aceptó y el checklist del día está completo, así que la jornada queda abierta. */
+    const abrirDia = async (t: Ticket, fecha: string) => {
+      await aceptar(t, fecha).expect(201);
+      await completarChecklist(t, fecha);
     };
 
     it('al pedirlas en la Ejecución operativa se crea una jornada por día del rango y el estado de hoy se deduce de la fecha', async () => {
@@ -3354,7 +3403,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ]);
     });
 
-    it('la aceptación del Company Man la marca el Supervisor asignado, el mismo día, y abre la jornada', async () => {
+    it('la aceptación del Company Man la marca el Supervisor asignado, el mismo día; con el checklist del día completo la jornada queda abierta', async () => {
       const t = await enEjecucion();
       await ver(t);
       expect((await aceptar(t, DIAS[1], op1())).status).toBe(403); // el operador no tiene el permiso
@@ -3365,20 +3414,28 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await aceptar(t, 'hoy')).status).toBe(400);
       expect((await aceptar(t, '2026-02-31')).status).toBe(400); // no existe en el calendario
       const r = await aceptar(t, DIAS[1]).expect(201);
-      expect(r.body).toMatchObject({ ok: true, yaMarcada: false });
+      // falta el checklist de seguridad del día: la jornada todavía no se abre
+      expect(r.body).toMatchObject({ ok: true, yaMarcada: false, abierta: false });
       expect((await aceptar(t, DIAS[1])).body.yaMarcada).toBe(true); // marcarla otra vez no cambia nada
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'pendiente',
+        companyManAcepto: true,
+        companyManAceptoPor: SUPERVISORA.id,
+        pendientes: { apertura: 1, cierre: 2 },
+      });
+      // al completarse el checklist del día, el sistema abre la jornada
+      await completarChecklist(t, DIAS[1]);
       const hoyJ = (await ver(t)).body.jornadas[1];
       expect(hoyJ).toMatchObject({
         estado: 'abierta',
         estadoVisible: 'abierta',
-        companyManAcepto: true,
-        companyManAceptoPor: SUPERVISORA.id,
+        pendientes: { apertura: 0, cierre: 2 },
       });
       expect(
         (await prisma.ticketJornadaHistorial.findMany({ where: { jornadaId: hoyJ.id } })).map(
-          (h) => h.accion,
+          (h) => [h.accion, h.actorId],
         ),
-      ).toEqual(['abierta']);
+      ).toEqual([['abierta', OP1.id]]); // la abrió el último requisito cumplido: el checklist del Operador
     });
 
     it('un día sin operación pide motivo del catálogo y detalle, lo registra quien opera el servicio y no se registra en un día futuro', async () => {
@@ -3406,9 +3463,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           registradoPor: OP1.id,
         },
       });
-      // una jornada sin operación ya no se acepta ni se cierra
+      // una jornada sin operación ya no se acepta, no se cierra y no admite checklist
       expect((await aceptar(t, DIAS[1])).status).toBe(409);
       expect((await cerrar(t, DIAS[1])).status).toBe(409);
+      expect(
+        (
+          await http()
+            .patch(`${t.url}/ingreso/${DIAS[1]}`)
+            .set(op1())
+            .send({ toolboxTalkRealizado: true })
+        ).status,
+      ).toBe(409);
       // el pasado también se puede registrar (un día que se olvidó)
       await sinOp(t, DIAS[0], {
         motivoId: await motivo('otro'),
@@ -3419,8 +3484,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     it('solo se cierra una jornada abierta y nunca la de un día que todavía no llega', async () => {
       const t = await enEjecucion();
       await ver(t);
-      expect((await cerrar(t, DIAS[1])).status).toBe(409); // falta la aceptación del Company Man
-      await aceptar(t, DIAS[1]).expect(201);
+      expect((await cerrar(t, DIAS[1])).status).toBe(409); // todavía no está abierta
+      await abrirDia(t, DIAS[1]);
       expect((await cerrar(t, DIAS[1], op1())).status).toBe(403);
       expect((await cerrar(t, DIAS[1], supAjeno())).status).toBe(403);
       await cumplirCierre(t, DIAS[1]);
@@ -3433,7 +3498,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         cerradaPor: SUPERVISORA.id,
       });
       expect((await cerrar(t, DIAS[1])).status).toBe(409); // ya cerrada
-      // un día futuro: aunque estuviera abierto, no se cierra (decisión del cliente)
+      // un día futuro: aunque se acepte al Company Man ese día, no se cierra (decisión del cliente)
       hoy = DIAS[2];
       await aceptar(t, DIAS[2]).expect(201);
       hoy = DIAS[1];
@@ -3443,7 +3508,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     it('reabrir pide motivo, solo aplica a una jornada cerrada o sin operación y queda en la bitácora', async () => {
       const t = await enEjecucion();
       await ver(t);
-      await aceptar(t, DIAS[1]).expect(201);
+      await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
       await cerrar(t, DIAS[1]).expect(201);
       expect((await reabrir(t, DIAS[1], { motivo: 'ab' })).status).toBe(400);
@@ -3452,7 +3517,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ).toBe(403);
       await reabrir(t, DIAS[1], { motivo: 'Faltó registrar una actividad' }).expect(201);
       const jornada = (await ver(t)).body.jornadas[1];
-      // tenía la aceptación del Company Man: vuelve abierta, sin datos de cierre
+      // tenía todos sus requisitos de apertura: vuelve abierta, sin datos de cierre
       expect(jornada).toMatchObject({
         estado: 'abierta',
         cerradaAt: null,
@@ -3589,30 +3654,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // ----------------------------------------------------------------------------------------------------------------
     // Etapa 2: requisitos por día
     // ----------------------------------------------------------------------------------------------------------------
-    const requisitosDe = async (ticketId: string, fecha?: string) =>
-      (
-        await admin.query(
-          `SELECT r.requisito_codigo AS codigo, r.estado, r.fecha::text AS fecha, q.momento, q.modulo
-             FROM pumping.ticket_requisito r JOIN pumping.requisito q ON q.codigo = r.requisito_codigo
-            WHERE r.ticket_id = $1 AND r.fecha IS NOT NULL ${fecha ? 'AND r.fecha = $2' : ''}
-            ORDER BY r.fecha, r.requisito_codigo`,
-          fecha ? [ticketId, fecha] : [ticketId],
-        )
-      ).rows as Array<{
-        codigo: string;
-        estado: string;
-        fecha: string;
-        momento: string;
-        modulo: string;
-      }>;
-
-    it('cada día activo recibe sus requisitos: aceptación del Company Man para abrir y job log y herramientas para cerrar', async () => {
+    it('cada día activo recibe sus requisitos: checklist y aceptación del Company Man para abrir; job log y herramientas para cerrar', async () => {
       const t = await enEjecucion();
       const r = await ver(t).expect(200);
       const filas = await requisitosDe(t.id);
-      expect(filas).toHaveLength(9); // 3 días × 3 requisitos activos del catálogo
+      expect(filas).toHaveLength(12); // 3 días × 4 requisitos activos del catálogo
       expect(new Set(filas.map((f) => f.codigo))).toEqual(
-        new Set(['company_man_acepto_dia', 'job_log_dia', 'herramientas_dia']),
+        new Set([
+          'checklist_seguridad_dia',
+          'company_man_acepto_dia',
+          'job_log_dia',
+          'herramientas_dia',
+        ]),
       );
       expect(filas.every((f) => f.estado === 'pendiente')).toBe(true);
       // la lista lo muestra por jornada, la apertura primero
@@ -3622,17 +3675,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           q.momento,
         ]),
       ).toEqual([
+        ['checklist_seguridad_dia', 'apertura'],
         ['company_man_acepto_dia', 'apertura'],
         ['herramientas_dia', 'cierre'],
         ['job_log_dia', 'cierre'],
       ]);
       expect(r.body.jornadas[1]).toMatchObject({
-        pendientes: { apertura: 1, cierre: 2 },
+        pendientes: { apertura: 2, cierre: 2 },
         bloqueos: [],
       });
       // pedirlas otra vez no duplica
       await ver(t).expect(200);
-      expect(await requisitosDe(t.id)).toHaveLength(9);
+      expect(await requisitosDe(t.id)).toHaveLength(12);
       // la lista de requisitos de salida de cada paso no mezcla los de las jornadas
       const estado = await http().get(`${t.url}/requisitos`).set(op1());
       if (estado.status === 200) {
@@ -3640,20 +3694,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       }
     });
 
-    it('aceptar al Company Man cumple su requisito y abre la jornada; sin operación quita lo pendiente del día y reabrir lo devuelve', async () => {
+    it('un día sin operación no muestra ni cuenta requisitos y reabrirlo los devuelve', async () => {
       const t = await enEjecucion();
       await ver(t);
-      const r = await aceptar(t, DIAS[1]).expect(201);
-      expect(r.body).toMatchObject({ yaMarcada: false, abierta: true });
-      expect(
-        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'company_man_acepto_dia'),
-      ).toMatchObject({ estado: 'cumplido' });
-      expect((await ver(t)).body.jornadas[1]).toMatchObject({
-        estado: 'abierta',
-        pendientes: { apertura: 0, cierre: 2 },
-      });
-
-      // un día sin operación no exige nada: no muestra requisitos ni cuenta pendientes; reabrirlo los devuelve
       await sinOp(t, DIAS[0], {
         motivoId: await motivo(),
         detalle: 'Lluvia en el primer día',
@@ -3666,13 +3709,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
       expect(
         (await ver(t)).body.jornadas[0].requisitos.map((q: { codigo: string }) => q.codigo),
-      ).toEqual(['company_man_acepto_dia', 'herramientas_dia', 'job_log_dia']);
+      ).toEqual([
+        'checklist_seguridad_dia',
+        'company_man_acepto_dia',
+        'herramientas_dia',
+        'job_log_dia',
+      ]);
     });
 
     it('no se cierra la jornada hasta cumplir el job log y las herramientas del día; guardar el job log otra vez lo reabre', async () => {
       const t = await enEjecucion();
       await ver(t);
-      await aceptar(t, DIAS[1]).expect(201);
+      await abrirDia(t, DIAS[1]);
       const sinCumplir = await cerrar(t, DIAS[1]);
       expect(sinCumplir.status).toBe(409);
       expect(sinCumplir.body.code).toBe('REQUISITOS_PENDIENTES');
@@ -3694,26 +3742,20 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       };
       await http().put(dia).set(op1()).send(cuerpoJobLog).expect(200);
       await http().post(`${dia}/completar`).set(op1()).expect(201);
-      let propios = await requisitosDe(t.id, DIAS[1]);
-      expect(propios.find((f) => f.codigo === 'job_log_dia')?.estado).toBe('cumplido');
-      expect(
-        (await requisitosDe(t.id, DIAS[0])).find((f) => f.codigo === 'job_log_dia')?.estado,
-      ).toBe('pendiente');
+      expect(await estadoReq(t.id, DIAS[1], 'job_log_dia')).toBe('cumplido');
+      expect(await estadoReq(t.id, DIAS[0], 'job_log_dia')).toBe('pendiente');
       const soloHerramientas = String((await cerrar(t, DIAS[1])).body.detail);
       expect(soloHerramientas).toContain('Herramientas del día registradas');
       expect(soloHerramientas).not.toContain('job log');
       // guardar de nuevo el día lo reabre: vuelve a faltar el job log
       await http().put(dia).set(op1()).send(cuerpoJobLog).expect(200);
-      propios = await requisitosDe(t.id, DIAS[1]);
-      expect(propios.find((f) => f.codigo === 'job_log_dia')?.estado).toBe('pendiente');
+      expect(await estadoReq(t.id, DIAS[1], 'job_log_dia')).toBe('pendiente');
       await http().post(`${dia}/completar`).set(op1()).expect(201);
 
       // las herramientas: al marcar algo ese día se cumple (se prueba con la marca puesta en la base; el reparto por la pantalla ya tiene sus pruebas)
       await marcarHerramienta(t, DIAS[1]);
       await ver(t);
-      expect(
-        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'herramientas_dia')?.estado,
-      ).toBe('cumplido');
+      expect(await estadoReq(t.id, DIAS[1], 'herramientas_dia')).toBe('cumplido');
       await cerrar(t, DIAS[1]).expect(201);
       expect((await ver(t)).body).toMatchObject({ cerradas: 1 });
       // quitar la marca del día deja de cumplirlo
@@ -3722,9 +3764,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         [t.id],
       );
       await ver(t);
-      expect(
-        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'herramientas_dia')?.estado,
-      ).toBe('pendiente');
+      expect(await estadoReq(t.id, DIAS[1], 'herramientas_dia')).toBe('pendiente');
     });
 
     it('lo que falta de otra área bloquea el día de hoy, se informa por área y, al llegar lo último, el sistema abre la jornada solo', async () => {
@@ -3737,16 +3777,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         const r = await ver(t).expect(200);
         expect(r.body.jornadas[1]).toMatchObject({
           estadoVisible: 'bloqueada',
-          pendientes: { apertura: 2, cierre: 2 },
+          pendientes: { apertura: 3, cierre: 2 },
           bloqueos: [{ codigo: 'ptw_dia_aprobado', responsable: 'qhse' }],
         });
         // un día futuro no se muestra bloqueado: todavía no toca
         expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
-        expect(r.body.pendientesPorArea).toMatchObject({ qhse: 1, pumping: 3 });
+        expect(r.body.pendientesPorArea).toMatchObject({ qhse: 1, pumping: 4 });
 
-        // el Company Man acepta, pero falta el PTW: la jornada no se abre
+        // el Company Man acepta y el checklist queda completo, pero falta el PTW: la jornada no se abre
         const acepta = await aceptar(t, DIAS[1]).expect(201);
         expect(acepta.body).toMatchObject({ yaMarcada: false, abierta: false });
+        await completarChecklist(t, DIAS[1]);
         expect((await ver(t)).body.jornadas[1]).toMatchObject({
           estado: 'pendiente',
           estadoVisible: 'bloqueada',
@@ -3806,7 +3847,128 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         t.id,
         DIAS[2],
       ]);
-      expect((await requisitosDe(t.id)).length).toBe(antes - 3);
+      expect((await requisitosDe(t.id)).length).toBe(antes - 4);
+    });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 3: checklist de seguridad por día
+    // ----------------------------------------------------------------------------------------------------------------
+    it('cada día tiene su checklist: lo completado un día no vale para otro y el requisito de la jornada lo sigue', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const dia1 = await completarChecklist(t, DIAS[0]);
+      expect(dia1).toMatchObject({ fecha: DIAS[0], completo: true });
+      expect(dia1.lecturas).toHaveLength(4);
+      expect(await estadoReq(t.id, DIAS[0], 'checklist_seguridad_dia')).toBe('cumplido');
+
+      // el día siguiente empieza de cero: sin confirmaciones, sin lecturas, con su propio LOTO
+      const dia2 = (await http().get(`${t.url}/ingreso/${DIAS[1]}`).set(op1()).expect(200)).body;
+      expect(dia2).toMatchObject({
+        fecha: DIAS[1],
+        completo: false,
+        toolboxTalkRealizado: false,
+        lecturas: [],
+      });
+      expect(dia2.loto.every((l: { marcado: boolean }) => !l.marcado)).toBe(true);
+      expect(await estadoReq(t.id, DIAS[1], 'checklist_seguridad_dia')).toBe('pendiente');
+      expect(await prisma.ticketIngreso.count({ where: { ticketId: t.id } })).toBe(2);
+
+      // desmarcar un ítem del día 1 lo deja incompleto y reabre solo el requisito de ese día
+      await http()
+        .patch(`${t.url}/ingreso/${DIAS[0]}/loto/${dia1.loto[0].itemId}`)
+        .set(op1())
+        .expect(200);
+      expect(await estadoReq(t.id, DIAS[0], 'checklist_seguridad_dia')).toBe('pendiente');
+      // el requisito anterior de ticket (para salir de la ejecución) sigue mientras algún día esté completo: ya no hay ninguno
+      expect(
+        (
+          await admin.query(
+            "SELECT estado FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'checklist_ingreso_locacion' AND fecha IS NULL",
+            [t.id],
+          )
+        ).rows[0].estado,
+      ).toBe('pendiente');
+      await completarChecklist(t, DIAS[1]);
+      expect(
+        (
+          await admin.query(
+            "SELECT estado FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'checklist_ingreso_locacion' AND fecha IS NULL",
+            [t.id],
+          )
+        ).rows[0].estado,
+      ).toBe('cumplido');
+    });
+
+    it('el checklist de un día solo se llena ese día o después, en una jornada activa del servicio y por el Operador del ticket', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const confirmar = { toolboxTalkRealizado: true };
+      const patch = (f: string, h = op1()) =>
+        http().patch(`${t.url}/ingreso/${f}`).set(h).send(confirmar);
+      expect((await patch(DIAS[2])).status).toBe(409); // el día todavía no llega
+      expect((await patch('2026-11-09')).status).toBe(404); // fuera del servicio
+      expect((await patch('hoy')).status).toBe(400);
+      expect((await patch('2026-02-31')).status).toBe(400);
+      expect((await http().get(`${t.url}/ingreso/2026-11-09`).set(op1())).status).toBe(404);
+      expect(
+        (await patch(DIAS[1], como('operador', OPERADOR_QUE_ACTUA, 'Oscar Operador'))).status,
+      ).toBe(403); // no es del ticket
+      expect((await patch(DIAS[1], sup())).status).toBe(403); // el checklist lo llena el Operador
+      expect((await patch(DIAS[1])).status).toBe(200);
+      expect((await patch(DIAS[0])).status).toBe(200); // un día pasado que se olvidó
+      // una jornada cerrada ya no admite checklist
+      await abrirDia(t, DIAS[1]);
+      await cumplirCierre(t, DIAS[1]);
+      await cerrar(t, DIAS[1]).expect(201);
+      expect((await patch(DIAS[1])).status).toBe(409);
+    });
+
+    it('la ruta anterior, sin fecha, sigue funcionando: trabaja con hoy si es día de servicio y si no con el primer día', async () => {
+      const t = await enEjecucion();
+      // hoy (DIAS[1]) es día de servicio
+      const hoyChecklist = (await http().get(`${t.url}/ingreso`).set(op1()).expect(200)).body;
+      expect(hoyChecklist.fecha).toBe(DIAS[1]);
+      // fuera del servicio, el primer día
+      hoy = '2026-12-01';
+      const otro = await enEjecucion('2027-02-01', '2027-02-03');
+      expect((await http().get(`${otro.url}/ingreso`).set(op1()).expect(200)).body.fecha).toBe(
+        '2027-02-01',
+      );
+    });
+
+    it('la base ata las lecturas y el LOTO al checklist de su día', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await completarChecklist(t, DIAS[0]);
+      const gas = (fecha: string) =>
+        admin.query(
+          "INSERT INTO pumping.ticket_ingreso_gas (id, ticket_id, fecha, gas, lectura, seguro, medido_por) VALUES ($1, $2, $3, 'h2s', 1, true, $4)",
+          [uuidv7(), t.id, fecha, JEFE],
+        );
+      await gas(DIAS[0]); // el día tiene su checklist
+      await expect(gas('2031-01-01')).rejects.toThrow(/ticket_ingreso_gas_ingreso_fkey/); // un día sin checklist
+      // borrar el checklist de un día se lleva sus lecturas y su LOTO, no los de otros días
+      await http().get(`${t.url}/ingreso/${DIAS[1]}`).set(op1()).expect(200);
+      await admin.query('DELETE FROM pumping.ticket_ingreso WHERE ticket_id = $1 AND fecha = $2', [
+        t.id,
+        DIAS[0],
+      ]);
+      expect(
+        (
+          await admin.query(
+            'SELECT count(*)::int AS c FROM pumping.ticket_ingreso_gas WHERE ticket_id = $1',
+            [t.id],
+          )
+        ).rows[0].c,
+      ).toBe(0);
+      expect(
+        (
+          await admin.query(
+            'SELECT count(*)::int AS c FROM pumping.ticket_ingreso_loto WHERE ticket_id = $1',
+            [t.id],
+          )
+        ).rows[0].c,
+      ).toBe(4); // el del otro día
     });
   });
 });

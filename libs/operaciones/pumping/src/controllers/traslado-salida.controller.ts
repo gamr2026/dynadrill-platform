@@ -182,11 +182,39 @@ export class TrasladoSalidaController {
     return this.terminos.aceptar(id, actor);
   }
 
-  // ---- checklist de ingreso a locación
+  // ---- checklist de ingreso a locación (uno por día; las rutas sin fecha trabajan con el día de hoy o, si no es de servicio, el primero)
   @RequirePermission(P.PUMPING_OPERAR)
   @Get('tickets/:id/ingreso')
   verIngreso(@Param('id', ParseUUIDPipe) id: string) {
     return this.ingreso.obtener(id);
+  }
+
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('tickets/:id/ingreso/:fecha')
+  verIngresoDelDia(@Param('id', ParseUUIDPipe) id: string, @Param('fecha') fecha: string) {
+    return this.ingreso.obtener(id, fecha);
+  }
+
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Patch('tickets/:id/ingreso/:fecha')
+  actualizarIngresoDelDia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: ActualizarIngresoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ingreso.actualizar(id, dto, actor, fecha);
+  }
+
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Patch('tickets/:id/ingreso/:fecha/loto/:itemId')
+  alternarLotoDelDia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fecha') fecha: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ingreso.alternarLoto(id, itemId, actor, fecha);
   }
 
   @RequirePermission(P.PUMPING_OPERAR)

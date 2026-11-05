@@ -229,7 +229,7 @@ model Ticket {
   unidades               TicketUnidad[]
   requisitos             TicketRequisito[]
   aceptaciones           AceptacionTerminos[]
-  ingreso                TicketIngreso?
+  ingresos               TicketIngreso[]
   reportesUnidad         ReporteUnidad[]
   documentos             TicketDocumento[]
   reportesDiarios        ReporteDiario[]
@@ -840,8 +840,10 @@ model LotoItem {
 /// Un registro por ticket. Está completo cuando están las cinco confirmaciones, la última lectura de cada gas es segura y todos los
 /// ítems LOTO están marcados (se calcula; `confirmado_*` guarda quién lo completó).
 model TicketIngreso {
-  ticketId                      String    @id @map("ticket_id") @db.Uuid
+  ticketId                      String    @map("ticket_id") @db.Uuid
   ticket                        Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Día de la jornada al que pertenece (uno por ticket y día).
+  fecha                         DateTime  @db.Date
   toolboxTalkRealizado          Boolean   @default(false) @map("toolbox_talk_realizado")
   walkaroundCompletado          Boolean   @default(false) @map("walkaround_completado")
   lineaBaseAmbientalDocumentada Boolean   @default(false) @map("linea_base_ambiental_documentada")
@@ -857,6 +859,7 @@ model TicketIngreso {
   gases TicketIngresoGas[]
   loto  TicketIngresoLoto[]
 
+  @@id([ticketId, fecha])
   @@map("ticket_ingreso")
   @@schema("pumping")
 }
@@ -865,7 +868,8 @@ model TicketIngreso {
 model TicketIngresoGas {
   id        String        @id @db.Uuid
   ticketId  String        @map("ticket_id") @db.Uuid
-  ingreso   TicketIngreso @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  fecha     DateTime      @db.Date
+  ingreso   TicketIngreso @relation(fields: [ticketId, fecha], references: [ticketId, fecha], onDelete: Cascade)
   gas       GasIngreso
   limite    GasLimite     @relation(fields: [gas], references: [gas])
   lectura   Decimal       @db.Decimal(8, 2)
@@ -874,14 +878,15 @@ model TicketIngresoGas {
   medidoPor String        @map("medido_por") @db.Uuid
   medidoAt  DateTime      @default(now()) @map("medido_at") @db.Timestamptz(6)
 
-  @@index([ticketId, gas, medidoAt])
+  @@index([ticketId, fecha, gas, medidoAt], map: "ticket_ingreso_gas_ticket_gas_idx")
   @@map("ticket_ingreso_gas")
   @@schema("pumping")
 }
 
 model TicketIngresoLoto {
   ticketId   String        @map("ticket_id") @db.Uuid
-  ingreso    TicketIngreso @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  fecha      DateTime      @db.Date
+  ingreso    TicketIngreso @relation(fields: [ticketId, fecha], references: [ticketId, fecha], onDelete: Cascade)
   lotoItemId String        @map("loto_item_id") @db.Uuid
   item       LotoItem      @relation(fields: [lotoItemId], references: [id])
   marcado    Boolean       @default(false)
@@ -889,7 +894,7 @@ model TicketIngresoLoto {
   marcadoPor String?       @map("marcado_por") @db.Uuid
   marcadoAt  DateTime?     @map("marcado_at") @db.Timestamptz(6)
 
-  @@id([ticketId, lotoItemId])
+  @@id([ticketId, fecha, lotoItemId])
   @@map("ticket_ingreso_loto")
   @@schema("pumping")
 }
