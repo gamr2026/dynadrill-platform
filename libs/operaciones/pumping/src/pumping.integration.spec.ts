@@ -23,6 +23,7 @@ import { uuidv7 } from '@dyn/utils';
 import { DespachosConsumer } from '@dyn/inventario';
 import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
 import { DuracionResultadoConsumer } from './consumers/duracion-resultado.consumer';
+import { AvanceService } from './services/avance.service';
 import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
@@ -4464,6 +4465,107 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         // otro rechazo (otro evento) cuando el ticket ya no tiene esa fecha: no toca nada
         await resultado.consumir(rechazo());
         expect(await bitacora(t.id)).toHaveLength(2);
+      });
+    });
+
+    describe('avance del servicio: cotizado frente a usado y aviso de que va adelantado', () => {
+      /** Una línea de herramienta cotizada (`cotizado`) con `usados` días reportados desde el primer día del servicio. */
+      const conAvance = async (cotizado: number, usados: number) => {
+        const t = await enEjecucion();
+        const linea = uuidv7();
+        const um = (
+          await admin.query('SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1')
+        ).rows[0].id;
+        await admin.query(
+          "INSERT INTO pumping.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 1, $3, 'Herramienta de prueba', $4, $5, 'herramienta')",
+          [linea, t.id, `AV-${n}`, um, cotizado],
+        );
+        for (let i = 0; i < usados; i++)
+          await admin.query(
+            "INSERT INTO pumping.reporte_item_dia (id, linea_id, fecha, estado, cantidad, created_by) VALUES ($1, $2, $3, 'operacion', 1, $4)",
+            [uuidv7(), linea, DIAS[i], JEFE],
+          );
+        await ver(t); // deja las jornadas creadas
+        return t;
+      };
+      const evaluar = (id: string) =>
+        prisma.$transaction((tx) => app.get(AvanceService).evaluarAdelanto(tx, id));
+      const avisosDe = async (id: string) =>
+        (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.avance_adelantado' AND datos->'data'->>'ticketId' = $1",
+            [id],
+          )
+        ).rows.map((x) => x.d);
+
+      it('muestra lo cotizado y lo usado por línea y el avance real frente al planificado', async () => {
+        const t = await conAvance(3, 2); // hoy es el día 2 de 3: lo planificado es 66,7 %
+        const r = await http().get(`${t.url}/avance`).set(op1());
+        expect(r.status).toBe(200);
+        expect(r.body).toMatchObject({
+          avanceReal: 66.7,
+          avancePlan: 66.7,
+          diferencia: 0,
+          diaActual: 2,
+          diasTotal: 3,
+          adelantado: false,
+          atrasado: false,
+          solicitudesPendientes: [],
+        });
+        expect(r.body.lineas).toEqual([
+          expect.objectContaining({
+            codigo: `AV-${n}`,
+            cotizado: 3,
+            usado: 2,
+            porcentaje: 66.7,
+            excedido: false,
+          }),
+        ]);
+        expect(
+          (
+            await http()
+              .get(`${t.url}/avance`)
+              .set(como('nadie', uuidv7(), 'Nadie', []))
+          ).status,
+        ).toBe(403);
+      });
+
+      it('avisa una sola vez al Jefe de Base cuando el avance va adelantado del plan', async () => {
+        hoy = DIAS[0]; // el plan al primer día es 33,3 %; ya se usaron 2 de 3 (66,7 %)
+        const t = await conAvance(3, 2);
+        const a = (await http().get(`${t.url}/avance`).set(op1())).body;
+        expect(a).toMatchObject({ adelantado: true, diferencia: 33.4, diaActual: 1 });
+
+        expect(await evaluar(t.id)).toBe(true);
+        expect(await evaluar(t.id)).toBe(false); // ya se avisó
+        const avisos = await avisosDe(t.id);
+        expect(avisos).toHaveLength(1);
+        expect(avisos[0]).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          avanceReal: 66.7,
+          avancePlan: 33.3,
+          diaActual: 1,
+          diasTotal: 3,
+        });
+      });
+
+      it('no avisa si va al ritmo del plan ni en el último día, y muestra cuando va atrasado', async () => {
+        const alRitmo = await conAvance(3, 2); // hoy: día 2 de 3
+        expect(await evaluar(alRitmo.id)).toBe(false);
+
+        hoy = DIAS[2];
+        const ultimo = await conAvance(3, 3);
+        expect((await http().get(`${ultimo.url}/avance`).set(op1())).body.adelantado).toBe(false);
+        expect(await evaluar(ultimo.id)).toBe(false);
+
+        const atrasado = await conAvance(3, 0);
+        expect((await http().get(`${atrasado.url}/avance`).set(op1())).body).toMatchObject({
+          avanceReal: 0,
+          atrasado: true,
+          adelantado: false,
+        });
+        expect(await avisosDe(alRitmo.id)).toEqual([]);
       });
     });
   });

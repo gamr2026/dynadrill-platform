@@ -11,6 +11,7 @@ import { uuidv7 } from '@dyn/utils';
 import type { EstadoItemReporte, Prisma, TipoLineaItem } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQ } from '../catalog/sembrar-traslado-salida';
+import { AvanceService } from './avance.service';
 import { JornadasService } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
@@ -56,6 +57,7 @@ export class ReporteHerramientasService {
     private readonly bus: EventBus,
     private readonly requisitos: RequisitosService,
     private readonly jornadas: JornadasService,
+    private readonly avance: AvanceService,
   ) {}
 
   /** `actorId`: quien consulta; si el reporte aún no se precargó y el ticket está en la ejecución, se precarga una sola vez. */
@@ -185,6 +187,7 @@ export class ReporteHerramientasService {
       await this.reabrir(tx, ticketId);
       // marcar (o desmarcar) un día cumple (o reabre) el requisito de cierre «herramientas del día»
       await this.jornadas.sincronizar(tx, ticketId, actor.id);
+      await this.avance.evaluarAdelanto(tx, ticketId); // si ya va adelantado del plan, avisa al Jefe de Base
     });
     return this.obtener(ticketId);
   }

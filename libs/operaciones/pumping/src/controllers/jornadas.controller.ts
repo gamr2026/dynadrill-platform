@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/commo
 import { IsIn, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
+import { AvanceService } from '../services/avance.service';
 import { DuracionService } from '../services/duracion.service';
 import { JornadasService } from '../services/jornadas.service';
 
@@ -29,6 +30,7 @@ export class JornadasController {
   constructor(
     private readonly jornadas: JornadasService,
     private readonly duracion: DuracionService,
+    private readonly avance: AvanceService,
   ) {}
 
   /** Las jornadas del ticket con su estado de hoy; en la Ejecución operativa se crean las que falten. */
@@ -77,6 +79,13 @@ export class JornadasController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.jornadas.cerrar(id, fecha, actor);
+  }
+
+  /** Avance del servicio: lo cotizado frente a lo usado por línea y el avance real frente al planificado. */
+  @RequirePermission(P.PUMPING_OPERAR, P.PUMPING_VER)
+  @Get('tickets/:id/avance')
+  avanceDelServicio(@Param('id', ParseUUIDPipe) id: string) {
+    return this.avance.obtener(id);
   }
 
   /** El Jefe de Base acorta o amplía la duración del servicio (nueva fecha de fin y motivo). */

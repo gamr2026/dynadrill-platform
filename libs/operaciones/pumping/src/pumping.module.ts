@@ -14,6 +14,7 @@ import { RequisitosExternosConsumer } from './consumers/requisitos-externos.cons
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { IngresoService } from './services/ingreso.service';
+import { AvanceService } from './services/avance.service';
 import { DuracionService } from './services/duracion.service';
 import { JornadasService } from './services/jornadas.service';
 import { EjecucionService } from './services/ejecucion.service';
@@ -59,6 +60,7 @@ import { TicketsService } from './services/tickets.service';
     ReportesDiariosService,
     ReporteHerramientasService,
     JornadasService,
+    AvanceService,
     DuracionService,
     DuracionResultadoConsumer,
     DiaCorregidoConsumer,
