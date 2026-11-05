@@ -64,7 +64,8 @@ const DEFINICIONES: Definicion[] = [
   {
     evento: 'qhse.aviso.pedido_sin_formato_recepcion',
     codigo: 'qhse_sin_formato_recepcion',
-    descripcion: 'Un servicio con personal asignado todavía no tiene el Formato de Recepción de la locación.',
+    descripcion:
+      'Un servicio con personal asignado todavía no tiene el Formato de Recepción de la locación.',
     asunto: 'Falta el Formato de Recepción: {{pedidoCodigo}}',
     intro:
       'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> ya tiene personal asignado y todavía no tiene el <strong>Formato de Recepción</strong> de la locación.',
@@ -79,14 +80,16 @@ const DEFINICIONES: Definicion[] = [
     cierre: 'Cárguelo en Documentos del pedido: sin él no se puede formalizar el PTW.',
     cierreTexto: 'Cárguelo en Documentos del pedido: sin él no se puede formalizar el PTW.',
     titulo: '{{pedidoCodigo}} — falta el Formato de Recepción',
-    detalle: 'Pedido de {{cliente}} ({{campo}} / {{pozo}}) sin Formato de Recepción de la locación.',
+    detalle:
+      'Pedido de {{cliente}} ({{campo}} / {{pozo}}) sin Formato de Recepción de la locación.',
     enlace: '/dashboard/qhse/documentos',
     tono: 'warning',
   },
   {
     evento: 'qhse.aviso.personal_asignado_sin_sfi',
     codigo: 'qhse_sin_sfi',
-    descripcion: 'Un servicio con personal asignado todavía no tiene el SFI (Formato de Seguridad de Ingreso).',
+    descripcion:
+      'Un servicio con personal asignado todavía no tiene el SFI (Formato de Seguridad de Ingreso).',
     asunto: 'Falta el SFI: {{pedidoCodigo}}',
     intro:
       'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> ya tiene personal asignado y todavía no tiene el <strong>Formato de Seguridad de Ingreso (SFI)</strong>.',
@@ -101,14 +104,16 @@ const DEFINICIONES: Definicion[] = [
     cierre: 'Cárguelo en Documentos del pedido antes del ingreso del personal a la locación.',
     cierreTexto: 'Cárguelo en Documentos del pedido antes del ingreso del personal a la locación.',
     titulo: '{{pedidoCodigo}} — falta el SFI',
-    detalle: '{{pedidoCodigo}} tiene personal asignado y no tiene el Formato de Seguridad de Ingreso.',
+    detalle:
+      '{{pedidoCodigo}} tiene personal asignado y no tiene el Formato de Seguridad de Ingreso.',
     enlace: '/dashboard/qhse/documentos',
     tono: 'warning',
   },
   {
     evento: 'qhse.aviso.ptw_sin_pt_hoy',
     codigo: 'qhse_ptw_sin_pt_hoy',
-    descripcion: 'El PTW del día está abierto y todavía no tiene el Permiso de Trabajo (PT) de hoy.',
+    descripcion:
+      'El PTW del día está abierto y todavía no tiene el Permiso de Trabajo (PT) de hoy.',
     asunto: 'Falta el PT de hoy: PTW {{ptwCodigo}} ({{pedidoCodigo}})',
     intro:
       'Como <strong>{{cargo}}</strong>, debe saber que el <strong>PTW {{ptwCodigo}}</strong> del pedido <strong>{{pedidoCodigo}}</strong> está abierto el <strong>{{diaOperacion}}</strong> y todavía no tiene el <strong>Permiso de Trabajo (PT)</strong> del día.',
@@ -125,6 +130,76 @@ const DEFINICIONES: Definicion[] = [
     titulo: 'PTW {{ptwCodigo}} — falta el PT de hoy',
     detalle: 'PTW de {{pedidoCodigo}} abierto el {{diaOperacion}} sin el PT del día.',
     enlace: '/dashboard/qhse/ptw',
+    tono: 'warning',
+  },
+  // ---- PTW diario: cada día de servicio necesita su PTW aprobado y su PT cargado (los emite el mismo emisor programado de QHSE)
+  {
+    evento: 'qhse.aviso.servicio_sin_ptw',
+    codigo: 'qhse_servicio_sin_ptw',
+    descripcion: 'Hay servicio hoy y el día no tiene ningún PTW vigente.',
+    asunto: 'Hay servicio hoy y no existe PTW: {{pedidoCodigo}}',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> tiene servicio hoy (<strong>{{diaOperacion}}</strong>) y <strong>no existe un PTW</strong> de ese día. Sin un PTW aprobado la jornada no se puede abrir en Pumping.',
+    introTexto:
+      'Como {{cargo}}, debe saber que el pedido {{pedidoCodigo}} tiene servicio hoy ({{diaOperacion}}) y no existe un PTW de ese día. Sin un PTW aprobado la jornada no se puede abrir en Pumping.',
+    filas: [
+      ['Pedido', 'pedidoCodigo'],
+      ['Ticket', 'ticketNumero'],
+      ['Cliente', 'cliente'],
+      ['Pozo', 'pozo'],
+      ['Día', 'diaOperacion'],
+    ],
+    cierre: 'Abra el PTW del día y reúna sus documentos.',
+    cierreTexto: 'Abra el PTW del día y reúna sus documentos.',
+    titulo: 'Hay servicio hoy y no existe PTW: {{pedidoCodigo}}',
+    detalle: 'Ticket {{ticketNumero}} · {{pozo}} · {{diaOperacion}}',
+    enlace: '/dashboard/qhse/ptw',
+    tono: 'error',
+  },
+  {
+    evento: 'qhse.aviso.ptw_sin_aprobar_hora_inicio',
+    codigo: 'qhse_ptw_sin_aprobar_hora_inicio',
+    descripcion: 'Llegó la hora de inicio del servicio y el PTW del día todavía no está aprobado.',
+    asunto: 'PTW sin aprobar a la hora de inicio: {{ptwCodigo}} ({{pedidoCodigo}})',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que ya pasó la hora de inicio del servicio ({{horaInicio}}) y el <strong>PTW {{ptwCodigo}}</strong> del pedido <strong>{{pedidoCodigo}}</strong> sigue sin aprobarse (fase: {{fase}}). Hasta que se apruebe, el Operador no puede abrir la jornada.',
+    introTexto:
+      'Como {{cargo}}, debe saber que ya pasó la hora de inicio del servicio ({{horaInicio}}) y el PTW {{ptwCodigo}} del pedido {{pedidoCodigo}} sigue sin aprobarse (fase: {{fase}}). Hasta que se apruebe, el Operador no puede abrir la jornada.',
+    filas: [
+      ['PTW', 'ptwCodigo'],
+      ['Pedido', 'pedidoCodigo'],
+      ['Cliente', 'cliente'],
+      ['Fase', 'fase'],
+      ['Día', 'diaOperacion'],
+    ],
+    cierre: 'Revise el PTW y apruébelo para liberar la jornada.',
+    cierreTexto: 'Revise el PTW y apruébelo para liberar la jornada.',
+    titulo: 'PTW {{ptwCodigo}} sin aprobar a la hora de inicio',
+    detalle: '{{pedidoCodigo}} · fase {{fase}} · inicio {{horaInicio}}',
+    enlace: '/dashboard/qhse/ptw',
+    tono: 'error',
+  },
+  {
+    evento: 'qhse.aviso.falta_pt_manana',
+    codigo: 'qhse_falta_pt_manana',
+    descripcion: 'El ticket tiene servicio mañana y todavía no se cargó el PT de ese día.',
+    asunto: 'Mañana falta el PT: {{pedidoCodigo}}',
+    intro:
+      'Como <strong>{{cargo}}</strong>, debe saber que el pedido <strong>{{pedidoCodigo}}</strong> tiene servicio mañana (<strong>{{diaOperacion}}</strong>) y todavía no se cargó el <strong>Permiso de Trabajo (PT)</strong> de ese día. Si no llega, la jornada de mañana quedará bloqueada.',
+    introTexto:
+      'Como {{cargo}}, debe saber que el pedido {{pedidoCodigo}} tiene servicio mañana ({{diaOperacion}}) y todavía no se cargó el Permiso de Trabajo (PT) de ese día. Si no llega, la jornada de mañana quedará bloqueada.',
+    filas: [
+      ['Pedido', 'pedidoCodigo'],
+      ['Ticket', 'ticketNumero'],
+      ['Cliente', 'cliente'],
+      ['Pozo', 'pozo'],
+      ['Día', 'diaOperacion'],
+    ],
+    cierre: 'Cargue el PT de mañana en Documentos por pedido.',
+    cierreTexto: 'Cargue el PT de mañana en Documentos por pedido.',
+    titulo: 'Mañana falta el PT: {{pedidoCodigo}}',
+    detalle: 'Ticket {{ticketNumero}} · {{pozo}} · {{diaOperacion}}',
+    enlace: '/dashboard/qhse/documentos',
     tono: 'warning',
   },
   // ---- ART de un pedido (vigencia legal de 15 días; avisa 3 días antes)

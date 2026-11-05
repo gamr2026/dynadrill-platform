@@ -35,6 +35,16 @@ const PTW_SIN_PT = [
   'pozo',
   'diaOperacion',
 ];
+const SERVICIO_DEL_DIA = [
+  'ticketId',
+  'ticketNumero',
+  'pedidoId',
+  'pedidoCodigo',
+  'cliente',
+  'campo',
+  'pozo',
+  'diaOperacion',
+];
 const LEGAL = [
   'requisitoLegalId',
   'tipo',
@@ -85,6 +95,15 @@ const DATOS_DEL_EVENTO: Record<string, string[]> = {
   'qhse.aviso.pedido_sin_formato_recepcion': DOCUMENTO_DE_INGRESO,
   'qhse.aviso.personal_asignado_sin_sfi': DOCUMENTO_DE_INGRESO,
   'qhse.aviso.ptw_sin_pt_hoy': PTW_SIN_PT,
+  'qhse.aviso.servicio_sin_ptw': SERVICIO_DEL_DIA,
+  'qhse.aviso.ptw_sin_aprobar_hora_inicio': [
+    ...SERVICIO_DEL_DIA,
+    'ptwId',
+    'ptwCodigo',
+    'fase',
+    'horaInicio',
+  ],
+  'qhse.aviso.falta_pt_manana': SERVICIO_DEL_DIA,
   'qhse.aviso.requisito_legal_por_vencer': LEGAL,
   'qhse.aviso.requisito_legal_vencido': LEGAL,
   'qhse.aviso.inspeccion_vencida': [
@@ -183,5 +202,9 @@ describe('plantillas de QHSE: vencimientos e investigación', () => {
     expect(tono('qhse.aviso.art_vencido')).toBe('error');
     expect(tono('qhse.aviso.requisito_legal_vencido')).toBe('error');
     expect(tono('qhse.aviso.objetivo_ambiental_por_vencer')).toBe('warning');
+    // el PTW diario: sin PTW o sin aprobar a la hora de inicio bloquea la jornada (error); el PT de mañana todavía se puede cargar (advertencia)
+    expect(tono('qhse.aviso.servicio_sin_ptw')).toBe('error');
+    expect(tono('qhse.aviso.ptw_sin_aprobar_hora_inicio')).toBe('error');
+    expect(tono('qhse.aviso.falta_pt_manana')).toBe('warning');
   });
 });
