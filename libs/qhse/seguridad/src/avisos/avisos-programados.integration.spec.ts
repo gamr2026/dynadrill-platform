@@ -7,6 +7,7 @@
  * La fecha «de hoy» se adelanta con el parámetro `hoy` para llegar a los plazos sin esperar.
  */
 import { Permission } from '@dyn/authz';
+import { Pool } from 'pg';
 import { uuidv7 } from '@dyn/utils';
 import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba';
 import { borrarInvestigacionesDe } from '../testing/limpieza-investigaciones';
@@ -66,7 +67,8 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
   /** Emite limitado a las entidades de la prueba. */
   // cada prueba fija las entidades que le corresponden: así lo que adelanta la fecha «de hoy» en una no hace vencer lo de otra
   let ambito: string[] = [];
-  const emitir = (hoy: string) => avisos.emitir(hoy, ambito);
+  // la hora fija en 00:00 deja en silencio los avisos que dependen de la hora del día (cada prueba que los necesita pasa la suya)
+  const emitir = (hoy: string) => avisos.emitir(hoy, ambito, '00:00');
   const eventosDe = async (id: string) =>
     (
       await sql(
@@ -296,6 +298,199 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
       });
       expect(String(ev.datos.data['ptwCodigo'])).toMatch(/^PTW-\d{6}$/);
       await limpiar([t2]);
+    });
+  });
+
+  describe('PTW diario: sin PTW, sin aprobar a la hora de inicio y falta el PT de mañana', () => {
+    /** Un ticket con servicio en esos días (los avisa Pumping y QHSE los guarda). */
+    const ticketConDias = async (dias: string[]) => {
+      const ticketId = uuidv7();
+      const pedidoId = uuidv7();
+      entidades.push(ticketId);
+      await sql(
+        "INSERT INTO qhse.ticket_ref (ticket_id, ticket_numero, pedido_id, pedido_codigo, cliente, campo, pozo) VALUES ($1, 8, $2, $3, 'Cliente de prueba', 'Campo de prueba', 'Pozo de prueba')",
+        [ticketId, pedidoId, `PED-DIAS-${n}-${entidades.length}`],
+      );
+      for (const d of dias)
+        await sql('INSERT INTO qhse.ticket_dia_servicio (ticket_id, fecha) VALUES ($1, $2)', [
+          ticketId,
+          d,
+        ]);
+      return { ticketId, pedidoId };
+    };
+    const ptwDelDia = async (
+      t2: { ticketId: string; pedidoId: string },
+      dia: string,
+      fase = 'gabinete',
+    ) => {
+      const id = uuidv7();
+      entidades.push(id);
+      await sql(
+        'INSERT INTO qhse.ptw (id, ticket_id, pedido_id, dia_operacion, created_by) VALUES ($1, $2, $3, $4, $5)',
+        [id, t2.ticketId, t2.pedidoId, dia, TECNICO.id],
+      );
+      // el trigger de fases exige el camino; para la prueba basta con dejar la fase pedida por la base
+      if (fase !== 'gabinete')
+        await sql('UPDATE qhse.ptw SET fase = $2::qhse.fase_ptw WHERE id = $1', [id, fase]);
+      return id;
+    };
+    const limpiar = async (ids: { ticketId: string; pedidoId: string }[]) => {
+      for (const { ticketId, pedidoId } of ids) {
+        await sql('DELETE FROM qhse.ptw WHERE ticket_id = $1', [ticketId]);
+        await sql('DELETE FROM qhse.documento_pedido WHERE pedido_id = $1', [pedidoId]);
+        await sql('DELETE FROM qhse.ticket_ref WHERE ticket_id = $1', [ticketId]);
+      }
+    };
+    const dia = fechaEn(0);
+    const manana = fechaEn(1);
+
+    it('«hay servicio hoy y no existe PTW»: avisa una vez por ticket y día, y no si ya hay un PTW vigente ni si hoy no es día de servicio', async () => {
+      const sinPtw = await ticketConDias([dia]);
+      const conPtw = await ticketConDias([dia]);
+      const otroDia = await ticketConDias([manana]);
+      await ptwDelDia(conPtw, dia);
+      ambito = [sinPtw.ticketId, conPtw.ticketId, otroDia.ticketId];
+      expect((await emitir(dia)).porTipo).toMatchObject({ 'qhse.aviso.servicio_sin_ptw': 1 });
+      expect((await emitir(dia)).total).toBe(0); // una sola vez
+      expect(await tipos(sinPtw.ticketId)).toEqual(['qhse.aviso.servicio_sin_ptw']);
+      expect(await tipos(conPtw.ticketId)).toEqual([]);
+      expect(await tipos(otroDia.ticketId)).toEqual([]);
+      const ev = (await eventosDe(sinPtw.ticketId))[0];
+      expect(ev.datos.data).toMatchObject({
+        ticketId: sinPtw.ticketId,
+        pedidoCodigo: expect.stringContaining('PED-DIAS-'),
+        cliente: 'Cliente de prueba',
+        pozo: 'Pozo de prueba',
+        diaOperacion: dia,
+      });
+      // un PTW anulado no cuenta como PTW vigente: el día sigue sin uno
+      const anulado = await ticketConDias([dia]);
+      await ptwDelDia(anulado, dia);
+      await sql(
+        "UPDATE qhse.ptw SET anulado_at = now(), anulado_por = $2, motivo_anulacion = 'prueba' WHERE ticket_id = $1",
+        [anulado.ticketId, TECNICO.id],
+      );
+      ambito = [anulado.ticketId];
+      expect((await emitir(dia)).porTipo).toMatchObject({ 'qhse.aviso.servicio_sin_ptw': 1 });
+      await limpiar([sinPtw, conPtw, otroDia, anulado]);
+    });
+
+    it('«PTW sin aprobar a la hora de inicio»: solo desde la hora configurada, una vez por PTW, y no si ya está aprobado', async () => {
+      const t3 = await ticketConDias([dia]);
+      const aprobado = await ticketConDias([dia]);
+      const pendiente = await ptwDelDia(t3, dia);
+      const ptwAprobado = await ptwDelDia(aprobado, dia);
+      // un PTW aprobado necesita sus cuatro documentos (lo exige la base); la fase la fija un administrador sin el disparador de fases
+      const doc = async (tipo: string, conFecha: boolean) => {
+        const id = uuidv7();
+        await sql(
+          `INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, fecha, vigente_hasta, created_by)
+           VALUES ($1, $2, $3, $4::qhse.tipo_documento_pedido, $5, $6::date, $7::date, $8)`,
+          [
+            id,
+            aprobado.pedidoId,
+            aprobado.ticketId,
+            tipo,
+            await archivo('qhse_documento_pedido'),
+            conFecha ? dia : null,
+            tipo === 'art' ? fechaEn(15) : null,
+            TECNICO.id,
+          ],
+        );
+        return id;
+      };
+      const [recepcion, art, pt, sfi] = [
+        await doc('formato_recepcion', false),
+        await doc('art', true),
+        await doc('pt', true),
+        await doc('sfi', false),
+      ];
+      const superusuario = new Pool({
+        connectionString: process.env['TEST_ADMIN_DATABASE_URL'],
+        max: 1,
+      });
+      try {
+        const c = await superusuario.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query('SET LOCAL session_replication_role = replica');
+          await c.query(
+            "UPDATE qhse.ptw SET fase = 'aprobado', documento_recepcion_id = $2, documento_art_id = $3, documento_pt_id = $4, documento_sfi_id = $5 WHERE id = $1",
+            [ptwAprobado, recepcion, art, pt, sfi],
+          );
+          await c.query('COMMIT');
+        } finally {
+          c.release();
+        }
+      } finally {
+        await superusuario.end();
+      }
+      ambito = [pendiente, ptwAprobado];
+      // antes de la hora de inicio (06:00 por defecto) todavía es temprano
+      const antes = await avisos.emitir(dia, ambito, '05:59');
+      expect(antes.porTipo['qhse.aviso.ptw_sin_aprobar_hora_inicio']).toBeUndefined();
+      // llegada la hora, avisa del PTW pendiente (una vez) y no del aprobado
+      const r = await avisos.emitir(dia, ambito, '06:00');
+      expect(r.porTipo['qhse.aviso.ptw_sin_aprobar_hora_inicio']).toBe(1);
+      expect(
+        (await avisos.emitir(dia, ambito, '09:30')).porTipo[
+          'qhse.aviso.ptw_sin_aprobar_hora_inicio'
+        ],
+      ).toBeUndefined(); // una sola vez
+      const ev = (await eventosDe(pendiente)).find(
+        (e) => e.tipo === 'qhse.aviso.ptw_sin_aprobar_hora_inicio',
+      );
+      expect(ev?.datos.data).toMatchObject({
+        ptwId: pendiente,
+        fase: 'gabinete',
+        diaOperacion: dia,
+        horaInicio: '06:00',
+      });
+      expect(String(ev?.datos.data['ptwCodigo'])).toMatch(/^PTW-\d{6}$/);
+      expect(await tipos(ptwAprobado)).toEqual([]);
+      await limpiar([t3, aprobado]);
+    });
+
+    it('«mañana falta el PT»: solo desde la tarde, solo si mañana hay servicio y no hay PT de ese día, una vez por ticket', async () => {
+      const sinPt = await ticketConDias([manana]);
+      const conPt = await ticketConDias([manana]);
+      const sinServicio = await ticketConDias([dia]);
+      const pt = async (t2: { ticketId: string; pedidoId: string }, fecha: string) =>
+        sql(
+          "INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, fecha, created_by) VALUES ($1, $2, $3, 'pt', $4, $5, $6)",
+          [
+            uuidv7(),
+            t2.pedidoId,
+            t2.ticketId,
+            await archivo('qhse_documento_pedido'),
+            fecha,
+            TECNICO.id,
+          ],
+        );
+      await pt(conPt, manana);
+      ambito = [sinPt.ticketId, conPt.ticketId, sinServicio.ticketId];
+      const temprano = await avisos.emitir(dia, ambito, '13:59'); // antes de la tarde hay tiempo de sobra
+      expect(temprano.porTipo['qhse.aviso.falta_pt_manana']).toBeUndefined();
+      expect((await avisos.emitir(dia, ambito, '14:00')).porTipo).toMatchObject({
+        'qhse.aviso.falta_pt_manana': 1,
+      });
+      expect(
+        (await avisos.emitir(dia, ambito, '18:00')).porTipo['qhse.aviso.falta_pt_manana'],
+      ).toBeUndefined(); // una sola vez
+      const ev = (await eventosDe(sinPt.ticketId)).find(
+        (e) => e.tipo === 'qhse.aviso.falta_pt_manana',
+      );
+      expect(ev?.datos.data).toMatchObject({ ticketId: sinPt.ticketId, diaOperacion: manana });
+      expect(await tipos(conPt.ticketId)).not.toContain('qhse.aviso.falta_pt_manana');
+      expect(await tipos(sinServicio.ticketId)).not.toContain('qhse.aviso.falta_pt_manana');
+      // un PT de otro día no cubre el de mañana
+      const otroPt = await ticketConDias([manana]);
+      await pt(otroPt, dia);
+      ambito = [otroPt.ticketId];
+      expect((await avisos.emitir(dia, ambito, '15:00')).porTipo).toMatchObject({
+        'qhse.aviso.falta_pt_manana': 1,
+      });
+      await limpiar([sinPt, conPt, sinServicio, otroPt]);
     });
   });
 

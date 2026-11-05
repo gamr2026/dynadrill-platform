@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@ne
 import { ConfigService } from '@nestjs/config';
 import { currentTraceparent } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
-import { aDia, aFecha, diasHasta, hoyEcuador } from '../comun/fechas';
+import { aDia, aFecha, diasHasta, horaEcuador, hoyEcuador } from '../comun/fechas';
 import {
   EstadoAccionInvestigacion,
   EstadoAspecto,
@@ -28,6 +28,11 @@ export const DIAS_AVISO_ART = 3;
  * barrido avisaría de todo el historial de tickets ya cerrados.
  */
 export const DIAS_VENTANA_DOCUMENTOS_INGRESO = 60;
+/** Hora (hora local) a la que empieza el servicio si no se configura: el aviso «PTW sin aprobar a la hora de inicio» no sale antes. */
+export const HORA_INICIO_SERVICIO = '06:00';
+/** Hora desde la que se avisa que mañana falta el PT: antes del mediodía todavía hay tiempo de sobra. */
+export const HORA_AVISO_PT_MANANA = '14:00';
+const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** Días de anticipación para avisar que vence el informe final de una investigación. */
 export const DIAS_AVISO_INFORME_INVESTIGACION = 5;
 
@@ -60,6 +65,10 @@ export interface ResumenAvisos {
 export class AvisosProgramadosService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AvisosProgramadosService.name);
   private readonly intervaloMin: number;
+  /** Hora (HH:mm, hora local) a la que empieza el servicio: `QHSE_HORA_INICIO_SERVICIO`, por defecto 06:00. */
+  private readonly horaInicio: string;
+  /** Hora desde la que se avisa que mañana falta el PT: `QHSE_AVISO_PT_MANANA_DESDE`, por defecto 14:00. */
+  private readonly horaPtManana: string;
   private timer?: NodeJS.Timeout;
   private enCurso = false;
 
@@ -70,6 +79,15 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
     private readonly desechos: DesechosAvisosService,
     cfg: ConfigService,
   ) {
+    const hora = (clave: string, defecto: string): string => {
+      const v = String(cfg.get(clave) ?? '').trim();
+      if (!v) return defecto;
+      if (HORA.test(v)) return v;
+      this.logger.warn(`${clave}="${v}" no es una hora HH:mm; se usa ${defecto}`);
+      return defecto;
+    };
+    this.horaInicio = hora('QHSE_HORA_INICIO_SERVICIO', HORA_INICIO_SERVICIO);
+    this.horaPtManana = hora('QHSE_AVISO_PT_MANANA_DESDE', HORA_AVISO_PT_MANANA);
     // 0 apaga la revisión programada (en pruebas está apagada por defecto); sin valor, cada hora
     const configurado = cfg.get('QHSE_AVISOS_INTERVAL_MINUTES');
     this.intervaloMin =
@@ -100,6 +118,8 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
     hoy: string = hoyEcuador(),
     /** Limita la revisión a esas entidades (pruebas); sin valor, revisa todo. */
     entidades?: readonly string[],
+    /** Hora local (HH:mm); solo se cambia en pruebas. */
+    hora: string = horaEcuador(),
   ): Promise<ResumenAvisos> {
     if (this.enCurso) return { total: 0, porTipo: {} };
     this.enCurso = true;
@@ -109,6 +129,9 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
           this.art(hoy),
           this.documentosDeIngresoFaltantes(hoy),
           this.ptwSinPtDeHoy(hoy),
+          this.servicioSinPtw(hoy),
+          this.ptwSinAprobarALaHora(hoy, hora),
+          this.faltaPtManana(hoy, hora),
           this.requisitosLegales(hoy),
           this.inspeccionesVencidas(hoy),
           this.investigaciones(hoy),
@@ -282,7 +305,13 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
         ticketId: true,
         pedidoId: true,
         ticket: {
-          select: { ticketNumero: true, pedidoCodigo: true, cliente: true, campo: true, pozo: true },
+          select: {
+            ticketNumero: true,
+            pedidoCodigo: true,
+            cliente: true,
+            campo: true,
+            pozo: true,
+          },
         },
       },
     });
@@ -304,6 +333,131 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
       },
     }));
   }
+
+  /** Datos de un ticket que llevan los avisos de servicio (los mismos para los tres de abajo). */
+  private datosTicket(t: {
+    ticketId: string;
+    ticketNumero: number | null;
+    pedidoId: string;
+    pedidoCodigo: string;
+    cliente: string | null;
+    campo: string | null;
+    pozo: string | null;
+  }) {
+    return {
+      ticketId: t.ticketId,
+      ticketNumero: t.ticketNumero,
+      pedidoId: t.pedidoId,
+      pedidoCodigo: t.pedidoCodigo,
+      cliente: t.cliente,
+      campo: t.campo,
+      pozo: t.pozo,
+    };
+  }
+
+  /**
+   * «Hay servicio hoy y no existe PTW»: el ticket tiene hoy como día de servicio y el día no tiene ningún PTW vigente. Normalmente la tarea
+   * programada lo abre a medianoche; este aviso sale si no se abrió (o se anuló) y nadie lo repuso. Un aviso por ticket y día.
+   */
+  private async servicioSinPtw(hoy: string): Promise<Candidato[]> {
+    const dias = await this.prisma.ticketDiaServicio.findMany({
+      where: { fecha: aFecha(hoy) },
+      select: { ticket: { select: this.seleccionTicket } },
+    });
+    if (!dias.length) return [];
+    const conPtw = new Set(
+      (
+        await this.prisma.ptw.findMany({
+          where: {
+            pedidoId: { in: dias.map((d) => d.ticket.pedidoId) },
+            diaOperacion: aFecha(hoy),
+            anuladoAt: null,
+          },
+          select: { pedidoId: true },
+        })
+      ).map((p) => p.pedidoId),
+    );
+    return dias
+      .filter((d) => !conPtw.has(d.ticket.pedidoId))
+      .map((d) => ({
+        tipo: 'qhse.aviso.servicio_sin_ptw',
+        entidadId: d.ticket.ticketId,
+        fechaLimite: hoy,
+        datos: { ...this.datosTicket(d.ticket), diaOperacion: hoy },
+      }));
+  }
+
+  /** «PTW sin aprobar a la hora de inicio»: llegada la hora de inicio del servicio, el PTW de hoy sigue sin aprobarse. Un aviso por PTW. */
+  private async ptwSinAprobarALaHora(hoy: string, hora: string): Promise<Candidato[]> {
+    if (hora < this.horaInicio) return [];
+    const filas = await this.prisma.ptw.findMany({
+      where: { diaOperacion: aFecha(hoy), anuladoAt: null, fase: { not: 'aprobado' } },
+      select: {
+        id: true,
+        numero: true,
+        fase: true,
+        ticket: { select: this.seleccionTicket },
+      },
+    });
+    return filas.map((p) => ({
+      tipo: 'qhse.aviso.ptw_sin_aprobar_hora_inicio',
+      entidadId: p.id,
+      fechaLimite: hoy,
+      datos: {
+        ...this.datosTicket(p.ticket),
+        ptwId: p.id,
+        ptwCodigo: codigoPtw(p.numero),
+        fase: p.fase,
+        diaOperacion: hoy,
+        horaInicio: this.horaInicio,
+      },
+    }));
+  }
+
+  /**
+   * «Mañana falta el PT»: el ticket tiene servicio mañana y todavía no se cargó el PT de ese día. Sin él la jornada de mañana quedaría bloqueada.
+   * Sale desde la hora configurada de la tarde (antes todavía hay tiempo de sobra). Un aviso por ticket y día.
+   */
+  private async faltaPtManana(hoy: string, hora: string): Promise<Candidato[]> {
+    if (hora < this.horaPtManana) return [];
+    const manana = masDias(hoy, 1);
+    const dias = await this.prisma.ticketDiaServicio.findMany({
+      where: { fecha: aFecha(manana) },
+      select: { ticket: { select: this.seleccionTicket } },
+    });
+    if (!dias.length) return [];
+    const conPt = new Set(
+      (
+        await this.prisma.documentoPedido.findMany({
+          where: {
+            pedidoId: { in: dias.map((d) => d.ticket.pedidoId) },
+            tipo: TipoDocumentoPedido.pt,
+            fecha: aFecha(manana),
+            anuladoAt: null,
+          },
+          select: { pedidoId: true },
+        })
+      ).map((d) => d.pedidoId),
+    );
+    return dias
+      .filter((d) => !conPt.has(d.ticket.pedidoId))
+      .map((d) => ({
+        tipo: 'qhse.aviso.falta_pt_manana',
+        entidadId: d.ticket.ticketId,
+        fechaLimite: manana,
+        datos: { ...this.datosTicket(d.ticket), diaOperacion: manana },
+      }));
+  }
+
+  private readonly seleccionTicket = {
+    ticketId: true,
+    ticketNumero: true,
+    pedidoId: true,
+    pedidoCodigo: true,
+    cliente: true,
+    campo: true,
+    pozo: true,
+  } as const;
 
   /** Requisitos legales: la revisión vigente de cada matriz que vence en 30 días o ya venció. */
   private async requisitosLegales(hoy: string): Promise<Candidato[]> {

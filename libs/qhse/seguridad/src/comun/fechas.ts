@@ -4,6 +4,15 @@ const DIA_MS = 86_400_000;
 export const hoyEcuador = (): string =>
   new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
 
+/** Hora de Ecuador (HH:mm, 24 horas): las horas de inicio del servicio se configuran en hora local. */
+export const horaEcuador = (ahora: Date = new Date()): string =>
+  ahora.toLocaleTimeString('en-GB', {
+    timeZone: 'America/Guayaquil',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+
 /** Fecha de medianoche UTC de un día AAAA-MM-DD (así la guarda y la lee Prisma en columnas `date`). */
 export const aFecha = (dia: string): Date => new Date(`${dia}T00:00:00.000Z`);
 
