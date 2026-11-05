@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
+import { DuracionServicioConsumer } from './consumers/duracion-servicio.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { PedidosModule } from './index';
 import { PrismaService } from './prisma/prisma.service';
@@ -69,6 +70,7 @@ run('documentos operativos (base de datos real)', () => {
   let U: (nombre: string) => string;
   let reporteDiario: ReporteDiarioConsumer;
   let cambioItems: CambioItemsConsumer;
+  let duracionServicio: DuracionServicioConsumer;
   let listaCambio: string | null = null;
   const eventos: string[] = [];
   const admin = new Pool({ connectionString: MIGRATOR_DB, max: 2 });
@@ -175,6 +177,7 @@ run('documentos operativos (base de datos real)', () => {
     U = await idsDeUnidades(prisma);
     reporteDiario = app.get(ReporteDiarioConsumer);
     cambioItems = app.get(CambioItemsConsumer);
+    duracionServicio = app.get(DuracionServicioConsumer);
   });
 
   afterAll(async () => {
@@ -1132,6 +1135,72 @@ run('documentos operativos (base de datos real)', () => {
       const r = await resultados(id);
       expect(r).toHaveLength(2);
       expect(r.every((x) => x.aplicado === false)).toBe(true);
+    });
+  });
+
+  describe('duración del servicio que decide el Jefe de Base de Pumping (evento de Operaciones)', () => {
+    const duracion = (pedidoId: string, fechaFinNueva: string): EventEnvelope => {
+      const id = uuidv7();
+      eventos.push(id);
+      return {
+        id,
+        type: 'operaciones.pumping.duracion_servicio_cambiada',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'jefe_base' },
+        data: {
+          ticketId: uuidv7(),
+          pedidoId,
+          accion: 'ampliar',
+          fechaFinAnterior: '2026-11-03',
+          fechaFinNueva,
+          motivo: 'El pozo se alarga',
+        },
+      } as EventEnvelope;
+    };
+    const fin = async (id: string) =>
+      (await prisma.pedido.findUniqueOrThrow({ where: { id } })).fechaFinServicio
+        ?.toISOString()
+        .slice(0, 10);
+    const salidas = async (id: string, tipo: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_comercial.outbox WHERE tipo = $1 AND datos->'data'->>'pedidoId' = $2",
+          [tipo, id],
+        )
+      ).rows.map((r) => r.d);
+
+    it('cambia la fecha de fin del pedido y avisa que el pedido se actualizó', async () => {
+      const id = await pedido('pumping', 'en_operacion');
+      const e = duracion(id, '2026-11-06');
+      await duracionServicio.consumir(e);
+      await duracionServicio.consumir(e); // mismo evento: lo ignora el inbox
+      expect(await fin(id)).toBe('2026-11-06');
+      const actualizados = await salidas(id, 'comercial.pedido.actualizado');
+      expect(actualizados).toHaveLength(1);
+      expect(actualizados[0]).toMatchObject({
+        origenCambio: 'operaciones',
+        campos: ['fechaFinServicio'],
+      });
+      expect(await salidas(id, 'comercial.duracion_servicio.rechazada')).toHaveLength(0);
+    });
+
+    it('si el pedido ya salió al cliente, no cambia la fecha y responde el rechazo para que Pumping revierta', async () => {
+      const id = await pedido('pumping', 'enviado_para_firmas');
+      await duracionServicio.consumir(duracion(id, '2026-11-06'));
+      expect(await fin(id)).toBe('2026-11-03');
+      const [r] = await salidas(id, 'comercial.duracion_servicio.rechazada');
+      expect(r).toMatchObject({ fechaFinAnterior: '2026-11-03', fechaFinNueva: '2026-11-06' });
+      expect(r.motivo).toContain('ya no admite cambios');
+    });
+
+    it('una fecha de fin anterior al inicio del servicio se rechaza sin tocar el pedido', async () => {
+      const id = await pedido('pumping', 'en_operacion');
+      await duracionServicio.consumir(duracion(id, '2026-10-30'));
+      expect(await fin(id)).toBe('2026-11-03');
+      expect(await salidas(id, 'comercial.duracion_servicio.rechazada')).toHaveLength(1);
     });
   });
 });

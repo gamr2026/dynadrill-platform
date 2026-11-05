@@ -385,6 +385,41 @@ export class PedidosService {
     });
   }
 
+  /**
+   * Cambia la fecha de fin del servicio por decisión del Jefe de Base de Pumping (acortar o ampliar la duración). Solo mientras el pedido es
+   * editable y ya está abierto; no pide la versión (el cambio ya lo decidió quien corresponde). Publica `comercial.pedido.actualizado` para que el
+   * ticket y los demás módulos tomen la fecha. Si el pedido ya tiene esa fecha no hace nada.
+   */
+  async aplicarFechaFinDeOperaciones(
+    pedidoId: string,
+    fechaFin: string,
+    ctx: Contexto,
+  ): Promise<void> {
+    const actual = await this.cargar(this.prisma, pedidoId);
+    if (actual.estado === 'borrador' || !EDITABLES.has(actual.estado)) {
+      throw new ConflictException(
+        `Un pedido en "${actual.estadoRef.nombre}" ya no admite cambios de fechas`,
+      );
+    }
+    const fin = fechaDia(fechaFin);
+    if (actual.fechaInicioServicio && fin < actual.fechaInicioServicio)
+      throw new BadRequestException('La fecha de fin no puede ser anterior a la de inicio');
+    if (actual.fechaFinServicio && actual.fechaFinServicio.getTime() === fin.getTime()) return;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.pedido.update({
+        where: { id: pedidoId },
+        data: { fechaFinServicio: fin, version: { increment: 1 }, updatedBy: ctx.actor.id },
+      });
+      await this.publicar(tx, 'comercial.pedido.actualizado', pedidoId, ctx, {
+        codigo: actual.codigo,
+        campos: ['fechaFinServicio'],
+        itemsModificados: false,
+        origenCambio: 'operaciones',
+        ...(await this.datosParaOperaciones(tx, pedidoId, false)),
+      });
+    });
+  }
+
   /** Valida todo, emite el código y abre el pedido. Desde `borrador` o desde `en_correccion`. */
   async abrir(id: string, ctx: Contexto) {
     await this.prisma.$transaction((tx) => this.abrirEnTx(tx, id, ctx));
