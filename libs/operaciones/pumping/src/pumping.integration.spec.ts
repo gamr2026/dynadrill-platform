@@ -4225,5 +4225,55 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       expect((await ver(t)).body.jornadas[1].estado).toBe('cerrada');
     });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 5b: Pumping avisa a QHSE los días de servicio activos (QHSE abre el PTW de cada día)
+    // ----------------------------------------------------------------------------------------------------------------
+    it('Pumping avisa a QHSE los días de servicio activos del ticket cada vez que el conjunto cambia', async () => {
+      const t = await enEjecucion();
+      const avisos = async () =>
+        (
+          await admin.query(
+            "SELECT datos->'data'->'dias' AS dias FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.dias_de_servicio_actualizados' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+            [t.id],
+          )
+        ).rows.map((r) => r.dias as string[]);
+      expect(await avisos()).toEqual([]); // antes de pedir las jornadas todavía no existen
+      await ver(t);
+      expect(await avisos()).toEqual([[DIAS[0], DIAS[1], DIAS[2]]]);
+      await ver(t); // sin cambios: no repite el aviso
+      expect(await avisos()).toHaveLength(1);
+
+      // un día sin operación ya no necesita PTW; al reabrirlo vuelve
+      await sinOp(t, DIAS[0], {
+        motivoId: await motivo(),
+        detalle: 'Lluvia en el primer día',
+      }).expect(201);
+      expect((await avisos()).at(-1)).toEqual([DIAS[1], DIAS[2]]);
+      await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
+      expect((await avisos()).at(-1)).toEqual([DIAS[0], DIAS[1], DIAS[2]]);
+
+      // si el servicio se acorta, el último día ya no aplica; si se amplía, vuelve
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[1],
+      ]);
+      await ver(t);
+      expect((await avisos()).at(-1)).toEqual([DIAS[0], DIAS[1]]);
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[2],
+      ]);
+      await ver(t);
+      expect((await avisos()).at(-1)).toEqual([DIAS[0], DIAS[1], DIAS[2]]);
+      // el aviso lleva lo que QHSE necesita para ubicar el ticket
+      const ultimo = (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.dias_de_servicio_actualizados' AND datos->'data'->>'ticketId' = $1 ORDER BY id DESC LIMIT 1",
+          [t.id],
+        )
+      ).rows[0].d;
+      expect(ultimo).toMatchObject({ ticketId: t.id, pedidoId: t.pedidoId });
+    });
   });
 });

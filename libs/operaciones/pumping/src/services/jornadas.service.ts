@@ -5,7 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { AuthUser } from '@dyn/common';
+import { currentTraceparent, type AuthUser } from '@dyn/common';
+import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { AccionJornada, EstadoJornada, Prisma } from '../generated/client';
 import { JREQ } from '../catalog/requisitos-jornada';
@@ -76,7 +77,10 @@ export function estadoVisible(
  */
 @Injectable()
 export class JornadasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly bus: EventBus,
+  ) {}
 
   /** Hoy en Ecuador. Aparte (y público) para que todo lo que depende de «hoy» use el mismo reloj y las pruebas puedan fijar el día. */
   hoy(): string {
@@ -115,6 +119,7 @@ export class JornadasService {
         fecha: new Date(`${d.fecha}T00:00:00Z`),
         numero: d.numero,
       }));
+    let cambio = nuevas.length > 0;
     if (nuevas.length) await tx.ticketJornada.createMany({ data: nuevas, skipDuplicates: true });
 
     // una jornada que vuelve a entrar al rango (se amplió de nuevo) deja de ser «no aplica»; las que salen, pasan a serlo
@@ -129,12 +134,47 @@ export class JornadasService {
             where: { id: j.id },
             data: { numero, ...(vuelve ? { estado: 'pendiente' as const } : {}) },
           });
+          if (vuelve) cambio = true;
         }
       } else if (j.estado === 'pendiente' || j.estado === 'abierta') {
         await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'no_aplica' } });
+        cambio = true;
       }
     }
     await this.sincronizar(tx, ticketId);
+    if (cambio) await this.publicarDias(tx, ticketId);
+  }
+
+  /**
+   * Avisa a QHSE qué días tiene activos el ticket (pendientes, abiertos o cerrados; no los «sin operación» ni los que no aplican): con eso QHSE abre
+   * el PTW de cada día. Cada aviso trae la lista completa y reemplaza a la anterior. Se publica cuando cambia el conjunto de días.
+   */
+  private async publicarDias(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    const t = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: { ticketNumero: true, pedidoId: true, pedidoCodigo: true },
+    });
+    if (!t) return;
+    const dias = await tx.ticketJornada.findMany({
+      where: { ticketId, estado: { in: ['pendiente', 'abierta', 'cerrada'] } },
+      orderBy: { fecha: 'asc' },
+      select: { fecha: true },
+    });
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.pumping.dias_de_servicio_actualizados',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: {
+          ticketId,
+          ticketNumero: t.ticketNumero,
+          pedidoId: t.pedidoId,
+          pedidoCodigo: t.pedidoCodigo,
+          dias: dias.map((d) => aFecha(d.fecha)),
+        },
+        traceparent: currentTraceparent(),
+      }),
+    );
   }
 
   /**
@@ -553,6 +593,7 @@ export class JornadasService {
         });
         await this.anotar(tx, j.id, 'sin_operacion', texto, actor.id);
         await this.sincronizar(tx, ticketId, actor.id);
+        await this.publicarDias(tx, ticketId); // un día sin operación ya no necesita PTW
         return { ok: true };
       },
     );
@@ -616,6 +657,7 @@ export class JornadasService {
       });
       await this.anotar(tx, j.id, 'reabierta', texto, actor.id);
       await this.sincronizar(tx, ticketId, actor.id); // el día vuelve a exigir sus requisitos
+      await this.publicarDias(tx, ticketId);
       return { ok: true };
     });
   }
