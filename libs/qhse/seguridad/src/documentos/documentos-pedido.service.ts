@@ -388,6 +388,8 @@ export class DocumentosPedidoService {
           ...(d.ticket
             ? { ticketNumero: d.ticket.ticketNumero, pedidoCodigo: d.ticket.pedidoCodigo }
             : {}),
+          // PT: el día; ART: el día de emisión (vale hasta `vigenteHasta`). Pumping los usa como requisitos de apertura de cada jornada
+          ...(d.fecha ? { fecha: d.fecha.toISOString().slice(0, 10) } : {}),
           ...(d.vigenteHasta ? { vigenteHasta: d.vigenteHasta.toISOString().slice(0, 10) } : {}),
           ...(motivo ? { motivo } : {}),
         },

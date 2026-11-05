@@ -505,6 +505,13 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       [pedidoId],
     );
     expect(n1.rows[0].n).toBe(6);
+    // el evento lleva la fecha del documento (el día del PT; el día de emisión del ART): Pumping los usa como requisitos de cada jornada
+    const ev = await t.admin.query(
+      "SELECT datos->'data' AS d FROM msg_qhse.outbox WHERE tipo = 'qhse.documento_pedido.cargado' AND datos->'data'->>'pedidoId' = $1 AND datos->'data'->>'tipoDocumento' = 'pt' ORDER BY id LIMIT 1",
+      [pedidoId],
+    );
+    expect(ev.rows).toHaveLength(1);
+    expect(ev.rows[0].d.fecha).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('la bandeja resume por pedido lo que tiene y lo que falta (el ART avisa 3 días antes de vencer)', async () => {
