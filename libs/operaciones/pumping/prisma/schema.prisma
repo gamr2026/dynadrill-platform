@@ -247,6 +247,7 @@ model Ticket {
   lineas                 TicketLinea[]
   jornadas               TicketJornada[]
   hechosQhse             TicketHechoQhse[]
+  cambiosDuracion        TicketDuracionCambio[]
 
   /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
   reportePrecargadoAt              DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
@@ -1197,5 +1198,32 @@ model TicketHechoQhse {
 
   @@unique([ticketId, tipo, origenId], map: "ticket_hecho_qhse_origen_key")
   @@map("ticket_hecho_qhse")
+  @@schema("pumping")
+}
+
+/// Cambios de la fecha de fin del servicio decididos por el Jefe de Base (o revertidos por el sistema). Solo se agrega.
+enum AccionDuracion {
+  acortar
+  ampliar
+  revertir
+
+  @@map("accion_duracion")
+  @@schema("pumping")
+}
+
+model TicketDuracionCambio {
+  id               String         @id @db.Uuid
+  ticketId         String         @map("ticket_id") @db.Uuid
+  ticket           Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  accion           AccionDuracion
+  fechaFinAnterior DateTime       @map("fecha_fin_anterior") @db.Date
+  fechaFinNueva    DateTime       @map("fecha_fin_nueva") @db.Date
+  motivo           String
+  /// Quién decidió; vacío cuando el sistema revierte porque Comercial no pudo aplicar el cambio. FK a `identidad.usuario` solo en la base de datos.
+  actorId          String?        @map("actor_id") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_duracion_cambio")
   @@schema("pumping")
 }

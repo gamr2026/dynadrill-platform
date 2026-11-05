@@ -417,6 +417,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     RoleCode.SUPERVISOR,
     RoleCode.SUPERVISOR_PUMPING,
   ]),
+  nuevo(
+    'pumping.jornadas.cambiar_duracion',
+    'Acortar o ampliar la duración del servicio de un ticket de Pumping (lo decide el Jefe de Base)',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
+  ),
   // flota
   def(
     'vehicleInspectionApprove',
@@ -813,6 +818,7 @@ export const Permission = {
   PUMPING_JORNADA_ACEPTAR_COMPANY_MAN: 'pumping.jornadas.aceptar_company_man',
   PUMPING_JORNADA_CERRAR: 'pumping.jornadas.cerrar',
   PUMPING_JORNADA_REABRIR: 'pumping.jornadas.reabrir',
+  PUMPING_JORNADA_CAMBIAR_DURACION: 'pumping.jornadas.cambiar_duracion',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',

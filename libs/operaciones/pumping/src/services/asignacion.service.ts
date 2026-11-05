@@ -378,11 +378,13 @@ export class AsignacionService {
    * Personas (de las indicadas, o todas las asignadas en tickets abiertos) que están en otro ticket sin cerrar cuyas fechas se cruzan con
    * las de este. Un ticket libera a su personal el día de fin del servicio (el del pedido); si ese día pasó y el ticket sigue abierto, hasta
    * que se cierre. Sin fechas se asume lo más estricto: ocupado hasta el cierre.
+   * Con `desde` solo se miran los días a partir de esa fecha (al ampliar un servicio, los anteriores ya estaban asignados).
    */
   async ocupadasPor(
     db: Pick<PrismaService, 'ticket' | 'ticketPersona'>,
     ticketId: string,
     usuarioIds?: string[],
+    desde?: Date,
   ): Promise<PersonaOcupada[]> {
     const mio = await db.ticket.findUnique({
       where: { id: ticketId },
@@ -390,7 +392,11 @@ export class AsignacionService {
     });
     if (!mio) throw new NotFoundException('El ticket no existe');
     const hoy = dia(new Date());
-    const miInicio = mio.fechaInicioServicio ? dia(mio.fechaInicioServicio) : hoy;
+    const miInicio = desde
+      ? dia(desde)
+      : mio.fechaInicioServicio
+        ? dia(mio.fechaInicioServicio)
+        : hoy;
     const miFin = mio.fechaFinServicio ? dia(mio.fechaFinServicio) : miInicio;
     const filas = await db.ticketPersona.findMany({
       where: {

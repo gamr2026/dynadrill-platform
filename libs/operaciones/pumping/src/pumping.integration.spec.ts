@@ -22,6 +22,7 @@ import { EventBus, MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { DespachosConsumer } from '@dyn/inventario';
 import { DiaCorregidoConsumer } from './consumers/dia-corregido.consumer';
+import { DuracionResultadoConsumer } from './consumers/duracion-resultado.consumer';
 import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
@@ -242,6 +243,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .mockResolvedValue(undefined);
     jest
       .spyOn(ResultadoCambioItemsConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(DuracionResultadoConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
@@ -4274,6 +4278,193 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         )
       ).rows[0].d;
       expect(ultimo).toMatchObject({ ticketId: t.id, pedidoId: t.pedidoId });
+    });
+
+    describe('duración del servicio: el Jefe de Base acorta o amplía', () => {
+      const jefeDuracion = () =>
+        como('jefe_base', JEFE, 'Jaime Jefe de Base', [
+          P.PUMPING_JORNADA_CAMBIAR_DURACION,
+          P.PUMPING_VER,
+        ]);
+      const cambiar = (t: { url: string }, cuerpo: object, h = jefeDuracion()) =>
+        http().post(`${t.url}/duracion`).set(h).send(cuerpo);
+      // las pruebas comparten personal: los otros servicios abiertos de las mismas personas se cierran para que no se crucen con éste
+      const sinPersonal = (t: { id: string }) =>
+        admin.query(
+          `UPDATE pumping.ticket SET paso_codigo = 'cierre'
+            WHERE id <> $1 AND id IN (SELECT ticket_id FROM pumping.ticket_persona
+                                       WHERE usuario_id IN (SELECT usuario_id FROM pumping.ticket_persona WHERE ticket_id = $1))`,
+          [t.id],
+        );
+      const finDe = async (id: string) =>
+        (
+          await admin.query(
+            'SELECT fecha_fin_servicio::text AS f FROM pumping.ticket WHERE id = $1',
+            [id],
+          )
+        ).rows[0].f as string;
+      const jornadasDe = async (id: string) =>
+        (
+          await admin.query(
+            'SELECT fecha::text AS fecha, estado FROM pumping.ticket_jornada WHERE ticket_id = $1 ORDER BY fecha',
+            [id],
+          )
+        ).rows as Array<{ fecha: string; estado: string }>;
+      const bitacora = async (id: string) =>
+        (
+          await admin.query(
+            'SELECT accion, fecha_fin_anterior::text AS anterior, fecha_fin_nueva::text AS nueva, motivo FROM pumping.ticket_duracion_cambio WHERE ticket_id = $1 ORDER BY id',
+            [id],
+          )
+        ).rows as Array<{ accion: string; anterior: string; nueva: string; motivo: string }>;
+      const salidas = async (id: string, tipo: string) =>
+        (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = $1 AND datos->'data'->>'ticketId' = $2 ORDER BY id",
+            [tipo, id],
+          )
+        ).rows.map((r) => r.d);
+
+      it('amplía: crea las jornadas nuevas, anota la bitácora y avisa a Comercial y a QHSE', async () => {
+        const t = await enEjecucion();
+        await sinPersonal(t);
+        await ver(t);
+        const r = await cambiar(t, {
+          accion: 'ampliar',
+          fechaFin: '2026-11-09',
+          motivo: 'El pozo se alarga',
+        });
+        expect(r.status).toBe(201);
+        expect(r.body.jornadas).toHaveLength(5);
+        expect(await finDe(t.id)).toBe('2026-11-09');
+        expect(await bitacora(t.id)).toEqual([
+          {
+            accion: 'ampliar',
+            anterior: DIAS[2],
+            nueva: '2026-11-09',
+            motivo: 'El pozo se alarga',
+          },
+        ]);
+        const [e] = await salidas(t.id, 'operaciones.pumping.duracion_servicio_cambiada');
+        expect(e).toMatchObject({
+          pedidoId: t.pedidoId,
+          accion: 'ampliar',
+          fechaFinAnterior: DIAS[2],
+          fechaFinNueva: '2026-11-09',
+        });
+        const dias = await salidas(t.id, 'operaciones.pumping.dias_de_servicio_actualizados');
+        expect(dias.at(-1).dias).toEqual([...DIAS, '2026-11-08', '2026-11-09']);
+      });
+
+      it('no amplía si se cruza con otro servicio abierto del mismo personal', async () => {
+        const t = await enEjecucion();
+        await enEjecucion('2026-11-08', '2026-11-10'); // otro servicio con el mismo personal
+        const r = await cambiar(t, {
+          accion: 'ampliar',
+          fechaFin: '2026-11-09',
+          motivo: 'Más días',
+        });
+        expect(r.status).toBe(409);
+        expect(r.body.detail).toContain('se cruza con otro servicio');
+        expect(await finDe(t.id)).toBe(DIAS[2]);
+        expect(await bitacora(t.id)).toEqual([]);
+      });
+
+      it('acorta: las jornadas sobrantes pasan a «no aplica», pero no antes de un día con trabajo registrado', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        await sinOp(t, DIAS[1], { motivoId: await motivo(), detalle: 'Lluvia todo el día' }).expect(
+          201,
+        );
+        const bloqueado = await cambiar(t, {
+          accion: 'acortar',
+          fechaFin: DIAS[0],
+          motivo: 'Terminó antes',
+        });
+        expect(bloqueado.status).toBe(409);
+        expect(bloqueado.body.detail).toContain('trabajo registrado');
+        expect(await finDe(t.id)).toBe(DIAS[2]);
+
+        await cambiar(t, { accion: 'acortar', fechaFin: DIAS[1], motivo: 'Terminó antes' }).expect(
+          201,
+        );
+        expect((await jornadasDe(t.id)).map((j) => [j.fecha, j.estado])).toEqual([
+          [DIAS[0], 'pendiente'],
+          [DIAS[1], 'sin_operacion'],
+          [DIAS[2], 'no_aplica'],
+        ]);
+        const dias = await salidas(t.id, 'operaciones.pumping.dias_de_servicio_actualizados');
+        expect(dias.at(-1).dias).toEqual([DIAS[0]]);
+      });
+
+      it('valida fechas y motivo, solo en la Ejecución operativa y solo con el permiso', async () => {
+        const t = await enEjecucion();
+        const base = { accion: 'ampliar', fechaFin: '2026-11-09', motivo: 'Más días' };
+        expect((await cambiar(t, { ...base, fechaFin: DIAS[2] })).status).toBe(409);
+        expect(
+          (await cambiar(t, { ...base, accion: 'acortar', fechaFin: '2026-11-08' })).status,
+        ).toBe(409);
+        expect(
+          (await cambiar(t, { ...base, accion: 'acortar', fechaFin: '2026-11-04' })).status,
+        ).toBe(400);
+        expect((await cambiar(t, { ...base, fechaFin: '09/11/2026' })).status).toBe(400);
+        expect((await cambiar(t, { ...base, motivo: 'a' })).status).toBe(400);
+        expect((await cambiar(t, base, sup())).status).toBe(403);
+        expect((await cambiar(t, base, op1())).status).toBe(403);
+        expect(await bitacora(t.id)).toEqual([]);
+
+        await admin.query('UPDATE pumping.ticket SET paso_codigo = $2 WHERE id = $1', [
+          t.id,
+          'control_retorno',
+        ]);
+        const fuera = await cambiar(t, base);
+        expect(fuera.status).toBe(409);
+        expect(fuera.body.detail).toContain('Ejecución operativa');
+        expect(await finDe(t.id)).toBe(DIAS[2]);
+      });
+
+      it('si Comercial no pudo aplicarlo, el ticket vuelve a la fecha anterior y queda en la bitácora', async () => {
+        const t = await enEjecucion();
+        await sinPersonal(t);
+        await cambiar(t, { accion: 'ampliar', fechaFin: '2026-11-09', motivo: 'Más días' }).expect(
+          201,
+        );
+        const rechazo = () => {
+          const id = uuidv7();
+          eventos.push(id);
+          return {
+            id,
+            type: 'comercial.duracion_servicio.rechazada',
+            version: 1,
+            occurredAt: new Date().toISOString(),
+            source: 'comercial',
+            subject: { type: 'pedido', id: t.pedidoId },
+            actor: { userId: JEFE, role: 'jefe_base' },
+            data: {
+              ticketId: t.id,
+              pedidoId: t.pedidoId,
+              fechaFinAnterior: DIAS[2],
+              fechaFinNueva: '2026-11-09',
+              motivo: 'El pedido ya salió al cliente',
+            },
+          } as EventEnvelope;
+        };
+        const e = rechazo();
+        const resultado = app.get(DuracionResultadoConsumer);
+        await resultado.consumir(e);
+        await resultado.consumir(e); // mismo evento: lo ignora el inbox
+        expect(await finDe(t.id)).toBe(DIAS[2]);
+        expect((await jornadasDe(t.id)).map((j) => [j.fecha, j.estado]).slice(3)).toEqual([
+          ['2026-11-08', 'no_aplica'],
+          ['2026-11-09', 'no_aplica'],
+        ]);
+        const b = await bitacora(t.id);
+        expect(b.map((x) => x.accion)).toEqual(['ampliar', 'revertir']);
+        expect(b[1].motivo).toContain('El pedido ya salió al cliente');
+        // otro rechazo (otro evento) cuando el ticket ya no tiene esa fecha: no toca nada
+        await resultado.consumir(rechazo());
+        expect(await bitacora(t.id)).toHaveLength(2);
+      });
     });
   });
 });
