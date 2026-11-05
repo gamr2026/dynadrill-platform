@@ -19,6 +19,8 @@ export interface ClaveRequisito {
   unidadId?: string | null;
   /** Operador (requisitos de ámbito `operador`). */
   usuarioId?: string | null;
+  /** Día (AAAA-MM-DD) de la jornada (requisitos de ámbito `jornada`); vacío en los demás. */
+  fecha?: string | null;
 }
 
 export interface RequisitoPendiente {
@@ -93,7 +95,7 @@ export class RequisitosService {
         ? { estado, cumplidoAt: new Date(), cumplidoPor: actorId ?? null, origen, motivo: null }
         : { estado, cumplidoAt: null, cumplidoPor: null, origen: null, motivo: null };
     const r = await db.ticketRequisito.updateMany({
-      where: { ticketId, requisitoCodigo: codigo, unidadId: null, usuarioId: null },
+      where: { ticketId, requisitoCodigo: codigo, unidadId: null, usuarioId: null, fecha: null },
       data: datos,
     });
     if (r.count === 0) {
@@ -117,6 +119,7 @@ export class RequisitosService {
         requisitoCodigo: k.codigo,
         unidadId: k.unidadId ?? null,
         usuarioId: k.usuarioId ?? null,
+        fecha: k.fecha ? new Date(`${k.fecha}T00:00:00Z`) : null,
         estado: 'pendiente',
       },
       data: {
@@ -138,6 +141,7 @@ export class RequisitosService {
         requisitoCodigo: k.codigo,
         unidadId: k.unidadId ?? null,
         usuarioId: k.usuarioId ?? null,
+        fecha: k.fecha ? new Date(`${k.fecha}T00:00:00Z`) : null,
         estado: 'cumplido',
       },
       data: {
@@ -201,7 +205,8 @@ export class RequisitosService {
   /** Estado de todos los requisitos del ticket, agrupados por el paso del que son salida (para la pantalla). */
   async estado(ticketId: string) {
     const filas = await this.prisma.ticketRequisito.findMany({
-      where: { ticketId },
+      // los requisitos por día (con fecha) los muestra la jornada, no la lista de requisitos de salida de cada paso
+      where: { ticketId, fecha: null },
       include: {
         requisito: { include: { pasos: { include: { paso: true } } } },
         unidad: UNIDAD_CON_PLACA,

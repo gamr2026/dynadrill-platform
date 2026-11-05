@@ -26,6 +26,11 @@ describe('jornadas: fechas y estado visible', () => {
     expect(estadoVisible('abierta', '2026-11-06', hoy)).toBe('abierta');
     expect(estadoVisible('pendiente', '2026-11-05', hoy)).toBe('con_pendientes');
     expect(estadoVisible('abierta', '2026-11-05', hoy)).toBe('con_pendientes');
+    // lo que falta de otra área bloquea solo el día de hoy aún sin abrir
+    expect(estadoVisible('pendiente', '2026-11-06', hoy, true)).toBe('bloqueada');
+    expect(estadoVisible('abierta', '2026-11-06', hoy, true)).toBe('abierta');
+    expect(estadoVisible('pendiente', '2026-11-07', hoy, true)).toBe('pendiente');
+    expect(estadoVisible('pendiente', '2026-11-05', hoy, true)).toBe('con_pendientes');
     for (const e of ['cerrada', 'sin_operacion', 'no_aplica'] as const) {
       expect(estadoVisible(e, '2026-11-05', hoy)).toBe(e);
       expect(estadoVisible(e, '2026-11-07', hoy)).toBe(e);

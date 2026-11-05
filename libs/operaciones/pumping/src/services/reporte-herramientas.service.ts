@@ -11,6 +11,7 @@ import { uuidv7 } from '@dyn/utils';
 import type { EstadoItemReporte, Prisma, TipoLineaItem } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REQ } from '../catalog/sembrar-traslado-salida';
+import { JornadasService } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
 
@@ -54,6 +55,7 @@ export class ReporteHerramientasService {
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
     private readonly requisitos: RequisitosService,
+    private readonly jornadas: JornadasService,
   ) {}
 
   /** `actorId`: quien consulta; si el reporte aún no se precargó y el ticket está en la ejecución, se precarga una sola vez. */
@@ -148,9 +150,7 @@ export class ReporteHerramientasService {
           }
         } else {
           if (!(typeof cantidad === 'number' && cantidad > 0)) {
-            throw new BadRequestException(
-              'Escriba la cantidad aplicada ese día (mayor que cero)',
-            );
+            throw new BadRequestException('Escriba la cantidad aplicada ese día (mayor que cero)');
           }
           valor = cantidad;
         }
@@ -183,6 +183,8 @@ export class ReporteHerramientasService {
         }
       }
       await this.reabrir(tx, ticketId);
+      // marcar (o desmarcar) un día cumple (o reabre) el requisito de cierre «herramientas del día»
+      await this.jornadas.sincronizar(tx, ticketId, actor.id);
     });
     return this.obtener(ticketId);
   }
@@ -206,7 +208,14 @@ export class ReporteHerramientasService {
         },
       });
       // sin un reporte completo (con al menos una cantidad) el ticket no sale de la Ejecución operativa
-      await this.requisitos.fijar(tx, ticketId, REQ.reporteHerramientas, 'cumplido', 'sistema', actor.id);
+      await this.requisitos.fijar(
+        tx,
+        ticketId,
+        REQ.reporteHerramientas,
+        'cumplido',
+        'sistema',
+        actor.id,
+      );
       const personas = await tx.ticketPersona.findMany({
         where: { ticketId, rol: { in: ['supervisor', 'operador'] } },
         select: { usuarioId: true, rol: true },

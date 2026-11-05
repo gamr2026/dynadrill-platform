@@ -56,8 +56,19 @@ enum AmbitoRequisito {
   ticket
   unidad
   operador
+  /// Uno por día activo del servicio (con su fecha): bloquea abrir o cerrar esa jornada.
+  jornada
 
   @@map("ambito_requisito")
+  @@schema("pumping")
+}
+
+/// Cuándo pesa un requisito de jornada: para abrir el día o para cerrarlo.
+enum MomentoRequisito {
+  apertura
+  cierre
+
+  @@map("momento_requisito")
   @@schema("pumping")
 }
 
@@ -612,6 +623,8 @@ model Requisito {
   ambito      AmbitoRequisito
   modulo      ModuloDueno
   activo      Boolean         @default(true)
+  /// Solo en los requisitos de ámbito `jornada`.
+  momento     MomentoRequisito?
 
   pasos   PasoRequisito[]
   tickets TicketRequisito[]
@@ -651,6 +664,8 @@ model TicketRequisito {
   cumplidoPor     String?             @map("cumplido_por") @db.Uuid
   origen          OrigenCumplimiento?
   motivo          String?
+  /// Día de la jornada a la que pertenece (solo requisitos de ámbito `jornada`); FK compuesta a `ticket_jornada` en la base de datos.
+  fecha           DateTime?           @db.Date
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -742,7 +757,8 @@ model TicketJornadaHistorial {
   jornada   TicketJornada @relation(fields: [jornadaId], references: [id], onDelete: Cascade)
   accion    AccionJornada
   motivo    String?
-  actorId   String        @map("actor_id") @db.Uuid
+  /// Quién lo hizo; vacío cuando lo hizo el sistema.
+  actorId   String?       @map("actor_id") @db.Uuid
   createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([jornadaId, createdAt])

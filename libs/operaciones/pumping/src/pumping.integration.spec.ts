@@ -3266,6 +3266,45 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ).rows[0].id as string;
     const estados = (r: { body: { jornadas: Array<{ estadoVisible: string }> } }) =>
       r.body.jornadas.map((j) => j.estadoVisible);
+    /** Marca una herramienta usada ese día (en la base: el reparto por la pantalla ya tiene sus pruebas en otro bloque). */
+    const marcarHerramienta = async (t: { id: string }, fecha: string) => {
+      let linea = (
+        await admin.query('SELECT id FROM pumping.ticket_linea WHERE ticket_id = $1 LIMIT 1', [
+          t.id,
+        ])
+      ).rows[0]?.id as string | undefined;
+      if (!linea) {
+        linea = uuidv7();
+        const um = (
+          await admin.query('SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1')
+        ).rows[0].id;
+        await admin.query(
+          "INSERT INTO pumping.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 1, $3, 'Herramienta de prueba', $4, 10, 'herramienta')",
+          [linea, t.id, `JR-${n}`, um],
+        );
+      }
+      await admin.query(
+        "INSERT INTO pumping.reporte_item_dia (id, linea_id, fecha, estado, cantidad, created_by) VALUES ($1, $2, $3, 'operacion', 1, $4)",
+        [uuidv7(), linea, fecha, JEFE],
+      );
+    };
+    /** Cumple lo que pide el cierre de un día: el job log completado (por su pantalla) y una herramienta marcada. */
+    const cumplirCierre = async (
+      t: { id: string; url: string; jornadas: string },
+      fecha: string,
+    ) => {
+      const dia = `${t.url}/reportes-diarios/${fecha}`;
+      await http()
+        .put(dia)
+        .set(op1())
+        .send({
+          actividades: [{ horaInicio: '06:00', horaFin: '09:30', detalle: 'Armado de líneas' }],
+        })
+        .expect(200);
+      await http().post(`${dia}/completar`).set(op1()).expect(201);
+      await marcarHerramienta(t, fecha);
+      await http().get(t.jornadas).set(op1()).expect(200); // pedir las jornadas deja los requisitos al día
+    };
 
     it('al pedirlas en la Ejecución operativa se crea una jornada por día del rango y el estado de hoy se deduce de la fecha', async () => {
       const t = await enEjecucion();
@@ -3384,6 +3423,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await aceptar(t, DIAS[1]).expect(201);
       expect((await cerrar(t, DIAS[1], op1())).status).toBe(403);
       expect((await cerrar(t, DIAS[1], supAjeno())).status).toBe(403);
+      await cumplirCierre(t, DIAS[1]);
       await cerrar(t, DIAS[1]).expect(201);
       const r = await ver(t);
       expect(r.body).toMatchObject({ cerradas: 1 });
@@ -3404,6 +3444,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const t = await enEjecucion();
       await ver(t);
       await aceptar(t, DIAS[1]).expect(201);
+      await cumplirCierre(t, DIAS[1]);
       await cerrar(t, DIAS[1]).expect(201);
       expect((await reabrir(t, DIAS[1], { motivo: 'ab' })).status).toBe(400);
       expect(
@@ -3543,6 +3584,229 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await expect(
         prisma.$executeRaw`DELETE FROM pumping.ticket_jornada_historial WHERE id = ${h}::uuid`,
       ).rejects.toThrow(/permission denied/);
+    });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 2: requisitos por día
+    // ----------------------------------------------------------------------------------------------------------------
+    const requisitosDe = async (ticketId: string, fecha?: string) =>
+      (
+        await admin.query(
+          `SELECT r.requisito_codigo AS codigo, r.estado, r.fecha::text AS fecha, q.momento, q.modulo
+             FROM pumping.ticket_requisito r JOIN pumping.requisito q ON q.codigo = r.requisito_codigo
+            WHERE r.ticket_id = $1 AND r.fecha IS NOT NULL ${fecha ? 'AND r.fecha = $2' : ''}
+            ORDER BY r.fecha, r.requisito_codigo`,
+          fecha ? [ticketId, fecha] : [ticketId],
+        )
+      ).rows as Array<{
+        codigo: string;
+        estado: string;
+        fecha: string;
+        momento: string;
+        modulo: string;
+      }>;
+
+    it('cada día activo recibe sus requisitos: aceptación del Company Man para abrir y job log y herramientas para cerrar', async () => {
+      const t = await enEjecucion();
+      const r = await ver(t).expect(200);
+      const filas = await requisitosDe(t.id);
+      expect(filas).toHaveLength(9); // 3 días × 3 requisitos activos del catálogo
+      expect(new Set(filas.map((f) => f.codigo))).toEqual(
+        new Set(['company_man_acepto_dia', 'job_log_dia', 'herramientas_dia']),
+      );
+      expect(filas.every((f) => f.estado === 'pendiente')).toBe(true);
+      // la lista lo muestra por jornada, la apertura primero
+      expect(
+        r.body.jornadas[1].requisitos.map((q: { codigo: string; momento: string }) => [
+          q.codigo,
+          q.momento,
+        ]),
+      ).toEqual([
+        ['company_man_acepto_dia', 'apertura'],
+        ['herramientas_dia', 'cierre'],
+        ['job_log_dia', 'cierre'],
+      ]);
+      expect(r.body.jornadas[1]).toMatchObject({
+        pendientes: { apertura: 1, cierre: 2 },
+        bloqueos: [],
+      });
+      // pedirlas otra vez no duplica
+      await ver(t).expect(200);
+      expect(await requisitosDe(t.id)).toHaveLength(9);
+      // la lista de requisitos de salida de cada paso no mezcla los de las jornadas
+      const estado = await http().get(`${t.url}/requisitos`).set(op1());
+      if (estado.status === 200) {
+        expect(JSON.stringify(estado.body)).not.toContain('company_man_acepto_dia');
+      }
+    });
+
+    it('aceptar al Company Man cumple su requisito y abre la jornada; sin operación quita lo pendiente del día y reabrir lo devuelve', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const r = await aceptar(t, DIAS[1]).expect(201);
+      expect(r.body).toMatchObject({ yaMarcada: false, abierta: true });
+      expect(
+        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'company_man_acepto_dia'),
+      ).toMatchObject({ estado: 'cumplido' });
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'abierta',
+        pendientes: { apertura: 0, cierre: 2 },
+      });
+
+      // un día sin operación no exige nada: no muestra requisitos ni cuenta pendientes; reabrirlo los devuelve
+      await sinOp(t, DIAS[0], {
+        motivoId: await motivo(),
+        detalle: 'Lluvia en el primer día',
+      }).expect(201);
+      expect((await ver(t)).body.jornadas[0]).toMatchObject({
+        estadoVisible: 'sin_operacion',
+        requisitos: [],
+        pendientes: { apertura: 0, cierre: 0 },
+      });
+      await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
+      expect(
+        (await ver(t)).body.jornadas[0].requisitos.map((q: { codigo: string }) => q.codigo),
+      ).toEqual(['company_man_acepto_dia', 'herramientas_dia', 'job_log_dia']);
+    });
+
+    it('no se cierra la jornada hasta cumplir el job log y las herramientas del día; guardar el job log otra vez lo reabre', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await aceptar(t, DIAS[1]).expect(201);
+      const sinCumplir = await cerrar(t, DIAS[1]);
+      expect(sinCumplir.status).toBe(409);
+      expect(sinCumplir.body.code).toBe('REQUISITOS_PENDIENTES');
+      expect(String(sinCumplir.body.detail)).toContain('Herramientas del día registradas');
+      expect(String(sinCumplir.body.detail)).toContain(
+        'Reporte diario de actividades (job log) completado',
+      );
+
+      // el job log por su pantalla de siempre: al completarlo se cumple el requisito de ese día (y no el de otros días)
+      const dia = `${t.url}/reportes-diarios/${DIAS[1]}`;
+      const cuerpoJobLog = {
+        actividades: [
+          {
+            horaInicio: '06:00',
+            horaFin: '09:30',
+            detalle: 'Armado de líneas y prueba de presión',
+          },
+        ],
+      };
+      await http().put(dia).set(op1()).send(cuerpoJobLog).expect(200);
+      await http().post(`${dia}/completar`).set(op1()).expect(201);
+      let propios = await requisitosDe(t.id, DIAS[1]);
+      expect(propios.find((f) => f.codigo === 'job_log_dia')?.estado).toBe('cumplido');
+      expect(
+        (await requisitosDe(t.id, DIAS[0])).find((f) => f.codigo === 'job_log_dia')?.estado,
+      ).toBe('pendiente');
+      const soloHerramientas = String((await cerrar(t, DIAS[1])).body.detail);
+      expect(soloHerramientas).toContain('Herramientas del día registradas');
+      expect(soloHerramientas).not.toContain('job log');
+      // guardar de nuevo el día lo reabre: vuelve a faltar el job log
+      await http().put(dia).set(op1()).send(cuerpoJobLog).expect(200);
+      propios = await requisitosDe(t.id, DIAS[1]);
+      expect(propios.find((f) => f.codigo === 'job_log_dia')?.estado).toBe('pendiente');
+      await http().post(`${dia}/completar`).set(op1()).expect(201);
+
+      // las herramientas: al marcar algo ese día se cumple (se prueba con la marca puesta en la base; el reparto por la pantalla ya tiene sus pruebas)
+      await marcarHerramienta(t, DIAS[1]);
+      await ver(t);
+      expect(
+        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'herramientas_dia')?.estado,
+      ).toBe('cumplido');
+      await cerrar(t, DIAS[1]).expect(201);
+      expect((await ver(t)).body).toMatchObject({ cerradas: 1 });
+      // quitar la marca del día deja de cumplirlo
+      await admin.query(
+        'DELETE FROM pumping.reporte_item_dia WHERE linea_id IN (SELECT id FROM pumping.ticket_linea WHERE ticket_id = $1)',
+        [t.id],
+      );
+      await ver(t);
+      expect(
+        (await requisitosDe(t.id, DIAS[1])).find((f) => f.codigo === 'herramientas_dia')?.estado,
+      ).toBe('pendiente');
+    });
+
+    it('lo que falta de otra área bloquea el día de hoy, se informa por área y, al llegar lo último, el sistema abre la jornada solo', async () => {
+      // QHSE todavía no cumple sus requisitos por día (etapa 5): se activa uno solo dentro de la prueba para ver cómo se comporta
+      await admin.query(
+        "UPDATE pumping.requisito SET activo = true WHERE codigo = 'ptw_dia_aprobado'",
+      );
+      try {
+        const t = await enEjecucion();
+        const r = await ver(t).expect(200);
+        expect(r.body.jornadas[1]).toMatchObject({
+          estadoVisible: 'bloqueada',
+          pendientes: { apertura: 2, cierre: 2 },
+          bloqueos: [{ codigo: 'ptw_dia_aprobado', responsable: 'qhse' }],
+        });
+        // un día futuro no se muestra bloqueado: todavía no toca
+        expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
+        expect(r.body.pendientesPorArea).toMatchObject({ qhse: 1, pumping: 3 });
+
+        // el Company Man acepta, pero falta el PTW: la jornada no se abre
+        const acepta = await aceptar(t, DIAS[1]).expect(201);
+        expect(acepta.body).toMatchObject({ yaMarcada: false, abierta: false });
+        expect((await ver(t)).body.jornadas[1]).toMatchObject({
+          estado: 'pendiente',
+          estadoVisible: 'bloqueada',
+        });
+        expect((await cerrar(t, DIAS[1])).status).toBe(409);
+
+        // QHSE aprueba el PTW del día: en cuanto se cumple el último requisito de apertura, el sistema abre la jornada
+        await admin.query(
+          "UPDATE pumping.ticket_requisito SET estado = 'cumplido', cumplido_at = now(), origen = 'evento' WHERE ticket_id = $1 AND requisito_codigo = 'ptw_dia_aprobado' AND fecha = $2",
+          [t.id, DIAS[1]],
+        );
+        const abierta = (await ver(t)).body.jornadas[1];
+        expect(abierta).toMatchObject({
+          estado: 'abierta',
+          estadoVisible: 'abierta',
+          bloqueos: [],
+        });
+        const bitacora = await prisma.ticketJornadaHistorial.findMany({
+          where: { jornadaId: abierta.id },
+        });
+        expect(bitacora.map((h) => [h.accion, h.actorId])).toEqual([['abierta', null]]); // la abrió el sistema, sin persona
+      } finally {
+        await admin.query(
+          "UPDATE pumping.requisito SET activo = false WHERE codigo = 'ptw_dia_aprobado'",
+        );
+      }
+    });
+
+    it('la base mantiene la coherencia de los requisitos por día', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const insertar = (codigo: string, fecha: string | null) =>
+        admin.query(
+          'INSERT INTO pumping.ticket_requisito (id, ticket_id, requisito_codigo, fecha) VALUES ($1, $2, $3, $4)',
+          [uuidv7(), t.id, codigo, fecha],
+        );
+      // un requisito de un día que no es jornada del ticket
+      await expect(insertar('job_log_dia', '2030-01-01')).rejects.toThrow(
+        /ticket_requisito_jornada_fkey/,
+      );
+      // el mismo requisito del mismo día no se repite
+      await expect(insertar('job_log_dia', DIAS[0])).rejects.toThrow(/ticket_requisito_unico_key/);
+      // un requisito de jornada lleva momento y los demás no
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.requisito (codigo, nombre, ambito, modulo) VALUES ('x_prueba', 'x', 'jornada', 'pumping')",
+        ),
+      ).rejects.toThrow(/requisito_momento_check/);
+      await expect(
+        admin.query(
+          "INSERT INTO pumping.requisito (codigo, nombre, ambito, modulo, momento) VALUES ('x_prueba', 'x', 'ticket', 'pumping', 'cierre')",
+        ),
+      ).rejects.toThrow(/requisito_momento_check/);
+      // borrar la jornada se lleva sus requisitos (la jornada se borra con el ticket)
+      const antes = (await requisitosDe(t.id)).length;
+      await admin.query('DELETE FROM pumping.ticket_jornada WHERE ticket_id = $1 AND fecha = $2', [
+        t.id,
+        DIAS[2],
+      ]);
+      expect((await requisitosDe(t.id)).length).toBe(antes - 3);
     });
   });
 });

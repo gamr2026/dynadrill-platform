@@ -10,6 +10,7 @@ import { EventBus } from '@dyn/messaging';
 import { firmaDeUnaLinea, uuidv7 } from '@dyn/utils';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { JornadasService } from './jornadas.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
 
 const PASO = 'ejecucion_operativa';
@@ -86,6 +87,7 @@ export class ReportesDiariosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bus: EventBus,
+    private readonly jornadas: JornadasService,
   ) {}
 
   /** Los días del ticket con su estado y el total de horas (todo derivado de las actividades). */
@@ -125,7 +127,12 @@ export class ReportesDiariosService {
         where: { ticketId_fecha: { ticketId, fecha: deDia(fecha) } },
       });
       if (previo?.corregidoAt) this.diaCorregido();
-      const representanteId = await this.representante(tx, ticketId, e.representanteId, previo?.representanteId);
+      const representanteId = await this.representante(
+        tx,
+        ticketId,
+        e.representanteId,
+        previo?.representanteId,
+      );
       const datos = {
         representanteId,
         tiempoProductivo: e.tiempoProductivo ?? null,
@@ -147,6 +154,7 @@ export class ReportesDiariosService {
         });
       }
       await this.guardarActividades(tx, id, e.actividades, actor.id);
+      await this.jornadas.sincronizar(tx, ticketId, actor.id); // guardar reabre el día: vuelve a faltar el job log
     });
     return this.obtener(ticketId, fecha);
   }
@@ -173,6 +181,7 @@ export class ReportesDiariosService {
         where: { id: r.id },
         data: { completadoAt: ahora, completadoPor: actor.id, updatedBy: actor.id },
       });
+      await this.jornadas.sincronizar(tx, ticketId, actor.id); // cumple el requisito de cierre «job log del día»
       const supervisor = await tx.ticketPersona.findFirst({
         where: { ticketId, rol: 'supervisor' },
         select: { usuarioId: true },
@@ -264,7 +273,11 @@ export class ReportesDiariosService {
       // se firma en cualquier paso (el día se completa en la ejecución y la firma puede llegar después): basta ser del equipo del ticket
       const t = await tx.ticket.findUnique({
         where: { id: ticketId },
-        select: { pedidoId: true, ticketNumero: true, personas: { select: { usuarioId: true, rol: true } } },
+        select: {
+          pedidoId: true,
+          ticketNumero: true,
+          personas: { select: { usuarioId: true, rol: true } },
+        },
       });
       if (!t) throw new NotFoundException('El ticket no existe');
       const delEquipo = t.personas.some((p) => p.usuarioId === actor.id);
@@ -285,11 +298,18 @@ export class ReportesDiariosService {
       const ahora = new Date();
       let prueba: Record<string, unknown>;
       if (rol === 'supervisor') {
-        const esSupervisor = t.personas.some((p) => p.rol === 'supervisor' && p.usuarioId === actor.id);
+        const esSupervisor = t.personas.some(
+          (p) => p.rol === 'supervisor' && p.usuarioId === actor.id,
+        );
         if (!esSupervisor && actor.roleCode !== 'superadmin') {
-          throw new ForbiddenException('Solo el Supervisor asignado a este ticket firma el reporte del día');
+          throw new ForbiddenException(
+            'Solo el Supervisor asignado a este ticket firma el reporte del día',
+          );
         }
-        if (archivoId) throw new BadRequestException('La firma del Supervisor se hace en el portal: no lleva archivo');
+        if (archivoId)
+          throw new BadRequestException(
+            'La firma del Supervisor se hace en el portal: no lleva archivo',
+          );
         prueba = firmaDeUnaLinea(
           'pumping_reporte_diario',
           r.id,
@@ -301,7 +321,9 @@ export class ReportesDiariosService {
         );
       } else {
         if (!archivoId) {
-          throw new BadRequestException('Suba el documento firmado por el representante del cliente');
+          throw new BadRequestException(
+            'Suba el documento firmado por el representante del cliente',
+          );
         }
         if (!(await tx.archivoRef.findUnique({ where: { id: archivoId } }))) {
           throw new BadRequestException('El archivo indicado no existe');
@@ -523,13 +545,18 @@ export class ReportesDiariosService {
     if (indicado) {
       const p = await tx.catPersonaContacto.findUnique({ where: { id: indicado } });
       if (!p || p.tipo !== 'representante_campo') {
-        throw new BadRequestException('El representante debe ser un representante de campo del catálogo');
+        throw new BadRequestException(
+          'El representante debe ser un representante de campo del catálogo',
+        );
       }
       return indicado;
     }
     if (indicado === null) return null;
     if (previo !== undefined) return previo;
-    const ticket = await tx.ticket.findUnique({ where: { id: ticketId }, select: { representanteCampoId: true } });
+    const ticket = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: { representanteCampoId: true },
+    });
     return ticket?.representanteCampoId ?? null;
   }
 
