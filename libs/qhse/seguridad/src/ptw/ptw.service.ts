@@ -55,6 +55,16 @@ export class PtwService {
     return this.abrirEn(tx, ticketId, this.dia(diaOperacion), actor, false);
   }
 
+  /** Abre el PTW de un día de servicio (lo usa la tarea programada). Si ese día ya tiene uno vigente no hace nada y devuelve `null`. */
+  async abrirDelDia(
+    tx: Tx,
+    ticketId: string,
+    diaOperacion: string,
+    actor: ActorPtw,
+  ): Promise<string | null> {
+    return this.abrirEn(tx, ticketId, this.dia(diaOperacion), actor, false);
+  }
+
   /** Abre el PTW del día; `rechazarSiExiste` decide si un PTW vigente del mismo día es un error (API) o se ignora (evento). */
   private async abrirEn(
     tx: Tx,

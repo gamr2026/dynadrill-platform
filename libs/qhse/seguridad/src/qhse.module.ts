@@ -47,6 +47,7 @@ import { StopController } from './stop/stop.controller';
 import { StopService } from './stop/stop.service';
 import { PtwConsultaService } from './ptw/ptw-consulta.service';
 import { PtwController } from './ptw/ptw.controller';
+import { PtwProgramadoService } from './ptw/ptw-programado.service';
 import { PtwService } from './ptw/ptw.service';
 import { InvestigacionesConsultaService } from './investigaciones/investigaciones-consulta.service';
 import { InvestigacionesController } from './investigaciones/investigaciones.controller';
@@ -118,6 +119,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     DocumentosPedidoService,
     DocumentosEstadoService,
     PtwService,
+    PtwProgramadoService,
     PtwConsultaService,
     SwaService,
     SwaConsultaService,

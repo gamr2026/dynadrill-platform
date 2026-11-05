@@ -183,6 +183,7 @@ model TicketRef {
   ptws           Ptw[]
   swas           Swa[]
   servicios      TicketServicio[]
+  diasServicio   TicketDiaServicio[]
   operadores     TicketOperador[]
   matricesOrigen IpercMatriz[]
 
@@ -589,6 +590,18 @@ model TicketServicio {
 
   @@id([ticketId, tipoCodigo])
   @@map("ticket_servicio")
+  @@schema("qhse")
+}
+
+/// Días de servicio activos del ticket (los avisa Pumping por evento y se reemplazan con cada aviso): de aquí sale qué PTW abre cada día la tarea programada.
+model TicketDiaServicio {
+  ticketId String    @map("ticket_id") @db.Uuid
+  ticket   TicketRef @relation(fields: [ticketId], references: [ticketId], onDelete: Cascade)
+  fecha    DateTime  @db.Date
+
+  @@id([ticketId, fecha])
+  @@index([fecha])
+  @@map("ticket_dia_servicio")
   @@schema("qhse")
 }
 

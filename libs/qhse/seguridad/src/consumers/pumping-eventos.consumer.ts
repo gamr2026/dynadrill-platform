@@ -14,12 +14,16 @@ const TIPOS = [
   'operaciones.pumping.asignacion_realizada',
   'operaciones.fcr.ticket_creado',
   'operaciones.fcr.asignacion_realizada',
+  'operaciones.pumping.dias_de_servicio_actualizados',
 ] as const;
+
+const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Recibe de Pumping y de FCR (contenedor operaciones) los hechos que abren casos de QHSE (contratos 4.6 y 3):
  *  - `ticket_creado`: QHSE conoce el ticket (para preparar el PTW, cargar sus documentos y referenciarlo);
- *  - `asignacion_realizada`: guarda los operadores asignados (la solicitud de EPI la hace el equipo de Pumping desde el ticket).
+ *  - `asignacion_realizada`: guarda los operadores asignados (la solicitud de EPI la hace el equipo de Pumping desde el ticket);
+ *  - `dias_de_servicio_actualizados`: los días de servicio activos del ticket (cada aviso reemplaza al anterior); de ahí la tarea programada abre el PTW de cada día.
  * Un evento al que le faltan datos se ignora sin error.
  */
 @Injectable()
@@ -40,6 +44,34 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
     });
   }
 
+  /** Reemplaza los días de servicio activos del ticket. Un aviso de un ticket que QHSE todavía no conoce, o sin lista de fechas, se ignora. */
+  private async diasDeServicio(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    d: Record<string, unknown>,
+  ): Promise<void> {
+    const ticketId = d['ticketId'];
+    if (!esUuid(ticketId) || !Array.isArray(d['dias'])) {
+      this.logger.warn('dias_de_servicio_actualizados: faltan ticketId o dias; se ignora');
+      return;
+    }
+    if (!(await tx.ticketRef.count({ where: { ticketId } }))) {
+      this.logger.warn(
+        `dias_de_servicio_actualizados: QHSE no conoce el ticket ${ticketId}; se ignora`,
+      );
+      return;
+    }
+    const dias = [
+      ...new Set(
+        (d['dias'] as unknown[]).filter((x): x is string => typeof x === 'string' && FECHA.test(x)),
+      ),
+    ];
+    await tx.ticketDiaServicio.deleteMany({ where: { ticketId } });
+    if (dias.length)
+      await tx.ticketDiaServicio.createMany({
+        data: dias.map((f) => ({ ticketId, fecha: new Date(`${f}T00:00:00.000Z`) })),
+      });
+  }
+
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
     if (!(TIPOS as readonly string[]).includes(event.type)) return;
@@ -47,6 +79,8 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
       await this.prisma.$transaction(async (tx) => {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
           const d = event.data;
+          if (event.type === 'operaciones.pumping.dias_de_servicio_actualizados')
+            return this.diasDeServicio(tx, d);
           const ticketId = d['ticketId'];
           const pedidoId = d['pedidoId'];
           if (!esUuid(ticketId) || !esUuid(pedidoId) || typeof d['pedidoCodigo'] !== 'string') {
