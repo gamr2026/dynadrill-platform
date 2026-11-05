@@ -371,6 +371,8 @@ model InspeccionVehiculo {
   unidad          Unidad            @relation(fields: [unidadId], references: [id])
   momento         MomentoInspeccion @default(salida)
   fecha           DateTime          @db.Timestamptz(6)
+  /// Día del servicio al que pertenece (un servicio de varios días tiene una inspección de salida y una de llegada por día).
+  diaServicio     DateTime          @map("dia_servicio") @db.Date
   /// Punto de partida (obligatorio) y destino (opcional): texto libre, como en la demo (no son bodegas: una base, un pozo, una ciudad…).
   puntoPartida    String            @map("punto_partida")
   destino         String?

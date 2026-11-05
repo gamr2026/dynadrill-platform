@@ -201,7 +201,12 @@ run('Flota F1: unidades, lecturas y preventivos (base de datos real)', () => {
     it('filtra por tipo y no lista las unidades dadas de baja por omisión', async () => {
       const a1 = await crear({ codigo: codigo('AUX'), nombre: 'Auxiliar 1', tipo: 'auxiliar' });
       const a2 = await crear({ codigo: codigo('AUX'), nombre: 'Auxiliar 2', tipo: 'auxiliar' });
-      const s1 = await crear({ codigo: codigo('SRV'), nombre: 'Servicio 1', tipo: 'servicio', lecturaInicial: 10 });
+      const s1 = await crear({
+        codigo: codigo('SRV'),
+        nombre: 'Servicio 1',
+        tipo: 'servicio',
+        lecturaInicial: 10,
+      });
       expect([a1.status, a2.status, s1.status]).toEqual([201, 201, 201]);
       const r = await http()
         .get('/api/operaciones/flota/unidades?tipo=auxiliar')

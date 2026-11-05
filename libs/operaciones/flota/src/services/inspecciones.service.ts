@@ -24,6 +24,8 @@ export interface RegistrarInspeccionEntrada {
   unidadId?: string;
   momento?: MomentoInspeccion;
   fecha?: Date;
+  /** Día del servicio (`AAAA-MM-DD`) al que pertenece; por omisión, el día de Ecuador de `fecha`. */
+  diaServicio?: string;
   /** Punto de partida y destino: texto libre (el de partida es obligatorio; el destino, no). */
   puntoPartida: string;
   destino?: string | null;
@@ -48,6 +50,8 @@ export function estadoDeSalida(
 }
 
 const SOLO_DIA = (d: Date) => d.toISOString().slice(0, 10);
+/** El día de Ecuador (UTC-5, sin horario de verano) de un instante. */
+const DIA_ECUADOR = (d: Date) => new Date(d.getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 /**
  * Inspección de vehículos (DYN-SGI-RE-068). Una inspección es un documento firmado: no se edita; se anula con motivo y se repite.
@@ -119,14 +123,24 @@ export class InspeccionesService {
         });
       }
 
+      const fecha = entrada.fecha ?? new Date();
+      const dia = entrada.diaServicio ?? DIA_ECUADOR(fecha);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || Number.isNaN(Date.parse(`${dia}T00:00:00Z`)))
+        throw new BadRequestException('El día del servicio no es válido');
+
       if (caso) {
         const hay = await tx.inspeccionVehiculo.findFirst({
-          where: { casoId: caso.id, momento, anuladaAt: null },
+          where: {
+            casoId: caso.id,
+            momento,
+            diaServicio: new Date(`${dia}T00:00:00Z`),
+            anuladaAt: null,
+          },
           select: { id: true },
         });
         if (hay) {
           throw new ConflictException({
-            message: `Este caso ya tiene la inspección de ${momento}; anúlela antes de repetirla`,
+            message: `Este caso ya tiene la inspección de ${momento} del ${dia}; anúlela antes de repetirla`,
             code: 'inspeccion_ya_registrada',
           });
         }
@@ -158,7 +172,6 @@ export class InspeccionesService {
       await this.conductores.exigirCondiciones(entrada.conductorId, tx);
 
       const id = uuidv7();
-      const fecha = entrada.fecha ?? new Date();
       await tx.inspeccionVehiculo.create({
         data: {
           id,
@@ -166,6 +179,7 @@ export class InspeccionesService {
           unidadId,
           momento,
           fecha,
+          diaServicio: new Date(`${dia}T00:00:00Z`),
           puntoPartida: partida,
           destino,
           conductorId: entrada.conductorId,
@@ -206,6 +220,7 @@ export class InspeccionesService {
         ticketId: caso?.ticketId ?? null,
         unidadId,
         vehiculoId: unidad.vehiculoId,
+        diaServicio: dia,
       };
       await this.publicar(tx, 'registrada', id, actor, {
         ...base,
@@ -436,8 +451,8 @@ export class InspeccionesService {
   }
 
   /** Casos de un ticket con el estado de la inspección de cada unidad (salida) y si ya hay la de llegada. */
-  async casosDeTicket(ticketId: string) {
-    return this.casos({ ticketId });
+  async casosDeTicket(ticketId: string, dia?: string) {
+    return this.casos({ ticketId }, dia);
   }
 
   /** Casos asignados a una cuenta (el operador emparejado con la unidad), de los últimos 60 días. */
@@ -448,7 +463,7 @@ export class InspeccionesService {
     });
   }
 
-  private async casos(where: Prisma.InspeccionCasoWhereInput) {
+  private async casos(where: Prisma.InspeccionCasoWhereInput, dia?: string) {
     const casos = await this.prisma.inspeccionCaso.findMany({
       where,
       include: {
@@ -461,8 +476,10 @@ export class InspeccionesService {
           },
         },
         operador: { select: { id: true, nombre: true } },
+        // sin día, la del día más reciente; con día, las de ese día del servicio
         inspecciones: {
-          where: { anuladaAt: null },
+          where: { anuladaAt: null, ...(dia ? { diaServicio: new Date(`${dia}T00:00:00Z`) } : {}) },
+          orderBy: { diaServicio: 'desc' },
           include: { revisiones: { orderBy: { revisadaAt: 'desc' }, take: 1 } },
         },
       },
@@ -522,11 +539,13 @@ export class InspeccionesService {
     id: string;
     casoId: string | null;
     unidadId: string;
+    diaServicio: Date;
     caso: { ticketId: string } | null;
     unidad: { vehiculoId: string | null };
   }) {
     return {
       inspeccionId: i.id,
+      diaServicio: SOLO_DIA(i.diaServicio),
       casoId: i.casoId,
       ticketId: i.caso?.ticketId ?? null,
       unidadId: i.unidadId,

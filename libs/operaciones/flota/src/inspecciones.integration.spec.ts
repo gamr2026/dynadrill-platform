@@ -761,9 +761,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
       ).rows[0].id;
       expect(
         await rechazoDeBase(
-          appDb.query('UPDATE flota.inspeccion_vehiculo SET destino = NULL WHERE id = $1', [
-            insp,
-          ]),
+          appDb.query('UPDATE flota.inspeccion_vehiculo SET destino = NULL WHERE id = $1', [insp]),
         ),
       ).toMatch(/permission denied/);
       expect(
@@ -845,7 +843,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
         /inspeccion_vehiculo_caso_fkey/,
       );
       expect(await rechazoDeBase(insertar(unidadId, 'salida', false))).toMatch(
-        /caso_momento_vigente_key/,
+        /caso_momento_dia_vigente_key/,
       );
     });
 

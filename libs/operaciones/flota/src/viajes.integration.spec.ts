@@ -147,7 +147,9 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'flota.gerenciamiento_viaje.firmado' AND datos->'data'->>'documentoId' = $1 ORDER BY id",
         [id],
       )
-    ).rows.map((r: { datos: { data: Record<string, unknown>; actor: { userId: string } } }) => r.datos);
+    ).rows.map(
+      (r: { datos: { data: Record<string, unknown>; actor: { userId: string } } }) => r.datos,
+    );
   const rechazoDeBase = async (promesa: Promise<unknown>) => {
     let error: unknown = null;
     try {
@@ -615,7 +617,7 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
             [uuidv7(), tickets[0], CONDUCTOR.id, unidadId, 'Base Coco', 'Pozo Beta-9'],
           ),
         ),
-      ).toMatch(/ticket_tipo_unidad_vigente_key/);
+      ).toMatch(/ticket_tipo_unidad_fecha_vigente_key/);
       // cada conductor solicita el de su unidad: otra unidad del mismo ticket y tipo sí cabe
       await admin.query(
         `INSERT INTO flota.gerenciamiento_viaje (id, tipo, ticket_id, conductor_id, unidad_id, fecha, motivo, origen,
@@ -623,6 +625,49 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
          VALUES ($1, 'salida', $2, $3, $4, current_date, 'Prueba', $5, $6, 0, 'bajo', $3)`,
         [uuidv7(), tickets[0], CONDUCTOR_2.id, servicioId, 'Base Coco', 'Pozo Beta-9'],
       );
+    });
+
+    it('un servicio de varios días tiene un viaje de salida por día, cada uno con la inspección de su día', async () => {
+      const ticket = uuidv7();
+      tickets.push(ticket);
+      await admin.query(
+        "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo) VALUES ($1, $2, $3, 'ejecucion_operativa')",
+        [ticket, uuidv7(), `PED-VD-${n}-${ticket.slice(-4)}`],
+      );
+      const caso = uuidv7();
+      await admin.query(
+        'INSERT INTO flota.inspeccion_caso (id, ticket_id, unidad_id, operador_id) VALUES ($1, $2, $3, $4)',
+        [caso, ticket, unidadId, CONDUCTOR.id],
+      );
+      const dia2 = new Date(Date.parse(`${hoy}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const inspeccion = (dia: string, partida: string) =>
+        admin.query(
+          `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, dia_servicio, punto_partida, destino, conductor_id, created_by)
+           VALUES ($1, $2, $3, 'salida', now(), $5::date, $6, $7, $4, $4)`,
+          [uuidv7(), caso, unidadId, CONDUCTOR.id, dia, partida, 'Pozo Beta-9'],
+        );
+      const sinOrigen = (extra: Record<string, unknown>) => {
+        const { origen: _o, destino: _d, ...resto } = cuerpo({ ticketId: ticket, ...extra });
+        return resto;
+      };
+      // el día 1 tiene su inspección; el día 2 todavía no
+      await inspeccion(hoy, 'Base Coco');
+      const primero = await solicitar(sinOrigen({ fecha: hoy }));
+      expect(primero.status).toBe(201);
+      const sin = await solicitar(sinOrigen({ fecha: dia2 }));
+      expect([sin.status, sin.body.code]).toEqual([409, 'sin_inspeccion_de_salida']);
+      // el mismo día no se repite, pero el día siguiente sí, con el origen de su inspección
+      const repetido = await solicitar(sinOrigen({ fecha: hoy }));
+      expect([repetido.status, repetido.body.code]).toEqual([409, 'viaje_ya_solicitado']);
+      await inspeccion(dia2, 'Base Quito');
+      const segundo = await solicitar(sinOrigen({ fecha: dia2 }));
+      expect(segundo.status).toBe(201);
+      const v2 = (await http().get(`${base}/${segundo.body.id}`).set(conductor()).expect(200)).body;
+      expect(v2.origen).toBe('Base Quito');
+      // la decisión avisa a Pumping el día del servicio al que pertenece el viaje
+      await http().post(`${base}/${segundo.body.id}/autorizar`).set(gerente()).expect(201);
+      const [e] = await eventos('flota.gerenciamiento_viaje.aprobado', segundo.body.id);
+      expect(e).toMatchObject({ ticketId: ticket, tipo: 'salida', diaServicio: dia2 });
     });
 
     it('con ticket, el origen y el destino salen de la inspección de salida de la unidad (sin ella no se solicita)', async () => {

@@ -39,6 +39,8 @@ export class RegistrarInspeccionDto {
   @IsOptional() @IsIn(MOMENTOS) momento?: (typeof MOMENTOS)[number];
   /** Momento de la inspección (ISO 8601); por omisión, ahora. */
   @IsOptional() @IsString() @MaxLength(40) fecha?: string;
+  /** Día del servicio (AAAA-MM-DD) al que pertenece; por omisión, el día de Ecuador de `fecha`. */
+  @IsOptional() @Matches(FECHA) diaServicio?: string;
   /** Punto de partida (obligatorio) y destino (opcional): texto libre. */
   @IsString() @MinLength(1) @MaxLength(200) puntoPartida!: string;
   @IsOptional() @IsString() @MaxLength(200) destino?: string | null;
@@ -64,6 +66,8 @@ export class ListarInspeccionesDto {
 
 export class CasosDto {
   @IsUUID() ticketId!: string;
+  /** Día del servicio (AAAA-MM-DD): el estado de cada unidad ese día; sin él, el del día más reciente. */
+  @IsOptional() @Matches(FECHA) dia?: string;
 }
 
 export class MotivoDto {
@@ -99,7 +103,7 @@ export class InspeccionesController {
   @RequirePermission(P.INSPECCIONES_VER)
   @Get('inspecciones-vehiculo/casos')
   casos(@Query() q: CasosDto) {
-    return this.inspecciones.casosDeTicket(q.ticketId);
+    return this.inspecciones.casosDeTicket(q.ticketId, q.dia);
   }
 
   @RequirePermission(P.INSPECCIONES_VER)

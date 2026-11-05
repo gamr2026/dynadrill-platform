@@ -193,13 +193,14 @@ export class ViajesService {
             ticketId: entrada.ticketId,
             unidadId: unidad.id,
             tipo: entrada.tipo,
+            fecha: new Date(`${entrada.fecha}T00:00:00.000Z`),
             OR: [{ decision: null }, { decision: 'autorizado' }],
           },
           select: { id: true },
         });
         if (hay) {
           throw new ConflictException({
-            message: `Esta unidad ya tiene un gerenciamiento de viaje de ${entrada.tipo} vigente en este ticket`,
+            message: `Esta unidad ya tiene un gerenciamiento de viaje de ${entrada.tipo} vigente en este ticket para el ${entrada.fecha}`,
             code: 'viaje_ya_solicitado',
           });
         }
@@ -211,6 +212,7 @@ export class ViajesService {
           where: {
             anuladaAt: null,
             momento: 'salida',
+            diaServicio: new Date(`${entrada.fecha}T00:00:00.000Z`),
             caso: { ticketId: entrada.ticketId, unidadId: unidad.id },
           },
           select: { id: true },
@@ -218,7 +220,7 @@ export class ViajesService {
         if (!salida) {
           throw new ConflictException({
             message:
-              'Primero se debe registrar la inspección de salida de la unidad: de ahí salen el origen y el destino del viaje',
+              'Primero se debe registrar la inspección de salida de la unidad de ese día: de ahí salen el origen y el destino del viaje',
             code: 'sin_inspeccion_de_salida',
           });
         }
@@ -537,6 +539,7 @@ export class ViajesService {
           numero: true,
           ticketId: true,
           tipo: true,
+          fecha: true,
           nivel: true,
           conductorId: true,
           decision: true,
@@ -603,6 +606,8 @@ export class ViajesService {
           ticketId: v.ticketId,
           tipo: v.tipo,
           nivel: v.nivel,
+          // día del servicio al que pertenece el viaje (Pumping lo ubica en la jornada)
+          diaServicio: v.fecha.toISOString().slice(0, 10),
           unidadId: v.unidadId,
           // Pumping ubica el requisito de la unidad por el vehículo del catálogo
           vehiculoId: v.unidad.vehiculoId,
