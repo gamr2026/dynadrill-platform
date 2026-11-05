@@ -3238,7 +3238,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       hoy = DIAS[1];
     });
 
-    type Ticket = { id: string; url: string; jornadas: string };
+    type Ticket = { id: string; url: string; jornadas: string; pedidoId: string };
     const enEjecucion = async (inicio = DIAS[0], fin = DIAS[2]): Promise<Ticket> => {
       const t = await ticketEnTraslado();
       await admin.query(
@@ -3346,10 +3346,51 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await marcarHerramienta(t, fecha);
       await ver(t).expect(200); // pedir las jornadas deja los requisitos al día
     };
-    /** Deja un día listo para trabajar: el Company Man aceptó y el checklist del día está completo, así que la jornada queda abierta. */
+    const mas = (fecha: string, dias: number) =>
+      new Date(Date.parse(`${fecha}T00:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
+    /** Lo que QHSE hace por día llega a Pumping como eventos: el PTW aprobado y los documentos PT y ART cargados (el ART vale 15 días). Devuelven el id de origen. */
+    const aprobarPtw = async (t: Ticket, fecha: string) => {
+      const ptwId = uuidv7();
+      await externos.consumir(
+        externo('qhse.ptw.cerrado', {
+          ptwId,
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          diaOperacion: fecha,
+        }),
+      );
+      return ptwId;
+    };
+    const cargarDocumento = async (
+      t: Ticket,
+      tipoDocumento: 'pt' | 'art',
+      fecha: string,
+      vigenteHasta?: string,
+    ) => {
+      const documentoId = uuidv7();
+      await externos.consumir(
+        externo('qhse.documento_pedido.cargado', {
+          documentoId,
+          tipoDocumento,
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          fecha,
+          ...(tipoDocumento === 'art' ? { vigenteHasta: vigenteHasta ?? mas(fecha, 15) } : {}),
+        }),
+      );
+      return documentoId;
+    };
+    /** QHSE cubre un día completo: PTW aprobado, PT cargado y un ART vigente. */
+    const cubrirQhse = async (t: Ticket, fecha: string) => {
+      await aprobarPtw(t, fecha);
+      await cargarDocumento(t, 'pt', fecha);
+      await cargarDocumento(t, 'art', fecha);
+    };
+    /** Deja un día listo para trabajar: el Company Man aceptó, el checklist del día está completo y QHSE lo cubrió, así que la jornada queda abierta. */
     const abrirDia = async (t: Ticket, fecha: string) => {
       await aceptar(t, fecha).expect(201);
       await completarChecklist(t, fecha);
+      await cubrirQhse(t, fecha);
     };
 
     it('al pedirlas en la Ejecución operativa se crea una jornada por día del rango y el estado de hoy se deduce de la fecha', async () => {
@@ -3371,7 +3412,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         [DIAS[1], 2],
         [DIAS[2], 3],
       ]);
-      expect(estados(r)).toEqual(['con_pendientes', 'hoy', 'pendiente']);
+      // hoy falta lo de QHSE (PTW, PT y ART): el día se ve bloqueado
+      expect(estados(r)).toEqual(['con_pendientes', 'bloqueada', 'pendiente']);
       // pedirlas otra vez no duplica
       await ver(t).expect(200);
       expect(await prisma.ticketJornada.count({ where: { ticketId: t.id } })).toBe(3);
@@ -3418,10 +3460,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         estado: 'pendiente',
         companyManAcepto: true,
         companyManAceptoPor: SUPERVISORA.id,
-        pendientes: { apertura: 1, cierre: 2 },
+        pendientes: { apertura: 4, cierre: 2 }, // checklist, PTW, PT y ART
       });
-      // al completarse el checklist del día, el sistema abre la jornada
+      // con el checklist del día completo todavía falta lo de QHSE; cuando QHSE cubre el día, el sistema abre la jornada
       await completarChecklist(t, DIAS[1]);
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'pendiente',
+        pendientes: { apertura: 3, cierre: 2 },
+      });
+      await cubrirQhse(t, DIAS[1]);
       const hoyJ = (await ver(t)).body.jornadas[1];
       expect(hoyJ).toMatchObject({
         estado: 'abierta',
@@ -3432,7 +3479,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         (await prisma.ticketJornadaHistorial.findMany({ where: { jornadaId: hoyJ.id } })).map(
           (h) => [h.accion, h.actorId],
         ),
-      ).toEqual([['abierta', OP1.id]]); // la abrió el último requisito cumplido: el checklist del Operador
+      ).toEqual([['abierta', null]]); // la abrió el sistema al llegar lo último (el aviso de QHSE), sin persona
     });
 
     it('un día sin operación pide motivo del catálogo y detalle, lo registra quien opera el servicio y no se registra en un día futuro', async () => {
@@ -3655,11 +3702,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const t = await enEjecucion();
       const r = await ver(t).expect(200);
       const filas = await requisitosDe(t.id);
-      expect(filas).toHaveLength(12); // 3 días × 4 requisitos activos del catálogo
+      expect(filas).toHaveLength(21); // 3 días × 7 requisitos activos del catálogo
       expect(new Set(filas.map((f) => f.codigo))).toEqual(
         new Set([
+          'art_vigente',
           'checklist_seguridad_dia',
           'company_man_acepto_dia',
+          'pt_dia_cargado',
+          'ptw_dia_aprobado',
           'job_log_dia',
           'herramientas_dia',
         ]),
@@ -3672,18 +3722,28 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           q.momento,
         ]),
       ).toEqual([
+        ['art_vigente', 'apertura'],
         ['checklist_seguridad_dia', 'apertura'],
         ['company_man_acepto_dia', 'apertura'],
+        ['pt_dia_cargado', 'apertura'],
+        ['ptw_dia_aprobado', 'apertura'],
         ['herramientas_dia', 'cierre'],
         ['job_log_dia', 'cierre'],
       ]);
-      expect(r.body.jornadas[1]).toMatchObject({
-        pendientes: { apertura: 2, cierre: 2 },
-        bloqueos: [],
-      });
+      expect(r.body.jornadas[1]).toMatchObject({ pendientes: { apertura: 5, cierre: 2 } });
+      expect(
+        r.body.jornadas[1].bloqueos.map((b: { codigo: string; responsable: string }) => [
+          b.codigo,
+          b.responsable,
+        ]),
+      ).toEqual([
+        ['art_vigente', 'qhse'],
+        ['pt_dia_cargado', 'qhse'],
+        ['ptw_dia_aprobado', 'qhse'],
+      ]);
       // pedirlas otra vez no duplica
       await ver(t).expect(200);
-      expect(await requisitosDe(t.id)).toHaveLength(12);
+      expect(await requisitosDe(t.id)).toHaveLength(21);
       // la lista de requisitos de salida de cada paso no mezcla los de las jornadas
       const estado = await http().get(`${t.url}/requisitos`).set(op1());
       if (estado.status === 200) {
@@ -3707,8 +3767,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect(
         (await ver(t)).body.jornadas[0].requisitos.map((q: { codigo: string }) => q.codigo),
       ).toEqual([
+        'art_vigente',
         'checklist_seguridad_dia',
         'company_man_acepto_dia',
+        'pt_dia_cargado',
+        'ptw_dia_aprobado',
         'herramientas_dia',
         'job_log_dia',
       ]);
@@ -3765,52 +3828,40 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     });
 
     it('lo que falta de otra área bloquea el día de hoy, se informa por área y, al llegar lo último, el sistema abre la jornada solo', async () => {
-      // QHSE todavía no cumple sus requisitos por día (etapa 5): se activa uno solo dentro de la prueba para ver cómo se comporta
-      await admin.query(
-        "UPDATE pumping.requisito SET activo = true WHERE codigo = 'ptw_dia_aprobado'",
-      );
-      try {
-        const t = await enEjecucion();
-        const r = await ver(t).expect(200);
-        expect(r.body.jornadas[1]).toMatchObject({
-          estadoVisible: 'bloqueada',
-          pendientes: { apertura: 3, cierre: 2 },
-          bloqueos: [{ codigo: 'ptw_dia_aprobado', responsable: 'qhse' }],
-        });
-        // un día futuro no se muestra bloqueado: todavía no toca
-        expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
-        expect(r.body.pendientesPorArea).toMatchObject({ qhse: 1, pumping: 4 });
+      const t = await enEjecucion();
+      const r = await ver(t).expect(200);
+      expect(r.body.jornadas[1]).toMatchObject({
+        estadoVisible: 'bloqueada',
+        pendientes: { apertura: 5, cierre: 2 },
+      });
+      // un día futuro no se muestra bloqueado: todavía no toca
+      expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
+      expect(r.body.pendientesPorArea).toMatchObject({ qhse: 3, pumping: 4 });
 
-        // el Company Man acepta y el checklist queda completo, pero falta el PTW: la jornada no se abre
-        const acepta = await aceptar(t, DIAS[1]).expect(201);
-        expect(acepta.body).toMatchObject({ yaMarcada: false, abierta: false });
-        await completarChecklist(t, DIAS[1]);
-        expect((await ver(t)).body.jornadas[1]).toMatchObject({
-          estado: 'pendiente',
-          estadoVisible: 'bloqueada',
-        });
-        expect((await cerrar(t, DIAS[1])).status).toBe(409);
+      // el Company Man acepta y el checklist queda completo, pero falta lo de QHSE: la jornada no se abre
+      const acepta = await aceptar(t, DIAS[1]).expect(201);
+      expect(acepta.body).toMatchObject({ yaMarcada: false, abierta: false });
+      await completarChecklist(t, DIAS[1]);
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'pendiente',
+        estadoVisible: 'bloqueada',
+      });
+      expect((await cerrar(t, DIAS[1])).status).toBe(409);
 
-        // QHSE aprueba el PTW del día: en cuanto se cumple el último requisito de apertura, el sistema abre la jornada
-        await admin.query(
-          "UPDATE pumping.ticket_requisito SET estado = 'cumplido', cumplido_at = now(), origen = 'evento' WHERE ticket_id = $1 AND requisito_codigo = 'ptw_dia_aprobado' AND fecha = $2",
-          [t.id, DIAS[1]],
-        );
-        const abierta = (await ver(t)).body.jornadas[1];
-        expect(abierta).toMatchObject({
-          estado: 'abierta',
-          estadoVisible: 'abierta',
-          bloqueos: [],
-        });
-        const bitacora = await prisma.ticketJornadaHistorial.findMany({
-          where: { jornadaId: abierta.id },
-        });
-        expect(bitacora.map((h) => [h.accion, h.actorId])).toEqual([['abierta', null]]); // la abrió el sistema, sin persona
-      } finally {
-        await admin.query(
-          "UPDATE pumping.requisito SET activo = false WHERE codigo = 'ptw_dia_aprobado'",
-        );
-      }
+      // QHSE va cumpliendo lo suyo: lo que falta se achica y en cuanto llega lo último el sistema abre la jornada
+      const bloqueos = async () =>
+        (await ver(t)).body.jornadas[1].bloqueos.map((b: { codigo: string }) => b.codigo);
+      await aprobarPtw(t, DIAS[1]);
+      expect(await bloqueos()).toEqual(['art_vigente', 'pt_dia_cargado']);
+      await cargarDocumento(t, 'pt', DIAS[1]);
+      expect(await bloqueos()).toEqual(['art_vigente']);
+      await cargarDocumento(t, 'art', DIAS[0]); // emitido el día 1: cubre hasta 15 días
+      const abierta = (await ver(t)).body.jornadas[1];
+      expect(abierta).toMatchObject({ estado: 'abierta', estadoVisible: 'abierta', bloqueos: [] });
+      const bitacora = await prisma.ticketJornadaHistorial.findMany({
+        where: { jornadaId: abierta.id },
+      });
+      expect(bitacora.map((h) => [h.accion, h.actorId])).toEqual([['abierta', null]]); // la abrió el sistema, sin persona
     });
 
     it('la base mantiene la coherencia de los requisitos por día', async () => {
@@ -3844,7 +3895,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         t.id,
         DIAS[2],
       ]);
-      expect((await requisitosDe(t.id)).length).toBe(antes - 4);
+      expect((await requisitosDe(t.id)).length).toBe(antes - 7);
     });
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -4015,6 +4066,164 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect(falta.body.detail).not.toContain('Formalización');
       await reporteCompleto(t);
       await avanzar(t).expect(201);
+    });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 5a: lo que QHSE hace por día (PTW aprobado, PT cargado, ART vigente) llega por eventos
+    // ----------------------------------------------------------------------------------------------------------------
+    it('cada hecho de QHSE cubre solo sus días: el PTW y el PT uno, el ART todo su rango; anular el documento deja el día sin cubrir', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      const ptw = await aprobarPtw(t, DIAS[0]);
+      await cargarDocumento(t, 'pt', DIAS[1]);
+      const art = await cargarDocumento(t, 'art', DIAS[0], DIAS[1]); // vale los días 1 y 2
+      const q = async (codigo: string) => [
+        await estadoReq(t.id, DIAS[0], codigo),
+        await estadoReq(t.id, DIAS[1], codigo),
+        await estadoReq(t.id, DIAS[2], codigo),
+      ];
+      expect(await q('ptw_dia_aprobado')).toEqual(['cumplido', 'pendiente', 'pendiente']);
+      expect(await q('pt_dia_cargado')).toEqual(['pendiente', 'cumplido', 'pendiente']);
+      expect(await q('art_vigente')).toEqual(['cumplido', 'cumplido', 'pendiente']);
+
+      // QHSE anula el PTW del día 1 y el ART: vuelven a faltar
+      await externos.consumir(
+        externo('qhse.ptw.anulado', { ptwId: ptw, ticketId: t.id, diaOperacion: DIAS[0] }),
+      );
+      await externos.consumir(
+        externo('qhse.documento_pedido.anulado', {
+          documentoId: art,
+          tipoDocumento: 'art',
+          ticketId: t.id,
+          fecha: DIAS[0],
+          vigenteHasta: DIAS[1],
+        }),
+      );
+      expect(await q('ptw_dia_aprobado')).toEqual(['pendiente', 'pendiente', 'pendiente']);
+      expect(await q('art_vigente')).toEqual(['pendiente', 'pendiente', 'pendiente']);
+      // un segundo ART que cubra solo el día 3 no cubre los anteriores
+      await cargarDocumento(t, 'art', DIAS[2], DIAS[2]);
+      expect(await q('art_vigente')).toEqual(['pendiente', 'pendiente', 'cumplido']);
+    });
+
+    it('un documento del pedido sin ticket llega al ticket por el pedido; los documentos que no son requisito y los eventos incompletos se ignoran', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await externos.consumir(
+        externo('qhse.documento_pedido.cargado', {
+          documentoId: uuidv7(),
+          tipoDocumento: 'pt',
+          pedidoId: t.pedidoId,
+          fecha: DIAS[1],
+        }),
+      );
+      expect(await estadoReq(t.id, DIAS[1], 'pt_dia_cargado')).toBe('cumplido');
+      const hechos = () => prisma.ticketHechoQhse.count({ where: { ticketId: t.id } });
+      expect(await hechos()).toBe(1);
+      // el SFI o el formato de recepción no son requisito de apertura
+      await externos.consumir(
+        externo('qhse.documento_pedido.cargado', {
+          documentoId: uuidv7(),
+          tipoDocumento: 'sfi',
+          ticketId: t.id,
+          fecha: DIAS[1],
+        }),
+      );
+      // sin fecha, sin origen o de un ticket que no existe: se ignoran sin error
+      await externos.consumir(
+        externo('qhse.documento_pedido.cargado', {
+          documentoId: uuidv7(),
+          tipoDocumento: 'pt',
+          ticketId: t.id,
+        }),
+      );
+      await externos.consumir(
+        externo('qhse.ptw.cerrado', { ticketId: t.id, diaOperacion: DIAS[1] }),
+      );
+      await externos.consumir(
+        externo('qhse.documento_pedido.cargado', {
+          documentoId: uuidv7(),
+          tipoDocumento: 'pt',
+          ticketId: uuidv7(),
+          fecha: DIAS[1],
+        }),
+      );
+      expect(await hechos()).toBe(1);
+      // el mismo evento dos veces no duplica el hecho
+      const doc = uuidv7();
+      const repetido = externo('qhse.documento_pedido.cargado', {
+        documentoId: doc,
+        tipoDocumento: 'pt',
+        ticketId: t.id,
+        fecha: DIAS[0],
+      });
+      await externos.consumir(repetido);
+      await externos.consumir(repetido);
+      expect(await hechos()).toBe(2);
+    });
+
+    it('lo que QHSE carga antes de que existan las jornadas se recuerda: al empezar la ejecución los días ya nacen cubiertos', async () => {
+      const t = await ticketEnTraslado(); // todavía no hay jornadas
+      const ticket: Ticket = { ...t, jornadas: `${t.url}/jornadas` };
+      await aprobarPtw(ticket, DIAS[0]);
+      await cargarDocumento(ticket, 'pt', DIAS[0]);
+      await cargarDocumento(ticket, 'art', DIAS[0]);
+      expect(await prisma.ticketJornada.count({ where: { ticketId: t.id } })).toBe(0);
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
+        [t.id, 'ejecucion_operativa', DIAS[0], DIAS[2]],
+      );
+      const r = await ver(ticket);
+      expect(r.body.jornadas[0].bloqueos).toEqual([]); // el día 1 ya tiene PTW, PT y ART
+      expect(r.body.jornadas[1].bloqueos.map((b: { codigo: string }) => b.codigo)).toEqual([
+        'pt_dia_cargado',
+        'ptw_dia_aprobado',
+      ]); // el ART vale 15 días
+    });
+
+    it('una jornada abierta vuelve a pendiente si deja de cumplir un requisito de apertura (QHSE anula el PTW) y queda en la bitácora', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await aceptar(t, DIAS[1]).expect(201);
+      await completarChecklist(t, DIAS[1]);
+      const ptw = await aprobarPtw(t, DIAS[1]);
+      await cargarDocumento(t, 'pt', DIAS[1]);
+      await cargarDocumento(t, 'art', DIAS[1]);
+      expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+
+      await externos.consumir(
+        externo('qhse.ptw.anulado', { ptwId: ptw, ticketId: t.id, diaOperacion: DIAS[1] }),
+      );
+      const j = (await ver(t)).body.jornadas[1];
+      expect(j).toMatchObject({
+        estado: 'pendiente',
+        estadoVisible: 'bloqueada',
+        bloqueos: [{ codigo: 'ptw_dia_aprobado', responsable: 'qhse' }],
+      });
+      const bitacora = await prisma.ticketJornadaHistorial.findMany({
+        where: { jornadaId: j.id },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(bitacora.map((h) => [h.accion, h.motivo, h.actorId])).toEqual([
+        ['abierta', null, null],
+        ['reabierta', 'Dejó de cumplirse: PTW del día aprobado', null],
+      ]);
+      // un nuevo PTW aprobado la vuelve a abrir
+      await aprobarPtw(t, DIAS[1]);
+      expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+      // una jornada cerrada no se toca por lo que pase después
+      await cumplirCierre(t, DIAS[1]);
+      await cerrar(t, DIAS[1]).expect(201);
+      await externos.consumir(
+        externo('qhse.documento_pedido.anulado', {
+          documentoId: uuidv7(),
+          tipoDocumento: 'art',
+          ticketId: t.id,
+          fecha: DIAS[1],
+          vigenteHasta: DIAS[2],
+        }),
+      );
+      expect((await ver(t)).body.jornadas[1].estado).toBe('cerrada');
     });
   });
 });

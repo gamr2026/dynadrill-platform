@@ -152,7 +152,7 @@ export class JornadasService {
     if (jornadas.length === 0) return;
     const definiciones = await tx.requisito.findMany({
       where: { ambito: 'jornada', activo: true },
-      select: { codigo: true, momento: true },
+      select: { codigo: true, momento: true, modulo: true, nombre: true },
     });
     const filas = await tx.ticketRequisito.findMany({
       where: { ticketId, fecha: { not: null } },
@@ -183,7 +183,14 @@ export class JornadasService {
         })
       ).map((r) => aFecha(r.fecha)),
     );
-    /** Lo que dicen los datos de Pumping de ese requisito ese día; `undefined` si lo cumple otra área o una etapa posterior. */
+    // lo que QHSE hizo por día (llega por eventos): un día lo cumple si algún hecho vigente del tipo lo cubre
+    const hechos = await tx.ticketHechoQhse.findMany({
+      where: { ticketId, vigente: true },
+      select: { tipo: true, desde: true, hasta: true },
+    });
+    const cubre = (tipo: 'ptw_aprobado' | 'pt' | 'art', fecha: string) =>
+      hechos.some((h) => h.tipo === tipo && aFecha(h.desde) <= fecha && fecha <= aFecha(h.hasta));
+    /** Lo que dicen los datos del ticket de ese requisito ese día; `undefined` si no hay forma de deducirlo. */
     const verdad = (
       codigo: string,
       j: (typeof jornadas)[number],
@@ -193,6 +200,9 @@ export class JornadasService {
       if (codigo === JREQ.checklist) return conChecklist.has(fecha);
       if (codigo === JREQ.jobLog) return conJobLog.has(fecha);
       if (codigo === JREQ.herramientas) return conHerramientas.has(fecha);
+      if (codigo === JREQ.ptw) return cubre('ptw_aprobado', fecha);
+      if (codigo === JREQ.pt) return cubre('pt', fecha);
+      if (codigo === JREQ.art) return cubre('art', fecha);
       return undefined;
     };
 
@@ -202,15 +212,21 @@ export class JornadasService {
     );
     const nuevas: Prisma.TicketRequisitoCreateManyInput[] = [];
     const ahora = new Date();
-    const cumplido = { estado: 'cumplido' as const, cumplidoAt: ahora, origen: 'sistema' as const };
+    const cumplido = (modulo: string) => ({
+      estado: 'cumplido' as const,
+      cumplidoAt: ahora,
+      origen: modulo === 'pumping' ? ('sistema' as const) : ('evento' as const),
+    });
     const pendiente = {
       estado: 'pendiente' as const,
       cumplidoAt: null,
       cumplidoPor: null,
       origen: null,
     };
+    // lo que cumple otra área (PTW, PT, ART) no tiene persona de Pumping
+    const deQhse: string[] = [JREQ.ptw, JREQ.pt, JREQ.art];
     const quien = (codigo: string, j: (typeof jornadas)[number]) =>
-      codigo === JREQ.companyMan ? j.companyManAceptoPor : actorId;
+      codigo === JREQ.companyMan ? j.companyManAceptoPor : deQhse.includes(codigo) ? null : actorId;
 
     for (const j of jornadas) {
       const fecha = aFecha(j.fecha);
@@ -225,12 +241,14 @@ export class JornadasService {
             ticketId,
             requisitoCodigo: d.codigo,
             fecha: j.fecha,
-            ...(v ? { ...cumplido, cumplidoPor: quien(d.codigo, j) } : { estado: 'pendiente' }),
+            ...(v
+              ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) }
+              : { estado: 'pendiente' }),
           });
         } else if (v !== undefined && (fila.estado === 'cumplido') !== v) {
           await tx.ticketRequisito.update({
             where: { id: fila.id },
-            data: v ? { ...cumplido, cumplidoPor: quien(d.codigo, j) } : pendiente,
+            data: v ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) } : pendiente,
           });
           estadoDe.set(clave(d.codigo, fecha), { ...fila, estado: v ? 'cumplido' : 'pendiente' });
         }
@@ -246,17 +264,29 @@ export class JornadasService {
       });
     }
 
-    // abre la jornada cuando ya se cumplieron todos sus requisitos de apertura (el último puede ser de otra área)
+    // abre la jornada cuando ya se cumplieron todos sus requisitos de apertura (el último puede ser de otra área); y si una jornada abierta deja
+    // de cumplir alguno (el PTW se anuló, el ART venció, se desmarcó el LOTO), vuelve a pendiente: no se opera sin sus requisitos. Una jornada
+    // cerrada no se toca.
     const deApertura = definiciones.filter((d) => d.momento === 'apertura');
     for (const j of jornadas) {
-      if (j.estado !== 'pendiente' || deApertura.length === 0) continue;
+      if ((j.estado !== 'pendiente' && j.estado !== 'abierta') || deApertura.length === 0) continue;
       const fecha = aFecha(j.fecha);
-      const todos = deApertura.every(
-        (d) => estadoDe.get(clave(d.codigo, fecha))?.estado === 'cumplido',
+      const faltan = deApertura.filter(
+        (d) => estadoDe.get(clave(d.codigo, fecha))?.estado !== 'cumplido',
       );
-      if (!todos) continue;
-      await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'abierta' } });
-      await this.anotar(tx, j.id, 'abierta', null, actorId);
+      if (j.estado === 'pendiente' && faltan.length === 0) {
+        await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'abierta' } });
+        await this.anotar(tx, j.id, 'abierta', null, actorId);
+      } else if (j.estado === 'abierta' && faltan.length > 0) {
+        await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'pendiente' } });
+        await this.anotar(
+          tx,
+          j.id,
+          'reabierta',
+          `Dejó de cumplirse: ${faltan.map((d) => d.nombre).join('; ')}`,
+          actorId,
+        );
+      }
     }
   }
 

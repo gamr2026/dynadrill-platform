@@ -1,8 +1,10 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { currentTraceparent, runInEventSpan } from '@dyn/common';
+import { uuidv7 } from '@dyn/utils';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
+import { JornadasService } from '../services/jornadas.service';
 import { RequisitosService } from '../services/requisitos.service';
 import { nombreDe } from '../services/tickets.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from '../services/unidad-etiqueta';
@@ -88,6 +90,8 @@ const FUENTES = [
       'qhse.ptw.formalizado',
       'qhse.ptw.cerrado',
       'qhse.ptw.anulado',
+      'qhse.documento_pedido.cargado',
+      'qhse.documento_pedido.anulado',
       'qhse.epi.despachada',
       'qhse.epi.revertida',
       'qhse.acta_entrega.cargada',
@@ -116,6 +120,7 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     private readonly bus: EventBus,
     private readonly prisma: PrismaService,
     private readonly requisitos: RequisitosService,
+    private readonly jornadas: JornadasService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -223,12 +228,79 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     );
   }
 
+  /**
+   * Lo que QHSE hace por día y alimenta los requisitos de apertura de cada jornada: PTW aprobado (un día), PT cargado (un día) y ART
+   * vigente (rango). Se guarda en `ticket_hecho_qhse` y, si el ticket ya tiene jornadas, se deja al día de inmediato. El ticket se halla por
+   * `ticketId` o, si el documento es del pedido, por `pedidoId`.
+   */
+  private async hechoQhse(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    event: EventEnvelope,
+  ): Promise<void> {
+    const d = event.data;
+    const dia = (v: unknown) =>
+      typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+    let tipo: 'ptw_aprobado' | 'pt' | 'art';
+    let origenId: string;
+    let desde: string | null;
+    let hasta: string | null;
+    const anulado = event.type.endsWith('.anulado');
+    if (event.type === 'qhse.ptw.cerrado' || event.type === 'qhse.ptw.anulado') {
+      tipo = 'ptw_aprobado';
+      origenId = String(d['ptwId'] ?? '');
+      desde = hasta = dia(d['diaOperacion']);
+    } else {
+      const t = d['tipoDocumento'];
+      if (t !== 'pt' && t !== 'art') return; // los demás documentos no son requisito de apertura
+      tipo = t;
+      origenId = String(d['documentoId'] ?? '');
+      desde = dia(d['fecha']);
+      hasta = t === 'art' ? dia(d['vigenteHasta']) : desde;
+    }
+    if (!origenId || !desde || !hasta) {
+      this.logger.warn(`${event.type}: faltan el origen o las fechas; se ignora`);
+      return;
+    }
+    const ticketId = await this.ticketDeEvento(tx, d);
+    if (!ticketId) return;
+    const rango = { desde: new Date(`${desde}T00:00:00Z`), hasta: new Date(`${hasta}T00:00:00Z`) };
+    await tx.ticketHechoQhse.upsert({
+      where: { ticketId_tipo_origenId: { ticketId, tipo, origenId } },
+      create: { id: uuidv7(), ticketId, tipo, origenId, ...rango, vigente: !anulado },
+      update: { ...rango, vigente: !anulado },
+    });
+    await this.jornadas.sincronizar(tx, ticketId, null);
+  }
+
+  private async ticketDeEvento(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    d: Record<string, unknown>,
+  ): Promise<string | null> {
+    if (typeof d['ticketId'] === 'string' && d['ticketId']) {
+      const t = await tx.ticket.findUnique({ where: { id: d['ticketId'] }, select: { id: true } });
+      return t?.id ?? null;
+    }
+    if (typeof d['pedidoId'] === 'string' && d['pedidoId']) {
+      const t = await tx.ticket.findUnique({
+        where: { pedidoId: d['pedidoId'] },
+        select: { id: true },
+      });
+      return t?.id ?? null;
+    }
+    return null;
+  }
+
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
-    if (/^qhse\.(swa|ptw)\./.test(event.type)) {
+    if (/^qhse\.(swa|ptw|documento_pedido)\./.test(event.type)) {
       await runInEventSpan(`consume ${event.type}`, event.traceparent, async () => {
         await this.prisma.$transaction(async (tx) => {
-          const nuevo = await this.bus.handleOnce(tx, event, () => this.bloqueoQhse(tx, event));
+          const nuevo = await this.bus.handleOnce(tx, event, async () => {
+            if (event.type.startsWith('qhse.documento_pedido.')) return this.hechoQhse(tx, event);
+            await this.bloqueoQhse(tx, event);
+            if (event.type === 'qhse.ptw.cerrado' || event.type === 'qhse.ptw.anulado')
+              await this.hechoQhse(tx, event);
+          });
           if (!nuevo) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
         });
       });

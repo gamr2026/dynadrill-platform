@@ -63,6 +63,16 @@ enum AmbitoRequisito {
   @@schema("pumping")
 }
 
+/// Qué hizo QHSE por día: PTW aprobado, PT cargado o ART vigente.
+enum TipoHechoQhse {
+  ptw_aprobado
+  pt
+  art
+
+  @@map("tipo_hecho_qhse")
+  @@schema("pumping")
+}
+
 /// Cuándo pesa un requisito de jornada: para abrir el día o para cerrarlo.
 enum MomentoRequisito {
   apertura
@@ -236,6 +246,7 @@ model Ticket {
   solicitudesCambioItems SolicitudCambioItems[]
   lineas                 TicketLinea[]
   jornadas               TicketJornada[]
+  hechosQhse             TicketHechoQhse[]
 
   /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
   reportePrecargadoAt              DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
@@ -1168,4 +1179,23 @@ model IdUsuario {
 
   @@map("usuario")
   @@schema("identidad")
+}
+
+/// Lo que QHSE hizo por día en este ticket, recibido por eventos (PTW aprobado, PT cargado, ART vigente por rango). Ver la migración 20261105160000.
+model TicketHechoQhse {
+  id        String        @id @db.Uuid
+  ticketId  String        @map("ticket_id") @db.Uuid
+  ticket    Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tipo      TipoHechoQhse
+  /// El PTW o el documento de QHSE que lo originó (otro contenedor, D1: sin FK).
+  origenId  String        @map("origen_id") @db.Uuid
+  desde     DateTime      @db.Date
+  hasta     DateTime      @db.Date
+  vigente   Boolean       @default(true)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([ticketId, tipo, origenId], map: "ticket_hecho_qhse_origen_key")
+  @@map("ticket_hecho_qhse")
+  @@schema("pumping")
 }
