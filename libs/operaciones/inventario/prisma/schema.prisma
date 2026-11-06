@@ -396,12 +396,15 @@ model ConsumoTicket {
   articulo        Articulo   @relation(fields: [articuloId], references: [id])
   cantidad        Decimal    @db.Decimal(14, 3)
   fecha           DateTime   @db.Timestamptz(6)
+  /// Día del servicio en que se usó lo consumido (`fecha` es cuándo se anotó).
+  diaServicio     DateTime   @default(dbgenerated("((now() AT TIME ZONE 'America/Guayaquil'::text))::date")) @map("dia_servicio") @db.Date
   observacion     String?
   responsableId   String     @map("responsable_id") @db.Uuid
   responsable     IdUsuario  @relation("consumoResponsable", fields: [responsableId], references: [id])
   createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([ticketPumpingId, articuloId])
+  @@index([ticketPumpingId, diaServicio])
   @@index([articuloId])
   @@map("consumo_ticket")
   @@schema("inventario")

@@ -414,7 +414,8 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     it('el resumen del tablero cuenta los artículos activos y los agotados; exige `articulos.ver`', async () => {
       const ruta = '/api/operaciones/inventario/articulos/resumen';
       const r = await http().get(ruta).set(lector()).expect(200);
-      const lista = (await http().get('/api/operaciones/inventario/articulos').set(lector())).body as Array<{
+      const lista = (await http().get('/api/operaciones/inventario/articulos').set(lector()))
+        .body as Array<{
         activo: boolean;
         stockActual: number;
       }>;
@@ -775,13 +776,22 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         ).status,
       ).toBe(404);
       // una parte sin código se guarda con código nulo (el registro de origen no siempre lo trae); un código puede repetirse en la herramienta
-      const sinCodigo = await http().post(url).set(bodeguero()).send({ item: '20', descripcion: 'Sin código' });
+      const sinCodigo = await http()
+        .post(url)
+        .set(bodeguero())
+        .send({ item: '20', descripcion: 'Sin código' });
       expect(sinCodigo.status).toBe(201);
       expect(sinCodigo.body.codigo).toBeNull();
-      const vacia = await http().post(url).set(bodeguero()).send({ item: '21', codigo: '  ', descripcion: 'Código en blanco' });
+      const vacia = await http()
+        .post(url)
+        .set(bodeguero())
+        .send({ item: '21', codigo: '  ', descripcion: 'Código en blanco' });
       expect(vacia.status).toBe(201);
       expect(vacia.body.codigo).toBeNull();
-      const repetida = await http().post(url).set(bodeguero()).send({ item: '22', codigo: 'P-2', descripcion: 'Misma pieza' });
+      const repetida = await http()
+        .post(url)
+        .set(bodeguero())
+        .send({ item: '22', codigo: 'P-2', descripcion: 'Misma pieza' });
       expect(repetida.status).toBe(201);
       expect(
         (await http().get(`/api/operaciones/inventario/articulos/${uuidv7()}/partes`).set(lector()))
@@ -1094,6 +1104,40 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
           [articuloId],
         )
       ).rows as Array<{ tipo: string; datos: { data: Record<string, unknown> } }>;
+
+    it('el consumo guarda el día del servicio (por omisión hoy en Ecuador) y el detalle del ticket lo suma por día', async () => {
+      const a = await crearArticulo('T1D');
+      await mover(a.id, BODEGA_A.id, ids.motivoCompra, 10);
+      const base = { ticketPumpingId: TICKET_A, articuloId: a.id, bodegaId: BODEGA_A.id };
+      await enTx((tx) => movimientosSvc.registrarSalida(tx, { ...base, cantidad: 8 }, actor));
+      const consumo = (cantidad: number, diaServicio?: string) =>
+        enTx((tx) =>
+          movimientosSvc.registrarConsumo(
+            tx,
+            { ticketPumpingId: TICKET_A, articuloId: a.id, cantidad, diaServicio },
+            actor,
+          ),
+        );
+      await consumo(1, '2026-11-02');
+      await consumo(2, '2026-11-02');
+      await consumo(4, '2026-11-03');
+      const sinDia = await consumo(1); // el día de hoy en Ecuador
+      const hoyEcuador = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+      expect(sinDia.diaServicio.toISOString().slice(0, 10)).toBe(hoyEcuador);
+      await expect(consumo(0.5, '02/11/2026')).rejects.toThrow(/AAAA-MM-DD/);
+      const detalle = (await movimientosSvc.quimicosDeTicket(TICKET_A)).find(
+        (q) => q.articuloId === a.id,
+      );
+      expect(detalle?.usadaPorDia.slice(0, 2)).toEqual([
+        { fecha: '2026-11-02', cantidad: 3 },
+        { fecha: '2026-11-03', cantidad: 4 },
+      ]);
+      expect(detalle?.usada).toBe(8);
+      const dias = (await evento(a.id))
+        .filter((e) => e.tipo === 'operaciones.inventario.consumo_registrado')
+        .map((e) => e.datos.data['diaServicio']);
+      expect(dias).toEqual(['2026-11-02', '2026-11-02', '2026-11-03', hoyEcuador]);
+    });
 
     it('la salida baja el stock y queda a cargo del ticket; la devolución y el consumo se calculan y no superan lo asignado', async () => {
       const a = await crearArticulo('T1');

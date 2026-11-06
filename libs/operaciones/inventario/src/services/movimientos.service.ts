@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -33,6 +38,8 @@ export interface ConsumoDeTicket {
   articuloId: string;
   cantidad: number | string;
   observacion?: string | null;
+  /** Día del servicio (`AAAA-MM-DD`) en que se usó; por omisión, hoy en Ecuador. */
+  diaServicio?: string;
 }
 
 export interface MovimientoDeDespacho {
@@ -240,6 +247,12 @@ export class MovimientosService {
     ) {
       throw new ConflictException({ message: 'El ticket no existe', code: 'TICKET_INVALIDO' });
     }
+    if (
+      e.diaServicio !== undefined &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(e.diaServicio) ||
+        Number.isNaN(Date.parse(`${e.diaServicio}T00:00:00Z`)))
+    )
+      throw new BadRequestException('El día del servicio debe tener el formato AAAA-MM-DD');
     await this.exigirPendiente(tx, e.ticketPumpingId, e.articuloId, cantidad, 'consumir');
     const c = await tx.consumoTicket.create({
       data: {
@@ -248,6 +261,7 @@ export class MovimientosService {
         articuloId: e.articuloId,
         cantidad,
         fecha: new Date(),
+        ...(e.diaServicio ? { diaServicio: new Date(`${e.diaServicio}T00:00:00Z`) } : {}),
         observacion: e.observacion?.trim() || null,
         responsableId: actor.id,
       },
@@ -267,6 +281,7 @@ export class MovimientosService {
           articuloCodigo: articulo.codigo,
           ticketId: e.ticketPumpingId,
           cantidad: Number(c.cantidad),
+          diaServicio: c.diaServicio.toISOString().slice(0, 10),
         },
         actor: { userId: actor.id, role: actor.roleCode },
         traceparent: currentTraceparent(),
@@ -419,11 +434,21 @@ export class MovimientosService {
     cantidad: number | string,
     actor: ActorInventario,
     observacion?: string | null,
+    diaServicio?: string,
   ) {
     const c = await this.prisma.$transaction((tx) =>
-      this.registrarConsumo(tx, { ticketPumpingId, articuloId, cantidad, observacion }, actor),
+      this.registrarConsumo(
+        tx,
+        { ticketPumpingId, articuloId, cantidad, observacion, diaServicio },
+        actor,
+      ),
     );
-    return { consumoId: c.id, articuloId: c.articuloId, cantidad: Number(c.cantidad) };
+    return {
+      consumoId: c.id,
+      articuloId: c.articuloId,
+      cantidad: Number(c.cantidad),
+      diaServicio: c.diaServicio.toISOString().slice(0, 10),
+    };
   }
 
   /** Los químicos de un ticket con su código, nombre y unidad: asignado, usado, devuelto y lo que sigue a su cargo. */
@@ -441,6 +466,13 @@ export class MovimientosService {
     const bodegas = await this.prisma.catBodega.findMany({
       where: { id: { in: [...new Set(salidas.map((s) => s.bodegaId))] } },
     });
+    // lo usado cada día del servicio
+    const porDia = await this.prisma.consumoTicket.groupBy({
+      by: ['articuloId', 'diaServicio'],
+      where: { ticketPumpingId },
+      _sum: { cantidad: true },
+      orderBy: { diaServicio: 'asc' },
+    });
     return balance
       .map((b) => {
         const a = articulos.find((x) => x.id === b.articuloId);
@@ -453,6 +485,13 @@ export class MovimientosService {
           usada: Number(b.usada),
           devuelta: Number(b.devuelta),
           pendiente: Number(b.pendiente),
+          /** Lo usado cada día del servicio. */
+          usadaPorDia: porDia
+            .filter((d) => d.articuloId === b.articuloId)
+            .map((d) => ({
+              fecha: d.diaServicio.toISOString().slice(0, 10),
+              cantidad: Number(d._sum.cantidad ?? 0),
+            })),
           bodegas: salidas
             .filter((s) => s.articuloId === b.articuloId)
             .map((s) => ({
