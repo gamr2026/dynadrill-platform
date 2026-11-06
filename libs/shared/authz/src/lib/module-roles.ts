@@ -151,14 +151,14 @@ export const ModuleRoles = {
   /**
    * Solicitudes de cambio de ítems del pedido (Operador propone, ver/listar
    * las propias) — mismo acceso que el módulo Pumping. La decisión final
-   * (aprobar/rechazar) es solo del Supervisor, ver `pumpingAprobarCambioItems`.
+   * (aprobar/rechazar) es del Supervisor y del Jefe de Base, ver `pumpingAprobarCambioItems`.
    */
   pumpingCambiosItems: withAdmins(
     RoleCode.SUPERVISOR,
     RoleCode.SUPERVISOR_PUMPING,
     RoleCode.OPERADOR,
   ),
-  /** Aprobar/rechazar una solicitud de cambio de ítems — solo el Supervisor (bandeja de "Aprobaciones"). */
+  /** Aprobar/rechazar una solicitud de cambio de ítems — el Supervisor del ticket y el Jefe de Base (bandeja de "Aprobaciones"). */
   pumpingAprobarCambioItems: withAdmins(RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING),
 
   /**

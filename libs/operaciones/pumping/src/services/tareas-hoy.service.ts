@@ -312,6 +312,27 @@ export class TareasHoyService {
         enlace: enlaceDe(t.id),
       });
     }
+    // el Jefe de Base decide los cambios de ítems igual que el Supervisor del ticket
+    const cambios = await this.prisma.solicitudCambioItems.findMany({
+      where: { estado: 'pendiente', ticket: { pasoCodigo: { not: 'cierre' } } },
+      select: {
+        motivo: true,
+        ticket: { select: { id: true, ticketNumero: true, pedidoCodigo: true } },
+      },
+      orderBy: { solicitadoAt: 'asc' },
+      take: 100,
+    });
+    for (const c of cambios) {
+      tareas.push({
+        clave: 'aprobar_cambio_items',
+        titulo: `Cambio de ítems del Ticket ${c.ticket.ticketNumero ?? c.ticket.pedidoCodigo} por aprobar`,
+        detalle: c.motivo,
+        estado: 'pendiente',
+        tono: 'warn',
+        ticketId: c.ticket.id,
+        enlace: enlaceDe(c.ticket.id),
+      });
+    }
     if (!tareas.length) return null;
     return {
       rol: 'jefe_base',

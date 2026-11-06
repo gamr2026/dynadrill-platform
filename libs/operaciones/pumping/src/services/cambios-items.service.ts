@@ -33,6 +33,10 @@ const INCLUIR = {
 
 type SolicitudConDatos = Prisma.SolicitudCambioItemsGetPayload<{ include: typeof INCLUIR }>;
 
+/** El Jefe de Base y los administradores proponen y deciden los cambios de ítems de cualquier ticket, igual que el Supervisor del ticket. */
+const veTodos = (actor: AuthUser): boolean =>
+  actor.roleCode === 'superadmin' || actor.roleCode === 'jefe_base';
+
 /**
  * Solicitudes de cambio de ítems del pedido (contrato 4.13): el Operador del equipo propone la lista de ítems que debe quedar en el
  * pedido y el Supervisor del ticket la aprueba o la rechaza. Al aprobar se publica el evento y Comercial aplica el cambio; su
@@ -61,9 +65,9 @@ export class CambiosItemsService {
       if (t.pasoCodigo === 'cierre') {
         throw new ConflictException('El ticket ya está cerrado: no admite cambios de ítems');
       }
-      if (actor.roleCode !== 'superadmin' && !t.personas.some((p) => p.usuarioId === actor.id)) {
+      if (!veTodos(actor) && !t.personas.some((p) => p.usuarioId === actor.id)) {
         throw new ForbiddenException(
-          'Solo el equipo asignado a este ticket puede proponer cambios',
+          'Solo el equipo asignado a este ticket, el Jefe de Base o un administrador pueden proponer cambios',
         );
       }
       const pendiente = await tx.solicitudCambioItems.findFirst({
@@ -120,12 +124,12 @@ export class CambiosItemsService {
     return filas.map((s) => this.vista(s));
   }
 
-  /** Bandeja de Aprobaciones: las pendientes de los tickets que supervisa quien consulta (Superadmin ve todas). */
+  /** Bandeja de Aprobaciones: las pendientes de los tickets que supervisa quien consulta (el Jefe de Base y Superadmin ven todas). */
   async pendientes(actor: AuthUser) {
     const filas = await this.prisma.solicitudCambioItems.findMany({
       where: {
         estado: 'pendiente',
-        ...(actor.roleCode === 'superadmin'
+        ...(veTodos(actor)
           ? {}
           : { ticket: { personas: { some: { usuarioId: actor.id, rol: 'supervisor' } } } }),
       },
@@ -260,9 +264,9 @@ export class CambiosItemsService {
     const esSupervisor = s.ticket.personas.some(
       (p) => p.rol === 'supervisor' && p.usuarioId === actor.id,
     );
-    if (!esSupervisor && actor.roleCode !== 'superadmin') {
+    if (!esSupervisor && !veTodos(actor)) {
       throw new ForbiddenException(
-        'Solo el Supervisor de este ticket puede aprobar o rechazar el cambio',
+        'Solo el Supervisor de este ticket o el Jefe de Base pueden aprobar o rechazar el cambio',
       );
     }
     return s;

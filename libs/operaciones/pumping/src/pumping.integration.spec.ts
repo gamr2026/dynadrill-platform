@@ -2938,6 +2938,61 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         )
       ).rows.map((r) => r.d);
 
+    it('el Jefe de Base propone y decide el cambio de ítems de cualquier ticket, igual que el Supervisor; otro supervisor del ticket ajeno no', async () => {
+      const jefeCambios = () =>
+        como('jefe_base', JEFE, 'Jaime Jefe de Base', [
+          P.PUMPING_VER,
+          P.PUMPING_CAMBIOS_SOLICITAR,
+          P.PUMPING_CAMBIOS_APROBAR,
+          P.PUMPING_JORNADA_CAMBIAR_DURACION,
+        ]);
+      const t = await ticketEnTraslado();
+      // el Jefe de Base no es del equipo del ticket y aun así propone
+      const propuesta = await propone(t, valido(), jefeCambios());
+      expect(propuesta.status).toBe(201);
+      // le aparece en su bandeja de Aprobaciones junto con las de los demás tickets
+      const bandeja = await http().get(`${base}/cambios-items/pendientes`).set(jefeCambios());
+      expect(bandeja.status).toBe(200);
+      expect(bandeja.body.map((x: { id: string }) => x.id)).toContain(propuesta.body.id);
+      // y es una tarea del día del Jefe de Base
+      const tareasJefe = await http().get(`${base}/mis-tareas-hoy`).set(jefeCambios());
+      const delJefe = (
+        tareasJefe.body.bloques as Array<{
+          rol: string;
+          tareas: Array<{ clave: string; ticketId: string | null }>;
+        }>
+      ).find((b) => b.rol === 'jefe_base');
+      expect(
+        delJefe?.tareas.some((x) => x.clave === 'aprobar_cambio_items' && x.ticketId === t.id),
+      ).toBe(true);
+      // un supervisor que no es del ticket no ve ni decide
+      const ajeno = como('supervisor_pumping', SUPERVISOR_PUMPING.id, SUPERVISOR_PUMPING.nombre, [
+        P.PUMPING_OPERAR,
+        P.PUMPING_CAMBIOS_APROBAR,
+      ]);
+      expect(
+        (await http().post(`${base}/cambios-items/${propuesta.body.id}/aprobar`).set(ajeno)).status,
+      ).toBe(403);
+      // el Jefe de Base aprueba: igual que el Supervisor, queda por aplicar y Comercial recibe el cambio
+      const ok = await http()
+        .post(`${base}/cambios-items/${propuesta.body.id}/aprobar`)
+        .set(jefeCambios());
+      expect(ok.status).toBe(201);
+      expect(await eventosAprobados(t.id)).toHaveLength(1);
+      // y también rechaza (con motivo) una solicitud nueva
+      await externos.consumir(resultado(propuesta.body.id, false, 'El pedido ya salió al cliente'));
+      const otra = await propone(t, valido(), jefeCambios());
+      expect(otra.status).toBe(201);
+      expect(
+        (
+          await http()
+            .post(`${base}/cambios-items/${otra.body.id}/rechazar`)
+            .set(jefeCambios())
+            .send({ motivo: 'No procede' })
+        ).status,
+      ).toBe(201);
+    });
+
     it('el equipo propone la lista de ítems, solo una pendiente por ticket y solo con lo que corresponde', async () => {
       const t = await ticketEnTraslado();
       const ok = await propone(t, valido());
