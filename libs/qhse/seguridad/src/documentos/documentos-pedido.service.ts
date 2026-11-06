@@ -363,6 +363,23 @@ export class DocumentosPedidoService {
     );
   }
 
+  /**
+   * Vuelve a publicar `qhse.documento_pedido.cargado` de cada PT y ART vigente (los demás documentos no son requisito de ninguna jornada). Se usa
+   * una sola vez al desplegar la jornada por día; Pumping los guarda por su origen, así que repetirlos no duplica nada.
+   */
+  async reenviarVigentes(actor: AuthUser): Promise<number> {
+    const ids = await this.prisma.documentoPedido.findMany({
+      where: { anuladoAt: null, tipo: { in: [TipoDocumentoPedido.pt, TipoDocumentoPedido.art] } },
+      select: { id: true },
+      orderBy: { fecha: 'asc' },
+    });
+    for (const { id } of ids)
+      await this.prisma.$transaction((tx) =>
+        this.publicar(tx, 'qhse.documento_pedido.cargado', id, actor),
+      );
+    return ids.length;
+  }
+
   private async publicar(
     tx: Tx,
     tipo: string,

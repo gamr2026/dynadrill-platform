@@ -70,6 +70,8 @@ import { AspectosAmbientalesController } from './aspectos-ambientales/aspectos-a
 import { AspectosAmbientalesService } from './aspectos-ambientales/aspectos-ambientales.service';
 import { AvisosProgramadosController } from './avisos/avisos-programados.controller';
 import { TareasHoyQhseController } from './avisos/tareas-hoy.controller';
+import { ReenvioAPumpingController } from './documentos/reenvio-a-pumping.controller';
+import { ReenvioAPumpingService } from './documentos/reenvio-a-pumping.service';
 import { TareasHoyQhseService } from './avisos/tareas-hoy.service';
 import { AvisosProgramadosService } from './avisos/avisos-programados.service';
 import { DashboardIndicadoresController } from './dashboard/dashboard-indicadores.controller';
@@ -108,6 +110,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     AspectosAmbientalesController,
     AvisosProgramadosController,
     TareasHoyQhseController,
+    ReenvioAPumpingController,
     DashboardMetasController,
     DashboardIndicadoresController,
   ],
@@ -168,6 +171,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     AspectosAmbientalesConsultaService,
     AvisosProgramadosService,
     TareasHoyQhseService,
+    ReenvioAPumpingService,
   ],
   exports: [
     EpiService,

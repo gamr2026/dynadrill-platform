@@ -237,6 +237,21 @@ export class PtwService {
     );
   }
 
+  /**
+   * Vuelve a publicar `qhse.ptw.cerrado` de cada PTW aprobado y vigente. Se usa una sola vez al desplegar la jornada por día: los PTW aprobados
+   * antes de que Pumping guardara sus hechos por día no le llegaron. Pumping los guarda por su origen, así que repetirlos no duplica nada.
+   */
+  async reenviarAprobados(actor: ActorPtw): Promise<number> {
+    const ids = await this.prisma.ptw.findMany({
+      where: { fase: FasePtw.aprobado, anuladoAt: null },
+      select: { id: true },
+      orderBy: { diaOperacion: 'asc' },
+    });
+    for (const { id } of ids)
+      await this.prisma.$transaction((tx) => this.publicar(tx, 'qhse.ptw.cerrado', id, actor));
+    return ids.length;
+  }
+
   private async publicar(
     tx: Tx,
     tipo: string,

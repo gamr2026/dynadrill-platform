@@ -14,6 +14,7 @@ import { borrarInvestigacionesDe } from '../testing/limpieza-investigaciones';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 import { AvisosProgramadosService } from './avisos-programados.service';
 import { TareasHoyQhseService } from './tareas-hoy.service';
+import { ReenvioAPumpingService } from '../documentos/reenvio-a-pumping.service';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 const P = Permission;
@@ -42,6 +43,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
   let t: AppDePrueba;
   let avisos: AvisosProgramadosService;
   let tareasHoy: TareasHoyQhseService;
+  let reenvio: ReenvioAPumpingService;
   const entidades: string[] = [];
   const archivos: string[] = [];
   const pedido = uuidv7();
@@ -84,6 +86,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
     t = await levantarAppDePrueba('3180');
     avisos = t.app.get(AvisosProgramadosService);
     tareasHoy = t.app.get(TareasHoyQhseService);
+    reenvio = t.app.get(ReenvioAPumpingService);
     await sembrarMaestros(t.admin, MAESTROS);
     const r = await sql(
       "SELECT id, codigo FROM archivos.modulo_archivo WHERE codigo IN ('qhse_requisito_legal','qhse_documento_pedido')",
@@ -414,6 +417,80 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
       expect(
         (despues.bloques[0]?.tareas ?? []).filter((x) => x.ticketId && suyas.includes(x.ticketId)),
       ).toEqual([]);
+    });
+
+    it('el reenvío único vuelve a publicar los PTW aprobados y los PT y ART vigentes a Pumping, y no los anulados ni otros documentos', async () => {
+      const tk = await ticketConDias([dia]);
+      const ptwId = await ptwDelDia(tk, dia);
+      const doc = async (tipo: string, conFecha: boolean) => {
+        const id = uuidv7();
+        await sql(
+          `INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, fecha, vigente_hasta, created_by)
+           VALUES ($1, $2, $3, $4::qhse.tipo_documento_pedido, $5, $6::date, $7::date, $8)`,
+          [
+            id,
+            tk.pedidoId,
+            tk.ticketId,
+            tipo,
+            await archivo('qhse_documento_pedido'),
+            conFecha ? dia : null,
+            tipo === 'art' ? fechaEn(15) : null,
+            TECNICO.id,
+          ],
+        );
+        return id;
+      };
+      const anulado = await doc('pt', true);
+      await sql(
+        "UPDATE qhse.documento_pedido SET anulado_at = now(), anulado_por = $2, motivo_anulacion = 'prueba' WHERE id = $1",
+        [anulado, TECNICO.id],
+      );
+      const [recepcion, art, pt, sfi] = [
+        await doc('formato_recepcion', false),
+        await doc('art', true),
+        await doc('pt', true),
+        await doc('sfi', false),
+      ];
+      const superusuario = new Pool({
+        connectionString: process.env['TEST_ADMIN_DATABASE_URL'],
+        max: 1,
+      });
+      try {
+        const c = await superusuario.connect();
+        try {
+          await c.query('BEGIN');
+          await c.query('SET LOCAL session_replication_role = replica');
+          await c.query(
+            "UPDATE qhse.ptw SET fase = 'aprobado', documento_recepcion_id = $2, documento_art_id = $3, documento_pt_id = $4, documento_sfi_id = $5 WHERE id = $1",
+            [ptwId, recepcion, art, pt, sfi],
+          );
+          await c.query('COMMIT');
+        } finally {
+          c.release();
+        }
+      } finally {
+        await superusuario.end();
+      }
+      const publicados = async (tipo: string) =>
+        (
+          await sql(
+            "SELECT datos->'data' AS d FROM msg_qhse.outbox WHERE tipo = $1 AND datos->'data'->>'pedidoId' = $2",
+            [tipo, tk.pedidoId],
+          )
+        ).rows.map((x) => x.d);
+      expect(await publicados('qhse.ptw.cerrado')).toEqual([]);
+
+      const resumen = await reenvio.reenviar({ id: TECNICO.id, roleCode: 'tecnico_hse' } as never);
+      expect(resumen.ptwAprobados).toBeGreaterThanOrEqual(1);
+      expect(resumen.documentos).toBeGreaterThanOrEqual(2);
+      const ptws = await publicados('qhse.ptw.cerrado');
+      expect(ptws).toHaveLength(1);
+      expect(ptws[0]).toMatchObject({ ptwId, ticketId: tk.ticketId, diaOperacion: dia });
+      const docs = await publicados('qhse.documento_pedido.cargado');
+      // solo el PT y el ART vigentes: ni el PT anulado ni la recepción ni el SFI
+      expect(docs.map((d) => d.tipoDocumento).sort()).toEqual(['art', 'pt']);
+      expect(docs.map((d) => d.documentoId)).not.toContain(anulado);
+      await limpiar([tk]);
     });
 
     it('«PTW sin aprobar a la hora de inicio»: solo desde la hora configurada, una vez por PTW, y no si ya está aprobado', async () => {
