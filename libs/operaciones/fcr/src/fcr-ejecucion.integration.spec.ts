@@ -331,6 +331,18 @@ run(
       http()
         .post(`${base(t)}/bitacora/${fecha}/enviar`)
         .set(auth);
+    /** Guarda y envía a Facturación la bitácora de todos los días del servicio (por omisión, del 5 al 12 de noviembre). */
+    const enviarTodosLosDias = async (t: string, inicio = '2026-11-05', fin = '2026-11-12') => {
+      for (
+        let ms = Date.parse(`${inicio}T00:00:00Z`);
+        ms <= Date.parse(`${fin}T00:00:00Z`);
+        ms += 86_400_000
+      ) {
+        const dia = new Date(ms).toISOString().slice(0, 10);
+        await guardar(t, dia).expect(200);
+        await enviar(t, dia).expect(201);
+      }
+    };
     const uso = (
       t: string,
       h: string,
@@ -548,6 +560,56 @@ run(
         await guardar(t.id, '2026-11-07', []).expect(200);
         const sin = await enviar(t.id, '2026-11-07').expect(400);
         expect(sin.body.code).toBe('SIN_ACTIVIDADES');
+      });
+
+      it('la bitácora enviada exige todos los días del servicio: uno de tres no la cumple y un día corregido por Facturación ya no se espera', async () => {
+        const t = await enEjecucion({ inicio: '2026-11-05', fin: '2026-11-07' });
+        const estado = async () =>
+          (
+            await admin.query(
+              "SELECT estado FROM fcr.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'bitacora_enviada'",
+              [t.id],
+            )
+          ).rows[0]?.estado;
+        expect(await estado()).toBe('pendiente');
+        for (const dia of ['2026-11-05', '2026-11-06']) {
+          await guardar(t.id, dia).expect(200);
+          await enviar(t.id, dia).expect(201);
+          expect(await estado()).toBe('pendiente'); // falta el último día
+        }
+        // Facturación corrige el día 3 (lo deja sin actividades): ya no se espera su bitácora
+        await consumer.consumir(
+          evento('comercial.documento_operativo.corregido', t.pedidoId, {
+            pedidoId: t.pedidoId,
+            origen: 'fcr',
+            fecha: '2026-11-07',
+          }),
+        );
+        expect(await estado()).toBe('cumplido');
+      });
+
+      it('un día más en el servicio vuelve a exigir su bitácora', async () => {
+        const t = await enEjecucion({ inicio: '2026-11-05', fin: '2026-11-06' });
+        await enviarTodosLosDias(t.id, '2026-11-05', '2026-11-06');
+        const estado = async () =>
+          (
+            await admin.query(
+              "SELECT estado FROM fcr.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'bitacora_enviada'",
+              [t.id],
+            )
+          ).rows[0]?.estado;
+        expect(await estado()).toBe('cumplido');
+        // se amplía el servicio un día: al enviar el nuevo día antes que el resto no alcanza, y sin él sigue pendiente
+        await admin.query('UPDATE fcr.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+          t.id,
+          '2026-11-07',
+        ]);
+        await guardar(t.id, '2026-11-05').expect(200); // reenvía un día ya enviado: se vuelve a evaluar
+        await enviar(t.id, '2026-11-05').expect(201);
+        expect(await estado()).toBe('pendiente');
+        await guardar(t.id, '2026-11-07').expect(200);
+        await enviar(t.id, '2026-11-07').expect(201);
+        expect(await estado()).toBe('cumplido');
       });
 
       it('lo que Facturación corrigió ya no se edita ni se reenvía desde el ticket; el de otro origen no cuenta', async () => {
@@ -1259,6 +1321,9 @@ run(
         await guardar(t.id, '2026-11-05').expect(200);
         expect((await finalizar(t.id).expect(409)).body.code).toBe('BITACORA_SIN_ENVIAR');
         await enviar(t.id, '2026-11-05').expect(201);
+        // el servicio dura 8 días: con un solo día enviado todavía falta la bitácora de los demás
+        expect(q(await finalizar(t.id).expect(409))).toMatch(/Bitácora enviada a Facturación/);
+        await enviarTodosLosDias(t.id);
         const sinListado = await finalizar(t.id).expect(409);
         expect(q(sinListado)).toMatch(/Reporte de herramientas confirmado/);
         expect(q(sinListado)).not.toMatch(/Bitácora enviada/);
@@ -1268,8 +1333,7 @@ run(
 
       it('finaliza: envía el Reporte de Herramientas por ítem con su cantidad real, pasa a la revisión y el operador ya no corrige', async () => {
         const t = await enEjecucion();
-        await guardar(t.id, '2026-11-05').expect(200);
-        await enviar(t.id, '2026-11-05').expect(201);
+        await enviarTodosLosDias(t.id);
         // el uso por herramienta (completación, picker...) no es la fuente del reporte
         await uso(t.id, t.cepillo, '2026-11-05', { estado: 'operacion' }).expect(200);
         const rep = `${base(t.id)}/reporte-herramientas`;
@@ -1381,8 +1445,7 @@ run(
 
       it('el Supervisor aprueba (control de retorno) o rechaza con motivo (vuelve a la ejecución y se reconfirma el uso)', async () => {
         const t = await enEjecucion();
-        await guardar(t.id, '2026-11-05').expect(200);
-        await enviar(t.id, '2026-11-05').expect(201);
+        await enviarTodosLosDias(t.id);
         await confirmarUso(t.id).expect(201);
         await finalizar(t.id).expect(201);
         await http()

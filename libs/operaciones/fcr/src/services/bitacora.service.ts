@@ -193,14 +193,45 @@ export class BitacoraService {
         data: { enviadaAt: new Date(), enviadaPor: actor.id, updatedBy: actor.id },
       });
       await this.publicar(tx, t, d.id, actor);
-      await this.requisitos.marcar(
-        tx,
-        { ticketId, codigo: REQ.bitacoraEnviada },
-        'sistema',
-        actor.id,
-      );
+      await this.actualizarRequisito(tx, ticketId, actor.id);
     });
     return this.obtener(ticketId, fecha);
+  }
+
+  /**
+   * `bitacora_enviada` se cumple cuando TODOS los días del servicio están enviados a Facturación (un día que Facturación corrigió y dejó sin
+   * actividades ya no se espera). Sin fechas de servicio basta con un día enviado. Si falta algún día (se amplió el servicio, se reabrió uno),
+   * el requisito vuelve a pendiente.
+   */
+  private async actualizarRequisito(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    actorId: string | null,
+  ): Promise<void> {
+    const t = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    const dias = await tx.bitacoraDia.findMany({
+      where: { ticketId, OR: [{ enviadaAt: { not: null } }, { corregidaAt: { not: null } }] },
+      select: { fecha: true, enviadaAt: true },
+    });
+    const resueltos = new Set(dias.map((d) => aDia(d.fecha)));
+    const alMenosUno = dias.some((d) => d.enviadaAt !== null);
+    let completo = alMenosUno;
+    if (t?.fechaInicioServicio && t.fechaFinServicio) {
+      const esperados: string[] = [];
+      for (
+        let ms = t.fechaInicioServicio.getTime();
+        ms <= t.fechaFinServicio.getTime() && esperados.length < 366;
+        ms += 86_400_000
+      )
+        esperados.push(new Date(ms).toISOString().slice(0, 10));
+      completo = alMenosUno && esperados.every((f) => resueltos.has(f));
+    }
+    const clave = { ticketId, codigo: REQ.bitacoraEnviada };
+    if (completo) await this.requisitos.marcar(tx, clave, 'sistema', actorId);
+    else await this.requisitos.reabrir(tx, clave);
   }
 
   /**
@@ -232,6 +263,7 @@ export class BitacoraService {
           where: { id: previo.id },
           data: { corregidaAt: new Date(), corregidaPor: conocido?.id ?? previo.updatedBy },
         });
+        await this.actualizarRequisito(tx, t.id, null); // un día corregido ya no se espera
       }
       return;
     }
@@ -260,6 +292,7 @@ export class BitacoraService {
         updatedBy: autor.actorId,
       },
     });
+    await this.actualizarRequisito(tx, t.id, null); // un día corregido ya no se espera
   }
 
   // ── piezas internas ─────────────────────────────────────────────────────────────────────────

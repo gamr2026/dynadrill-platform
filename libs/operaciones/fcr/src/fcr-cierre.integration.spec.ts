@@ -301,6 +301,18 @@ run(
       http()
         .post(`${base(t)}/bitacora/${fecha}/enviar`)
         .set(auth);
+    /** Guarda y envía a Facturación la bitácora de todos los días del servicio (por omisión, del 5 al 12 de noviembre). */
+    const enviarTodosLosDias = async (t: string, inicio = '2026-11-05', fin = '2026-11-12') => {
+      for (
+        let ms = Date.parse(`${inicio}T00:00:00Z`);
+        ms <= Date.parse(`${fin}T00:00:00Z`);
+        ms += 86_400_000
+      ) {
+        const dia = new Date(ms).toISOString().slice(0, 10);
+        await guardar(t, dia).expect(200);
+        await enviar(t, dia).expect(201);
+      }
+    };
     const uso = (
       t: string,
       h: string,
@@ -410,8 +422,7 @@ run(
     /** Lleva el ticket hasta el control de retorno. */
     const enRetorno = async () => {
       const t = await enEjecucion();
-      await guardar(t.id, '2026-11-05').expect(200);
-      await enviar(t.id, '2026-11-05').expect(201);
+      await enviarTodosLosDias(t.id);
       await uso(t.id, t.cepillo, '2026-11-05').expect(200);
       await confirmarUso(t.id).expect(201);
       await finalizar(t.id).expect(201);
