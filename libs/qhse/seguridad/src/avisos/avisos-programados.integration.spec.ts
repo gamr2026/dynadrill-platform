@@ -13,6 +13,7 @@ import { levantarAppDePrueba, type AppDePrueba } from '../testing/app-de-prueba'
 import { borrarInvestigacionesDe } from '../testing/limpieza-investigaciones';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testing/maestros';
 import { AvisosProgramadosService } from './avisos-programados.service';
+import { TareasHoyQhseService } from './tareas-hoy.service';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 const P = Permission;
@@ -40,6 +41,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
   jest.setTimeout(300000);
   let t: AppDePrueba;
   let avisos: AvisosProgramadosService;
+  let tareasHoy: TareasHoyQhseService;
   const entidades: string[] = [];
   const archivos: string[] = [];
   const pedido = uuidv7();
@@ -81,6 +83,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
   beforeAll(async () => {
     t = await levantarAppDePrueba('3180');
     avisos = t.app.get(AvisosProgramadosService);
+    tareasHoy = t.app.get(TareasHoyQhseService);
     await sembrarMaestros(t.admin, MAESTROS);
     const r = await sql(
       "SELECT id, codigo FROM archivos.modulo_archivo WHERE codigo IN ('qhse_requisito_legal','qhse_documento_pedido')",
@@ -373,6 +376,44 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
       ambito = [anulado.ticketId];
       expect((await emitir(dia)).porTipo).toMatchObject({ 'qhse.aviso.servicio_sin_ptw': 1 });
       await limpiar([sinPtw, conPtw, otroDia, anulado]);
+    });
+
+    it('«mis tareas de hoy» muestra todo el día lo que falta para que las jornadas operen: abrir el PTW, aprobarlo y cargar el PT de mañana', async () => {
+      const sinPtw = await ticketConDias([dia]);
+      const sinAprobar = await ticketConDias([dia]);
+      const sinPt = await ticketConDias([manana]);
+      const ptw = await ptwDelDia(sinAprobar, dia);
+      const suyas = [sinPtw.ticketId, sinAprobar.ticketId, sinPt.ticketId];
+      const r = await tareasHoy.delDia(dia);
+      const tareas = (r.bloques[0]?.tareas ?? []).filter(
+        (x) => x.ticketId && suyas.includes(x.ticketId),
+      );
+      expect(
+        tareas.map((x) => [
+          x.clave,
+          x.ticketId === sinPtw.ticketId
+            ? 'sin_ptw'
+            : x.ticketId === sinAprobar.ticketId
+              ? 'sin_aprobar'
+              : 'sin_pt',
+        ]),
+      ).toEqual([
+        ['abrir_ptw', 'sin_ptw'],
+        ['aprobar_ptw', 'sin_aprobar'],
+        ['cargar_pt', 'sin_pt'],
+      ]);
+      expect(tareas[0]).toMatchObject({ tono: 'danger', enlace: '/dashboard/qhse/ptw' });
+      expect(tareas[1].titulo).toContain('PTW-');
+      expect(tareas[1].detalle).toContain('antes del inicio previsto');
+      expect(tareas[2]).toMatchObject({ enlace: '/dashboard/qhse/documentos' });
+      expect(r.bloques[0]).toMatchObject({ rol: 'qhse' });
+      void ptw;
+      await limpiar([sinPtw, sinAprobar, sinPt]);
+      // sin nada pendiente de estos tickets, ya no aparecen
+      const despues = await tareasHoy.delDia(dia);
+      expect(
+        (despues.bloques[0]?.tareas ?? []).filter((x) => x.ticketId && suyas.includes(x.ticketId)),
+      ).toEqual([]);
     });
 
     it('«PTW sin aprobar a la hora de inicio»: solo desde la hora configurada, una vez por PTW, y no si ya está aprobado', async () => {

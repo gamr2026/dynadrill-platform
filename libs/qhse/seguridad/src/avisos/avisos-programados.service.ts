@@ -41,7 +41,7 @@ const masDias = (dia: string, dias: number): string =>
   new Date(Date.parse(`${dia}T00:00:00Z`) + dias * DIA_MS).toISOString().slice(0, 10);
 
 /** Un hecho por vencimiento que merece aviso. */
-interface Candidato {
+export interface Candidato {
   /** Tipo del evento `qhse.aviso.*` que se publica. */
   tipo: string;
   entidadId: string;
@@ -359,7 +359,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
    * «Hay servicio hoy y no existe PTW»: el ticket tiene hoy como día de servicio y el día no tiene ningún PTW vigente. Normalmente la tarea
    * programada lo abre a medianoche; este aviso sale si no se abrió (o se anuló) y nadie lo repuso. Un aviso por ticket y día.
    */
-  private async servicioSinPtw(hoy: string): Promise<Candidato[]> {
+  async servicioSinPtw(hoy: string): Promise<Candidato[]> {
     const dias = await this.prisma.ticketDiaServicio.findMany({
       where: { fecha: aFecha(hoy) },
       select: { ticket: { select: this.seleccionTicket } },
@@ -388,7 +388,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
   }
 
   /** «PTW sin aprobar a la hora de inicio»: llegada la hora de inicio del servicio, el PTW de hoy sigue sin aprobarse. Un aviso por PTW. */
-  private async ptwSinAprobarALaHora(hoy: string, hora: string): Promise<Candidato[]> {
+  async ptwSinAprobarALaHora(hoy: string, hora: string): Promise<Candidato[]> {
     if (hora < this.horaInicio) return [];
     const filas = await this.prisma.ptw.findMany({
       where: { diaOperacion: aFecha(hoy), anuladoAt: null, fase: { not: 'aprobado' } },
@@ -418,7 +418,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
    * «Mañana falta el PT»: el ticket tiene servicio mañana y todavía no se cargó el PT de ese día. Sin él la jornada de mañana quedaría bloqueada.
    * Sale desde la hora configurada de la tarde (antes todavía hay tiempo de sobra). Un aviso por ticket y día.
    */
-  private async faltaPtManana(hoy: string, hora: string): Promise<Candidato[]> {
+  async faltaPtManana(hoy: string, hora: string): Promise<Candidato[]> {
     if (hora < this.horaPtManana) return [];
     const manana = masDias(hoy, 1);
     const dias = await this.prisma.ticketDiaServicio.findMany({
