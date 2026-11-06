@@ -94,7 +94,10 @@ const aDto = (p: PrefacturaCompleta, nombres: Nombres = new Map()) => ({
         motivo: p.rechazoMotivo,
         devueltoA: p.rechazoDevueltoA,
         devueltoAUsuario: p.rechazoDevueltoAUsuarioId
-          ? { id: p.rechazoDevueltoAUsuarioId, nombre: nombres.get(p.rechazoDevueltoAUsuarioId) ?? null }
+          ? {
+              id: p.rechazoDevueltoAUsuarioId,
+              nombre: nombres.get(p.rechazoDevueltoAUsuarioId) ?? null,
+            }
           : null,
         /** Los ítems que el cliente observó, con su observación. */
         items: p.rechazoItems.map((o) => {
@@ -360,7 +363,11 @@ export class PrefacturasService {
     });
     const avance = await this.documentos.avance(pedidoId);
     if (vigente)
-      return { preliminar: false, prefactura: aDto(vigente, await this.nombresDe(vigente)), avance };
+      return {
+        preliminar: false,
+        prefactura: aDto(vigente, await this.nombresDe(vigente)),
+        avance,
+      };
     const calculo = await this.prisma.$transaction(async (tx) => {
       const pedido = await tx.pedido.findUniqueOrThrow({
         where: { id: pedidoId },
@@ -944,10 +951,16 @@ export class PrefacturasService {
       where: { pedidoId: pedido.id },
       include: {
         herramientas: { orderBy: { orden: 'asc' }, include: { usos: true, unidadMedida: true } },
+        _count: { select: { actividades: true } },
       },
     });
+    // Un día quitado por Facturación queda como documento corregido sin actividades: no es un día trabajado y no se cobra
+    // (igual que en el avance documental).
     const diasJob = new Set(
-      reportes.filter((r) => r.tipo === 'reporte_job').map((r) => aDia(r.fecha)),
+      reportes
+        .filter((r) => r.tipo === 'reporte_job')
+        .filter((r) => !(r.corregidoAt !== null && r._count.actividades === 0))
+        .map((r) => aDia(r.fecha)),
     ).size;
     const herramientas = reportes
       .filter((r) => r.tipo === 'reporte_herramientas')

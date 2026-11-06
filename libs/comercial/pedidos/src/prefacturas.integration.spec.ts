@@ -509,6 +509,21 @@ run('prefactura (base de datos real)', () => {
     await generar(id).expect(409);
   });
 
+  it('un día que Facturación quitó del Reporte Job no cuenta como día trabajado: no se cobra', async () => {
+    const id = await pedidoListo(); // servicio de 2 días (1 y 2 de noviembre), con Reporte Job de los dos
+    await doc(job(3), id).expect(201); // un reporte de un día fuera del servicio: el conteo de días sigue cuadrando
+    // Facturación deja el día 2 sin actividades (queda como documento corregido y vacío)
+    await http()
+      .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
+      .set(bearer([P.DOCUMENTOS_OPERATIVOS_VER, P.DOCUMENTOS_OPERATIVOS_CORREGIR]))
+      .send({ origen: 'fcr', fecha: '2026-11-02', actividades: [] })
+      .expect(200);
+    const r = await generar(id).expect(201);
+    const sup = r.body.items.find((i: { codigo: string }) => i.codigo.startsWith('SUP'));
+    // supervisor por día: los días 1 y 3 tienen Reporte Job; el día 2, quitado, no se cobra (antes se cobraban 3)
+    expect(sup).toMatchObject({ cantidad: 2, precioTotal: 874.46, fuente: 'personal' });
+  });
+
   it('el índice lista las prefacturas con su pedido y cliente, y filtra por estado y texto', async () => {
     const id = await pedidoListo();
     const gen = (await generar(id).expect(201)).body;
@@ -1115,11 +1130,23 @@ run('prefactura (base de datos real)', () => {
     });
     const url2 = `/api/comercial/prefacturas/${v1.id}/seguimiento`;
     await http().post(url2).set(fact()).send({ nota: '  ' }).expect(400);
-    const seg = await http().post(url2).set(fact()).send({ nota: 'Se avisó a Operaciones' }).expect(201);
-    expect(seg.body.seguimiento).toMatchObject([{ nota: 'Se avisó a Operaciones', por: { id: ACTOR } }]);
+    const seg = await http()
+      .post(url2)
+      .set(fact())
+      .send({ nota: 'Se avisó a Operaciones' })
+      .expect(201);
+    expect(seg.body.seguimiento).toMatchObject([
+      { nota: 'Se avisó a Operaciones', por: { id: ACTOR } },
+    ]);
     await expect(
       prisma.prefacturaRechazoItem.create({
-        data: { id: uuidv7(), prefacturaId: v1.id, prefacturaItemId: item.id, observacion: 'Otra vez', createdBy: ACTOR },
+        data: {
+          id: uuidv7(),
+          prefacturaId: v1.id,
+          prefacturaItemId: item.id,
+          observacion: 'Otra vez',
+          createdBy: ACTOR,
+        },
       }),
     ).rejects.toThrow(); // un ítem se observa una vez
     await expect(
@@ -1127,7 +1154,9 @@ run('prefactura (base de datos real)', () => {
         data: { id: uuidv7(), prefacturaId: v1.id, nota: '  ', createdBy: ACTOR },
       }),
     ).rejects.toThrow(); // nota vacía
-    await expect(prisma.$executeRaw`DELETE FROM comercial.prefactura_seguimiento WHERE prefactura_id = ${v1.id}::uuid`).rejects.toThrow(); // inmutable
+    await expect(
+      prisma.$executeRaw`DELETE FROM comercial.prefactura_seguimiento WHERE prefactura_id = ${v1.id}::uuid`,
+    ).rejects.toThrow(); // inmutable
     expect(await estadoDe(id)).toBe('en_correccion');
     const hist = await prisma.procesoHistorial.findMany({
       where: { entidadId: id },
