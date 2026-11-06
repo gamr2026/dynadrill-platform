@@ -50,7 +50,9 @@ export class DuracionServicioConsumer implements OnApplicationBootstrap {
           const fechaFin = String(d['fechaFinNueva'] ?? '');
           const userId = event.actor?.userId;
           if (!pedidoId || !/^\d{4}-\d{2}-\d{2}$/.test(fechaFin) || !userId) {
-            this.logger.warn(`${event.type}: faltan el pedido, la fecha o quién decidió; se ignora`);
+            this.logger.warn(
+              `${event.type}: faltan el pedido, la fecha o quién decidió; se ignora`,
+            );
             return;
           }
           const actor = {
@@ -65,7 +67,17 @@ export class DuracionServicioConsumer implements OnApplicationBootstrap {
           } as unknown as AuthUser;
           let motivo: string | null = null;
           try {
-            await this.pedidos.aplicarFechaFinDeOperaciones(pedidoId, fechaFin, { actor, token: '' });
+            const accion = d['accion'] === 'ampliar' ? 'ampliar' : 'acortar';
+            await this.pedidos.aplicarFechaFinDeOperaciones(
+              pedidoId,
+              fechaFin,
+              { actor, token: '' },
+              {
+                accion,
+                motivo: String(d['motivo'] ?? 'Sin motivo indicado'),
+                ticketNumero: typeof d['ticketNumero'] === 'number' ? d['ticketNumero'] : null,
+              },
+            );
           } catch (e) {
             if (
               e instanceof ConflictException ||

@@ -394,6 +394,8 @@ export class PedidosService {
     pedidoId: string,
     fechaFin: string,
     ctx: Contexto,
+    /** Lo que decidió Operaciones, para dejar el porqué (la prefactura explica con él los días que ya no cuentan). */
+    cambio?: { accion: 'acortar' | 'ampliar'; motivo: string; ticketNumero?: number | null },
   ): Promise<void> {
     const actual = await this.cargar(this.prisma, pedidoId);
     if (actual.estado === 'borrador' || !EDITABLES.has(actual.estado)) {
@@ -410,6 +412,20 @@ export class PedidosService {
         where: { id: pedidoId },
         data: { fechaFinServicio: fin, version: { increment: 1 }, updatedBy: ctx.actor.id },
       });
+      if (cambio) {
+        await tx.pedidoCambioDuracion.create({
+          data: {
+            id: uuidv7(),
+            pedidoId,
+            accion: cambio.accion,
+            fechaFinAnterior: actual.fechaFinServicio,
+            fechaFinNueva: fin,
+            motivo: cambio.motivo,
+            ticketNumero: cambio.ticketNumero ?? null,
+            actorId: ctx.actor.id,
+          },
+        });
+      }
       await this.publicar(tx, 'comercial.pedido.actualizado', pedidoId, ctx, {
         codigo: actual.codigo,
         campos: ['fechaFinServicio'],
@@ -681,7 +697,12 @@ export class PedidosService {
    * misma persona, mientras el pedido es editable. El contenido no pasa por aquí: se guarda su id y una copia de nombre,
    * tipo y tamaño.
    */
-  async adjuntarDocumento(id: string, archivoId: string, descripcion: string | undefined, ctx: Contexto) {
+  async adjuntarDocumento(
+    id: string,
+    archivoId: string,
+    descripcion: string | undefined,
+    ctx: Contexto,
+  ) {
     const p = await this.cargar(this.prisma, id);
     if (!EDITABLES.has(p.estado)) throw new ConflictException('Este pedido ya no se puede editar');
     if (p.documentos.length >= MAX_DOCUMENTOS) {

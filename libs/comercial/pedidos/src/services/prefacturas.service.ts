@@ -22,6 +22,7 @@ import {
 } from '../dto/prefacturas.dto';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { dentroDelServicio, explicarDiasFuera } from './dias-del-servicio';
 import { calcularPrefactura, ItemLista, TasasAplicadas } from '../prefacturas/calculo';
 import { filasParaAs2 } from '../prefacturas/exportacion-as2';
 import { DocumentosOperativosService } from './documentos-operativos.service';
@@ -955,26 +956,47 @@ export class PrefacturasService {
       },
     });
     // Un día quitado por Facturación queda como documento corregido sin actividades: no es un día trabajado y no se cobra
-    // (igual que en el avance documental).
+    // (igual que en el avance documental). Tampoco se cobra un día fuera de las fechas del servicio (p. ej. porque se acortó): se avisa cuáles
+    // y por qué.
+    const rango = { inicio: pedido.fechaInicioServicio, fin: pedido.fechaFinServicio };
+    const diasFuera = new Set<string>();
+    const dia = (d: Date) => d.toISOString().slice(0, 10);
     const diasJob = new Set(
       reportes
         .filter((r) => r.tipo === 'reporte_job')
         .filter((r) => !(r.corregidoAt !== null && r._count.actividades === 0))
-        .map((r) => aDia(r.fecha)),
+        .flatMap((r) => (r.fecha ? [r.fecha] : []))
+        .filter((f) => {
+          if (dentroDelServicio(f, rango)) return true;
+          diasFuera.add(dia(f));
+          return false;
+        })
+        .map(dia),
     ).size;
     const herramientas = reportes
       .filter((r) => r.tipo === 'reporte_herramientas')
       .flatMap((r) => r.herramientas)
-      .map((h) => ({
-        nombre: h.nombre,
-        serie: h.serie,
-        codigo: h.codigo,
-        unidad: h.unidadMedida?.nombre ?? null,
-        cantidad: h.cantidad === null ? null : Number(h.cantidad),
-        usos: h.usos.map((u) => ({ estado: u.estado })),
-      }));
+      .map((h) => {
+        const dentro = h.usos.filter((u) => dentroDelServicio(u.fecha, rango));
+        const fuera = h.usos.filter((u) => !dentroDelServicio(u.fecha, rango));
+        for (const u of fuera) diasFuera.add(dia(u.fecha));
+        // con el reporte por ítem la cantidad es la suma de sus días: se descuenta lo de los días que ya no cuentan
+        const cantidad =
+          h.cantidad === null
+            ? null
+            : Math.max(0, Number(h.cantidad) - fuera.reduce((s, u) => s + Number(u.cantidad), 0));
+        return {
+          nombre: h.nombre,
+          serie: h.serie,
+          codigo: h.codigo,
+          unidad: h.unidadMedida?.nombre ?? null,
+          cantidad,
+          usos: dentro.map((u) => ({ estado: u.estado })),
+        };
+      });
 
     const tasas = await this.tasas(tx);
+    const aviso = diasFuera.size ? await explicarDiasFuera(tx, pedido.id, [...diasFuera]) : null;
     const resultado = calcularPrefactura({
       itemsPedido: pedido.items.map((i) => ({
         codigo: i.codigo,
@@ -990,6 +1012,7 @@ export class PrefacturasService {
       nombreLista: lista?.numeroContrato ?? null,
       tasas,
     });
+    if (aviso) resultado.advertencias.push(aviso);
     return { ...resultado, listaId: lista?.id ?? null, tasas };
   }
 

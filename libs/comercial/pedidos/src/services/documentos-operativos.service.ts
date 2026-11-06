@@ -16,6 +16,7 @@ import {
   UsoHerramientaDto,
 } from '../dto/documentos-operativos.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { dentroDelServicio, explicarDiasFuera } from './dias-del-servicio';
 import { PedidoEstadoService } from './pedido-estado.service';
 
 /** Estados del pedido en los que todavía se reciben o corrigen documentos operativos (antes de generar la prefactura). */
@@ -50,6 +51,9 @@ export interface Avance {
   /** Días que debería cubrir el Reporte Job (inicio a fin del servicio) y días con reporte recibido. */
   diasEsperados: number;
   diasConReporteJob: number;
+  /** Días con Reporte Job que quedaron fuera del servicio (p. ej. porque se acortó): no cuentan, y aquí se dice por qué. */
+  diasFueraDelServicio: string[];
+  explicacionDiasFuera: string | null;
   /** El Reporte de Herramientas solo lo exige la línea FCR. */
   reporteHerramientasRequerido: boolean;
   reporteHerramientasRecibido: boolean;
@@ -345,7 +349,12 @@ export class DocumentosOperativosService {
   private async avanceEn(
     db: Pick<
       PrismaService,
-      'pedido' | 'documentoOperativo' | 'documentoOperativoUso' | 'guiaRemision' | 'pedidoItem'
+      | 'pedido'
+      | 'documentoOperativo'
+      | 'documentoOperativoUso'
+      | 'guiaRemision'
+      | 'pedidoItem'
+      | 'pedidoCambioDuracion'
     >,
     pedidoId: string,
   ): Promise<Avance> {
@@ -366,7 +375,19 @@ export class DocumentosOperativosService {
       },
       select: { fecha: true },
     });
-    const conReporte = new Set(dias.map((d) => aDia(d.fecha)));
+    // un día fuera de las fechas del servicio (p. ej. porque Operaciones lo acortó) no cuenta, y se dice por qué
+    const rango = { inicio: pedido.fechaInicioServicio, fin: pedido.fechaFinServicio };
+    const conFecha = dias.flatMap((d) => (d.fecha ? [d.fecha] : []));
+    const conReporte = new Set(
+      conFecha.filter((f) => dentroDelServicio(f, rango)).map((f) => f.toISOString().slice(0, 10)),
+    );
+    const diasFuera = [
+      ...new Set(
+        conFecha
+          .filter((f) => !dentroDelServicio(f, rango))
+          .map((f) => f.toISOString().slice(0, 10)),
+      ),
+    ].sort();
     const ini = pedido.fechaInicioServicio;
     const fin = pedido.fechaFinServicio;
     const diasEsperados =
@@ -402,6 +423,10 @@ export class DocumentosOperativosService {
       completo: pendientes.length === 0,
       diasEsperados,
       diasConReporteJob: conReporte.size,
+      diasFueraDelServicio: diasFuera,
+      explicacionDiasFuera: diasFuera.length
+        ? await explicarDiasFuera(db, pedidoId, diasFuera)
+        : null,
       reporteHerramientasRequerido: requiereHerramientas,
       reporteHerramientasRecibido: herramientas > 0,
       usoVenta,

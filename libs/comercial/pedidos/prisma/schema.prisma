@@ -304,6 +304,7 @@ model Pedido {
   documentosFirmados DocumentoRespaldoFirmado[]
   guias            GuiaRemision[]
   ordenTrabajo     OrdenTrabajo?
+  cambiosDuracion  PedidoCambioDuracion[]
 
   @@index([estado])
   @@index([clienteId])
@@ -369,6 +370,26 @@ model ServicioSubtipo {
 }
 
 /// Tipo de servicio elegido en un pedido.
+/// Cambios de la fecha de fin del servicio que decidió Operaciones (acortar o ampliar) y su motivo. Solo se agrega.
+model PedidoCambioDuracion {
+  id               String    @id @db.Uuid
+  pedidoId         String    @map("pedido_id") @db.Uuid
+  pedido           Pedido    @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  accion           String
+  fechaFinAnterior DateTime? @map("fecha_fin_anterior") @db.Date
+  fechaFinNueva    DateTime  @map("fecha_fin_nueva") @db.Date
+  motivo           String
+  /// Ticket de Pumping que lo decidió (solo para mostrarlo).
+  ticketNumero     Int?      @map("ticket_numero")
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  actorId          String?   @map("actor_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([pedidoId, createdAt])
+  @@map("pedido_cambio_duracion")
+  @@schema("comercial")
+}
+
 model PedidoTipoServicio {
   id       String       @id @db.Uuid
   pedidoId String       @map("pedido_id") @db.Uuid

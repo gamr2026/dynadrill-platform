@@ -1178,6 +1178,12 @@ run('documentos operativos (base de datos real)', () => {
       await duracionServicio.consumir(e);
       await duracionServicio.consumir(e); // mismo evento: lo ignora el inbox
       expect(await fin(id)).toBe('2026-11-06');
+      // queda el porqué del cambio (la prefactura lo usa para explicar los días que dejan de contar)
+      const cambios = await prisma.pedidoCambioDuracion.findMany({ where: { pedidoId: id } });
+      expect(cambios).toHaveLength(1); // el evento repetido no lo duplica
+      expect(cambios[0]).toMatchObject({ accion: 'ampliar', motivo: 'El pozo se alarga' });
+      expect(cambios[0].fechaFinAnterior?.toISOString().slice(0, 10)).toBe('2026-11-03');
+      expect(cambios[0].fechaFinNueva.toISOString().slice(0, 10)).toBe('2026-11-06');
       const actualizados = await salidas(id, 'comercial.pedido.actualizado');
       expect(actualizados).toHaveLength(1);
       expect(actualizados[0]).toMatchObject({
@@ -1191,6 +1197,7 @@ run('documentos operativos (base de datos real)', () => {
       const id = await pedido('pumping', 'enviado_para_firmas');
       await duracionServicio.consumir(duracion(id, '2026-11-06'));
       expect(await fin(id)).toBe('2026-11-03');
+      expect(await prisma.pedidoCambioDuracion.count({ where: { pedidoId: id } })).toBe(0);
       const [r] = await salidas(id, 'comercial.duracion_servicio.rechazada');
       expect(r).toMatchObject({ fechaFinAnterior: '2026-11-03', fechaFinNueva: '2026-11-06' });
       expect(r.motivo).toContain('ya no admite cambios');

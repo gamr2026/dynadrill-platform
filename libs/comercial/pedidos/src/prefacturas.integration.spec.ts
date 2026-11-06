@@ -509,19 +509,56 @@ run('prefactura (base de datos real)', () => {
     await generar(id).expect(409);
   });
 
-  it('un día que Facturación quitó del Reporte Job no cuenta como día trabajado: no se cobra', async () => {
+  it('un reporte de un día fuera del servicio no se cobra ni cuenta para la documentación, y se dice cuál y por qué', async () => {
     const id = await pedidoListo(); // servicio de 2 días (1 y 2 de noviembre), con Reporte Job de los dos
-    await doc(job(3), id).expect(201); // un reporte de un día fuera del servicio: el conteo de días sigue cuadrando
-    // Facturación deja el día 2 sin actividades (queda como documento corregido y vacío)
-    await http()
-      .put(`/api/comercial/pedidos/${id}/documentos-operativos/dia`)
-      .set(bearer([P.DOCUMENTOS_OPERATIVOS_VER, P.DOCUMENTOS_OPERATIVOS_CORREGIR]))
-      .send({ origen: 'fcr', fecha: '2026-11-02', actividades: [] })
-      .expect(200);
+    await doc(job(3), id).expect(201); // un reporte del día 3: queda fuera del servicio
+    const avance = (
+      await http()
+        .get(`/api/comercial/pedidos/${id}/documentos-operativos/avance`)
+        .set(fact())
+        .expect(200)
+    ).body;
+    expect(avance).toMatchObject({
+      completo: true,
+      diasEsperados: 2,
+      diasConReporteJob: 2,
+      diasFueraDelServicio: ['2026-11-03'],
+    });
+    expect(avance.explicacionDiasFuera).toContain('03/11/2026 no se cuentan ni se facturan');
+    expect(avance.explicacionDiasFuera).toContain('fuera de las fechas del servicio');
+
     const r = await generar(id).expect(201);
     const sup = r.body.items.find((i: { codigo: string }) => i.codigo.startsWith('SUP'));
-    // supervisor por día: los días 1 y 3 tienen Reporte Job; el día 2, quitado, no se cobra (antes se cobraban 3)
+    // supervisor por día: los 2 días del servicio (no el día 3 fuera de él) a 437,23
     expect(sup).toMatchObject({ cantidad: 2, precioTotal: 874.46, fuente: 'personal' });
+    expect(r.body.advertencias.join(' ')).toContain(
+      'Los días 03/11/2026 no se cuentan ni se facturan',
+    );
+  });
+
+  it('si el servicio se acortó, la prefactura explica con el motivo y el ticket por qué esos días ya no cuentan', async () => {
+    const id = await pedidoListo();
+    await doc(job(3), id).expect(201);
+    // Operaciones había acortado el servicio hasta el día 2 (la fecha ya está en el pedido): queda el porqué
+    await prisma.pedidoCambioDuracion.create({
+      data: {
+        id: uuidv7(),
+        pedidoId: id,
+        accion: 'acortar',
+        fechaFinAnterior: new Date('2026-11-03T00:00:00Z'),
+        fechaFinNueva: new Date('2026-11-02T00:00:00Z'),
+        motivo: 'El pozo terminó antes de lo previsto',
+        ticketNumero: 4593,
+        actorId: ACTOR,
+      },
+    });
+    const r = await generar(id).expect(201);
+    const aviso = r.body.advertencias.find((a: string) =>
+      a.includes('no se cuentan ni se facturan'),
+    );
+    expect(aviso).toContain('03/11/2026');
+    expect(aviso).toContain('El servicio se acortó hasta el 02/11/2026 (ticket 4593)');
+    expect(aviso).toContain('Motivo: El pozo terminó antes de lo previsto');
   });
 
   it('el índice lista las prefacturas con su pedido y cliente, y filtra por estado y texto', async () => {
