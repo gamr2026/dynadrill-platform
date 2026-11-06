@@ -4443,6 +4443,152 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       });
     });
 
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 9: «Mis tareas de hoy»
+    // ----------------------------------------------------------------------------------------------------------------
+    describe('mis tareas de hoy: lo que cada persona debe hacer hoy según su papel en el servicio', () => {
+      type Tarea = { clave: string; estado: string; detalle: string | null; titulo: string };
+      type Bloque = {
+        rol: string;
+        ticketId: string | null;
+        jornada: unknown;
+        pendientes: number;
+        tareas: Tarea[];
+      };
+      const url = `${base}/mis-tareas-hoy`;
+      const bloqueDe = async (t: Ticket, rol: string, h: ReturnType<typeof op1>) => {
+        const r = await http().get(url).set(h).expect(200);
+        return (r.body.bloques as Bloque[]).find((b) => b.ticketId === t.id && b.rol === rol);
+      };
+      const tarea = (b: Bloque | undefined, clave: string) =>
+        b?.tareas.find((x) => x.clave === clave);
+
+      it('el Operador ve los pendientes de hoy de su unidad; lo hecho queda marcado y lo que espera a otras áreas se le dice', async () => {
+        const t = await enEjecucion(); // hoy es el día 2 de 3
+        await ver(t);
+        const antes = await bloqueDe(t, 'operador', op1());
+        expect(antes?.jornada).toEqual({ numero: 2, total: 3, fecha: DIAS[1] });
+        expect(antes?.tareas.map((x) => [x.clave, x.estado])).toEqual([
+          ['checklist', 'pendiente'],
+          ['company_man', 'pendiente'],
+          ['reporte_salida', 'pendiente'],
+          ['job_log', 'pendiente'],
+          ['herramientas', 'pendiente'],
+          ['reporte_llegada', 'pendiente'],
+          ['esperando_otras_areas', 'bloqueada'],
+          ['jornada_atrasada', 'bloqueada'], // el día 1 ya pasó sin cerrarse
+        ]);
+        expect(tarea(antes, 'esperando_otras_areas')?.detalle).toContain('PTW del día aprobado');
+
+        await abrirDia(t, DIAS[1]);
+        const abierta = await bloqueDe(t, 'operador', op1());
+        expect(abierta?.tareas.map((x) => [x.clave, x.estado])).toEqual([
+          ['checklist', 'hecha'],
+          ['company_man', 'hecha'],
+          ['reporte_salida', 'hecha'],
+          ['job_log', 'pendiente'],
+          ['herramientas', 'pendiente'],
+          ['reporte_llegada', 'pendiente'],
+          ['jornada_atrasada', 'bloqueada'],
+        ]);
+        expect(abierta?.pendientes).toBe(4); // job log, herramientas, llegada y la jornada atrasada
+        // el otro operador es de otra unidad: ve lo suyo, no lo de su compañero
+        const otro = await bloqueDe(t, 'operador', op2());
+        expect(otro?.tareas.map((x) => x.clave)).toContain('reporte_salida');
+        // quien no está en el servicio no tiene bloque de este ticket
+        expect(
+          await bloqueDe(t, 'operador', como('operador', uuidv7(), 'Otro', [P.PUMPING_OPERAR])),
+        ).toBeUndefined();
+      });
+
+      it('el Supervisor ve la aceptación del Company Man y cuándo se puede cerrar la jornada', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        const antes = await bloqueDe(t, 'supervisor', sup());
+        expect(tarea(antes, 'aceptar_company_man')).toMatchObject({ estado: 'pendiente' });
+        expect(tarea(antes, 'cerrar_jornada')?.detalle).toContain('todavía no está abierta');
+
+        await abrirDia(t, DIAS[1]);
+        const abierta = await bloqueDe(t, 'supervisor', sup());
+        expect(tarea(abierta, 'aceptar_company_man')).toMatchObject({ estado: 'hecha' });
+        expect(tarea(abierta, 'cerrar_jornada')?.detalle).toContain('Se habilita cuando se cumpla');
+
+        await cumplirCierre(t, DIAS[1]);
+        expect(tarea(await bloqueDe(t, 'supervisor', sup()), 'cerrar_jornada')?.detalle).toBe(
+          'Lista para cerrar',
+        );
+        await cerrar(t, DIAS[1]).expect(201);
+        expect(tarea(await bloqueDe(t, 'supervisor', sup()), 'cerrar_jornada')).toMatchObject({
+          estado: 'hecha',
+        });
+      });
+
+      it('las jornadas de días pasados sin cerrar aparecen como tarea bloqueada, para el Operador y el Supervisor', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        hoy = DIAS[2]; // el día 3: los días 1 y 2 ya pasaron sin cerrarse
+        for (const [rol, h] of [
+          ['operador', op1()],
+          ['supervisor', sup()],
+        ] as const) {
+          const b = await bloqueDe(t, rol, h);
+          const atrasadas = b?.tareas.filter((x) => x.clave === 'jornada_atrasada') ?? [];
+          expect(atrasadas.map((x) => x.titulo)).toEqual([
+            'Jornada del 05/11 sin cerrar',
+            'Jornada del 06/11 sin cerrar',
+          ]);
+          expect(atrasadas.every((x) => x.estado === 'bloqueada')).toBe(true);
+          expect(atrasadas[0].detalle).toContain('Falta:');
+        }
+      });
+
+      it('el Jefe de Base ve los servicios que van adelantados; sin permiso de Pumping no se ve nada', async () => {
+        hoy = DIAS[0]; // el plan al primer día es 33,3 %
+        const t = await enEjecucion();
+        const um = (
+          await admin.query('SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1')
+        ).rows[0].id;
+        const linea = uuidv7();
+        await admin.query(
+          "INSERT INTO pumping.ticket_linea (id, ticket_id, orden, codigo, descripcion, unidad_medida_id, cantidad, tipo_linea) VALUES ($1, $2, 1, $3, 'Herramienta de prueba', $4, 3, 'herramienta')",
+          [linea, t.id, `TH-${n}`, um],
+        );
+        for (let i = 0; i < 2; i++)
+          await admin.query(
+            "INSERT INTO pumping.reporte_item_dia (id, linea_id, fecha, estado, cantidad, created_by) VALUES ($1, $2, $3, 'operacion', 1, $4)",
+            [uuidv7(), linea, DIAS[i], JEFE],
+          );
+        await ver(t);
+        const jefe = como('jefe_base', JEFE, 'Jaime Jefe de Base', [
+          P.PUMPING_JORNADA_CAMBIAR_DURACION,
+          P.PUMPING_VER,
+        ]);
+        const r = await http().get(url).set(jefe).expect(200);
+        const bloque = (r.body.bloques as Bloque[]).find((b) => b.rol === 'jefe_base');
+        const mia = bloque?.tareas.find(
+          (x) => x.clave === 'avance_adelantado' && x.titulo.includes('adelantado'),
+        );
+        expect(mia).toBeDefined();
+        const suya = bloque?.tareas.find(
+          (x) => (x as Tarea & { ticketId: string }).ticketId === t.id,
+        );
+        expect(suya).toMatchObject({ clave: 'avance_adelantado', estado: 'pendiente' });
+        expect(suya?.detalle).toContain('66.7 % de lo cotizado usado frente a 33.3 % planificado');
+        // el Operador no tiene el bloque de Jefe de Base
+        const deOperador = await http().get(url).set(op1()).expect(200);
+        expect((deOperador.body.bloques as Bloque[]).some((b) => b.rol === 'jefe_base')).toBe(
+          false,
+        );
+        expect(
+          (
+            await http()
+              .get(url)
+              .set(como('nadie', uuidv7(), 'Nadie', []))
+          ).status,
+        ).toBe(403);
+      });
+    });
+
     describe('duración del servicio: el Jefe de Base acorta o amplía', () => {
       const jefeDuracion = () =>
         como('jefe_base', JEFE, 'Jaime Jefe de Base', [

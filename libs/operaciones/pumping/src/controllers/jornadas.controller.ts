@@ -5,6 +5,7 @@ import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AvanceService } from '../services/avance.service';
 import { DuracionService } from '../services/duracion.service';
 import { JornadasService } from '../services/jornadas.service';
+import { TareasHoyService } from '../services/tareas-hoy.service';
 
 const P = Permission;
 
@@ -31,7 +32,18 @@ export class JornadasController {
     private readonly jornadas: JornadasService,
     private readonly duracion: DuracionService,
     private readonly avance: AvanceService,
+    private readonly tareas: TareasHoyService,
   ) {}
+
+  /**
+   * «Mis tareas de hoy» de Pumping: lo que la persona que consulta debe hacer hoy según su papel en cada servicio en ejecución (Operador,
+   * Supervisor) y, si puede cambiar la duración, los servicios que van adelantados o atrasados (Jefe de Base).
+   */
+  @RequirePermission(P.PUMPING_OPERAR, P.PUMPING_VER)
+  @Get('mis-tareas-hoy')
+  misTareasHoy(@CurrentUser() actor: AuthUser) {
+    return this.tareas.delUsuario(actor);
+  }
 
   /** Las jornadas del ticket con su estado de hoy; en la Ejecución operativa se crean las que falten. */
   @RequirePermission(P.PUMPING_OPERAR, P.PUMPING_VER)
