@@ -670,6 +670,82 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect(e).toMatchObject({ ticketId: ticket, tipo: 'salida', diaServicio: dia2 });
     });
 
+    it('«mis traslados de hoy» del Conductor muestra lo que ya hizo hoy y lo que le falta, y solo en servicios activos con hoy como día de servicio', async () => {
+      const hoyEc = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+      const ticket = uuidv7();
+      tickets.push(ticket);
+      await admin.query(
+        "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo, fecha_inicio_servicio, fecha_fin_servicio) VALUES ($1, $2, $3, 'ejecucion_operativa', $4::date, $4::date)",
+        [ticket, uuidv7(), `PED-TH-${n}-${ticket.slice(-4)}`, hoyEc],
+      );
+      const caso = uuidv7();
+      await admin.query(
+        'INSERT INTO flota.inspeccion_caso (id, ticket_id, unidad_id, operador_id) VALUES ($1, $2, $3, $4)',
+        [caso, ticket, unidadId, CONDUCTOR.id],
+      );
+      const verTareas = token('conductor', CONDUCTOR.nombre, [P.INSPECCIONES_VER], CONDUCTOR.id);
+      const bloque = async () =>
+        (
+          await http().get('/api/operaciones/flota/mis-tareas-hoy').set(verTareas).expect(200)
+        ).body.bloques.find((b: { ticketId: string }) => b.ticketId === ticket) as
+          | {
+              rol: string;
+              pendientes: number;
+              tareas: Array<{ clave: string; estado: string; detalle: string | null }>;
+            }
+          | undefined;
+      const estados = async () => (await bloque())?.tareas.map((t) => [t.clave, t.estado]);
+      expect(await estados()).toEqual([
+        ['inspeccion_salida', 'pendiente'],
+        ['viaje_salida', 'pendiente'],
+        ['inspeccion_llegada', 'pendiente'],
+        ['viaje_retorno', 'pendiente'],
+      ]);
+      expect((await bloque())?.rol).toBe('conductor');
+
+      const inspeccion = (momento: string) =>
+        admin.query(
+          `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, dia_servicio, punto_partida, destino, conductor_id, created_by)
+           VALUES ($1, $2, $3, $5::flota.momento_inspeccion, now(), $6::date, 'Base Coco', 'Pozo Beta-9', $4, $4)`,
+          [uuidv7(), caso, unidadId, CONDUCTOR.id, momento, hoyEc],
+        );
+      await inspeccion('salida');
+      expect((await estados())?.[0]).toEqual(['inspeccion_salida', 'hecha']);
+      expect((await bloque())?.tareas[1].detalle).toContain('Falta solicitar');
+
+      const {
+        origen: _o,
+        destino: _d,
+        ...cuerpoSinRuta
+      } = cuerpo({ ticketId: ticket, fecha: hoyEc });
+      const viaje = await solicitar(cuerpoSinRuta);
+      expect(viaje.status).toBe(201);
+      expect((await bloque())?.tareas[1].detalle).toContain('espera la autorización');
+      await http().post(`${base}/${viaje.body.id}/autorizar`).set(gerente()).expect(201);
+      expect((await estados())?.[1]).toEqual(['viaje_salida', 'hecha']);
+
+      await inspeccion('llegada');
+      expect(await estados()).toEqual([
+        ['inspeccion_salida', 'hecha'],
+        ['viaje_salida', 'hecha'],
+        ['inspeccion_llegada', 'hecha'],
+        ['viaje_retorno', 'pendiente'],
+      ]);
+      expect((await bloque())?.pendientes).toBe(1);
+
+      // un servicio que ya no tiene hoy como día de servicio, o que ya terminó, no aparece
+      await admin.query(
+        'UPDATE pumping.ticket SET fecha_inicio_servicio = $2::date + 1, fecha_fin_servicio = $2::date + 3 WHERE id = $1',
+        [ticket, hoyEc],
+      );
+      expect(await bloque()).toBeUndefined();
+      await admin.query(
+        "UPDATE pumping.ticket SET fecha_inicio_servicio = $2::date, fecha_fin_servicio = $2::date, paso_codigo = 'cierre' WHERE id = $1",
+        [ticket, hoyEc],
+      );
+      expect(await bloque()).toBeUndefined();
+    });
+
     it('con ticket, el origen y el destino salen de la inspección de salida de la unidad (sin ella no se solicita)', async () => {
       const ticket = uuidv7();
       tickets.push(ticket);

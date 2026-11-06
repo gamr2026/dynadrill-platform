@@ -20,6 +20,7 @@ import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { ConductoresService } from '../services/conductores.service';
 import { InspeccionesService } from '../services/inspecciones.service';
+import { TareasHoyConductorService } from '../services/tareas-hoy.service';
 
 const P = Permission;
 const actorDe = (u: AuthUser) => ({ id: u.id, roleCode: u.roleCode });
@@ -91,6 +92,7 @@ export class InspeccionesController {
   constructor(
     private readonly inspecciones: InspeccionesService,
     private readonly conductores: ConductoresService,
+    private readonly tareas: TareasHoyConductorService,
   ) {}
 
   // ---- inspecciones
@@ -104,6 +106,13 @@ export class InspeccionesController {
   @Get('inspecciones-vehiculo/casos')
   casos(@Query() q: CasosDto) {
     return this.inspecciones.casosDeTicket(q.ticketId, q.dia);
+  }
+
+  /** «Mis traslados de hoy» del Conductor: inspección y gerenciamiento de viaje de salida y de regreso de cada unidad que lleva. */
+  @RequirePermission(P.INSPECCIONES_VER)
+  @Get('mis-tareas-hoy')
+  misTareasHoy(@CurrentUser() u: AuthUser) {
+    return this.tareas.delUsuario(u);
   }
 
   @RequirePermission(P.INSPECCIONES_VER)

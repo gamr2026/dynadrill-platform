@@ -433,6 +433,10 @@ model PumTicket {
   id           String                @id @db.Uuid
   /// Número del ticket (el de la prefactura): solo para mostrarlo en los formatos; Flota nunca lo escribe.
   ticketNumero Int?                  @unique @map("ticket_numero")
+  /// Paso y fechas del servicio del ticket: Flota solo los lee (para saber si el servicio está activo y si hoy es día de servicio).
+  pasoCodigo          String    @map("paso_codigo")
+  fechaInicioServicio DateTime? @map("fecha_inicio_servicio") @db.Date
+  fechaFinServicio    DateTime? @map("fecha_fin_servicio") @db.Date
   casos        InspeccionCaso[]
   viajes       GerenciamientoViaje[]
 

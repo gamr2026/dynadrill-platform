@@ -6,6 +6,7 @@ import { UnidadesController } from './controllers/unidades.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { ConductoresService } from './services/conductores.service';
 import { InspeccionesService } from './services/inspecciones.service';
+import { TareasHoyConductorService } from './services/tareas-hoy.service';
 import { LecturasService } from './services/lecturas.service';
 import { PreventivosService } from './services/preventivos.service';
 import { ProveedoresService } from './services/proveedores.service';
@@ -30,6 +31,7 @@ import { ViajesService } from './services/viajes.service';
     ProveedoresService,
     ConductoresService,
     InspeccionesService,
+    TareasHoyConductorService,
     ViajesService,
     AsignacionPumpingConsumer,
   ],
