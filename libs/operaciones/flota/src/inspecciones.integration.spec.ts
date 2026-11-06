@@ -514,6 +514,66 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
     });
   });
 
+  describe('F3: el estado de cada caso se lee por día de servicio', () => {
+    it('cada día tiene su inspección de salida: el listado del ticket y «mis casos» muestran la del día pedido', async () => {
+      const ticket2 = uuidv7();
+      await admin.query(
+        "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo) VALUES ($1, $2, $3, 'ejecucion_operativa')",
+        [ticket2, uuidv7(), `PED-DIA-${n}-${ticket2.slice(-4)}`],
+      );
+      const caso = uuidv7();
+      await admin.query(
+        'INSERT INTO flota.inspeccion_caso (id, ticket_id, unidad_id, operador_id) VALUES ($1, $2, $3, $4)',
+        [caso, ticket2, unidadId, OPERADOR.id],
+      );
+      const inspeccion = async (dia: string) => {
+        const id = uuidv7();
+        await admin.query(
+          `INSERT INTO flota.inspeccion_vehiculo (id, caso_id, unidad_id, momento, fecha, dia_servicio, punto_partida, destino, conductor_id, created_by)
+           VALUES ($1, $2, $3, 'salida', now(), $5::date, 'Base Coco', 'Pozo Beta-9', $4, $4)`,
+          [id, caso, unidadId, OPERADOR.id, dia],
+        );
+        return id;
+      };
+      const dia1 = await inspeccion('2026-11-05');
+      const dia2 = await inspeccion('2026-11-06');
+      const delTicket = async (dia: string) =>
+        (
+          await http()
+            .get(`${base}/inspecciones-vehiculo/casos?ticketId=${ticket2}&dia=${dia}`)
+            .set(operador())
+            .expect(200)
+        ).body[0] as { salidaInspeccionId: string | null; estado: string };
+      expect((await delTicket('2026-11-05')).salidaInspeccionId).toBe(dia1);
+      expect((await delTicket('2026-11-06')).salidaInspeccionId).toBe(dia2);
+      // un día sin inspección: pendiente, no el estado del día anterior
+      expect(await delTicket('2026-11-07')).toMatchObject({
+        salidaInspeccionId: null,
+        estado: 'pendiente',
+      });
+      // lo mismo en «mis casos» (el Conductor ve el estado de HOY, no el de ayer)
+      const mis = async (dia: string) =>
+        (
+          await http()
+            .get(`${base}/inspecciones-vehiculo/mis-casos?dia=${dia}`)
+            .set(operador())
+            .expect(200)
+        ).body.find((c: { ticketId: string }) => c.ticketId === ticket2) as {
+          salidaInspeccionId: string | null;
+        };
+      expect((await mis('2026-11-06')).salidaInspeccionId).toBe(dia2);
+      expect((await mis('2026-11-08')).salidaInspeccionId).toBeNull();
+      await http()
+        .get(`${base}/inspecciones-vehiculo/mis-casos?dia=06/11/2026`)
+        .set(operador())
+        .expect(400);
+
+      await admin.query('DELETE FROM flota.inspeccion_vehiculo WHERE caso_id = $1', [caso]);
+      await admin.query('DELETE FROM flota.inspeccion_caso WHERE id = $1', [caso]);
+      await admin.query('DELETE FROM pumping.ticket WHERE id = $1', [ticket2]);
+    });
+  });
+
   describe('F3: registrar, revisar y anular la inspección', () => {
     let casoA = '';
     let casoB = '';

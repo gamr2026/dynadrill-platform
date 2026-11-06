@@ -65,6 +65,11 @@ export class ListarInspeccionesDto {
   @IsOptional() @IsIn(['true', 'false']) incluirAnuladas?: 'true' | 'false';
 }
 
+export class MisCasosDto {
+  /** Día del servicio (AAAA-MM-DD): el estado de cada unidad ese día; sin él, el del día más reciente. */
+  @IsOptional() @Matches(FECHA) dia?: string;
+}
+
 export class CasosDto {
   @IsUUID() ticketId!: string;
   /** Día del servicio (AAAA-MM-DD): el estado de cada unidad ese día; sin él, el del día más reciente. */
@@ -117,8 +122,8 @@ export class InspeccionesController {
 
   @RequirePermission(P.INSPECCIONES_VER)
   @Get('inspecciones-vehiculo/mis-casos')
-  misCasos(@CurrentUser() u: AuthUser) {
-    return this.inspecciones.casosDeOperador(u.id);
+  misCasos(@CurrentUser() u: AuthUser, @Query() q: MisCasosDto) {
+    return this.inspecciones.casosDeOperador(u.id, q.dia);
   }
 
   @RequirePermission(P.INSPECCIONES_VER)

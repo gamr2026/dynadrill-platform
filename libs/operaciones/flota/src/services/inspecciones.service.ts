@@ -456,11 +456,14 @@ export class InspeccionesService {
   }
 
   /** Casos asignados a una cuenta (el operador emparejado con la unidad), de los últimos 60 días. */
-  async casosDeOperador(operadorId: string) {
-    return this.casos({
-      operadorId,
-      createdAt: { gte: new Date(Date.now() - 60 * 86_400_000) },
-    });
+  async casosDeOperador(operadorId: string, dia?: string) {
+    return this.casos(
+      {
+        operadorId,
+        createdAt: { gte: new Date(Date.now() - 60 * 86_400_000) },
+      },
+      dia,
+    );
   }
 
   private async casos(where: Prisma.InspeccionCasoWhereInput, dia?: string) {
