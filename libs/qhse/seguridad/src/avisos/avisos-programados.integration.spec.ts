@@ -15,6 +15,7 @@ import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from '../testi
 import { AvisosProgramadosService } from './avisos-programados.service';
 import { TareasHoyQhseService } from './tareas-hoy.service';
 import { ReenvioAPumpingService } from '../documentos/reenvio-a-pumping.service';
+import { PtwCalendarioService } from '../ptw/ptw-calendario.service';
 
 const run = process.env['RUN_INTEGRATION'] ? describe : describe.skip;
 const P = Permission;
@@ -44,6 +45,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
   let avisos: AvisosProgramadosService;
   let tareasHoy: TareasHoyQhseService;
   let reenvio: ReenvioAPumpingService;
+  let calendario: PtwCalendarioService;
   const entidades: string[] = [];
   const archivos: string[] = [];
   const pedido = uuidv7();
@@ -87,6 +89,7 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
     avisos = t.app.get(AvisosProgramadosService);
     tareasHoy = t.app.get(TareasHoyQhseService);
     reenvio = t.app.get(ReenvioAPumpingService);
+    calendario = t.app.get(PtwCalendarioService);
     await sembrarMaestros(t.admin, MAESTROS);
     const r = await sql(
       "SELECT id, codigo FROM archivos.modulo_archivo WHERE codigo IN ('qhse_requisito_legal','qhse_documento_pedido')",
@@ -417,6 +420,53 @@ run('QHSE: avisos por vencimiento (base de datos real)', () => {
       expect(
         (despues.bloques[0]?.tareas ?? []).filter((x) => x.ticketId && suyas.includes(x.ticketId)),
       ).toEqual([]);
+    });
+
+    it('el calendario de cobertura muestra por ticket y día de servicio el PTW, el PT y el ART (que cubre todo su rango)', async () => {
+      const tk = await ticketConDias([dia, manana]);
+      await ptwDelDia(tk, dia); // nace en gabinete
+      const insertar = async (tipo: string, fecha: string, hasta: string | null) =>
+        sql(
+          `INSERT INTO qhse.documento_pedido (id, pedido_id, ticket_id, tipo, archivo_id, fecha, vigente_hasta, created_by)
+           VALUES ($1, $2, $3, $4::qhse.tipo_documento_pedido, $5, $6::date, $7::date, $8)`,
+          [
+            uuidv7(),
+            tk.pedidoId,
+            tk.ticketId,
+            tipo,
+            await archivo('qhse_documento_pedido'),
+            fecha,
+            hasta,
+            TECNICO.id,
+          ],
+        );
+      await insertar('pt', manana, null);
+      await insertar('art', fechaEn(-14), manana); // el ART vale 15 días: emitido hace 14, cubre hoy y mañana
+      const pasado = fechaEn(2);
+      const c = await calendario.cobertura(dia, pasado);
+      expect(c.dias).toEqual([dia, manana, pasado]);
+      const fila = c.tickets.find((x) => x.ticketId === tk.ticketId);
+      expect(fila).toMatchObject({
+        pedidoCodigo: expect.stringContaining('PED-DIAS-'),
+        cliente: 'Cliente de prueba',
+      });
+      expect(fila?.dias.map((d) => [d.fecha, d.servicio, d.ptw, d.pt, d.art])).toEqual([
+        [dia, true, 'gabinete', false, true],
+        [manana, true, 'sin', true, true],
+        [pasado, false, 'sin', false, false],
+      ]);
+      // un PTW anulado no cubre el día
+      await sql(
+        "UPDATE qhse.ptw SET anulado_at = now(), anulado_por = $2, motivo_anulacion = 'prueba' WHERE ticket_id = $1",
+        [tk.ticketId, TECNICO.id],
+      );
+      const despues = await calendario.cobertura(dia, manana);
+      expect(despues.tickets.find((x) => x.ticketId === tk.ticketId)?.dias[0].ptw).toBe('sin');
+      // fechas mal escritas, al revés o demasiadas
+      await expect(calendario.cobertura('06/11/2026', dia)).rejects.toThrow(/formato/);
+      await expect(calendario.cobertura(manana, dia)).rejects.toThrow(/anterior/);
+      await expect(calendario.cobertura(dia, fechaEn(40))).rejects.toThrow(/hasta 31 días/);
+      await limpiar([tk]);
     });
 
     it('el reenvío único vuelve a publicar los PTW aprobados y los PT y ART vigentes a Pumping, y no los anulados ni otros documentos', async () => {

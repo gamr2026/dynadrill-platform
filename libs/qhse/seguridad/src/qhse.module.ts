@@ -70,6 +70,7 @@ import { AspectosAmbientalesController } from './aspectos-ambientales/aspectos-a
 import { AspectosAmbientalesService } from './aspectos-ambientales/aspectos-ambientales.service';
 import { AvisosProgramadosController } from './avisos/avisos-programados.controller';
 import { TareasHoyQhseController } from './avisos/tareas-hoy.controller';
+import { PtwCalendarioService } from './ptw/ptw-calendario.service';
 import { ReenvioAPumpingController } from './documentos/reenvio-a-pumping.controller';
 import { ReenvioAPumpingService } from './documentos/reenvio-a-pumping.service';
 import { TareasHoyQhseService } from './avisos/tareas-hoy.service';
@@ -172,6 +173,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     AvisosProgramadosService,
     TareasHoyQhseService,
     ReenvioAPumpingService,
+    PtwCalendarioService,
   ],
   exports: [
     EpiService,

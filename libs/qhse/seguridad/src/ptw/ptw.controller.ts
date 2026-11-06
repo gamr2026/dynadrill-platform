@@ -4,6 +4,7 @@ import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength } fro
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { FasePtw } from '../generated/client';
+import { PtwCalendarioService } from './ptw-calendario.service';
 import { PtwConsultaService } from './ptw-consulta.service';
 import { PtwService } from './ptw.service';
 
@@ -17,6 +18,13 @@ export class ListarPtwDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   incluirAnulados?: boolean;
+}
+
+export class CalendarioPtwDto {
+  /** Primer día (AAAA-MM-DD); por omisión, hoy. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) desde?: string;
+  /** Último día (AAAA-MM-DD); por omisión, seis días después del primero. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) hasta?: string;
 }
 
 export class AbrirPtwDto {
@@ -35,12 +43,20 @@ export class PtwController {
   constructor(
     private readonly ptw: PtwService,
     private readonly consulta: PtwConsultaService,
+    private readonly calendario: PtwCalendarioService,
   ) {}
 
   @RequirePermission(P.PTW_VER)
   @Get()
   listar(@Query() q: ListarPtwDto) {
     return this.consulta.listar(q);
+  }
+
+  /** Calendario de cobertura: por ticket y día de servicio, el PTW (y su fase), el PT y el ART vigente. Va antes de `:id` para no confundirse con uno. */
+  @RequirePermission(P.PTW_VER)
+  @Get('calendario')
+  cobertura(@Query() q: CalendarioPtwDto) {
+    return this.calendario.cobertura(q.desde, q.hasta);
   }
 
   @RequirePermission(P.PTW_VER)
