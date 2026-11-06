@@ -17,4 +17,27 @@ export const JREQ = {
   jobLog: 'job_log_dia',
   /** Cierre: al menos una herramienta, ítem o cantidad marcada ese día en el Reporte de Herramientas. */
   herramientas: 'herramientas_dia',
+  // Traslados de cada día (etapa 7c). Los «por unidad» tienen una fila por cada unidad de transporte del ticket.
+  /** Apertura, por unidad (Flota): inspección de vehículos del día realizada. */
+  inspeccionRealizada: 'inspeccion_vehiculo_dia',
+  /** Apertura, por unidad (Flota): la inspección del día aprobada por el Supervisor. */
+  inspeccionAprobada: 'inspeccion_aprobada_dia',
+  /** Apertura, por unidad: el operador firmó el reporte de unidad de salida del día. */
+  reporteSalida: 'reporte_unidad_salida_dia',
+  /** Apertura, por unidad (Flota): gerenciamiento de viaje de salida del día aprobado. */
+  gerenciamientoSalida: 'gerenciamiento_salida_dia',
+  /** Apertura (QHSE): ninguna SWA activa en el servicio. */
+  sinSwa: 'sin_swa_dia',
+  /** Cierre, por unidad: el operador firmó el reporte de unidad de llegada del día. */
+  reporteLlegada: 'reporte_unidad_llegada_dia',
+  /** Cierre, por unidad (Flota): gerenciamiento de viaje de retorno del día aprobado. */
+  gerenciamientoRetorno: 'gerenciamiento_retorno_dia',
 } as const;
+
+/** Requisito del traslado (antes de un paso del ticket) → su equivalente por día. Los eventos de Flota ya traen el día del servicio. */
+export const REQUISITO_DEL_DIA: Record<string, string> = {
+  inspeccion_vehiculo_realizada: JREQ.inspeccionRealizada,
+  inspeccion_vehiculo_aprobada: JREQ.inspeccionAprobada,
+  gerenciamiento_viaje_salida_aprobado: JREQ.gerenciamientoSalida,
+  gerenciamiento_viaje_retorno_aprobado: JREQ.gerenciamientoRetorno,
+};

@@ -314,12 +314,8 @@ export class ReporteUnidadService {
           salida: i.resultado,
         })),
       });
-      await this.requisitos.marcar(
-        tx,
-        { ticketId, codigo: REQ.reporteSalida, unidadId },
-        'sistema',
-        actor.id,
-      );
+      // la firma del día cumple el requisito de apertura de esa jornada (si el ticket todavía no tiene jornadas, lo toman al crearse)
+      await this.jornadas.sincronizar(tx, ticketId, actor.id);
     });
     return this.obtener(ticketId, unidadId, e.fecha);
   }
@@ -438,12 +434,8 @@ export class ReporteUnidadService {
           update: { llegada: i.resultado },
         });
       }
-      await this.requisitos.marcar(
-        tx,
-        { ticketId, codigo: REQ.reporteLlegada, unidadId },
-        'sistema',
-        actor.id,
-      );
+      // la firma del día cumple el requisito de cierre de esa jornada
+      await this.jornadas.sincronizar(tx, ticketId, actor.id);
       const hayNovedades =
         !!(
           reporte.novedadesMecanica ||

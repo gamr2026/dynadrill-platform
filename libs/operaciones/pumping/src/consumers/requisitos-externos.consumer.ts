@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { currentTraceparent, runInEventSpan } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
+import { REQUISITO_DEL_DIA } from '../catalog/requisitos-jornada';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
 import { JornadasService } from '../services/jornadas.service';
@@ -16,6 +17,20 @@ interface Regla {
   /** Qué trae el evento para ubicar la fila: la cuenta del operador, la unidad o nada más que el ticket. */
   por: 'usuarioId' | 'unidadId' | 'ticket';
 }
+
+/** Requisito del traslado → tipo de hecho que se guarda por unidad y día. */
+const TIPO_DE_HECHO: Record<
+  string,
+  | 'inspeccion_realizada'
+  | 'inspeccion_aprobada'
+  | 'gerenciamiento_salida'
+  | 'gerenciamiento_retorno'
+> = {
+  [REQ.inspeccionRealizada]: 'inspeccion_realizada',
+  [REQ.inspeccionAprobada]: 'inspeccion_aprobada',
+  [REQ.gerenciamientoSalida]: 'gerenciamiento_salida',
+  [REQ.gerenciamientoRetorno]: 'gerenciamiento_retorno',
+};
 
 /** `tipo` del evento de gerenciamiento de viaje → requisito. */
 const requisitoDeViaje = (data: Record<string, unknown>): string | null =>
@@ -207,6 +222,8 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
       } else if (event.data['sinSwaActivas'] === true) {
         await this.requisitos.fijar(tx, ticketId, REQ.swaSinActivar, 'cumplido', 'evento', actor);
       }
+      // una SWA activa bloquea la apertura de cada día: las jornadas se dejan al día
+      await this.jornadas.sincronizar(tx, ticketId, null);
       return;
     }
     const ticket = await tx.ticket.findUnique({
@@ -272,6 +289,48 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     await this.jornadas.sincronizar(tx, ticketId, null);
   }
 
+  /**
+   * Lo que Flota hace por unidad y día (inspección realizada o aprobada, gerenciamiento de viaje de salida o de retorno). Se guarda sin
+   * importar si el ticket ya tiene jornadas (el conductor inspecciona antes de salir) y, si las tiene, se dejan al día. Al quedar realizada la
+   * inspección se le avisa al Supervisor.
+   */
+  private async hechoDeTraslado(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    event: EventEnvelope,
+    ticketId: string,
+    unidadId: string,
+    requisito: string,
+    accion: 'cumplir' | 'reabrir',
+  ): Promise<void> {
+    const dia = String(event.data['diaServicio'] ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+      this.logger.warn(`${event.type}: falta el día del servicio; se ignora`);
+      return;
+    }
+    if (!(await tx.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }))) {
+      this.logger.warn(`${event.type}: el ticket ${ticketId} no existe; se ignora`);
+      return;
+    }
+    const tipo = TIPO_DE_HECHO[requisito];
+    const fecha = new Date(`${dia}T00:00:00Z`);
+    const vigente = accion === 'cumplir';
+    const previo = await tx.ticketHechoTraslado.findUnique({
+      where: { ticketId_unidadId_fecha_tipo: { ticketId, unidadId, fecha, tipo } },
+    });
+    if (previo) {
+      if (previo.vigente !== vigente)
+        await tx.ticketHechoTraslado.update({ where: { id: previo.id }, data: { vigente } });
+    } else {
+      await tx.ticketHechoTraslado.create({
+        data: { id: uuidv7(), ticketId, unidadId, fecha, tipo, vigente },
+      });
+    }
+    await this.jornadas.sincronizar(tx, ticketId, null);
+    this.logger.log(`${event.type}: ${tipo} ${vigente ? 'vigente' : 'retirado'} (${dia})`);
+    if (event.type === 'flota.inspeccion_vehiculo.realizada' && (!previo || !previo.vigente))
+      await this.avisarSupervisor(tx, ticketId, unidadId, event);
+  }
+
   private async ticketDeEvento(
     tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
     d: Record<string, unknown>,
@@ -317,6 +376,11 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
             typeof regla.codigo === 'function' ? regla.codigo(event.data) : regla.codigo;
           if (!ticketId || !quien || !codigo) {
             this.logger.warn(`${event.type}: faltan ticketId, ${regla.por} o el tipo; se ignora`);
+            return;
+          }
+          // la inspección y el gerenciamiento de viaje se exigen en cada jornada: el evento trae el día del servicio
+          if (codigo in REQUISITO_DEL_DIA) {
+            await this.hechoDeTraslado(tx, event, ticketId, quien, codigo, regla.accion);
             return;
           }
           const clave = {

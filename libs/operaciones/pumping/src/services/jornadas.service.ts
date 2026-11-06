@@ -10,7 +10,9 @@ import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { AccionJornada, EstadoJornada, Prisma } from '../generated/client';
 import { JREQ } from '../catalog/requisitos-jornada';
+import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
+import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 const PASO = 'ejecucion_operativa';
 /** Un servicio no dura más de un año: protege contra fechas mal escritas que crearían miles de filas. */
@@ -192,12 +194,44 @@ export class JornadasService {
     if (jornadas.length === 0) return;
     const definiciones = await tx.requisito.findMany({
       where: { ambito: 'jornada', activo: true },
-      select: { codigo: true, momento: true, modulo: true, nombre: true },
+      select: { codigo: true, momento: true, modulo: true, nombre: true, porUnidad: true },
     });
     const filas = await tx.ticketRequisito.findMany({
       where: { ticketId, fecha: { not: null } },
-      select: { id: true, requisitoCodigo: true, fecha: true, estado: true },
+      select: { id: true, requisitoCodigo: true, fecha: true, estado: true, unidadId: true },
     });
+    // los traslados de cada día: una fila por cada unidad de transporte del ticket
+    const unidades = (
+      await tx.ticketUnidad.findMany({ where: { ticketId }, select: { unidadId: true } })
+    ).map((u) => u.unidadId);
+    const reportes = await tx.reporteUnidad.findMany({
+      where: { ticketId },
+      select: { unidadId: true, fecha: true, salidaFirmadaAt: true, llegadaFirmadaAt: true },
+    });
+    const salidaFirmada = new Set(
+      reportes.filter((x) => x.salidaFirmadaAt).map((x) => `${x.unidadId}|${aFecha(x.fecha)}`),
+    );
+    const llegadaFirmada = new Set(
+      reportes.filter((x) => x.llegadaFirmadaAt).map((x) => `${x.unidadId}|${aFecha(x.fecha)}`),
+    );
+    // lo que Flota hizo por unidad y día (llega por eventos)
+    const hechosTraslado = new Set(
+      (await tx.ticketHechoTraslado.findMany({ where: { ticketId, vigente: true } })).map(
+        (h) => `${h.tipo}|${h.unidadId}|${aFecha(h.fecha)}`,
+      ),
+    );
+    // la SWA es del servicio: si hay una activa, ningún día se abre (el requisito del ticket nace cumplido y la SWA lo reabre)
+    const swa = await tx.ticketRequisito.findFirst({
+      where: {
+        ticketId,
+        requisitoCodigo: REQ.swaSinActivar,
+        unidadId: null,
+        usuarioId: null,
+        fecha: null,
+      },
+      select: { estado: true },
+    });
+    const sinSwa = !swa || swa.estado === 'cumplido';
     const conJobLog = new Set(
       (
         await tx.reporteDiario.findMany({
@@ -235,6 +269,7 @@ export class JornadasService {
       codigo: string,
       j: (typeof jornadas)[number],
       fecha: string,
+      unidadId: string | null,
     ): boolean | undefined => {
       if (codigo === JREQ.companyMan) return j.companyManAceptoAt !== null;
       if (codigo === JREQ.checklist) return conChecklist.has(fecha);
@@ -243,13 +278,25 @@ export class JornadasService {
       if (codigo === JREQ.ptw) return cubre('ptw_aprobado', fecha);
       if (codigo === JREQ.pt) return cubre('pt', fecha);
       if (codigo === JREQ.art) return cubre('art', fecha);
+      if (codigo === JREQ.sinSwa) return sinSwa;
+      if (codigo === JREQ.reporteSalida) return salidaFirmada.has(`${unidadId}|${fecha}`);
+      if (codigo === JREQ.reporteLlegada) return llegadaFirmada.has(`${unidadId}|${fecha}`);
+      const delTraslado = (tipo: string) => hechosTraslado.has(`${tipo}|${unidadId}|${fecha}`);
+      if (codigo === JREQ.inspeccionRealizada) return delTraslado('inspeccion_realizada');
+      if (codigo === JREQ.inspeccionAprobada) return delTraslado('inspeccion_aprobada');
+      if (codigo === JREQ.gerenciamientoSalida) return delTraslado('gerenciamiento_salida');
+      if (codigo === JREQ.gerenciamientoRetorno) return delTraslado('gerenciamiento_retorno');
       return undefined;
     };
 
-    const clave = (codigo: string, fecha: string) => `${codigo}|${fecha}`;
+    const clave = (codigo: string, fecha: string, unidadId: string | null = null) =>
+      `${codigo}|${fecha}|${unidadId ?? ''}`;
     const estadoDe = new Map(
-      filas.map((f) => [clave(f.requisitoCodigo, aFecha(f.fecha as Date)), f] as const),
+      filas.map((f) => [clave(f.requisitoCodigo, aFecha(f.fecha as Date), f.unidadId), f] as const),
     );
+    /** A quién corresponde cada requisito: a cada unidad si es «por unidad», si no, al servicio. */
+    const destinos = (d: { porUnidad: boolean }): Array<string | null> =>
+      d.porUnidad ? unidades : [null];
     const nuevas: Prisma.TicketRequisitoCreateManyInput[] = [];
     const ahora = new Date();
     const cumplido = (modulo: string) => ({
@@ -273,33 +320,40 @@ export class JornadasService {
       // un día que no se opera no exige nada: no se le crean requisitos y los que tenía no cuentan (la aplicación no borra requisitos)
       if (j.estado === 'no_aplica' || j.estado === 'sin_operacion') continue;
       for (const d of definiciones) {
-        const v = verdad(d.codigo, j, fecha);
-        const fila = estadoDe.get(clave(d.codigo, fecha));
-        if (!fila) {
-          nuevas.push({
-            id: uuidv7(),
-            ticketId,
-            requisitoCodigo: d.codigo,
-            fecha: j.fecha,
-            ...(v
-              ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) }
-              : { estado: 'pendiente' }),
-          });
-        } else if (v !== undefined && (fila.estado === 'cumplido') !== v) {
-          await tx.ticketRequisito.update({
-            where: { id: fila.id },
-            data: v ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) } : pendiente,
-          });
-          estadoDe.set(clave(d.codigo, fecha), { ...fila, estado: v ? 'cumplido' : 'pendiente' });
+        for (const unidadId of destinos(d)) {
+          const v = verdad(d.codigo, j, fecha, unidadId);
+          const fila = estadoDe.get(clave(d.codigo, fecha, unidadId));
+          if (!fila) {
+            nuevas.push({
+              id: uuidv7(),
+              ticketId,
+              requisitoCodigo: d.codigo,
+              fecha: j.fecha,
+              unidadId,
+              ...(v
+                ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) }
+                : { estado: 'pendiente' }),
+            });
+          } else if (v !== undefined && (fila.estado === 'cumplido') !== v) {
+            await tx.ticketRequisito.update({
+              where: { id: fila.id },
+              data: v ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) } : pendiente,
+            });
+            estadoDe.set(clave(d.codigo, fecha, unidadId), {
+              ...fila,
+              estado: v ? 'cumplido' : 'pendiente',
+            });
+          }
         }
       }
     }
     if (nuevas.length) await tx.ticketRequisito.createMany({ data: nuevas, skipDuplicates: true });
     for (const n of nuevas) {
-      estadoDe.set(clave(n.requisitoCodigo, aFecha(n.fecha as Date)), {
+      estadoDe.set(clave(n.requisitoCodigo, aFecha(n.fecha as Date), n.unidadId ?? null), {
         id: n.id as string,
         requisitoCodigo: n.requisitoCodigo,
         fecha: n.fecha as Date,
+        unidadId: n.unidadId ?? null,
         estado: n.estado ?? 'pendiente',
       });
     }
@@ -311,8 +365,8 @@ export class JornadasService {
     for (const j of jornadas) {
       if ((j.estado !== 'pendiente' && j.estado !== 'abierta') || deApertura.length === 0) continue;
       const fecha = aFecha(j.fecha);
-      const faltan = deApertura.filter(
-        (d) => estadoDe.get(clave(d.codigo, fecha))?.estado !== 'cumplido',
+      const faltan = deApertura.filter((d) =>
+        destinos(d).some((u) => estadoDe.get(clave(d.codigo, fecha, u))?.estado !== 'cumplido'),
       );
       if (j.estado === 'pendiente' && faltan.length === 0) {
         await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'abierta' } });
@@ -388,10 +442,16 @@ export class JornadasService {
         estado: 'pendiente',
         requisito: { momento: 'cierre' },
       },
-      include: { requisito: { select: { nombre: true } } },
-      orderBy: { requisitoCodigo: 'asc' },
+      include: { requisito: { select: { nombre: true } }, unidad: UNIDAD_CON_PLACA },
+      orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
     });
-    return filas.map((f) => ({ codigo: f.requisitoCodigo, nombre: f.requisito.nombre }));
+    return filas.map((f) => {
+      const para = f.unidad ? etiquetaDeUnidad(f.unidad) : null;
+      return {
+        codigo: f.requisitoCodigo,
+        nombre: para ? `${f.requisito.nombre} (${para})` : f.requisito.nombre,
+      };
+    });
   }
 
   /** Las jornadas del ticket con su estado de hoy. Al pedirlas en la Ejecución operativa se crean las que falten. */
@@ -423,8 +483,9 @@ export class JornadasService {
       where: { ticketId, fecha: { not: null } },
       include: {
         requisito: { select: { nombre: true, descripcion: true, modulo: true, momento: true } },
+        unidad: UNIDAD_CON_PLACA,
       },
-      orderBy: { requisitoCodigo: 'asc' },
+      orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
     });
     const deFecha = new Map<string, typeof requisitos>();
     for (const r of requisitos) {
@@ -440,6 +501,9 @@ export class JornadasService {
         .map((r) => ({
           codigo: r.requisitoCodigo,
           nombre: r.requisito.nombre,
+          /** La unidad a la que corresponde (los traslados del día son por unidad); `null` si es del servicio. */
+          unidadId: r.unidadId,
+          para: r.unidad ? etiquetaDeUnidad(r.unidad) : null,
           descripcion: r.requisito.descripcion,
           momento: r.requisito.momento as 'apertura' | 'cierre',
           /** Área responsable de cumplirlo: `pumping`, `qhse` o `flota`. */
@@ -452,7 +516,11 @@ export class JornadasService {
       // lo que falta de otra área bloquea el día; lo de Pumping es la tarea del día
       const bloqueos = faltan
         .filter((r) => r.momento === 'apertura' && r.modulo !== 'pumping')
-        .map((r) => ({ codigo: r.codigo, nombre: r.nombre, responsable: r.modulo }));
+        .map((r) => ({
+          codigo: r.codigo,
+          nombre: r.para ? `${r.nombre} (${r.para})` : r.nombre,
+          responsable: r.modulo,
+        }));
       return {
         id: j.id,
         fecha,

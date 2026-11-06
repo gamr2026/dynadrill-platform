@@ -11,6 +11,7 @@ import { MovimientosService, type LineaDeTicket } from '@dyn/inventario';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
+import { hoyEnGuayaquil } from './jornadas.service';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
@@ -65,6 +66,11 @@ export class AsignacionService {
     private readonly requisitos: RequisitosService,
     private readonly inventario: MovimientosService,
   ) {}
+
+  /** Hoy en Ecuador, para saber cuándo se libera el personal. Aparte (y público) para que las pruebas fijen el día. */
+  hoy(): string {
+    return hoyEnGuayaquil();
+  }
 
   async asignar(id: string, entrada: AsignacionEntrada, actor: AuthUser) {
     const {
@@ -391,7 +397,7 @@ export class AsignacionService {
       select: { fechaInicioServicio: true, fechaFinServicio: true },
     });
     if (!mio) throw new NotFoundException('El ticket no existe');
-    const hoy = dia(new Date());
+    const hoy = this.hoy();
     const miInicio = desde
       ? dia(desde)
       : mio.fechaInicioServicio

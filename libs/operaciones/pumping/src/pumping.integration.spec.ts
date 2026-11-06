@@ -29,6 +29,7 @@ import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
+import { AsignacionService } from './services/asignacion.service';
 import { JornadasService } from './services/jornadas.service';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
@@ -255,6 +256,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     externos = app.get(RequisitosExternosConsumer);
     diaCorregido = app.get(DiaCorregidoConsumer);
     resultadoCambio = app.get(ResultadoCambioItemsConsumer);
+    // el día de las pruebas es fijo: sus fechas (5 al 7 de noviembre) no dependen del día en que se corran
+    jest.spyOn(app.get(AsignacionService), 'hoy').mockReturnValue('2026-11-05');
   });
 
   afterAll(async () => {
@@ -553,15 +556,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await http().post(`${base}/tickets/${id}/terminos/aceptar`).set(o).expect(201);
     for (const o of [OP1, OP2])
       await externos.consumir(externo('qhse.epi.despachada', { ticketId: id, usuarioId: o.id }));
-    for (const v of [VEHICULO, VEHICULO_2]) {
-      await externos.consumir(
-        externo(
-          'flota.inspeccion_vehiculo.realizada',
-          { ticketId: id, unidadId: v.unidadId },
-          'flota',
-        ),
-      );
-    }
+    // (la inspección, el reporte de unidad y el gerenciamiento de viaje ya no son del paso: son de cada jornada)
     // QHSE abrió el PTW del primer día de operación (y no hay SWA activa: ese requisito nace cumplido)
     await externos.consumir(
       externo('qhse.ptw.abierto', { ticketId: id, ...(await diaInicio(id)) }),
@@ -715,9 +710,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(r.body.asignacion.unidades.map((u: { placa: string }) => u.placa).sort()).toEqual(
       [VEHICULO.placa, VEHICULO_2.placa].sort(),
     );
-    // lo que el proceso exige: del ticket 4 (acta de entrega, SWA, PTW del primer día y reporte de herramientas; el checklist y la aceptación del Company Man son de cada jornada), 6 por unidad (con el reporte de llegada y el gerenciamiento de viaje de salida y de retorno), 2 por operador
+    // lo que el proceso exige una sola vez: del ticket 4 (acta de entrega, SWA, PTW del primer día y reporte de herramientas) y 2 por operador (EPI y términos). Lo de cada día (checklist, Company Man, inspección, reporte de unidad y gerenciamiento de viaje por unidad) es de cada jornada
     const req = await requisitosDe(t.id);
-    expect(req).toHaveLength(4 + 6 * 2 + 2 * 2);
+    expect(req).toHaveLength(4 + 2 * 2);
+    for (const viejo of [
+      'inspeccion_vehiculo_realizada',
+      'inspeccion_vehiculo_aprobada',
+      'reporte_unidad_salida',
+      'reporte_unidad_llegada',
+      'gerenciamiento_viaje_salida_aprobado',
+      'gerenciamiento_viaje_retorno_aprobado',
+    ])
+      expect(req.map((x) => x.codigo)).not.toContain(viejo);
     expect(req.map((x) => x.codigo)).not.toContain('checklist_ingreso_locacion');
     expect(req.map((x) => x.codigo)).not.toContain('ejecucion_formalizada');
     expect(
@@ -808,10 +812,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(r.body.asignacion.operadores).toEqual([
       expect.objectContaining({ unidadId: UNIDAD_SIN_VEHICULO.id, placa: null }),
     ]);
+    // los traslados de cada día se exigen en cada jornada, no como requisitos del ticket
     const req = await requisitosDe(t.id);
-    expect(req.filter((x) => x.codigo === 'reporte_unidad_salida').map((x) => x.para)).toEqual([
-      UNIDAD_SIN_VEHICULO.codigo,
-    ]);
+    expect(req.some((x) => x.para === UNIDAD_SIN_VEHICULO.codigo)).toBe(false);
     const evento = (
       await admin.query(
         "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.asignacion_realizada' AND datos->'data'->>'pedidoId' = $1",
@@ -1130,10 +1133,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .replace(/^.*Falta: /, '')
       .replace(/\.$/, '')
       .split('; ');
-    expect(falta).toHaveLength(2 + 2 * 2 + 2 + 1); // 2 inspecciones, 2 EPI + 2 términos, 2 reportes y el PTW del primer día (el checklist de ingreso es de la ejecución)
+    // 2 EPI + 2 términos y el PTW del primer día: la inspección, el reporte de unidad y el gerenciamiento de viaje son de cada jornada
+    expect(falta).toHaveLength(2 * 2 + 1);
     expect(falta).toContain('PTW del primer día de operación abierto');
     expect(falta).toContain(`Entrega de EPI despachada (${OP1.nombre})`);
-    expect(falta).toContain(`Reporte de unidad de salida (${VEHICULO.placa})`);
+    expect(falta.some((f) => /inspecci|Reporte de unidad|viaje/i.test(f))).toBe(false);
   });
 
   it('términos y condiciones: cada operador asignado acepta la versión vigente con su propia cuenta; es una constancia inmutable', async () => {
@@ -1272,18 +1276,34 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       estado: 'pendiente',
       origen: null,
     });
-    // eventos de Flota
+    // eventos de Flota: lo que hace por unidad y día queda guardado (aunque el ticket aún no tenga jornadas) y lo toma cada jornada
+    const DIA = '2026-11-05';
+    const hechos = async () =>
+      (
+        await admin.query(
+          'SELECT tipo, unidad_id, fecha::text AS fecha, vigente FROM pumping.ticket_hecho_traslado WHERE ticket_id = $1 ORDER BY tipo, unidad_id',
+          [t.id],
+        )
+      ).rows;
+    const realizada = externo(
+      'flota.inspeccion_vehiculo.realizada',
+      { ticketId: t.id, unidadId: VEHICULO.unidadId, diaServicio: DIA },
+      'flota',
+    );
+    await externos.consumir(realizada);
+    await externos.consumir(realizada); // el mismo evento: lo ignora el inbox
+    expect(await hechos()).toEqual([
+      { tipo: 'inspeccion_realizada', unidad_id: VEHICULO.unidadId, fecha: DIA, vigente: true },
+    ]);
+    // sin el día del servicio no hay jornada a la que pertenezca: se ignora
     await externos.consumir(
       externo(
         'flota.inspeccion_vehiculo.realizada',
-        { ticketId: t.id, unidadId: VEHICULO.unidadId },
+        { ticketId: t.id, unidadId: VEHICULO_2.unidadId },
         'flota',
       ),
     );
-    req = await requisitosDe(t.id);
-    expect(
-      req.find((x) => x.codigo === 'inspeccion_vehiculo_realizada' && x.para === VEHICULO.placa),
-    ).toMatchObject({ estado: 'cumplido', origen: 'evento' });
+    expect(await hechos()).toHaveLength(1);
     // al quedar realizada la inspección se avisa al Supervisor asignado (una sola vez, aunque el evento se repita)
     const avisos = await admin.query(
       "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.inspeccion_realizada' AND datos->'data'->>'ticketId' = $1",
@@ -1294,42 +1314,25 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(avisos.rows[0].d.asignados).toEqual([
       { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
     ]);
-    // gerenciamiento de viaje (lo aprueba su dueño): uno de salida y otro de retorno por unidad (cada conductor solicita el de la suya)
-    const viaje =
-      (codigo: string, placa: string) => (rows: Awaited<ReturnType<typeof requisitosDe>>) =>
-        rows.find((x) => x.codigo === codigo && x.para === placa);
-    const salidaDe = (placa: string) => viaje('gerenciamiento_viaje_salida_aprobado', placa);
+    // gerenciamiento de viaje (lo aprueba su dueño): uno de salida y otro de retorno por unidad y por día
+    const viaje = (hecho: string, tipo: string, unidadId = VEHICULO.unidadId) =>
+      externo(hecho, { ticketId: t.id, tipo, unidadId, diaServicio: DIA }, 'flota');
+    await externos.consumir(viaje('flota.gerenciamiento_viaje.aprobado', 'salida'));
+    await externos.consumir(viaje('flota.gerenciamiento_viaje.aprobado', 'otro')); // tipo desconocido: se ignora
+    expect((await hechos()).map((h) => [h.tipo, h.vigente])).toEqual([
+      ['inspeccion_realizada', true],
+      ['gerenciamiento_salida', true],
+    ]);
+    // el de la otra unidad es suyo: no cumple el de esta
     await externos.consumir(
-      externo(
-        'flota.gerenciamiento_viaje.aprobado',
-        { ticketId: t.id, tipo: 'salida', unidadId: VEHICULO.unidadId },
-        'flota',
-      ),
+      viaje('flota.gerenciamiento_viaje.aprobado', 'retorno', VEHICULO_2.unidadId),
     );
-    await externos.consumir(
-      externo(
-        'flota.gerenciamiento_viaje.aprobado',
-        { ticketId: t.id, tipo: 'otro', unidadId: VEHICULO.unidadId },
-        'flota',
-      ),
-    ); // tipo desconocido: se ignora
-    req = await requisitosDe(t.id);
-    expect(salidaDe(VEHICULO.placa)(req)).toMatchObject({ estado: 'cumplido', origen: 'evento' });
-    // la otra unidad sigue pendiente: su conductor aún no lo tiene aprobado
-    expect(salidaDe(VEHICULO_2.placa)(req)).toMatchObject({ estado: 'pendiente' });
     expect(
-      req.filter((x) => x.codigo === 'gerenciamiento_viaje_retorno_aprobado').map((x) => x.estado),
-    ).toEqual(['pendiente', 'pendiente']);
-    await externos.consumir(
-      externo(
-        'flota.gerenciamiento_viaje.rechazado',
-        { ticketId: t.id, tipo: 'salida', unidadId: VEHICULO.unidadId },
-        'flota',
-      ),
-    );
-    expect(salidaDe(VEHICULO.placa)(await requisitosDe(t.id))).toMatchObject({
-      estado: 'pendiente',
-    });
+      (await hechos()).filter((h) => h.tipo === 'gerenciamiento_retorno').map((h) => h.unidad_id),
+    ).toEqual([VEHICULO_2.unidadId]);
+    // un rechazo retira lo aprobado
+    await externos.consumir(viaje('flota.gerenciamiento_viaje.rechazado', 'salida'));
+    expect((await hechos()).find((h) => h.tipo === 'gerenciamiento_salida')?.vigente).toBe(false);
     // un evento sin ticket o de un tipo desconocido no rompe nada
     await externos.consumir(externo('qhse.epi.despachada', { usuarioId: OP1.id }));
     await externos.consumir(externo('qhse.otra_cosa', { ticketId: t.id }));
@@ -1409,15 +1412,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         )
         .map((x) => x.codigo);
     await cumplirTodoMenosReporte(t.id);
-    for (const v of [VEHICULO, VEHICULO_2]) {
-      const id = (await requisitosDe(t.id)).find(
-        (x) => x.codigo === 'reporte_unidad_salida' && x.para === v.placa,
-      )!.id;
-      await prisma.ticketRequisito.update({
-        where: { id },
-        data: { estado: 'cumplido', origen: 'sistema', cumplidoAt: new Date() },
-      });
-    }
     // con todo cumplido (y sin SWA) el traslado puede salir: se prueba el bloqueo antes de avanzar
     // SWA activada: reabre el requisito y el paso no avanza
     await externos.consumir(
@@ -1494,7 +1488,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(req.filter((x) => x.codigo === 'swa_sin_activar')).toHaveLength(1);
   });
 
-  it('el reporte de unidad de salida lo firma el operador de cada unidad, solo con los demás requisitos cumplidos; con todo listo el ticket pasa a la revisión y se avisa al supervisor', async () => {
+  it('el reporte de unidad de salida lo firma el operador de cada unidad, solo con los demás requisitos del traslado cumplidos; el ticket sale del traslado sin depender de él (lo exige cada jornada) y se avisa al supervisor', async () => {
     const t = await ticketEnTraslado();
     const reporteUrl = (v: string) => `${t.url}/reportes-unidad/${v}/salida`;
     // el listado de unidades con su operador
@@ -1581,13 +1575,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     await http().put(reporteUrl(VEHICULO_2.unidadId)).set(op1()).send(cuerpo1).expect(403); // la unidad del otro operador
     await http().put(reporteUrl(VEHICULO.unidadId)).set(operador()).send(cuerpo1).expect(403); // un operador que no es del ticket
     await http().put(reporteUrl(uuidv7())).set(op1()).send(cuerpo1).expect(404);
-    // todavía no puede salir: faltan los reportes
-    await http()
-      .post(`${t.url}/avanzar`)
-      .set(op1())
-      .send({ hacia: 'revision_reportes_salida' })
-      .expect(409);
-
     const firmado = (
       await http().put(reporteUrl(VEHICULO.unidadId)).set(op1()).send(cuerpo1).expect(200)
     ).body;
@@ -1626,18 +1613,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         .body.salida.combustible,
     ).toBe(70);
 
-    // falta el de la otra unidad
-    const aunFalta = await http()
-      .post(`${t.url}/avanzar`)
-      .set(op1())
-      .send({ hacia: 'revision_reportes_salida' })
-      .expect(409);
-    expect(aunFalta.body.detail).toContain(`Reporte de unidad de salida (${VEHICULO_2.placa})`);
-    expect(aunFalta.body.detail).not.toContain(VEHICULO.placa);
     const cuerpo2 = await salidaValida(t.id, VEHICULO_2.unidadId);
     await http().put(reporteUrl(VEHICULO_2.unidadId)).set(op2()).send(cuerpo2).expect(200);
 
-    // todo cumplido: sale del traslado hacia la revisión de reportes de salida
+    // lo del traslado cumplido: sale hacia la revisión de reportes de salida
     const r = await http()
       .post(`${t.url}/avanzar`)
       .set(op1())
@@ -1662,13 +1641,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // y no se puede volver a firmar la salida
     await http().put(reporteUrl(VEHICULO.unidadId)).set(op1()).send(cuerpo1).expect(409);
 
-    // en la revisión de salida falta aprobar la inspección de cada unidad (requisito de Mantenimiento)
-    const falta = await http()
-      .post(`${t.url}/avanzar`)
-      .set(supervisora())
-      .send({ hacia: 'ejecucion_operativa' })
-      .expect(409); // aún no hay transición
-    expect(falta.body).toBeDefined();
     const evento = await admin.query(
       "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.salida_reportada' AND datos->'data'->>'pedidoId' = $1",
       [t.pedidoId],
@@ -1700,32 +1672,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'revision_reportes_salida' })
       .expect(201);
 
-    // revisión de salida: inspección aprobada de cada unidad y gerenciamiento de viaje de salida aprobado
-    const faltaRevision = await http()
-      .post(`${t.url}/avanzar`)
-      .set(supervisora())
-      .send({ hacia: 'ejecucion_operativa' })
-      .expect(409);
-    expect(faltaRevision.body.detail).toContain('Inspección de vehículos aprobada');
-    expect(faltaRevision.body.detail).toContain('Gerenciamiento de viaje de salida aprobado');
-    for (const v of [VEHICULO, VEHICULO_2]) {
-      await externos.consumir(
-        externo(
-          'flota.inspeccion_vehiculo.aprobada',
-          { ticketId: t.id, unidadId: v.unidadId },
-          'flota',
-        ),
-      );
-    }
-    for (const v of [VEHICULO, VEHICULO_2]) {
-      await externos.consumir(
-        externo(
-          'flota.gerenciamiento_viaje.aprobado',
-          { ticketId: t.id, tipo: 'salida', unidadId: v.unidadId },
-          'flota',
-        ),
-      );
-    }
+    // revisión de salida: la inspección aprobada y el gerenciamiento de viaje de salida ya no son del paso: los exige cada jornada
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())
@@ -1769,22 +1716,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     );
     await http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' }).expect(201);
 
-    // control de retorno: gerenciamiento de viaje de retorno aprobado
-    const faltaRetorno = await http()
-      .post(`${t.url}/avanzar`)
-      .set(supervisora())
-      .send({ hacia: 'traslado_llegada' })
-      .expect(409);
-    expect(faltaRetorno.body.detail).toContain('Gerenciamiento de viaje de retorno aprobado');
-    for (const v of [VEHICULO, VEHICULO_2]) {
-      await externos.consumir(
-        externo(
-          'flota.gerenciamiento_viaje.aprobado',
-          { ticketId: t.id, tipo: 'retorno', unidadId: v.unidadId },
-          'flota',
-        ),
-      );
-    }
+    // control de retorno: el gerenciamiento de viaje de retorno lo exige cada jornada
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())
@@ -1792,11 +1724,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .expect(201);
 
     // traslado de llegada: cada operador firma la llegada de su unidad (publica el evento para Mantenimiento)
-    await http()
-      .post(`${t.url}/avanzar`)
-      .set(op1())
-      .send({ hacia: 'revision_reportes_llegada' })
-      .expect(409);
     const llegada = async (unidadId: string, extra: object = {}) => {
       const r = (
         await http().get(`${t.url}/reportes-unidad/${unidadId}`).set(supervisora()).expect(200)
@@ -1844,14 +1771,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(l1.llantas).toEqual([
       { posicion: 'delantera_izquierda', salida: '80 PSI', llegada: '78 PSI' },
     ]);
-    const aunFaltaLlegada = await http()
-      .post(`${t.url}/avanzar`)
-      .set(op1())
-      .send({ hacia: 'revision_reportes_llegada' })
-      .expect(409);
-    expect(aunFaltaLlegada.body.detail).toContain(
-      `Reporte de unidad de llegada (${VEHICULO_2.placa})`,
-    );
     await http().put(urlLlegada(VEHICULO_2.unidadId)).set(op2()).send(cuerpoLlegada2).expect(200);
     const eventosLlegada = await admin.query(
       "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.reporte_unidad_llegada' AND datos->'data'->>'ticketId' = $1",
@@ -2152,37 +2071,35 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   });
 
   describe('inspección de vehículo aprobada: la aprueba Flota y llega por evento (ya no hay aprobación en Pumping)', () => {
-    const inspeccion = async (id: string, unidadId: string) =>
+    const DIA = '2026-11-05';
+    const aprobada = async (id: string, unidadId: string) =>
       (
         await admin.query(
-          "SELECT estado, origen FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'inspeccion_vehiculo_aprobada' AND unidad_id = $2",
-          [id, unidadId],
+          "SELECT vigente FROM pumping.ticket_hecho_traslado WHERE ticket_id = $1 AND tipo = 'inspeccion_aprobada' AND unidad_id = $2 AND fecha = $3",
+          [id, unidadId, DIA],
         )
-      ).rows[0];
+      ).rows[0]?.vigente;
 
-    it('el evento de Flota cumple el requisito de esa unidad (y la otra sigue pendiente); un rechazo lo reabre; la ruta vieja ya no existe', async () => {
+    it('el evento de Flota deja aprobada la inspección de esa unidad ese día (y la otra no); un rechazo la retira; la ruta vieja ya no existe', async () => {
       const t = await ticketEnTraslado();
-      expect((await inspeccion(t.id, VEHICULO.unidadId)).estado).toBe('pendiente');
+      expect(await aprobada(t.id, VEHICULO.unidadId)).toBeUndefined();
       await externos.consumir(
         externo(
           'flota.inspeccion_vehiculo.aprobada',
-          { ticketId: t.id, unidadId: VEHICULO.unidadId },
+          { ticketId: t.id, unidadId: VEHICULO.unidadId, diaServicio: DIA },
           'flota',
         ),
       );
-      expect(await inspeccion(t.id, VEHICULO.unidadId)).toEqual({
-        estado: 'cumplido',
-        origen: 'evento',
-      });
-      expect((await inspeccion(t.id, VEHICULO_2.unidadId)).estado).toBe('pendiente');
+      expect(await aprobada(t.id, VEHICULO.unidadId)).toBe(true);
+      expect(await aprobada(t.id, VEHICULO_2.unidadId)).toBeUndefined();
       await externos.consumir(
         externo(
           'flota.inspeccion_vehiculo.rechazada',
-          { ticketId: t.id, unidadId: VEHICULO.unidadId },
+          { ticketId: t.id, unidadId: VEHICULO.unidadId, diaServicio: DIA },
           'flota',
         ),
       );
-      expect((await inspeccion(t.id, VEHICULO.unidadId)).estado).toBe('pendiente');
+      expect(await aprobada(t.id, VEHICULO.unidadId)).toBe(false);
       await http()
         .post(`${t.url}/revision-salida/inspecciones/${VEHICULO.unidadId}/aprobar`)
         .set(supervisora())
@@ -3353,8 +3270,73 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         .expect(200);
       await http().post(`${dia}/completar`).set(op1()).expect(201);
       await marcarHerramienta(t, fecha);
+      await cumplirLlegada(t, fecha);
       await ver(t).expect(200); // pedir las jornadas deja los requisitos al día
     };
+    const UNIDADES_DEL_TICKET = [
+      { v: VEHICULO, o: OP1 },
+      { v: VEHICULO_2, o: OP2 },
+    ];
+    /** Los traslados de salida de un día, por cada unidad: Flota inspecciona, aprueba y autoriza el viaje; el operador firma el reporte de unidad. */
+    const cumplirSalida = async (t: Ticket, fecha: string) => {
+      for (const { v, o } of UNIDADES_DEL_TICKET) {
+        const ev = (tipo: string, extra: Record<string, unknown> = {}) =>
+          externos.consumir(
+            externo(
+              tipo,
+              { ticketId: t.id, unidadId: v.unidadId, diaServicio: fecha, ...extra },
+              'flota',
+            ),
+          );
+        await ev('flota.inspeccion_vehiculo.realizada');
+        await ev('flota.inspeccion_vehiculo.aprobada');
+        await ev('flota.gerenciamiento_viaje.aprobado', { tipo: 'salida' });
+        await admin.query(
+          `INSERT INTO pumping.reporte_unidad (id, ticket_id, unidad_id, fecha, origen, destino, salida_fecha, salida_combustible, salida_firmada_por, salida_firmada_at)
+           VALUES ($1, $2, $3, $4::date, 'Base Coco', 'Pozo Beta-9', $4::date, 80, $5, now())
+           ON CONFLICT (ticket_id, unidad_id, fecha) DO UPDATE SET salida_firmada_por = $5, salida_firmada_at = now()`,
+          [uuidv7(), t.id, v.unidadId, fecha, o.id],
+        );
+      }
+    };
+    /** Los traslados de llegada de un día, por cada unidad: el operador firma el reporte de llegada y Flota autoriza el viaje de retorno. */
+    const cumplirLlegada = async (t: Ticket, fecha: string) => {
+      for (const { v, o } of UNIDADES_DEL_TICKET) {
+        await externos.consumir(
+          externo(
+            'flota.gerenciamiento_viaje.aprobado',
+            { ticketId: t.id, unidadId: v.unidadId, diaServicio: fecha, tipo: 'retorno' },
+            'flota',
+          ),
+        );
+        await admin.query(
+          `UPDATE pumping.reporte_unidad
+              SET llegada_fecha = $3::date, llegada_combustible = 20, unidad_lista = true, operacion_interrumpida = false,
+                  llegada_firmada_por = $4, llegada_firmada_at = now()
+            WHERE ticket_id = $1 AND unidad_id = $2 AND fecha = $3::date`,
+          [t.id, v.unidadId, fecha, o.id],
+        );
+      }
+    };
+    /** Lo que exige cada día, en el orden en que lo muestra la jornada: la apertura primero y por código. Los de traslado son uno por unidad (2). */
+    const APERTURA_DIA = [
+      'art_vigente',
+      'checklist_seguridad_dia',
+      'company_man_acepto_dia',
+      ...Array(2).fill('gerenciamiento_salida_dia'),
+      ...Array(2).fill('inspeccion_aprobada_dia'),
+      ...Array(2).fill('inspeccion_vehiculo_dia'),
+      'pt_dia_cargado',
+      'ptw_dia_aprobado',
+      ...Array(2).fill('reporte_unidad_salida_dia'),
+      'sin_swa_dia',
+    ];
+    const CIERRE_DIA = [
+      ...Array(2).fill('gerenciamiento_retorno_dia'),
+      'herramientas_dia',
+      'job_log_dia',
+      ...Array(2).fill('reporte_unidad_llegada_dia'),
+    ];
     const mas = (fecha: string, dias: number) =>
       new Date(Date.parse(`${fecha}T00:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
     /** Lo que QHSE hace por día llega a Pumping como eventos: el PTW aprobado y los documentos PT y ART cargados (el ART vale 15 días). Devuelven el id de origen. */
@@ -3399,6 +3381,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const abrirDia = async (t: Ticket, fecha: string) => {
       await aceptar(t, fecha).expect(201);
       await completarChecklist(t, fecha);
+      await cumplirSalida(t, fecha);
       await cubrirQhse(t, fecha);
     };
 
@@ -3469,20 +3452,26 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         estado: 'pendiente',
         companyManAcepto: true,
         companyManAceptoPor: SUPERVISORA.id,
-        pendientes: { apertura: 4, cierre: 2 }, // checklist, PTW, PT y ART
+        pendientes: { apertura: 12, cierre: 6 }, // checklist, PTW, PT y ART, y por cada unidad la inspección (realizada y aprobada), el reporte de salida y el viaje
       });
       // con el checklist del día completo todavía falta lo de QHSE; cuando QHSE cubre el día, el sistema abre la jornada
       await completarChecklist(t, DIAS[1]);
       expect((await ver(t)).body.jornadas[1]).toMatchObject({
         estado: 'pendiente',
-        pendientes: { apertura: 3, cierre: 2 },
+        pendientes: { apertura: 11, cierre: 6 },
+      });
+      // los traslados de salida de cada unidad: Flota inspecciona, aprueba y autoriza el viaje, y el operador firma el reporte
+      await cumplirSalida(t, DIAS[1]);
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'pendiente',
+        pendientes: { apertura: 3, cierre: 6 },
       });
       await cubrirQhse(t, DIAS[1]);
       const hoyJ = (await ver(t)).body.jornadas[1];
       expect(hoyJ).toMatchObject({
         estado: 'abierta',
         estadoVisible: 'abierta',
-        pendientes: { apertura: 0, cierre: 2 },
+        pendientes: { apertura: 0, cierre: 6 },
       });
       expect(
         (await prisma.ticketJornadaHistorial.findMany({ where: { jornadaId: hoyJ.id } })).map(
@@ -3711,19 +3700,14 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const t = await enEjecucion();
       const r = await ver(t).expect(200);
       const filas = await requisitosDe(t.id);
-      expect(filas).toHaveLength(21); // 3 días × 7 requisitos activos del catálogo
+      expect(filas).toHaveLength(60); // 3 días × 20 (7 del día y 13 de traslados por unidad: 6 por unidad y la SWA)
       expect(new Set(filas.map((f) => f.codigo))).toEqual(
-        new Set([
-          'art_vigente',
-          'checklist_seguridad_dia',
-          'company_man_acepto_dia',
-          'pt_dia_cargado',
-          'ptw_dia_aprobado',
-          'job_log_dia',
-          'herramientas_dia',
-        ]),
+        new Set([...APERTURA_DIA, ...CIERRE_DIA]),
       );
-      expect(filas.every((f) => f.estado === 'pendiente')).toBe(true);
+      // todo pendiente, salvo «sin SWA»: sin ninguna SWA activa nace cumplido
+      expect(filas.filter((f) => f.estado === 'cumplido').map((f) => f.codigo)).toEqual(
+        Array(3).fill('sin_swa_dia'),
+      );
       // la lista lo muestra por jornada, la apertura primero
       expect(
         r.body.jornadas[1].requisitos.map((q: { codigo: string; momento: string }) => [
@@ -3731,15 +3715,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           q.momento,
         ]),
       ).toEqual([
-        ['art_vigente', 'apertura'],
-        ['checklist_seguridad_dia', 'apertura'],
-        ['company_man_acepto_dia', 'apertura'],
-        ['pt_dia_cargado', 'apertura'],
-        ['ptw_dia_aprobado', 'apertura'],
-        ['herramientas_dia', 'cierre'],
-        ['job_log_dia', 'cierre'],
+        ...APERTURA_DIA.map((c) => [c, 'apertura']),
+        ...CIERRE_DIA.map((c) => [c, 'cierre']),
       ]);
-      expect(r.body.jornadas[1]).toMatchObject({ pendientes: { apertura: 5, cierre: 2 } });
+      expect(r.body.jornadas[1]).toMatchObject({ pendientes: { apertura: 13, cierre: 6 } });
       expect(
         r.body.jornadas[1].bloqueos.map((b: { codigo: string; responsable: string }) => [
           b.codigo,
@@ -3747,12 +3726,15 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ]),
       ).toEqual([
         ['art_vigente', 'qhse'],
+        ...Array(2).fill(['gerenciamiento_salida_dia', 'flota']),
+        ...Array(2).fill(['inspeccion_aprobada_dia', 'flota']),
+        ...Array(2).fill(['inspeccion_vehiculo_dia', 'flota']),
         ['pt_dia_cargado', 'qhse'],
         ['ptw_dia_aprobado', 'qhse'],
       ]);
       // pedirlas otra vez no duplica
       await ver(t).expect(200);
-      expect(await requisitosDe(t.id)).toHaveLength(21);
+      expect(await requisitosDe(t.id)).toHaveLength(60);
       // la lista de requisitos de salida de cada paso no mezcla los de las jornadas
       const estado = await http().get(`${t.url}/requisitos`).set(op1());
       if (estado.status === 200) {
@@ -3775,15 +3757,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
       expect(
         (await ver(t)).body.jornadas[0].requisitos.map((q: { codigo: string }) => q.codigo),
-      ).toEqual([
-        'art_vigente',
-        'checklist_seguridad_dia',
-        'company_man_acepto_dia',
-        'pt_dia_cargado',
-        'ptw_dia_aprobado',
-        'herramientas_dia',
-        'job_log_dia',
-      ]);
+      ).toEqual([...APERTURA_DIA, ...CIERRE_DIA]);
     });
 
     it('no se cierra la jornada hasta cumplir el job log y las herramientas del día; guardar el job log otra vez lo reabre', async () => {
@@ -3825,6 +3799,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await marcarHerramienta(t, DIAS[1]);
       await ver(t);
       expect(await estadoReq(t.id, DIAS[1], 'herramientas_dia')).toBe('cumplido');
+      // falta la llegada de cada unidad: su reporte y el viaje de retorno
+      const sinLlegada = await cerrar(t, DIAS[1]);
+      expect(sinLlegada.status).toBe(409);
+      expect(String(sinLlegada.body.detail)).toContain(
+        `Reporte de unidad de llegada del día (${VEHICULO.placa})`,
+      );
+      expect(String(sinLlegada.body.detail)).toContain(
+        `Gerenciamiento de viaje de retorno del día aprobado (${VEHICULO_2.placa})`,
+      );
+      await cumplirLlegada(t, DIAS[1]);
+      await ver(t);
       await cerrar(t, DIAS[1]).expect(201);
       expect((await ver(t)).body).toMatchObject({ cerradas: 1 });
       // quitar la marca del día deja de cumplirlo
@@ -3841,16 +3826,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const r = await ver(t).expect(200);
       expect(r.body.jornadas[1]).toMatchObject({
         estadoVisible: 'bloqueada',
-        pendientes: { apertura: 5, cierre: 2 },
+        pendientes: { apertura: 13, cierre: 6 },
       });
       // un día futuro no se muestra bloqueado: todavía no toca
       expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
-      expect(r.body.pendientesPorArea).toMatchObject({ qhse: 3, pumping: 4 });
+      expect(r.body.pendientesPorArea).toMatchObject({ qhse: 3, flota: 8, pumping: 8 });
 
       // el Company Man acepta y el checklist queda completo, pero falta lo de QHSE: la jornada no se abre
       const acepta = await aceptar(t, DIAS[1]).expect(201);
       expect(acepta.body).toMatchObject({ yaMarcada: false, abierta: false });
       await completarChecklist(t, DIAS[1]);
+      await cumplirSalida(t, DIAS[1]); // y Flota y el operador cumplieron los traslados de salida
       expect((await ver(t)).body.jornadas[1]).toMatchObject({
         estado: 'pendiente',
         estadoVisible: 'bloqueada',
@@ -3904,7 +3890,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         t.id,
         DIAS[2],
       ]);
-      expect((await requisitosDe(t.id)).length).toBe(antes - 7);
+      expect((await requisitosDe(t.id)).length).toBe(antes - 20);
     });
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -4183,11 +4169,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         [t.id, 'ejecucion_operativa', DIAS[0], DIAS[2]],
       );
       const r = await ver(ticket);
-      expect(r.body.jornadas[0].bloqueos).toEqual([]); // el día 1 ya tiene PTW, PT y ART
-      expect(r.body.jornadas[1].bloqueos.map((b: { codigo: string }) => b.codigo)).toEqual([
-        'pt_dia_cargado',
-        'ptw_dia_aprobado',
-      ]); // el ART vale 15 días
+      const deQhse = (j: { bloqueos: Array<{ codigo: string; responsable: string }> }) =>
+        j.bloqueos.filter((b) => b.responsable === 'qhse').map((b) => b.codigo);
+      expect(deQhse(r.body.jornadas[0])).toEqual([]); // el día 1 ya tiene PTW, PT y ART
+      expect(deQhse(r.body.jornadas[1])).toEqual(['pt_dia_cargado', 'ptw_dia_aprobado']); // el ART vale 15 días
     });
 
     it('una jornada abierta vuelve a pendiente si deja de cumplir un requisito de apertura (QHSE anula el PTW) y queda en la bitácora', async () => {
@@ -4195,6 +4180,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await ver(t);
       await aceptar(t, DIAS[1]).expect(201);
       await completarChecklist(t, DIAS[1]);
+      await cumplirSalida(t, DIAS[1]);
       const ptw = await aprobarPtw(t, DIAS[1]);
       await cargarDocumento(t, 'pt', DIAS[1]);
       await cargarDocumento(t, 'art', DIAS[1]);
@@ -4283,6 +4269,124 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         )
       ).rows[0].d;
       expect(ultimo).toMatchObject({ ticketId: t.id, pedidoId: t.pedidoId });
+    });
+
+    // ----------------------------------------------------------------------------------------------------------------
+    // Etapa 7c: los traslados de salida y de llegada se repiten cada día, por unidad
+    // ----------------------------------------------------------------------------------------------------------------
+    describe('traslados de cada día: la salida y la llegada se exigen en cada jornada, por unidad', () => {
+      const bloqueosDe = async (t: Ticket, i: number) =>
+        (await ver(t)).body.jornadas[i].bloqueos.map(
+          (b: { codigo: string; responsable: string }) => [b.codigo, b.responsable],
+        ) as Array<[string, string]>;
+      const viaje = (t: Ticket, hecho: string, unidadId: string, fecha: string, extra = {}) =>
+        externos.consumir(
+          externo(hecho, { ticketId: t.id, unidadId, diaServicio: fecha, ...extra }, 'flota'),
+        );
+
+      it('lo que se cumplió un día no cubre al siguiente: cada jornada pide sus traslados', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        await abrirDia(t, DIAS[1]);
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+        // el día 3 empieza de cero: Flota y los reportes de unidad de ese día todavía no existen
+        const faltan = (await bloqueosDe(t, 2)).filter(([, area]) => area === 'flota');
+        expect(faltan.map(([c]) => c)).toEqual([
+          ...Array(2).fill('gerenciamiento_salida_dia'),
+          ...Array(2).fill('inspeccion_aprobada_dia'),
+          ...Array(2).fill('inspeccion_vehiculo_dia'),
+        ]);
+        await cumplirSalida(t, DIAS[2]);
+        expect((await bloqueosDe(t, 2)).filter(([, area]) => area === 'flota')).toEqual([]);
+        // y lo del día 3 no tocó al día 2
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+      });
+
+      it('una SWA activa bloquea abrir el día y, al cerrarse la última, la jornada se abre sola', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        await abrirDia(t, DIAS[1]);
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+
+        await externos.consumir(
+          externo('qhse.swa.activado', {
+            ticketId: t.id,
+            swaId: uuidv7(),
+            swaActivasEnTicket: 1,
+            sinSwaActivas: false,
+          }),
+        );
+        const j = (await ver(t)).body.jornadas[1];
+        expect(j).toMatchObject({ estado: 'pendiente', estadoVisible: 'bloqueada' });
+        expect(j.bloqueos.map((b: { codigo: string }) => b.codigo)).toEqual(['sin_swa_dia']);
+        // lo mismo en los demás días: la SWA es del servicio
+        expect((await bloqueosDe(t, 2)).map(([c]) => c)).toContain('sin_swa_dia');
+
+        await externos.consumir(
+          externo('qhse.swa.cerrado', {
+            ticketId: t.id,
+            swaId: uuidv7(),
+            swaActivasEnTicket: 0,
+            sinSwaActivas: true,
+          }),
+        );
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+      });
+
+      it('un rechazo de Flota o una inspección anulada deja el día sin cubrir, y volver a aprobar lo abre', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        await abrirDia(t, DIAS[1]);
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+
+        await viaje(t, 'flota.inspeccion_vehiculo.rechazada', VEHICULO.unidadId, DIAS[1]);
+        expect(await bloqueosDe(t, 1)).toEqual([['inspeccion_aprobada_dia', 'flota']]);
+        expect((await ver(t)).body.jornadas[1].estado).toBe('pendiente');
+        // el rechazo del viaje de salida de la otra unidad también
+        await viaje(t, 'flota.gerenciamiento_viaje.rechazado', VEHICULO_2.unidadId, DIAS[1], {
+          tipo: 'salida',
+        });
+        expect((await bloqueosDe(t, 1)).map(([c]) => c)).toEqual([
+          'gerenciamiento_salida_dia',
+          'inspeccion_aprobada_dia',
+        ]);
+        await viaje(t, 'flota.inspeccion_vehiculo.aprobada', VEHICULO.unidadId, DIAS[1]);
+        await viaje(t, 'flota.gerenciamiento_viaje.aprobado', VEHICULO_2.unidadId, DIAS[1], {
+          tipo: 'salida',
+        });
+        expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+        // anular la inspección realizada deja sin cubrir ese día
+        await viaje(t, 'flota.inspeccion_vehiculo.anulada', VEHICULO_2.unidadId, DIAS[1]);
+        expect((await bloqueosDe(t, 1)).map(([c]) => c)).toEqual(['inspeccion_vehiculo_dia']);
+      });
+
+      it('lo que Flota hace antes de la ejecución se recuerda: el día 1 nace cubierto al crearse las jornadas', async () => {
+        const t = await ticketEnTraslado(); // todavía no hay jornadas
+        const ticket: Ticket = { ...t, jornadas: `${t.url}/jornadas` };
+        for (const v of [VEHICULO, VEHICULO_2]) {
+          await viaje(ticket, 'flota.inspeccion_vehiculo.realizada', v.unidadId, DIAS[0]);
+          await viaje(ticket, 'flota.inspeccion_vehiculo.aprobada', v.unidadId, DIAS[0]);
+          await viaje(ticket, 'flota.gerenciamiento_viaje.aprobado', v.unidadId, DIAS[0], {
+            tipo: 'salida',
+          });
+        }
+        expect(await prisma.ticketJornada.count({ where: { ticketId: t.id } })).toBe(0);
+        await admin.query(
+          'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
+          [t.id, 'ejecucion_operativa', DIAS[0], DIAS[2]],
+        );
+        const r = await ver(ticket);
+        expect(
+          r.body.jornadas[0].bloqueos.filter(
+            (b: { responsable: string }) => b.responsable === 'flota',
+          ),
+        ).toEqual([]);
+        expect(
+          r.body.jornadas[1].bloqueos.filter(
+            (b: { responsable: string }) => b.responsable === 'flota',
+          ),
+        ).toHaveLength(6);
+      });
     });
 
     describe('duración del servicio: el Jefe de Base acorta o amplía', () => {
@@ -4625,6 +4729,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           { fecha: DIAS[1], salida: true, llegada: false },
         ]);
 
+        // la firma de la salida cumple el requisito de apertura de ese día para esa unidad, y solo para ella
+        const requisito = async (codigo: string, fecha: string) =>
+          (
+            await admin.query(
+              'SELECT unidad_id, estado FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = $2 AND fecha = $3 ORDER BY unidad_id',
+              [t.id, codigo, fecha],
+            )
+          ).rows as Array<{ unidad_id: string; estado: string }>;
+        const salidas = await requisito('reporte_unidad_salida_dia', DIAS[0]);
+        expect(salidas.find((x) => x.unidad_id === unidad)?.estado).toBe('cumplido');
+        expect(salidas.find((x) => x.unidad_id !== unidad)?.estado).toBe('pendiente');
         // la llegada del día 1 no toca la del día 2
         const cuerpoDia1 = await cuerpoLlegada(t, DIAS[0]);
         const llegada = await http()

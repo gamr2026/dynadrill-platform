@@ -246,6 +246,7 @@ model Ticket {
   solicitudesCambioItems SolicitudCambioItems[]
   lineas                 TicketLinea[]
   jornadas               TicketJornada[]
+  hechosTraslado         TicketHechoTraslado[]
   hechosQhse             TicketHechoQhse[]
   cambiosDuracion        TicketDuracionCambio[]
   avisoAvance            TicketAvisoAvance?
@@ -638,6 +639,8 @@ model Requisito {
   activo      Boolean         @default(true)
   /// Solo en los requisitos de ámbito `jornada`.
   momento     MomentoRequisito?
+  /// Solo en los de ámbito `jornada`: hay una fila por cada unidad del ticket en cada día.
+  porUnidad   Boolean         @default(false) @map("por_unidad")
 
   pasos   PasoRequisito[]
   tickets TicketRequisito[]
@@ -1215,6 +1218,35 @@ enum AccionDuracion {
 }
 
 /// Marca que ya se avisó al Jefe de Base que el avance del servicio va adelantado (una vez por ticket). Solo se agrega.
+enum TipoHechoTraslado {
+  inspeccion_realizada
+  inspeccion_aprobada
+  gerenciamiento_salida
+  gerenciamiento_retorno
+
+  @@map("tipo_hecho_traslado")
+  @@schema("pumping")
+}
+
+/// Lo que Flota hace por unidad y día (llega por eventos, a veces antes de que existan las jornadas) y alimenta los requisitos de cada jornada.
+model TicketHechoTraslado {
+  id        String             @id @db.Uuid
+  ticketId  String             @map("ticket_id") @db.Uuid
+  ticket    Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Unidad de Flota (FK solo en la base de datos: es de otro esquema).
+  unidadId  String             @map("unidad_id") @db.Uuid
+  fecha     DateTime           @db.Date
+  tipo      TipoHechoTraslado
+  vigente   Boolean            @default(true)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([ticketId, unidadId, fecha, tipo], map: "ticket_hecho_traslado_unico_key")
+  @@index([unidadId])
+  @@map("ticket_hecho_traslado")
+  @@schema("pumping")
+}
+
 model TicketAvisoAvance {
   ticketId    String   @id @map("ticket_id") @db.Uuid
   ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)

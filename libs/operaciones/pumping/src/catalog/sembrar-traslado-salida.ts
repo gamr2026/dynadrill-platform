@@ -46,14 +46,6 @@ interface RequisitoDef {
 
 export const REQUISITOS: RequisitoDef[] = [
   {
-    codigo: REQ.inspeccionRealizada,
-    nombre: 'Inspección de vehículos realizada',
-    descripcion: 'El conductor de la unidad realizó la Inspección de Vehículos (DYN-SGI-RE-068) desde Flota.',
-    ambito: 'unidad',
-    modulo: 'flota',
-    paso: 'traslado_salida',
-  },
-  {
     codigo: REQ.ingresoLocacion,
     nombre: 'Checklist de ingreso a locación',
     descripcion:
@@ -80,40 +72,6 @@ export const REQUISITOS: RequisitoDef[] = [
     paso: 'traslado_salida',
   },
   {
-    codigo: REQ.reporteSalida,
-    nombre: 'Reporte de unidad de salida',
-    descripcion: 'El operador firmó el Reporte de Unidad (DYN-MNT-RE-012) de salida de su unidad.',
-    ambito: 'unidad',
-    modulo: 'pumping',
-    paso: 'traslado_salida',
-  },
-  {
-    codigo: REQ.inspeccionAprobada,
-    nombre: 'Inspección de vehículos aprobada',
-    descripcion: 'El supervisor aprobó la Inspección de Vehículos de la unidad.',
-    ambito: 'unidad',
-    modulo: 'flota',
-    paso: 'revision_reportes_salida',
-  },
-  {
-    codigo: REQ.gerenciamientoSalida,
-    nombre: 'Gerenciamiento de viaje de salida aprobado',
-    descripcion:
-      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de salida que solicitó el Conductor de la unidad está aprobado.',
-    ambito: 'unidad',
-    modulo: 'flota',
-    paso: 'revision_reportes_salida',
-  },
-  {
-    codigo: REQ.gerenciamientoRetorno,
-    nombre: 'Gerenciamiento de viaje de retorno aprobado',
-    descripcion:
-      'El Gerenciamiento de Viaje (DYN-SGI-RE-049) de retorno que solicitó el Conductor de la unidad está aprobado.',
-    ambito: 'unidad',
-    modulo: 'flota',
-    paso: 'control_retorno',
-  },
-  {
     codigo: REQ.reporteHerramientas,
     nombre: 'Reporte de herramientas completado',
     descripcion:
@@ -130,14 +88,6 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'pumping',
     paso: 'ejecucion_operativa',
-  },
-  {
-    codigo: REQ.reporteLlegada,
-    nombre: 'Reporte de unidad de llegada',
-    descripcion: 'El operador firmó el Reporte de Unidad (DYN-MNT-RE-012) de llegada de su unidad.',
-    ambito: 'unidad',
-    modulo: 'pumping',
-    paso: 'traslado_llegada',
   },
   {
     codigo: REQ.swaSinActivar,
