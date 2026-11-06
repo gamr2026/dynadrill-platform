@@ -258,6 +258,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     resultadoCambio = app.get(ResultadoCambioItemsConsumer);
     // el día de las pruebas es fijo: sus fechas (5 al 7 de noviembre) no dependen del día en que se corran
     jest.spyOn(app.get(AsignacionService), 'hoy').mockReturnValue('2026-11-05');
+    jest.spyOn(app.get(JornadasService), 'hoy').mockReturnValue('2026-11-05');
   });
 
   afterAll(async () => {
@@ -2048,6 +2049,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await devolucion(1)).status).toBe(409);
 
       await enPaso(t.id, 'ejecucion_operativa');
+      // el consumo se anota en un día del servicio: el día de las pruebas es el único día de este ticket
+      await admin.query(
+        'UPDATE pumping.ticket SET fecha_inicio_servicio = $2, fecha_fin_servicio = $2 WHERE id = $1',
+        [t.id, '2026-11-05'],
+      );
       expect((await consumo(4, operador())).status).toBe(403); // no es del equipo
       expect((await consumo(11)).status).toBe(409); // más de lo asignado
       const c = await consumo(6);
@@ -2067,6 +2073,54 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         pendiente: 0,
       });
       expect(await stock()).toBe(antes + 4);
+    });
+
+    it('el consumo queda anotado por día del servicio: solo en una jornada activa que ya llegó, y el detalle lo muestra por día', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA }).expect(201);
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $4 WHERE id = $1',
+        [t.id, 'ejecucion_operativa', '2026-11-05', '2026-11-07'],
+      );
+      const consumo = (cantidad: number, fecha?: string) =>
+        http()
+          .post(`${t.url}/quimicos/consumo`)
+          .set(op1())
+          .send({ articuloId: QUIMICO.id, cantidad, ...(fecha ? { fecha } : {}) });
+      const reloj = jest.spyOn(app.get(JornadasService), 'hoy');
+      try {
+        expect((await consumo(2)).status).toBe(201); // hoy (el día 1) por omisión
+        expect((await consumo(1, '2026-11-06')).status).toBe(409); // el día 2 todavía no llega
+        expect((await consumo(1, '2026-11-09')).status).toBe(404); // fuera del servicio
+        expect((await consumo(1, 'ayer')).status).toBe(400);
+
+        reloj.mockReturnValue('2026-11-06');
+        expect((await consumo(3)).status).toBe(201); // hoy (el día 2)
+        const d = await consumo(1, '2026-11-05'); // se anota con retraso lo que se usó el día 1
+        expect(d.status).toBe(201);
+        expect(d.body.quimicos[0]).toMatchObject({ asignada: 10, usada: 6, pendiente: 4 });
+        expect(d.body.quimicos[0].usadaPorDia).toEqual([
+          { fecha: '2026-11-05', cantidad: 3 },
+          { fecha: '2026-11-06', cantidad: 3 },
+        ]);
+        // un día sin operación ya no admite consumo
+        await admin.query(
+          "UPDATE pumping.ticket_jornada SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE ticket_id = $1 AND fecha = '2026-11-05'",
+          [t.id, JEFE],
+        );
+        expect((await consumo(1, '2026-11-05')).status).toBe(409);
+      } finally {
+        reloj.mockReturnValue('2026-11-05');
+      }
+      // el aviso de cada consumo lleva el día en que se usó
+      const dias = (
+        await admin.query(
+          "SELECT datos->'data'->>'diaServicio' AS dia FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.consumo_registrado' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+          [t.id],
+        )
+      ).rows.map((x) => x.dia);
+      expect(dias).toEqual(['2026-11-05', '2026-11-06', '2026-11-05']);
     });
   });
 

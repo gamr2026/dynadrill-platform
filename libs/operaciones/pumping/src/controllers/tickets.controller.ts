@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -51,6 +52,8 @@ export class QuimicoDto {
 export class ConsumoQuimicoDto {
   @IsUUID() articuloId!: string;
   @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(99999999) cantidad!: number;
+  /** Día del servicio (AAAA-MM-DD) en que se usó; por omisión, hoy. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) fecha?: string;
 }
 
 export class DevolucionQuimicosDto {
@@ -165,7 +168,7 @@ export class TicketsController {
     @Body() dto: ConsumoQuimicoDto,
     @CurrentUser() actor: AuthUser,
   ) {
-    return this.quimicos.consumir(id, dto.articuloId, dto.cantidad, actor);
+    return this.quimicos.consumir(id, dto.articuloId, dto.cantidad, actor, dto.fecha);
   }
 
   /** El Supervisor devuelve a bodega lo que sobró, en el control de retorno. */

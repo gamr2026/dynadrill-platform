@@ -7,6 +7,7 @@ import {
 import type { AuthUser } from '@dyn/common';
 import { MovimientosService, type LineaDeTicket } from '@dyn/inventario';
 import { PrismaService } from '../prisma/prisma.service';
+import { JornadasService } from './jornadas.service';
 import { puedeActuar, puedeActuarEn } from './tickets.service';
 
 const PASO_EJECUCION = 'ejecucion_operativa';
@@ -22,6 +23,7 @@ export class QuimicosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventario: MovimientosService,
+    private readonly jornadas: JornadasService,
   ) {}
 
   /** Lo asignado, usado, devuelto y pendiente de cada químico, y los documentos del ticket (mezcla). */
@@ -42,15 +44,41 @@ export class QuimicosService {
     };
   }
 
-  /** El Operador registra cuánto usó de un químico (no mueve stock; no puede superar lo que el ticket tiene a su cargo). */
-  async consumir(ticketId: string, articuloId: string, cantidad: number, actor: AuthUser) {
+  /**
+   * El Operador registra cuánto usó de un químico un día del servicio (por omisión, hoy; no mueve stock y no puede superar lo que el ticket
+   * tiene a su cargo). Con jornadas, el día debe ser una jornada activa que ya llegó.
+   */
+  async consumir(
+    ticketId: string,
+    articuloId: string,
+    cantidad: number,
+    actor: AuthUser,
+    fecha?: string,
+  ) {
     await this.exigirPaso(
       ticketId,
       PASO_EJECUCION,
       actor,
       'El consumo se registra en la Ejecución operativa',
     );
-    await this.inventario.registrarConsumoDeTicket(ticketId, articuloId, cantidad, actor);
+    const dia = fecha ?? this.jornadas.hoy();
+    const t = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    // un ticket sin fechas de servicio no tiene jornadas contra las que validar el día
+    if (t?.fechaInicioServicio && t.fechaFinServicio)
+      await this.prisma.$transaction((tx) =>
+        this.jornadas.exigirDiaDeTrabajo(tx, ticketId, dia, 'el consumo de químicos'),
+      );
+    await this.inventario.registrarConsumoDeTicket(
+      ticketId,
+      articuloId,
+      cantidad,
+      actor,
+      null,
+      dia,
+    );
     return this.detalle(ticketId);
   }
 
