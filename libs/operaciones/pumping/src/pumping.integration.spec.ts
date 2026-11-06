@@ -30,6 +30,7 @@ import { RequisitosExternosConsumer } from './consumers/requisitos-externos.cons
 import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
 import { AsignacionService } from './services/asignacion.service';
+import { JornadasAvisosService } from './services/jornadas-avisos.service';
 import { JornadasService } from './services/jornadas.service';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
@@ -4641,6 +4642,63 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
               .set(como('nadie', uuidv7(), 'Nadie', []))
           ).status,
         ).toBe(403);
+      });
+    });
+
+    describe('aviso «jornada sin cerrar»: una sola vez por ticket y día, al equipo del ticket', () => {
+      const avisos = async (ticketId: string) =>
+        (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.jornada_sin_cerrar' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+            [ticketId],
+          )
+        ).rows.map((x) => x.d);
+      const revisar = (dia: string, t: { id: string }) =>
+        app.get(JornadasAvisosService).emitir(dia, [t.id]);
+
+      it('avisa el día que pasó sin cerrarse, no lo repite y al día siguiente avisa el nuevo', async () => {
+        const t = await enEjecucion();
+        // el día 1 todavía es hoy: nada que avisar
+        expect(await revisar(DIAS[0], t)).toEqual({ avisados: 0 });
+        // pasó el día 1 sin cerrarse
+        expect(await revisar(DIAS[1], t)).toEqual({ avisados: 1 });
+        expect(await revisar(DIAS[1], t)).toEqual({ avisados: 0 }); // una sola vez
+        const [a] = await avisos(t.id);
+        expect(a).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          fecha: DIAS[0],
+          dia: '05/11/2026',
+          numero: 1,
+        });
+        expect(a.faltan).toContain('Checklist de seguridad del día');
+        // el equipo del ticket: el supervisor y los dos operadores (no los conductores)
+        expect(a.asignados).toEqual(
+          expect.arrayContaining([
+            { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
+            { usuarioId: OP1.id, rolCodigo: 'operador' },
+            { usuarioId: OP2.id, rolCodigo: 'operador' },
+          ]),
+        );
+        expect(a.asignados.every((x: { rolCodigo: string }) => x.rolCodigo !== 'conductor')).toBe(
+          true,
+        );
+        // al día siguiente pasa el día 2: solo ese es nuevo
+        expect(await revisar(DIAS[2], t)).toEqual({ avisados: 1 });
+        expect((await avisos(t.id)).map((x) => x.fecha)).toEqual([DIAS[0], DIAS[1]]);
+      });
+
+      it('no avisa un día sin operación ni un ticket que todavía no está en la ejecución', async () => {
+        const t = await enEjecucion();
+        await ver(t);
+        await sinOp(t, DIAS[0], {
+          motivoId: await motivo(),
+          detalle: 'Lluvia en el primer día',
+        }).expect(201);
+        expect(await revisar(DIAS[1], t)).toEqual({ avisados: 0 });
+        const enTraslado = await ticketEnTraslado();
+        expect(await revisar(DIAS[2], enTraslado)).toEqual({ avisados: 0 });
+        expect(await avisos(enTraslado.id)).toEqual([]);
       });
     });
 

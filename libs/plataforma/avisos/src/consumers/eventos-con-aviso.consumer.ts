@@ -18,6 +18,7 @@ export const SUSCRIPCIONES: ReadonlyArray<{ source: string; patterns: string[] }
       'operaciones.pumping.salida_reportada',
       'operaciones.pumping.inspeccion_realizada',
       'operaciones.pumping.avance_adelantado',
+      'operaciones.pumping.jornada_sin_cerrar',
       'operaciones.mantenimiento.reporte.recibido',
       'operaciones.mantenimiento.suborden.asignada',
       'operaciones.mantenimiento.suborden.derivada_a_pumping',

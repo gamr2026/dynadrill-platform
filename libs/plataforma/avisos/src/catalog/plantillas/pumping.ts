@@ -206,4 +206,58 @@ export const PLANTILLAS_PUMPING: PlantillaDef[] = [
     evento: 'operaciones.pumping.avance_adelantado',
     rol: 'jefe_base',
   },
+  {
+    codigo: 'pumping_jornada_sin_cerrar_supervisor',
+    descripcion:
+      'Pasó un día de servicio y su jornada sigue sin cerrar: se avisa una vez al Supervisor del ticket (solo a su cuenta).',
+    asunto: 'Jornada sin cerrar: Ticket {{ticketNumero}} — día {{dia}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>La <strong>jornada del {{dia}}</strong> (día {{numero}} del servicio) del siguiente ticket sigue <strong>sin cerrar</strong>:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Falta', 'faltan') +
+      '</table>' +
+      '<p>Mientras haya jornadas sin cerrar el ticket no puede salir de la Ejecución operativa. Complete lo que falta o regístrela como día sin operación.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nLa jornada del {{dia}} (día {{numero}} del servicio) del siguiente ticket sigue sin cerrar:\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nFalta: {{faltan}}\n\n' +
+      'Mientras haya jornadas sin cerrar el ticket no puede salir de la Ejecución operativa. Complete lo que falta o regístrela como día sin operación.',
+    tituloAviso: 'Jornada del {{dia}} sin cerrar: Ticket {{ticketNumero}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} — falta: {{faltan}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'warning',
+    evento: 'operaciones.pumping.jornada_sin_cerrar',
+    rol: 'supervisor',
+  },
+  {
+    codigo: 'pumping_jornada_sin_cerrar_operador',
+    descripcion:
+      'Pasó un día de servicio y su jornada sigue sin cerrar: se avisa una vez al Operador del ticket (solo a su cuenta).',
+    asunto: 'Jornada sin cerrar: Ticket {{ticketNumero}} — día {{dia}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>La <strong>jornada del {{dia}}</strong> (día {{numero}} del servicio) del siguiente ticket sigue <strong>sin cerrar</strong>:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Falta', 'faltan') +
+      '</table>' +
+      '<p>Mientras haya jornadas sin cerrar el ticket no puede salir de la Ejecución operativa. Complete lo que falta o regístrela como día sin operación.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nLa jornada del {{dia}} (día {{numero}} del servicio) del siguiente ticket sigue sin cerrar:\n\n' +
+      'Ticket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nFalta: {{faltan}}\n\n' +
+      'Mientras haya jornadas sin cerrar el ticket no puede salir de la Ejecución operativa. Complete lo que falta o regístrela como día sin operación.',
+    tituloAviso: 'Jornada del {{dia}} sin cerrar: Ticket {{ticketNumero}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} — falta: {{faltan}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'warning',
+    evento: 'operaciones.pumping.jornada_sin_cerrar',
+    rol: 'operador',
+  },
 ];

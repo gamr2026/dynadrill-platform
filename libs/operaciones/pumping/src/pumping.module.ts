@@ -15,6 +15,7 @@ import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
 import { IngresoService } from './services/ingreso.service';
 import { AvanceService } from './services/avance.service';
+import { JornadasAvisosService } from './services/jornadas-avisos.service';
 import { TareasHoyService } from './services/tareas-hoy.service';
 import { DuracionService } from './services/duracion.service';
 import { JornadasService } from './services/jornadas.service';
@@ -62,6 +63,7 @@ import { TicketsService } from './services/tickets.service';
     ReporteHerramientasService,
     JornadasService,
     AvanceService,
+    JornadasAvisosService,
     TareasHoyService,
     DuracionService,
     DuracionResultadoConsumer,
