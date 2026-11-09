@@ -1751,7 +1751,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'control_retorno' })
       .expect(409);
     expect(faltanJornadas.body.code).toBe('JORNADAS_PENDIENTES');
-    expect(faltanJornadas.body.detail).toContain('Faltan jornadas por cerrar: Día 1');
+    // los días del servicio de esta prueba aún no llegan: no se exigen, pero hace falta al menos una jornada registrada
+    expect(faltanJornadas.body.detail).toContain('Registre al menos la jornada de hoy');
     // la ruta anterior «formalizar» marca la aceptación del Company Man de hoy
     const formalizar = `${t.url}/ejecucion/formalizar`;
     await http().post(formalizar).set(op1()).expect(403); // sin el permiso
@@ -4173,18 +4174,19 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     const avanzar = (t: { url: string }) =>
       http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' });
 
-    it('el ticket no sale de la Ejecución operativa mientras haya jornadas por cerrar; un día sin operación o que no aplica no estorba', async () => {
-      const t = await enEjecucion();
+    it('el ticket no sale de la Ejecución operativa mientras haya jornadas por cerrar hasta hoy; los días que aún no llegan no se exigen', async () => {
+      const t = await enEjecucion(); // el reloj de la prueba marca el día 2
       await reporteCompleto(t);
       const r0 = await ver(t);
       expect(r0.body).toMatchObject({ total: 3, porCerrar: 3 });
       const bloqueado = await avanzar(t).expect(409);
       expect(bloqueado.body.code).toBe('JORNADAS_PENDIENTES');
+      // el día 3 todavía no llega: no figura entre lo que falta
       expect(bloqueado.body.detail).toContain(
-        'Faltan jornadas por cerrar: Día 1 (05/11); Día 2 (06/11); Día 3 (07/11)',
+        'Faltan jornadas por cerrar: Día 1 (05/11); Día 2 (06/11).',
       );
 
-      // el día 1 sin operación, el día 2 trabajado y cerrado
+      // el día 1 sin operación, el día 2 (hoy) trabajado y cerrado
       await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
         201,
       );
@@ -4192,11 +4194,55 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await cumplirCierre(t, DIAS[1]);
       await cerrar(t, DIAS[1]).expect(201);
       expect((await ver(t)).body).toMatchObject({ porCerrar: 1, cerradas: 1, sinOperacion: 1 });
-      expect((await avanzar(t).expect(409)).body.detail).toContain(
-        'Faltan jornadas por cerrar: Día 3 (07/11)',
-      );
 
-      // el servicio se acorta a dos días: el tercero ya no aplica y no estorba
+      // con hoy registrado ya puede continuar: el servicio termina hoy y el día 3 deja de aplicar
+      await avanzar(t).expect(201);
+      expect(
+        (
+          await admin.query(
+            'SELECT paso_codigo, fecha_fin_servicio::text AS fin FROM pumping.ticket WHERE id = $1',
+            [t.id],
+          )
+        ).rows[0],
+      ).toEqual({ paso_codigo: 'control_retorno', fin: DIAS[1] });
+      expect(
+        (
+          await admin.query(
+            'SELECT fecha::text AS fecha, estado FROM pumping.ticket_jornada WHERE ticket_id = $1 ORDER BY fecha',
+            [t.id],
+          )
+        ).rows.map((j) => `${j.fecha}:${j.estado}`),
+      ).toEqual([`${DIAS[0]}:sin_operacion`, `${DIAS[1]}:cerrada`, `${DIAS[2]}:no_aplica`]);
+      // y Comercial se entera del nuevo fin del servicio
+      const aviso = await admin.query(
+        "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.duracion_servicio_cambiada' AND datos->'data'->>'ticketId' = $1",
+        [t.id],
+      );
+      expect(aviso.rows).toHaveLength(1);
+      expect(aviso.rows[0].datos.data).toMatchObject({
+        accion: 'acortar',
+        fechaFinNueva: DIAS[1],
+      });
+    });
+
+    it('para salir de la Ejecución operativa hace falta al menos una jornada registrada, aunque todas las demás sean futuras', async () => {
+      const t = await enEjecucion(DIAS[2], DIAS[2]); // el servicio empieza mañana
+      await reporteCompleto(t);
+      await ver(t);
+      const r = await avanzar(t).expect(409);
+      expect(r.body.code).toBe('JORNADAS_PENDIENTES');
+      expect(r.body.detail).toContain('Registre al menos la jornada de hoy');
+    });
+
+    it('si el servicio se acorta a mano, el día que sobra tampoco estorba', async () => {
+      const t = await enEjecucion();
+      await reporteCompleto(t);
+      await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
+        201,
+      );
+      await abrirDia(t, DIAS[1]);
+      await cumplirCierre(t, DIAS[1]);
+      await cerrar(t, DIAS[1]).expect(201);
       await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
         t.id,
         DIAS[1],

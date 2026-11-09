@@ -349,7 +349,11 @@ export class TicketsService {
       if (salida.exigeRequisitos) {
         await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
         // y de la Ejecución operativa solo se sale con todas las jornadas del servicio resueltas
-        if (t.pasoCodigo === PASO_EJECUCION) await this.jornadas.exigirResueltas(tx, id);
+        if (t.pasoCodigo === PASO_EJECUCION) {
+          const finReal = await this.jornadas.exigirResueltas(tx, id);
+          if (finReal)
+            await this.jornadas.acortarAlSalir(tx, id, finReal, actor.id, actor.roleCode);
+        }
         // y de la revisión de salida solo con la inspección aprobada y el reporte firmado de cada unidad
         if (t.pasoCodigo === PASO_REVISION_SALIDA)
           await this.jornadas.exigirRevisionDeSalida(tx, id);
