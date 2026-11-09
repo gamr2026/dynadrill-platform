@@ -35,6 +35,8 @@ export function diasEntre(inicio: string, fin: string): string[] {
 
 const aFecha = (d: Date): string => d.toISOString().slice(0, 10);
 /** «09/11». */
+/** «09/11» a partir de AAAA-MM-DD. */
+const diaCortoDeTexto = (f: string): string => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
 const diaCorto = (f: Date): string => `${aFecha(f).slice(8, 10)}/${aFecha(f).slice(5, 7)}`;
 
 /** AAAA-MM-DD que además existe en el calendario (el 31 de febrero no): la fecha vuelve igual al pasar por Date. */
@@ -405,11 +407,14 @@ export class JornadasService {
   async exigirResueltas(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
     await this.generar(tx, ticketId);
     const hoy = this.hoy();
-    const filas = await tx.ticketJornada.findMany({
-      where: { ticketId, estado: { not: 'no_aplica' } },
-      orderBy: { fecha: 'asc' },
-      select: { numero: true, fecha: true, estado: true },
-    });
+    const [filas, t] = await Promise.all([
+      tx.ticketJornada.findMany({
+        where: { ticketId, estado: { not: 'no_aplica' } },
+        orderBy: { fecha: 'asc' },
+        select: { numero: true, fecha: true, estado: true },
+      }),
+      tx.ticket.findUnique({ where: { id: ticketId }, select: { cicloHasta: true } }),
+    ]);
     const abierta = (f: (typeof filas)[number]) =>
       f.estado === 'pendiente' || f.estado === 'abierta';
     const vencidas = filas.filter((f) => abierta(f) && aFecha(f.fecha) <= hoy);
@@ -421,10 +426,16 @@ export class JornadasService {
         code: 'JORNADAS_PENDIENTES',
       });
     }
-    if (filas.length > 0 && filas.every(abierta)) {
+    // hace falta un día resuelto que todavía no haya recorrido su ciclo (el primero, o uno posterior al último ciclo completado)
+    const ciclo = t?.cicloHasta ? aFecha(t.cicloHasta) : null;
+    const nuevo = filas.some((f) => !abierta(f) && (!ciclo || aFecha(f.fecha) > ciclo));
+    if (filas.length > 0 && !nuevo) {
+      const siguiente = filas.find((f) => abierta(f));
       throw new ConflictException({
         message:
-          'No se puede continuar desde "Ejecución operativa". Registre al menos la jornada de hoy: ciérrela o regístrela como día sin operación.',
+          ciclo && siguiente
+            ? `No se puede continuar desde "Ejecución operativa". Ya se completó el ciclo hasta el ${diaCortoDeTexto(ciclo)}: el Día ${siguiente.numero} (${diaCorto(siguiente.fecha)}) se trabaja cuando llegue su día, y entonces se cierra o se registra como día sin operación.`
+            : 'No se puede continuar desde "Ejecución operativa". Registre al menos la jornada de hoy: ciérrela o regístrela como día sin operación.',
         code: 'JORNADAS_PENDIENTES',
       });
     }

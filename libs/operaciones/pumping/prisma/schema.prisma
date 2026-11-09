@@ -205,6 +205,8 @@ model Ticket {
   /// Número de ticket = el de la prefactura que vendrá. Nulo solo en pedidos abiertos antes de que existiera esta regla.
   ticketNumero Int?    @unique @map("ticket_numero")
   pasoCodigo   String  @map("paso_codigo")
+  /// Último día del servicio cuyo ciclo (hasta la revisión final) ya se completó.
+  cicloHasta   DateTime? @map("ciclo_hasta") @db.Date
   paso         Paso    @relation(fields: [pasoCodigo], references: [codigo])
   version      Int     @default(1)
   tipoOt       TipoOt? @map("tipo_ot")

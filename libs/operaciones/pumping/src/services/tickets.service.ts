@@ -348,7 +348,16 @@ export class TicketsService {
       // cada día del servicio recorre el ciclo hasta la revisión final: de ahí se cierra (con todos los días resueltos) o se pasa al siguiente día
       if (t.pasoCodigo === 'revision_final') {
         if (hacia === 'cierre') await this.jornadas.exigirServicioCompleto(tx, id);
-        if (hacia === PASO_EJECUCION) await this.jornadas.exigirDiasPorTrabajar(tx, id);
+        if (hacia === PASO_EJECUCION) {
+          await this.jornadas.exigirDiasPorTrabajar(tx, id);
+          // el ciclo de los días resueltos terminó: el siguiente ciclo exige un día nuevo
+          const ultimo = await tx.ticketJornada.findFirst({
+            where: { ticketId: id, estado: { in: ['cerrada', 'sin_operacion'] } },
+            orderBy: { fecha: 'desc' },
+            select: { fecha: true },
+          });
+          if (ultimo) await tx.ticket.update({ where: { id }, data: { cicloHasta: ultimo.fecha } });
+        }
       }
       // para salir del paso deben estar cumplidos todos sus requisitos (la lista de lo que falta va en la respuesta)
       if (salida.exigeRequisitos) {

@@ -4335,6 +4335,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         (await admin.query('SELECT paso_codigo FROM pumping.ticket WHERE id = $1', [t.id])).rows[0]
           .paso_codigo,
       ).toBe('ejecucion_operativa');
+      // el ciclo de hoy ya se completó: no se puede salir de la ejecución otra vez sin trabajar un día nuevo
+      await reporteCompleto(t);
+      const repetido = await avanzar(t).expect(409);
+      expect(repetido.body.code).toBe('JORNADAS_PENDIENTES');
+      expect(repetido.body.detail).toContain('Ya se completó el ciclo hasta el 06/11');
+      expect(repetido.body.detail).toContain('Día 3 (07/11)');
       // si el servicio se acorta (el día 3 ya no aplica), no quedan días por trabajar: solo queda cerrar
       await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
         t.id,
