@@ -95,6 +95,8 @@ export const TRANSICIONES: Array<{
   { de: 'revision_reportes_llegada', a: 'revision_final' },
   // Revisión final: el Acta de Entrega de Locación; el rechazo vuelve a la revisión de llegada, con motivo
   { de: 'revision_final', a: 'cierre' },
+  // Cada día del servicio recorre el ciclo hasta la revisión final: si quedan días por trabajar, el ticket vuelve a la ejecución para el siguiente
+  { de: 'revision_final', a: 'ejecucion_operativa', exigeRequisitos: false },
   { de: 'revision_final', a: 'revision_reportes_llegada', motivo: true, exigeRequisitos: false },
 ];
 

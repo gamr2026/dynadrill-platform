@@ -34,6 +34,8 @@ export function diasEntre(inicio: string, fin: string): string[] {
 }
 
 const aFecha = (d: Date): string => d.toISOString().slice(0, 10);
+/** «09/11». */
+const diaCorto = (f: Date): string => `${aFecha(f).slice(8, 10)}/${aFecha(f).slice(5, 7)}`;
 
 /** AAAA-MM-DD que además existe en el calendario (el 31 de febrero no): la fecha vuelve igual al pasar por Date. */
 export const fechaValida = (fecha: string): boolean =>
@@ -396,12 +398,11 @@ export class JornadasService {
   }
 
   /**
-   * Para salir de la Ejecución operativa: todas las jornadas **hasta hoy** deben estar cerradas, sin operación o no aplicar, y al menos una
-   * debe tener su trabajo registrado. Los días que aún no llegan no se exigen (nadie sabe de antemano cómo va a ir el servicio): si quedan, el
-   * servicio termina en el último día registrado y devuelve esa fecha para que se acorte (esos días pasan a «no aplica» y se avisa a Comercial).
-   * `null` si no sobra ningún día.
+   * Para salir de la Ejecución operativa (cada día del servicio recorre el ciclo completo hasta la revisión final): todas las jornadas **hasta
+   * hoy** deben estar cerradas, sin operación o no aplicar, y al menos una debe tener su trabajo registrado. Los días que aún no llegan no se
+   * exigen: su ciclo empieza cuando llegue su día, y el ticket solo se cierra cuando todos los días estén resueltos.
    */
-  async exigirResueltas(tx: Prisma.TransactionClient, ticketId: string): Promise<string | null> {
+  async exigirResueltas(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
     await this.generar(tx, ticketId);
     const hoy = this.hoy();
     const filas = await tx.ticketJornada.findMany({
@@ -409,85 +410,60 @@ export class JornadasService {
       orderBy: { fecha: 'asc' },
       select: { numero: true, fecha: true, estado: true },
     });
-    const dia = (f: Date) => `${aFecha(f).slice(8, 10)}/${aFecha(f).slice(5, 7)}`;
-    const abiertas = (f: (typeof filas)[number]) =>
+    const abierta = (f: (typeof filas)[number]) =>
       f.estado === 'pendiente' || f.estado === 'abierta';
-    const vencidas = filas.filter((f) => abiertas(f) && aFecha(f.fecha) <= hoy);
+    const vencidas = filas.filter((f) => abierta(f) && aFecha(f.fecha) <= hoy);
     if (vencidas.length > 0) {
       throw new ConflictException({
         message: `No se puede continuar desde "Ejecución operativa". Faltan jornadas por cerrar: ${vencidas
-          .map((f) => `Día ${f.numero} (${dia(f.fecha)})`)
+          .map((f) => `Día ${f.numero} (${diaCorto(f.fecha)})`)
           .join('; ')}. Ciérrelas o regístrelas como día sin operación.`,
         code: 'JORNADAS_PENDIENTES',
       });
     }
-    const futuras = filas.filter((f) => abiertas(f));
-    if (futuras.length === 0) return null;
-    const registradas = filas.filter((f) => !abiertas(f));
-    if (registradas.length === 0) {
+    if (filas.length > 0 && filas.every(abierta)) {
       throw new ConflictException({
         message:
           'No se puede continuar desde "Ejecución operativa". Registre al menos la jornada de hoy: ciérrela o regístrela como día sin operación.',
         code: 'JORNADAS_PENDIENTES',
       });
     }
-    return aFecha(registradas[registradas.length - 1].fecha);
+  }
+
+  /** Los días del servicio que todavía no se resolvieron (pendientes o abiertos), en orden. */
+  private async diasSinResolver(tx: Prisma.TransactionClient, ticketId: string) {
+    await this.generar(tx, ticketId);
+    return tx.ticketJornada.findMany({
+      where: { ticketId, estado: { in: ['pendiente', 'abierta'] } },
+      orderBy: { fecha: 'asc' },
+      select: { numero: true, fecha: true },
+    });
   }
 
   /**
-   * Al salir de la Ejecución operativa con días del servicio que aún no llegan, el servicio termina en el último día registrado: se acorta la
-   * fecha de fin del ticket (los días sobrantes pasan a «no aplica» y QHSE recibe la lista nueva) y se avisa a Comercial como cualquier acortamiento.
+   * Cerrar el servicio (de la «Revisión final» al «Cierre») exige que **todos** los días del servicio estén resueltos: cerrados, sin operación o
+   * no aplicar. Si faltan, el ticket pasa al siguiente día; si el trabajo ya terminó, el Jefe de Base acorta el servicio.
    */
-  async acortarAlSalir(
-    tx: Prisma.TransactionClient,
-    ticketId: string,
-    fechaFin: string,
-    actorId: string,
-    roleCode: string,
-  ): Promise<void> {
-    const t = await tx.ticket.findUnique({
-      where: { id: ticketId },
-      select: { fechaFinServicio: true, pedidoId: true, pedidoCodigo: true, ticketNumero: true },
+  async exigirServicioCompleto(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    const faltan = await this.diasSinResolver(tx, ticketId);
+    if (!faltan.length) return;
+    throw new ConflictException({
+      message: `No se puede cerrar el servicio: faltan días por trabajar: ${faltan
+        .map((f) => `Día ${f.numero} (${diaCorto(f.fecha)})`)
+        .join(
+          '; ',
+        )}. Pase al siguiente día; si el trabajo ya terminó, el Jefe de Base acorta el servicio, y si un día no se trabaja, se registra como día sin operación.`,
+      code: 'JORNADAS_PENDIENTES',
     });
-    if (!t?.fechaFinServicio) return;
-    const actual = aFecha(t.fechaFinServicio);
-    if (!(fechaFin < actual)) return;
-    const motivo = 'El servicio terminó al salir de la Ejecución operativa';
-    await tx.ticket.update({
-      where: { id: ticketId },
-      data: { fechaFinServicio: new Date(`${fechaFin}T00:00:00Z`) },
+  }
+
+  /** De la «Revisión final» se vuelve a la ejecución solo si quedan días por trabajar (el ciclo del siguiente día). */
+  async exigirDiasPorTrabajar(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    if ((await this.diasSinResolver(tx, ticketId)).length) return;
+    throw new ConflictException({
+      message: 'No quedan días por trabajar: el servicio ya puede cerrarse.',
+      code: 'SIN_DIAS_POR_TRABAJAR',
     });
-    await this.generar(tx, ticketId);
-    await tx.ticketDuracionCambio.create({
-      data: {
-        id: uuidv7(),
-        ticketId,
-        accion: 'acortar',
-        fechaFinAnterior: new Date(`${actual}T00:00:00Z`),
-        fechaFinNueva: new Date(`${fechaFin}T00:00:00Z`),
-        motivo,
-        actorId,
-      },
-    });
-    await this.bus.publish(
-      tx,
-      this.bus.create({
-        type: 'operaciones.pumping.duracion_servicio_cambiada',
-        subject: { type: 'pumping_ticket', id: ticketId },
-        data: {
-          ticketId,
-          ticketNumero: t.ticketNumero,
-          pedidoId: t.pedidoId,
-          pedidoCodigo: t.pedidoCodigo,
-          accion: 'acortar',
-          fechaFinAnterior: actual,
-          fechaFinNueva: fechaFin,
-          motivo,
-        },
-        actor: { userId: actorId, role: roleCode },
-        traceparent: currentTraceparent(),
-      }),
-    );
   }
 
   /**

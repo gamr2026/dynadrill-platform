@@ -4283,7 +4283,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await cerrar(t, DIAS[1]).expect(201);
       expect((await ver(t)).body).toMatchObject({ porCerrar: 1, cerradas: 1, sinOperacion: 1 });
 
-      // con hoy registrado ya puede continuar: el servicio termina hoy y el día 3 deja de aplicar
+      // con hoy registrado ya puede continuar con el ciclo de hoy; el servicio no se acorta y el día 3 sigue pendiente para cuando llegue
       await avanzar(t).expect(201);
       expect(
         (
@@ -4292,7 +4292,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
             [t.id],
           )
         ).rows[0],
-      ).toEqual({ paso_codigo: 'control_retorno', fin: DIAS[1] });
+      ).toEqual({ paso_codigo: 'control_retorno', fin: DIAS[2] });
       expect(
         (
           await admin.query(
@@ -4300,17 +4300,54 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
             [t.id],
           )
         ).rows.map((j) => `${j.fecha}:${j.estado}`),
-      ).toEqual([`${DIAS[0]}:sin_operacion`, `${DIAS[1]}:cerrada`, `${DIAS[2]}:no_aplica`]);
-      // y Comercial se entera del nuevo fin del servicio
-      const aviso = await admin.query(
-        "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.duracion_servicio_cambiada' AND datos->'data'->>'ticketId' = $1",
-        [t.id],
+      ).toEqual([`${DIAS[0]}:sin_operacion`, `${DIAS[1]}:cerrada`, `${DIAS[2]}:pendiente`]);
+      expect(
+        (
+          await admin.query(
+            "SELECT 1 FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.duracion_servicio_cambiada' AND datos->'data'->>'ticketId' = $1",
+            [t.id],
+          )
+        ).rows,
+      ).toHaveLength(0);
+    });
+
+    it('cada día recorre el ciclo hasta la revisión final: de ahí se cierra solo con todos los días resueltos; si quedan días, el ticket vuelve a la ejecución', async () => {
+      const t = await enEjecucion();
+      await ver(t);
+      await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
+        201,
       );
-      expect(aviso.rows).toHaveLength(1);
-      expect(aviso.rows[0].datos.data).toMatchObject({
-        accion: 'acortar',
-        fechaFinNueva: DIAS[1],
-      });
+      await abrirDia(t, DIAS[1]);
+      await cumplirCierre(t, DIAS[1]);
+      await cerrar(t, DIAS[1]).expect(201);
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'revision_final' WHERE id = $1", [
+        t.id,
+      ]);
+      const desdeFinal = (hacia: string) =>
+        http().post(`${t.url}/avanzar`).set(supervisora()).send({ hacia });
+      // el día 3 sigue sin resolver: no se cierra
+      const sinCerrar = await desdeFinal('cierre').expect(409);
+      expect(sinCerrar.body.code).toBe('JORNADAS_PENDIENTES');
+      expect(sinCerrar.body.detail).toContain('Día 3 (07/11)');
+      // y el ticket pasa a esperar el siguiente día en la ejecución (sin exigir el Acta, que es del cierre)
+      await desdeFinal('ejecucion_operativa').expect(201);
+      expect(
+        (await admin.query('SELECT paso_codigo FROM pumping.ticket WHERE id = $1', [t.id])).rows[0]
+          .paso_codigo,
+      ).toBe('ejecucion_operativa');
+      // si el servicio se acorta (el día 3 ya no aplica), no quedan días por trabajar: solo queda cerrar
+      await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
+        t.id,
+        DIAS[1],
+      ]);
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'revision_final' WHERE id = $1", [
+        t.id,
+      ]);
+      const sinDias = await desdeFinal('ejecucion_operativa').expect(409);
+      expect(sinDias.body.code).toBe('SIN_DIAS_POR_TRABAJAR');
+      expect((await desdeFinal('cierre').expect(409)).body.detail).toContain(
+        'Acta de Entrega de Locación',
+      );
     });
 
     it('para salir de la Ejecución operativa hace falta al menos una jornada registrada, aunque todas las demás sean futuras', async () => {

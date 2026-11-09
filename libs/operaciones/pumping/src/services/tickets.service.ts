@@ -345,15 +345,16 @@ export class TicketsService {
       }
       if (salida.requiereMotivo && !motivo?.trim())
         throw new BadRequestException('El motivo es obligatorio');
+      // cada día del servicio recorre el ciclo hasta la revisión final: de ahí se cierra (con todos los días resueltos) o se pasa al siguiente día
+      if (t.pasoCodigo === 'revision_final') {
+        if (hacia === 'cierre') await this.jornadas.exigirServicioCompleto(tx, id);
+        if (hacia === PASO_EJECUCION) await this.jornadas.exigirDiasPorTrabajar(tx, id);
+      }
       // para salir del paso deben estar cumplidos todos sus requisitos (la lista de lo que falta va en la respuesta)
       if (salida.exigeRequisitos) {
         await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
         // y de la Ejecución operativa solo se sale con todas las jornadas del servicio resueltas
-        if (t.pasoCodigo === PASO_EJECUCION) {
-          const finReal = await this.jornadas.exigirResueltas(tx, id);
-          if (finReal)
-            await this.jornadas.acortarAlSalir(tx, id, finReal, actor.id, actor.roleCode);
-        }
+        if (t.pasoCodigo === PASO_EJECUCION) await this.jornadas.exigirResueltas(tx, id);
         // y de la revisión de salida solo con la inspección aprobada y el reporte firmado de cada unidad
         if (t.pasoCodigo === PASO_REVISION_SALIDA)
           await this.jornadas.exigirRevisionDeSalida(tx, id);
