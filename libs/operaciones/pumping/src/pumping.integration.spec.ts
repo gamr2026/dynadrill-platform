@@ -1471,6 +1471,23 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       }),
     );
     expect(await faltan()).toEqual(['ptw_primer_dia_abierto']);
+    // si QHSE lo reintegra, el requisito se cumple otra vez; si lo vuelve a anular, vuelve a exigirse
+    await externos.consumir(
+      externo('qhse.ptw.reintegrado', {
+        ticketId: t.id,
+        ...(await diaInicio(t.id)),
+        fase: 'gabinete',
+      }),
+    );
+    expect(await faltan()).toEqual([]);
+    await externos.consumir(
+      externo('qhse.ptw.anulado', {
+        ticketId: t.id,
+        ...(await diaInicio(t.id)),
+        motivo: 'otra vez',
+      }),
+    );
+    expect(await faltan()).toEqual(['ptw_primer_dia_abierto']);
     await externos.consumir(
       externo('qhse.ptw.abierto', { ticketId: t.id, diaOperacion: '2030-01-01' }),
     );
@@ -4207,6 +4224,28 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect(await q('art_vigente')).toEqual(['cumplido', 'cumplido', 'pendiente']);
 
       // QHSE anula el PTW del día 1 y el ART: vuelven a faltar
+      await externos.consumir(
+        externo('qhse.ptw.anulado', { ptwId: ptw, ticketId: t.id, diaOperacion: DIAS[0] }),
+      );
+      // reintegrado como aprobado el PTW del día 1 vuelve a valer; en gabinete todavía no (y se vuelve a anular para seguir)
+      await externos.consumir(
+        externo('qhse.ptw.reintegrado', {
+          ptwId: ptw,
+          ticketId: t.id,
+          diaOperacion: DIAS[0],
+          fase: 'gabinete',
+        }),
+      );
+      expect((await q('ptw_dia_aprobado'))[0]).toBe('pendiente');
+      await externos.consumir(
+        externo('qhse.ptw.reintegrado', {
+          ptwId: ptw,
+          ticketId: t.id,
+          diaOperacion: DIAS[0],
+          fase: 'aprobado',
+        }),
+      );
+      expect((await q('ptw_dia_aprobado'))[0]).toBe('cumplido');
       await externos.consumir(
         externo('qhse.ptw.anulado', { ptwId: ptw, ticketId: t.id, diaOperacion: DIAS[0] }),
       );

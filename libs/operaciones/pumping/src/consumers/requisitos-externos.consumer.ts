@@ -105,6 +105,7 @@ const FUENTES = [
       'qhse.ptw.formalizado',
       'qhse.ptw.cerrado',
       'qhse.ptw.anulado',
+      'qhse.ptw.reintegrado',
       'qhse.documento_pedido.cargado',
       'qhse.documento_pedido.anulado',
       'qhse.epi.despachada',
@@ -262,7 +263,9 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     let desde: string | null;
     let hasta: string | null;
     const anulado = event.type.endsWith('.anulado');
-    if (event.type === 'qhse.ptw.cerrado' || event.type === 'qhse.ptw.anulado') {
+    // un PTW reintegrado vuelve a valer según la fase que traía: aprobado cuenta como PTW aprobado del día; en gabinete o aprobación todavía no
+    const vigente = event.type === 'qhse.ptw.reintegrado' ? d['fase'] === 'aprobado' : !anulado;
+    if (/^qhse\.ptw\.(cerrado|anulado|reintegrado)$/.test(event.type)) {
       tipo = 'ptw_aprobado';
       origenId = String(d['ptwId'] ?? '');
       desde = hasta = dia(d['diaOperacion']);
@@ -283,8 +286,8 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
     const rango = { desde: new Date(`${desde}T00:00:00Z`), hasta: new Date(`${hasta}T00:00:00Z`) };
     await tx.ticketHechoQhse.upsert({
       where: { ticketId_tipo_origenId: { ticketId, tipo, origenId } },
-      create: { id: uuidv7(), ticketId, tipo, origenId, ...rango, vigente: !anulado },
-      update: { ...rango, vigente: !anulado },
+      create: { id: uuidv7(), ticketId, tipo, origenId, ...rango, vigente },
+      update: { ...rango, vigente },
     });
     await this.jornadas.sincronizar(tx, ticketId, null);
   }
@@ -357,7 +360,7 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
           const nuevo = await this.bus.handleOnce(tx, event, async () => {
             if (event.type.startsWith('qhse.documento_pedido.')) return this.hechoQhse(tx, event);
             await this.bloqueoQhse(tx, event);
-            if (event.type === 'qhse.ptw.cerrado' || event.type === 'qhse.ptw.anulado')
+            if (/^qhse\.ptw\.(cerrado|anulado|reintegrado)$/.test(event.type))
               await this.hechoQhse(tx, event);
           });
           if (!nuevo) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);

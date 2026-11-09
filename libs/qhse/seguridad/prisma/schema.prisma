@@ -73,6 +73,7 @@ enum AccionPtw {
   firmado
   aprobado
   anulado
+  reintegrado
 
   @@map("accion_ptw")
   @@schema("qhse")

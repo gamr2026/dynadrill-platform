@@ -188,6 +188,51 @@ export class PtwService {
     return this.consulta.detalle(id);
   }
 
+  /**
+   * Reintegra un PTW anulado: vuelve a ser el vigente de su día, con la fase y los documentos que tenía. Pide su motivo y deja la huella en el
+   * historial (`reintegrado`); la anulación anterior no se borra. No se puede si el pedido ya tiene otro PTW vigente ese día (la tarea programada
+   * pudo abrir uno nuevo: se anula primero) ni si alguno de los documentos que el PTW ya tenía fijados fue anulado.
+   */
+  async reintegrar(id: string, motivo: string, actor: AuthUser) {
+    const m = texto(motivo);
+    if (!m) throw new BadRequestException('Indique el motivo del reintegro');
+    await this.prisma.$transaction(async (tx) => {
+      const p = await tx.ptw.findUnique({ where: { id } });
+      if (!p) throw new NotFoundException('El PTW no existe');
+      if (!p.anuladoAt) throw new ConflictException('El PTW no está anulado');
+      const otro = await tx.ptw.findFirst({
+        where: { pedidoId: p.pedidoId, diaOperacion: p.diaOperacion, anuladoAt: null },
+        select: { numero: true },
+      });
+      if (otro)
+        throw new ConflictException(
+          `Ya hay un PTW vigente (${codigoPtw(otro.numero)}) de este pedido para ese día; anúlelo antes de reintegrar este`,
+        );
+      const documentos = [
+        p.documentoRecepcionId,
+        p.documentoArtId,
+        p.documentoPtId,
+        p.documentoSfiId,
+      ].filter((d): d is string => !!d);
+      if (
+        documentos.length &&
+        (await tx.documentoPedido.count({
+          where: { id: { in: documentos }, anuladoAt: { not: null } },
+        })) > 0
+      )
+        throw new ConflictException(
+          'Alguno de los documentos de este PTW fue anulado: no se puede reintegrar, abra un PTW nuevo',
+        );
+      await tx.ptw.update({
+        where: { id },
+        data: { anuladoAt: null, anuladoPor: null, motivoAnulacion: null, updatedBy: actor.id },
+      });
+      await this.historia(tx, id, AccionPtw.reintegrado, actor, m);
+      await this.publicar(tx, 'qhse.ptw.reintegrado', id, actor, m);
+    });
+    return this.consulta.detalle(id);
+  }
+
   // ------------------------------------------------------------------------------------------------------- internos
 
   private dia(valor: string): Date {

@@ -92,4 +92,15 @@ export class PtwController {
   ) {
     return this.ptw.anular(id, dto.motivo, actor);
   }
+
+  /** Devuelve su validez a un PTW anulado (con su motivo). Lo hace quien puede anular. */
+  @RequirePermission(P.PTW_APROBAR)
+  @Post(':id/reintegrar')
+  reintegrar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AnularPtwDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.ptw.reintegrar(id, dto.motivo, actor);
+  }
 }

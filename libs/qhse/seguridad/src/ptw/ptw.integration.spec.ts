@@ -323,6 +323,72 @@ run('QHSE: Permiso de Trabajo (PTW) por día y pedido (base de datos real)', () 
     ).toBe(201);
   });
 
+  it('un PTW anulado se puede reintegrar con su motivo: recupera su fase y deja la huella; no si el día ya tiene otro vigente o un documento se anuló', async () => {
+    const { id, ticketId, pedidoId } = await enAprobacion();
+    expect((await accion(id, 'aprobar', {}, gerente())).status).toBe(201);
+    // no se reintegra lo que no está anulado
+    const noAnulado = await accion(id, 'reintegrar', { motivo: 'por error' }, gerente());
+    expect(noAnulado.status).toBe(409);
+    expect(noAnulado.body.detail).toMatch(/no está anulado/);
+
+    expect((await accion(id, 'anular', { motivo: 'Se anuló por error' }, gerente())).status).toBe(
+      201,
+    );
+    // quien reintegra necesita el permiso de aprobar y debe decir por qué
+    expect((await accion(id, 'reintegrar', { motivo: 'fue un error' }, hse())).status).toBe(403);
+    expect((await accion(id, 'reintegrar', { motivo: '  ' }, gerente())).status).toBe(400);
+
+    const r = await accion(id, 'reintegrar', { motivo: 'La anulación fue un error' }, gerente());
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ anulado: false, fase: 'aprobado', anuladoPor: null });
+    // la anulación anterior queda en el historial, seguida del reintegro con su motivo
+    expect(r.body.historial.map((h: { accion: string }) => h.accion)).toEqual([
+      'abierto',
+      'documentos_validados',
+      'aprobado',
+      'anulado',
+      'reintegrado',
+    ]);
+    expect(r.body.historial.at(-1).motivo).toBe('La anulación fue un error');
+    expect((await eventos('qhse.ptw.reintegrado', ticketId))[0].datos.data).toMatchObject({
+      ptwId: id,
+      fase: 'aprobado',
+      motivo: 'La anulación fue un error',
+    });
+    // sigue siendo el vigente del día: otro no se puede abrir
+    expect((await abrir(ticketId, hoy)).status).toBe(409);
+
+    // si el día ya tiene otro PTW vigente, no se reintegra hasta anularlo
+    expect((await accion(id, 'anular', { motivo: 'otra vez' }, gerente())).status).toBe(201);
+    const otro = await abrir(ticketId, hoy);
+    expect(otro.status).toBe(201);
+    const choca = await accion(id, 'reintegrar', { motivo: 'quiero este' }, gerente());
+    expect(choca.status).toBe(409);
+    expect(choca.body.detail).toMatch(/Ya hay un PTW vigente/);
+    expect((await accion(otro.body.id, 'anular', { motivo: 'sobra' }, gerente())).status).toBe(201);
+
+    // si alguno de sus documentos se anuló mientras tanto, tampoco
+    const pt = (
+      await t.http().get('/api/qhse/documentos').query({ pedidoId, tipo: 'pt' }).set(hse())
+    ).body[0];
+    expect(
+      (
+        await t
+          .http()
+          .post(`/api/qhse/documentos/${pt.id}/anular`)
+          .set(hse())
+          .send({ motivo: 'se cargó mal' })
+      ).status,
+    ).toBe(201);
+    const sinDoc = await accion(id, 'reintegrar', { motivo: 'insisto' }, gerente());
+    expect(sinDoc.status).toBe(409);
+    expect(sinDoc.body.detail).toMatch(/documentos/);
+    // y un PTW anulado sigue sin poder cambiarse de otra forma (lo protege la base)
+    await expect(sql("UPDATE qhse.ptw SET fase = 'gabinete' WHERE id = $1", [id])).rejects.toThrow(
+      /anulado/,
+    );
+  });
+
   // ------------------------------------------------------------------------------------------------------- permisos
 
   it('el Supervisor no entra al PTW y hace falta el permiso de cada acción', async () => {
