@@ -1688,6 +1688,12 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
   it('recorre todo el servicio: revisión de salida, ejecución, retorno, llegada, revisión final y cierre, con lo que exige cada paso', async () => {
     const t = await ticketEnTraslado();
+    const inicio = (
+      await admin.query(
+        'SELECT fecha_inicio_servicio::text AS f FROM pumping.ticket WHERE id = $1',
+        [t.id],
+      )
+    ).rows[0].f as string;
     await cumplirTodoMenosReporte(t.id);
     for (const [v, o] of [
       [VEHICULO, op1()],
@@ -1695,7 +1701,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     ] as const) {
       const cuerpoSalida = await salidaValida(t.id, v.unidadId);
       await http()
-        .put(`${t.url}/reportes-unidad/${v.unidadId}/salida`)
+        .put(`${t.url}/reportes-unidad/${v.unidadId}/${inicio}/salida`)
         .set(o)
         .send(cuerpoSalida)
         .expect(200);
@@ -1706,7 +1712,21 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'revision_reportes_salida' })
       .expect(201);
 
-    // revisión de salida: la inspección aprobada y el gerenciamiento de viaje de salida ya no son del paso: los exige cada jornada
+    // revisión de salida: no se pasa a la ejecución sin la inspección de cada unidad aprobada (los reportes ya están firmados); el
+    // gerenciamiento de viaje de salida no es del paso: lo exige cada jornada
+    const sinInspeccion = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'ejecucion_operativa' })
+      .expect(409);
+    expect(sinInspeccion.body.code).toBe('REQUISITOS_PENDIENTES');
+    expect(sinInspeccion.body.detail).toContain('Inspección de vehículo aprobada');
+    expect(sinInspeccion.body.detail).not.toContain('Reporte de unidad de salida firmado');
+    for (const v of [VEHICULO, VEHICULO_2])
+      await admin.query(
+        "INSERT INTO pumping.ticket_hecho_traslado (id, ticket_id, unidad_id, fecha, tipo, vigente) VALUES (gen_random_uuid(), $1, $2, $3, 'inspeccion_aprobada', true)",
+        [t.id, v.unidadId, inicio],
+      );
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())

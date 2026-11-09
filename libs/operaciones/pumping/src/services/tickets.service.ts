@@ -59,6 +59,7 @@ const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 const ORDEN_TRASLADO_SALIDA = 30;
 const ORDEN_EJECUCION = 50;
 const PASO_EJECUCION = 'ejecucion_operativa';
+const PASO_REVISION_SALIDA = 'revision_reportes_salida';
 const NOMBRES = {
   cliente: true,
   campo: true,
@@ -349,6 +350,9 @@ export class TicketsService {
         await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
         // y de la Ejecución operativa solo se sale con todas las jornadas del servicio resueltas
         if (t.pasoCodigo === PASO_EJECUCION) await this.jornadas.exigirResueltas(tx, id);
+        // y de la revisión de salida solo con la inspección aprobada y el reporte firmado de cada unidad
+        if (t.pasoCodigo === PASO_REVISION_SALIDA)
+          await this.jornadas.exigirRevisionDeSalida(tx, id);
       }
       const r = await tx.ticket.updateMany({
         where: { id, pasoCodigo: t.pasoCodigo },

@@ -406,6 +406,67 @@ export class JornadasService {
   }
 
   /**
+   * De la «Revisión de reportes de salida» a la ejecución solo se pasa con la revisión hecha: la inspección de cada unidad aprobada por el
+   * Supervisor (la hizo el Conductor) y el reporte de unidad de salida firmado por su Operador, del primer día del servicio. Cada día siguiente
+   * vuelve a pasar por lo mismo en su jornada. Un ticket sin fecha de inicio no se puede validar y no se bloquea.
+   */
+  async exigirRevisionDeSalida(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    const t = await tx.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        fechaInicioServicio: true,
+        unidades: {
+          select: {
+            unidadId: true,
+            unidad: { select: { codigo: true, vehiculo: { select: { placa: true } } } },
+          },
+        },
+      },
+    });
+    if (!t?.fechaInicioServicio) return;
+    const dia = t.fechaInicioServicio;
+    const [aprobadas, firmados] = await Promise.all([
+      tx.ticketHechoTraslado.findMany({
+        where: { ticketId, fecha: dia, tipo: 'inspeccion_aprobada', vigente: true },
+        select: { unidadId: true },
+      }),
+      tx.reporteUnidad.findMany({
+        where: { ticketId, fecha: dia, salidaFirmadaAt: { not: null } },
+        select: { unidadId: true },
+      }),
+    ]);
+    const conInspeccion = new Set(aprobadas.map((a) => a.unidadId));
+    const conReporte = new Set(firmados.map((f) => f.unidadId));
+    const pendientes = t.unidades.flatMap((u) => {
+      const nombre = u.unidad.vehiculo?.placa ?? u.unidad.codigo;
+      return [
+        ...(conInspeccion.has(u.unidadId)
+          ? []
+          : [
+              {
+                codigo: 'inspeccion_vehiculo_aprobada',
+                texto: `Inspección de vehículo aprobada (${nombre})`,
+              },
+            ]),
+        ...(conReporte.has(u.unidadId)
+          ? []
+          : [
+              {
+                codigo: 'reporte_unidad_salida',
+                texto: `Reporte de unidad de salida firmado (${nombre})`,
+              },
+            ]),
+      ];
+    });
+    if (!pendientes.length) return;
+    throw new ConflictException({
+      message: `No se puede continuar desde "Revisión de reportes de salida". Falta: ${pendientes.map((p) => p.texto).join('; ')}.`,
+      code: 'REQUISITOS_PENDIENTES',
+      pendientes,
+    });
+  }
+
+  /**
    * Para registrar trabajo de un día (checklist de seguridad, job log…): el día debe ser una jornada activa (pendiente o abierta) y ya haber
    * llegado. Crea las jornadas que falten. `queCosa` completa el mensaje.
    */
