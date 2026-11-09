@@ -406,6 +406,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Marcar que el Company Man aceptó trabajar en la jornada del día',
     [RoleCode.SUPERADMIN, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
   ),
+  nuevo(
+    'pumping.reportes_llegada.revisar',
+    'Aprobar o rechazar (con motivo) el reporte de unidad de llegada de cada unidad y día, en la Revisión de reportes de llegada',
+    [RoleCode.SUPERADMIN, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
+  ),
   nuevo('pumping.jornadas.cerrar', 'Cerrar la jornada del día de un ticket de Pumping', [
     RoleCode.SUPERADMIN,
     RoleCode.SUPERVISOR,
@@ -817,6 +822,7 @@ export const Permission = {
   PUMPING_EJECUCION_FORMALIZAR: 'pumping.ejecucion.formalizar',
   PUMPING_JORNADA_ACEPTAR_COMPANY_MAN: 'pumping.jornadas.aceptar_company_man',
   PUMPING_JORNADA_CERRAR: 'pumping.jornadas.cerrar',
+  PUMPING_REPORTE_LLEGADA_REVISAR: 'pumping.reportes_llegada.revisar',
   PUMPING_JORNADA_REABRIR: 'pumping.jornadas.reabrir',
   PUMPING_JORNADA_CAMBIAR_DURACION: 'pumping.jornadas.cambiar_duracion',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',

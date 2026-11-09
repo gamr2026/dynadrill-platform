@@ -59,6 +59,17 @@ export type EstadoVisibleJornada =
  * `bloqueada`: el día de hoy no se puede abrir porque falta un requisito de OTRA área (PTW, PT o ART de QHSE…). Lo que falta de Pumping
  * (la aceptación del Company Man, por ejemplo) no la bloquea: es la tarea del día.
  */
+/** Una unidad y un día trabajado en la Revisión de reportes de llegada. */
+export interface FilaRevisionLlegada {
+  unidadId: string;
+  unidad: string;
+  fecha: string;
+  numero: number;
+  inspeccion: 'pendiente' | 'por_aprobar' | 'aprobada';
+  reporte: 'sin_firmar' | 'por_revisar' | 'aprobado' | 'rechazado';
+  motivo: string | null;
+}
+
 export function estadoVisible(
   estado: EstadoJornada,
   fecha: string,
@@ -535,6 +546,172 @@ export class JornadasService {
     if (!pendientes.length) return;
     throw new ConflictException({
       message: `No se puede continuar desde "Revisión de reportes de salida". Falta: ${pendientes.map((p) => p.texto).join('; ')}.`,
+      code: 'REQUISITOS_PENDIENTES',
+      pendientes,
+    });
+  }
+
+  /**
+   * Revisión de reportes de llegada: una fila por unidad y por cada día trabajado (jornada cerrada) con lo que el Supervisor debe revisar: la
+   * inspección de llegada (la hace el Conductor y la aprueba el Supervisor en Flota) y el reporte de unidad de llegada (lo firma el Operador; el
+   * Supervisor lo aprueba o lo rechaza con motivo). Un reporte que se vuelve a firmar después de un rechazo se revisa de nuevo.
+   */
+  async revisionDeLlegada(
+    cliente: Prisma.TransactionClient | PrismaService,
+    ticketId: string,
+  ): Promise<FilaRevisionLlegada[]> {
+    const [unidades, jornadas, hechos, reportes, revisiones] = await Promise.all([
+      cliente.ticketUnidad.findMany({
+        where: { ticketId },
+        select: {
+          unidadId: true,
+          unidad: { select: { codigo: true, vehiculo: { select: { placa: true } } } },
+        },
+      }),
+      cliente.ticketJornada.findMany({
+        where: { ticketId, estado: 'cerrada' },
+        orderBy: { fecha: 'asc' },
+        select: { fecha: true, numero: true },
+      }),
+      cliente.ticketHechoTraslado.findMany({
+        where: {
+          ticketId,
+          vigente: true,
+          tipo: { in: ['inspeccion_llegada_realizada', 'inspeccion_llegada_aprobada'] },
+        },
+        select: { unidadId: true, fecha: true, tipo: true },
+      }),
+      cliente.reporteUnidad.findMany({
+        where: { ticketId, llegadaFirmadaAt: { not: null } },
+        select: { unidadId: true, fecha: true, llegadaFirmadaAt: true },
+      }),
+      cliente.reporteLlegadaRevision.findMany({
+        where: { ticketId },
+        orderBy: { revisadoAt: 'desc' },
+        select: { unidadId: true, fecha: true, decision: true, motivo: true, revisadoAt: true },
+      }),
+    ]);
+    const clave = (u: string, f: Date) => `${u}|${aFecha(f)}`;
+    const hecho = (u: string, f: Date, tipo: string) =>
+      hechos.some((h) => clave(h.unidadId, h.fecha) === clave(u, f) && h.tipo === tipo);
+    return unidades.flatMap((u) =>
+      jornadas.map((j) => {
+        const firma = reportes.find(
+          (r) => clave(r.unidadId, r.fecha) === clave(u.unidadId, j.fecha),
+        );
+        const ultima = revisiones.find(
+          (r) => clave(r.unidadId, r.fecha) === clave(u.unidadId, j.fecha),
+        );
+        // una revisión anterior a la última firma ya no vale: el reporte cambió
+        const vigente =
+          ultima && firma?.llegadaFirmadaAt && ultima.revisadoAt >= firma.llegadaFirmadaAt
+            ? ultima
+            : null;
+        return {
+          unidadId: u.unidadId,
+          unidad: u.unidad.vehiculo?.placa ?? u.unidad.codigo,
+          fecha: aFecha(j.fecha),
+          numero: j.numero,
+          inspeccion: hecho(u.unidadId, j.fecha, 'inspeccion_llegada_aprobada')
+            ? ('aprobada' as const)
+            : hecho(u.unidadId, j.fecha, 'inspeccion_llegada_realizada')
+              ? ('por_aprobar' as const)
+              : ('pendiente' as const),
+          reporte: !firma
+            ? ('sin_firmar' as const)
+            : !vigente
+              ? ('por_revisar' as const)
+              : vigente.decision === 'aprobada'
+                ? ('aprobado' as const)
+                : ('rechazado' as const),
+          motivo: vigente?.decision === 'rechazada' ? (vigente.motivo ?? null) : null,
+        };
+      }),
+    );
+  }
+
+  listarRevisionLlegada(ticketId: string): Promise<FilaRevisionLlegada[]> {
+    return this.revisionDeLlegada(this.prisma, ticketId);
+  }
+
+  /** El Supervisor aprueba o rechaza (con motivo) el reporte de llegada de una unidad y un día. Un rechazo deja al Operador volver a firmarlo. */
+  async revisarReporteLlegada(
+    ticketId: string,
+    unidadId: string,
+    fecha: string,
+    decision: 'aprobada' | 'rechazada',
+    motivo: string | undefined,
+    actor: AuthUser,
+  ) {
+    const texto = motivo?.trim() ?? '';
+    if (decision === 'rechazada' && texto.length < 3)
+      throw new BadRequestException('Escriba el motivo del rechazo (mínimo 3 caracteres)');
+    await this.prisma.$transaction(async (tx) => {
+      const t = await tx.ticket.findUnique({
+        where: { id: ticketId },
+        select: { pasoCodigo: true, personas: { select: { usuarioId: true, rol: true } } },
+      });
+      if (!t) throw new NotFoundException('El ticket no existe');
+      if (t.pasoCodigo !== 'revision_reportes_llegada')
+        throw new ConflictException(
+          'Los reportes de llegada se revisan en la Revisión de reportes de llegada',
+        );
+      this.exigirSupervisorAsignado(t.personas, actor);
+      const dia = new Date(`${fecha}T00:00:00Z`);
+      const reporte = await tx.reporteUnidad.findUnique({
+        where: { ticketId_unidadId_fecha: { ticketId, unidadId, fecha: dia } },
+        select: { llegadaFirmadaAt: true },
+      });
+      if (!reporte?.llegadaFirmadaAt)
+        throw new ConflictException('Ese reporte de llegada todavía no está firmado');
+      await tx.reporteLlegadaRevision.create({
+        data: {
+          id: uuidv7(),
+          ticketId,
+          unidadId,
+          fecha: dia,
+          decision,
+          motivo: decision === 'rechazada' ? texto : null,
+          revisadoPor: actor.id,
+        },
+      });
+    });
+    return { ok: true };
+  }
+
+  /**
+   * De la «Revisión de reportes de llegada» a la revisión final solo se pasa con la llegada revisada: la inspección de llegada de cada unidad
+   * aprobada y su reporte de llegada aprobado por el Supervisor, de cada día trabajado.
+   */
+  async exigirRevisionDeLlegada(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    const filas = await this.revisionDeLlegada(tx, ticketId);
+    const dia = (f: FilaRevisionLlegada) => `${f.unidad} (Día ${f.numero})`;
+    const pendientes = filas.flatMap((f) => [
+      ...(f.inspeccion === 'aprobada'
+        ? []
+        : [
+            {
+              codigo: 'inspeccion_llegada_aprobada',
+              texto: `${f.inspeccion === 'por_aprobar' ? 'Aprobar' : 'Hacer y aprobar'} la inspección de llegada de ${dia(f)}`,
+            },
+          ]),
+      ...(f.reporte === 'aprobado'
+        ? []
+        : [
+            {
+              codigo: 'reporte_llegada_aprobado',
+              texto:
+                f.reporte === 'rechazado'
+                  ? `Corregir y volver a firmar el reporte de llegada de ${dia(f)} (rechazado)`
+                  : f.reporte === 'sin_firmar'
+                    ? `Firmar el reporte de llegada de ${dia(f)}`
+                    : `Aprobar el reporte de llegada de ${dia(f)}`,
+            },
+          ]),
+    ]);
+    if (!pendientes.length) return;
+    throw new ConflictException({
+      message: `No se puede continuar desde "Revisión de reportes de llegada". Falta: ${pendientes.map((p) => p.texto).join('; ')}.`,
       code: 'REQUISITOS_PENDIENTES',
       pendientes,
     });

@@ -1,5 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { IsIn, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
+import { IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AvanceService } from '../services/avance.service';
@@ -19,6 +27,12 @@ export class CambiarDuracionDto {
   /** Nueva fecha de fin del servicio (AAAA-MM-DD). */
   @Matches(/^\d{4}-\d{2}-\d{2}$/) fechaFin!: string;
   @IsString() @MinLength(3) @MaxLength(500) motivo!: string;
+}
+
+export class RevisarReporteLlegadaDto {
+  @IsIn(['aprobada', 'rechazada']) decision!: 'aprobada' | 'rechazada';
+  /** Obligatorio al rechazar. */
+  @IsOptional() @IsString() @MaxLength(500) motivo?: string;
 }
 
 export class ReabrirJornadaDto {
@@ -50,6 +64,34 @@ export class JornadasController {
   @Get('tickets/:id/jornadas')
   listar(@Param('id', ParseUUIDPipe) id: string) {
     return this.jornadas.listar(id);
+  }
+
+  /** Revisión de reportes de llegada: por unidad y día trabajado, la inspección de llegada y el reporte de llegada con su estado. */
+  @RequirePermission(P.PUMPING_OPERAR, P.PUMPING_VER)
+  @Get('tickets/:id/revision-llegada')
+  revisionLlegada(@Param('id', ParseUUIDPipe) id: string) {
+    return this.jornadas.listarRevisionLlegada(id);
+  }
+
+  /** El Supervisor aprueba o rechaza (con motivo) el reporte de llegada de una unidad y un día. */
+  @RequirePermission(P.PUMPING_REPORTE_LLEGADA_REVISAR)
+  @Post('tickets/:id/reportes-unidad/:unidadId/:fecha/llegada/revision')
+  revisarReporteLlegada(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('unidadId', ParseUUIDPipe) unidadId: string,
+    @Param('fecha') fecha: string,
+    @Body() dto: RevisarReporteLlegadaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) throw new BadRequestException('El día no es válido');
+    return this.jornadas.revisarReporteLlegada(
+      id,
+      unidadId,
+      fecha,
+      dto.decision,
+      dto.motivo,
+      actor,
+    );
   }
 
   /** Motivos para registrar un día sin operación. */

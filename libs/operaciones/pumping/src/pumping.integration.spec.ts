@@ -1850,7 +1850,95 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       .send({ hacia: 'revision_reportes_llegada' })
       .expect(201);
 
-    // revisión de llegada y revisión final: el cierre exige el Acta de Entrega de Locación; el rechazo vuelve con motivo
+    // revisión final: el cierre exige el Acta de Entrega de Locación; el rechazo vuelve con motivo
+    // revisión de llegada: el Supervisor aprueba la inspección de llegada (Flota) y el reporte de llegada de cada unidad y día trabajado.
+    // Esta prueba solo firmó el reporte del primer día: los demás días no cuentan
+    await admin.query(
+      "UPDATE pumping.ticket_jornada SET estado = 'no_aplica' WHERE ticket_id = $1 AND fecha <> $2::date",
+      [t.id, inicio],
+    );
+    const revisor = () =>
+      como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [P.PUMPING_REPORTE_LLEGADA_REVISAR]);
+    const urlRevision = (v: string) => `${t.url}/reportes-unidad/${v}/${inicio}/llegada/revision`;
+    const sinRevision = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'revision_final' })
+      .expect(409);
+    expect(sinRevision.body.code).toBe('REQUISITOS_PENDIENTES');
+    expect(sinRevision.body.detail).toContain('inspección de llegada');
+    expect(sinRevision.body.detail).toContain('reporte de llegada');
+    const filas = (await http().get(`${t.url}/revision-llegada`).set(supervisora()).expect(200))
+      .body as Array<{ unidadId: string; inspeccion: string; reporte: string }>;
+    expect(filas).toHaveLength(2);
+    expect(filas.every((f) => f.inspeccion === 'pendiente' && f.reporte === 'por_revisar')).toBe(
+      true,
+    );
+    // la inspección de llegada llega de Flota por evento y no toca la de salida
+    for (const v of [VEHICULO, VEHICULO_2])
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.registrada',
+          {
+            ticketId: t.id,
+            unidadId: v.unidadId,
+            diaServicio: inicio,
+            momento: 'llegada',
+          },
+          'flota',
+        ),
+      );
+    expect(
+      (await http().get(`${t.url}/revision-llegada`).set(supervisora()).expect(200)).body.map(
+        (f: { inspeccion: string }) => f.inspeccion,
+      ),
+    ).toEqual(['por_aprobar', 'por_aprobar']);
+    for (const v of [VEHICULO, VEHICULO_2])
+      await externos.consumir(
+        externo(
+          'flota.inspeccion_vehiculo.aprobada',
+          {
+            ticketId: t.id,
+            unidadId: v.unidadId,
+            diaServicio: inicio,
+            momento: 'llegada',
+          },
+          'flota',
+        ),
+      );
+    expect(
+      (await http().get(`${t.url}/revision-llegada`).set(supervisora()).expect(200)).body.map(
+        (f: { inspeccion: string }) => f.inspeccion,
+      ),
+    ).toEqual(['aprobada', 'aprobada']);
+    // el reporte: solo el Supervisor con el permiso; el rechazo exige motivo y deja al Operador volver a firmar; lo aprobado ya no se toca
+    await http()
+      .post(urlRevision(VEHICULO.unidadId))
+      .set(supervisora())
+      .send({ decision: 'aprobada' })
+      .expect(403);
+    await http()
+      .post(urlRevision(VEHICULO.unidadId))
+      .set(revisor())
+      .send({ decision: 'rechazada' })
+      .expect(400);
+    await http()
+      .post(urlRevision(VEHICULO.unidadId))
+      .set(revisor())
+      .send({ decision: 'rechazada', motivo: 'Falta el detalle del ruido' })
+      .expect(201);
+    const rechazada = (
+      await http().get(`${t.url}/revision-llegada`).set(supervisora()).expect(200)
+    ).body.find((f: { unidadId: string }) => f.unidadId === VEHICULO.unidadId);
+    expect(rechazada).toMatchObject({ reporte: 'rechazado', motivo: 'Falta el detalle del ruido' });
+    await http().put(urlLlegada(VEHICULO.unidadId)).set(op1()).send(conNovedad).expect(200);
+    for (const v of [VEHICULO, VEHICULO_2])
+      await http()
+        .post(urlRevision(v.unidadId))
+        .set(revisor())
+        .send({ decision: 'aprobada' })
+        .expect(201);
+    await http().put(urlLlegada(VEHICULO.unidadId)).set(op1()).send(conNovedad).expect(409);
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())

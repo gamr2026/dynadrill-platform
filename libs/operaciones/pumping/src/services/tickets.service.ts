@@ -357,6 +357,9 @@ export class TicketsService {
         // y de la revisión de salida solo con la inspección aprobada y el reporte firmado de cada unidad
         if (t.pasoCodigo === PASO_REVISION_SALIDA)
           await this.jornadas.exigirRevisionDeSalida(tx, id);
+        // y de la revisión de llegada solo con la inspección de llegada aprobada y el reporte de llegada aprobado por el Supervisor
+        if (t.pasoCodigo === 'revision_reportes_llegada')
+          await this.jornadas.exigirRevisionDeLlegada(tx, id);
       }
       const r = await tx.ticket.updateMany({
         where: { id, pasoCodigo: t.pasoCodigo },

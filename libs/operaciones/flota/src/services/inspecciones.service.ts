@@ -221,10 +221,10 @@ export class InspeccionesService {
         unidadId,
         vehiculoId: unidad.vehiculoId,
         diaServicio: dia,
+        momento,
       };
       await this.publicar(tx, 'registrada', id, actor, {
         ...base,
-        momento,
         hayNovedades: noCumple.length > 0,
         bloqueaUso: bloqueantes > 0,
       });
@@ -299,8 +299,7 @@ export class InspeccionesService {
         motivoTexto: motivo.trim(),
         asignados: [{ usuarioId: i.conductorId, rolCodigo: 'conductor' }],
       });
-      if (i.momento === 'salida')
-        await this.publicar(tx, 'anulada', inspeccionId, actor, this.base(i));
+      await this.publicar(tx, 'anulada', inspeccionId, actor, this.base(i));
       return { id: inspeccionId, estado: 'rechazada' as const };
     });
   }
@@ -319,8 +318,7 @@ export class InspeccionesService {
         where: { id: inspeccionId },
         data: { anuladaAt: new Date(), anuladaPor: actor.id, anulacionMotivo: motivo.trim() },
       });
-      if (i.momento === 'salida')
-        await this.publicar(tx, 'anulada', inspeccionId, actor, this.base(i));
+      await this.publicar(tx, 'anulada', inspeccionId, actor, this.base(i));
       return { id: inspeccionId, anulada: true };
     });
   }
@@ -543,11 +541,13 @@ export class InspeccionesService {
     casoId: string | null;
     unidadId: string;
     diaServicio: Date;
+    momento: MomentoInspeccion;
     caso: { ticketId: string } | null;
     unidad: { vehiculoId: string | null };
   }) {
     return {
       inspeccionId: i.id,
+      momento: i.momento,
       diaServicio: SOLO_DIA(i.diaServicio),
       casoId: i.casoId,
       ticketId: i.caso?.ticketId ?? null,

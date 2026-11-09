@@ -81,6 +81,13 @@ export const REGLAS_EXTERNAS: Record<string, Regla> = {
     accion: 'reabrir',
     por: 'unidadId',
   },
+  // Flota: la inspección de llegada es otra inspección (momento «llegada»): se guarda como hecho de la unidad y el día para la revisión de llegada.
+  // La de salida usa «realizada» y no necesita este aviso.
+  'flota.inspeccion_vehiculo.registrada': {
+    codigo: REQ.inspeccionRealizada,
+    accion: 'cumplir',
+    por: 'unidadId',
+  },
   // Flota: gerenciamiento de viaje (lo solicita el Conductor; su aprobación es condición para salir de la revisión de salida y del control de retorno)
   'flota.gerenciamiento_viaje.aprobado': {
     codigo: requisitoDeViaje,
@@ -117,6 +124,7 @@ const FUENTES = [
   {
     source: 'flota',
     patterns: [
+      'flota.inspeccion_vehiculo.registrada',
       'flota.inspeccion_vehiculo.realizada',
       'flota.inspeccion_vehiculo.anulada',
       'flota.inspeccion_vehiculo.aprobada',
@@ -334,6 +342,42 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
       await this.avisarSupervisor(tx, ticketId, unidadId, event);
   }
 
+  /**
+   * La inspección de llegada de una unidad y un día: realizada (al registrarse), aprobada por el Supervisor, o retirada si se rechaza o se anula.
+   * Solo guarda el hecho: la revisión de llegada lo consulta para dejar pasar el ticket.
+   */
+  private async hechoDeLlegada(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    event: EventEnvelope,
+    ticketId: string,
+    unidadId: string,
+  ): Promise<void> {
+    const efecto = {
+      'flota.inspeccion_vehiculo.registrada': ['inspeccion_llegada_realizada', true],
+      'flota.inspeccion_vehiculo.anulada': ['inspeccion_llegada_realizada', false],
+      'flota.inspeccion_vehiculo.aprobada': ['inspeccion_llegada_aprobada', true],
+      'flota.inspeccion_vehiculo.rechazada': ['inspeccion_llegada_aprobada', false],
+    }[event.type] as
+      ['inspeccion_llegada_realizada' | 'inspeccion_llegada_aprobada', boolean] | undefined;
+    const dia = String(event.data['diaServicio'] ?? '').slice(0, 10);
+    if (!efecto || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+      this.logger.warn(`${event.type}: inspección de llegada sin día o tipo; se ignora`);
+      return;
+    }
+    if (!(await tx.ticket.findUnique({ where: { id: ticketId }, select: { id: true } }))) {
+      this.logger.warn(`${event.type}: el ticket ${ticketId} no existe; se ignora`);
+      return;
+    }
+    const [tipo, vigente] = efecto;
+    const fecha = new Date(`${dia}T00:00:00Z`);
+    await tx.ticketHechoTraslado.upsert({
+      where: { ticketId_unidadId_fecha_tipo: { ticketId, unidadId, fecha, tipo } },
+      create: { id: uuidv7(), ticketId, unidadId, fecha, tipo, vigente },
+      update: { vigente },
+    });
+    this.logger.log(`${event.type}: ${tipo} ${vigente ? 'vigente' : 'retirado'} (${dia})`);
+  }
+
   private async ticketDeEvento(
     tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
     d: Record<string, unknown>,
@@ -380,6 +424,14 @@ export class RequisitosExternosConsumer implements OnApplicationBootstrap {
           if (!ticketId || !quien || !codigo) {
             this.logger.warn(`${event.type}: faltan ticketId, ${regla.por} o el tipo; se ignora`);
             return;
+          }
+          // la inspección de llegada (otro momento de la misma inspección de Flota) alimenta la revisión de llegada, no los requisitos del día
+          if (event.type.startsWith('flota.inspeccion_vehiculo.')) {
+            if (event.data['momento'] === 'llegada') {
+              await this.hechoDeLlegada(tx, event, ticketId, quien);
+              return;
+            }
+            if (event.type === 'flota.inspeccion_vehiculo.registrada') return;
           }
           // la inspección y el gerenciamiento de viaje se exigen en cada jornada: el evento trae el día del servicio
           if (codigo in REQUISITO_DEL_DIA) {

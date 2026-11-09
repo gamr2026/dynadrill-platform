@@ -347,7 +347,9 @@ export class ReporteUnidadService {
     await this.prisma.$transaction(async (tx) => {
       const t = await tx.ticket.findUnique({ where: { id: ticketId } });
       if (!t) throw new NotFoundException('El ticket no existe');
-      if (!PASOS_LLEGADA.includes(t.pasoCodigo))
+      // en la Revisión de reportes de llegada solo se vuelve a firmar un reporte que el Supervisor rechazó
+      const enRevision = t.pasoCodigo === 'revision_reportes_llegada';
+      if (!PASOS_LLEGADA.includes(t.pasoCodigo) && !enRevision)
         throw new ConflictException(
           'El reporte de llegada se registra durante la Ejecución operativa o en el Traslado de llegada',
         );
@@ -379,6 +381,17 @@ export class ReporteUnidadService {
           })));
       if (!previo?.salidaFirmadaAt)
         throw new ConflictException('La unidad no tiene un reporte de salida firmado');
+      if (enRevision) {
+        const ultima = await tx.reporteLlegadaRevision.findFirst({
+          where: { ticketId, unidadId, fecha: previo.fecha },
+          orderBy: { revisadoAt: 'desc' },
+          select: { decision: true },
+        });
+        if (ultima?.decision !== 'rechazada')
+          throw new ConflictException(
+            'Ese reporte de llegada no está rechazado: ya no se puede modificar',
+          );
+      }
 
       const items = await tx.inspeccionItem.findMany({
         where: { activo: true },

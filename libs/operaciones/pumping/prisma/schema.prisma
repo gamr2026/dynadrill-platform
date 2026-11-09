@@ -247,16 +247,17 @@ model Ticket {
   lineas                 TicketLinea[]
   jornadas               TicketJornada[]
   hechosTraslado         TicketHechoTraslado[]
+  revisionesLlegada      ReporteLlegadaRevision[]
   hechosQhse             TicketHechoQhse[]
   cambiosDuracion        TicketDuracionCambio[]
   avisoAvance            TicketAvisoAvance?
   avisosJornada          TicketAvisoJornada[]
 
   /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
-  reportePrecargadoAt              DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
+  reportePrecargadoAt              DateTime?  @map("reporte_precargado_at") @db.Timestamptz(6)
   /// Cuándo el operador dio por completo el Reporte de Herramientas (van juntos con quién).
-  reporteHerramientasCompletadoAt  DateTime? @map("reporte_herramientas_completado_at") @db.Timestamptz(6)
-  reporteHerramientasCompletadoPor String?   @map("reporte_herramientas_completado_por") @db.Uuid
+  reporteHerramientasCompletadoAt  DateTime?  @map("reporte_herramientas_completado_at") @db.Timestamptz(6)
+  reporteHerramientasCompletadoPor String?    @map("reporte_herramientas_completado_por") @db.Uuid
   reporteHerramientasCompletador   IdUsuario? @relation("completadorReporteHerramientas", fields: [reporteHerramientasCompletadoPor], references: [id])
 
   @@index([pasoCodigo])
@@ -366,8 +367,8 @@ model SolicitudCambioItem {
   listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
   codigo             String
   descripcion        String
-  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
-  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
+  unidadMedidaId     String               @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida      @relation(fields: [unidadMedidaId], references: [id])
   cantidad           Decimal              @db.Decimal(12, 3)
   descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
   tipoLinea          TipoLineaItem        @map("tipo_linea")
@@ -431,27 +432,27 @@ model ReporteItemDia {
 
 /// Reporte Diario de Actividades (DYN-SGI-RE-047) de un ticket: uno por día. Borrador hasta completarlo; se puede reabrir editándolo.
 model ReporteDiario {
-  id                   String    @id @db.Uuid
-  ticketId             String    @map("ticket_id") @db.Uuid
-  ticket               Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  fecha                DateTime  @db.Date
+  id                 String              @id @db.Uuid
+  ticketId           String              @map("ticket_id") @db.Uuid
+  ticket             Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha              DateTime            @db.Date
   /// Company Man del cliente que firmó ese día (contacto de campo del catálogo): se precarga con el del ticket.
-  representanteId      String?   @map("representante_id") @db.Uuid
-  representante        CatPersonaContacto? @relation(fields: [representanteId], references: [id])
-  tiempoProductivo     Decimal?  @map("tiempo_productivo") @db.Decimal(5, 2)
-  tiempoNoProductivo   Decimal?  @map("tiempo_no_productivo") @db.Decimal(5, 2)
-  observaciones        String?
-  completadoAt         DateTime? @map("completado_at") @db.Timestamptz(6)
-  completadoPor        String?   @map("completado_por") @db.Uuid
+  representanteId    String?             @map("representante_id") @db.Uuid
+  representante      CatPersonaContacto? @relation(fields: [representanteId], references: [id])
+  tiempoProductivo   Decimal?            @map("tiempo_productivo") @db.Decimal(5, 2)
+  tiempoNoProductivo Decimal?            @map("tiempo_no_productivo") @db.Decimal(5, 2)
+  observaciones      String?
+  completadoAt       DateTime?           @map("completado_at") @db.Timestamptz(6)
+  completadoPor      String?             @map("completado_por") @db.Uuid
   /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
-  corregidoAt          DateTime? @map("corregido_at") @db.Timestamptz(6)
+  corregidoAt        DateTime?           @map("corregido_at") @db.Timestamptz(6)
   /// Quién lo corrigió (actor del evento de Comercial); su rol es el de su usuario. Va junto con `corregidoAt`.
-  corregidoPor         String?   @map("corregido_por") @db.Uuid
-  corrector            IdUsuario? @relation("reporteCorrector", fields: [corregidoPor], references: [id])
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy            String    @map("created_by") @db.Uuid
-  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy            String    @map("updated_by") @db.Uuid
+  corregidoPor       String?             @map("corregido_por") @db.Uuid
+  corrector          IdUsuario?          @relation("reporteCorrector", fields: [corregidoPor], references: [id])
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String              @map("created_by") @db.Uuid
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String              @map("updated_by") @db.Uuid
 
   actividades ReporteDiarioActividad[]
   adjuntos    ReporteDiarioAdjunto[]
@@ -551,8 +552,8 @@ model ReporteDiarioTablaCelda {
 
 /// `archivos.archivo`: solo el id, para comprobar que existe antes de guardar una referencia.
 model ArchivoRef {
-  id         String            @id @db.Uuid
-  documentos TicketDocumento[]
+  id              String                 @id @db.Uuid
+  documentos      TicketDocumento[]
   adjuntosReporte ReporteDiarioAdjunto[]
 
   @@map("archivo")
@@ -632,16 +633,16 @@ model TicketUnidad {
 
 /// Condiciones que el proceso exige (catálogo): de qué ámbito son y qué módulo es dueño del dato que las cumple.
 model Requisito {
-  codigo      String          @id
+  codigo      String            @id
   nombre      String
   descripcion String?
   ambito      AmbitoRequisito
   modulo      ModuloDueno
-  activo      Boolean         @default(true)
+  activo      Boolean           @default(true)
   /// Solo en los requisitos de ámbito `jornada`.
   momento     MomentoRequisito?
   /// Solo en los de ámbito `jornada`: hay una fila por cada unidad del ticket en cada día.
-  porUnidad   Boolean         @default(false) @map("por_unidad")
+  porUnidad   Boolean           @default(false) @map("por_unidad")
 
   pasos   PasoRequisito[]
   tickets TicketRequisito[]
@@ -1098,11 +1099,11 @@ model CatTaladro {
 }
 
 model CatPersonaContacto {
-  id      String   @id @db.Uuid
-  nombre  String
+  id              String          @id @db.Uuid
+  nombre          String
   /// 'representante_campo' | 'representante_quito' | 'analista_facturacion' | 'agente_comercial'.
-  tipo    String
-  tickets Ticket[]
+  tipo            String
+  tickets         Ticket[]
   reportesDiarios ReporteDiario[]
 
   @@map("persona_contacto")
@@ -1172,18 +1173,18 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  asignaciones       TicketPersona[]          @relation("personaAsignada")
-  historial          TicketHistorial[]        @relation("historialActor")
-  requisitos         TicketRequisito[]        @relation("requisitoOperador")
-  aceptaciones       AceptacionTerminos[]     @relation("aceptacionTerminos")
-  terminosValidados  TerminosVersion[]        @relation("terminosValidados")
-  actividadesDiarias ReporteDiarioActividad[] @relation("actividadAutor")
-  cambiosSolicitados SolicitudCambioItems[]   @relation("solicitanteCambio")
-  cambiosRevisados   SolicitudCambioItems[]   @relation("revisorCambio")
-  reportesCompletados Ticket[]                @relation("completadorReporteHerramientas")
-  celdasReporte      ReporteItemDia[]         @relation("autorCeldaReporte")
-  reportesCorregidos ReporteDiario[]          @relation("reporteCorrector")
-  adjuntosReporte    ReporteDiarioAdjunto[]   @relation("autorAdjuntoReporte")
+  asignaciones        TicketPersona[]          @relation("personaAsignada")
+  historial           TicketHistorial[]        @relation("historialActor")
+  requisitos          TicketRequisito[]        @relation("requisitoOperador")
+  aceptaciones        AceptacionTerminos[]     @relation("aceptacionTerminos")
+  terminosValidados   TerminosVersion[]        @relation("terminosValidados")
+  actividadesDiarias  ReporteDiarioActividad[] @relation("actividadAutor")
+  cambiosSolicitados  SolicitudCambioItems[]   @relation("solicitanteCambio")
+  cambiosRevisados    SolicitudCambioItems[]   @relation("revisorCambio")
+  reportesCompletados Ticket[]                 @relation("completadorReporteHerramientas")
+  celdasReporte       ReporteItemDia[]         @relation("autorCeldaReporte")
+  reportesCorregidos  ReporteDiario[]          @relation("reporteCorrector")
+  adjuntosReporte     ReporteDiarioAdjunto[]   @relation("autorAdjuntoReporte")
 
   @@map("usuario")
   @@schema("identidad")
@@ -1224,23 +1225,52 @@ enum TipoHechoTraslado {
   inspeccion_aprobada
   gerenciamiento_salida
   gerenciamiento_retorno
+  /// La inspección de llegada del día (otra inspección de Flota, de momento «llegada») y su aprobación por el Supervisor.
+  inspeccion_llegada_realizada
+  inspeccion_llegada_aprobada
 
   @@map("tipo_hecho_traslado")
   @@schema("pumping")
 }
 
+enum DecisionRevisionReporte {
+  aprobada
+  rechazada
+
+  @@map("decision_revision_reporte")
+  @@schema("pumping")
+}
+
+/// Revisión del Supervisor al reporte de unidad de llegada de cada unidad y día (aprobado o rechazado con motivo). Historia: solo se agrega.
+model ReporteLlegadaRevision {
+  id          String                  @id @db.Uuid
+  ticketId    String                  @map("ticket_id") @db.Uuid
+  ticket      Ticket                  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  unidadId    String                  @map("unidad_id") @db.Uuid
+  fecha       DateTime                @db.Date
+  decision    DecisionRevisionReporte
+  motivo      String?
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  revisadoPor String                  @map("revisado_por") @db.Uuid
+  revisadoAt  DateTime                @default(now()) @map("revisado_at") @db.Timestamptz(6)
+
+  @@index([ticketId, unidadId, fecha, revisadoAt(sort: Desc)])
+  @@map("reporte_llegada_revision")
+  @@schema("pumping")
+}
+
 /// Lo que Flota hace por unidad y día (llega por eventos, a veces antes de que existan las jornadas) y alimenta los requisitos de cada jornada.
 model TicketHechoTraslado {
-  id        String             @id @db.Uuid
-  ticketId  String             @map("ticket_id") @db.Uuid
-  ticket    Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id        String            @id @db.Uuid
+  ticketId  String            @map("ticket_id") @db.Uuid
+  ticket    Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   /// Unidad de Flota (FK solo en la base de datos: es de otro esquema).
-  unidadId  String             @map("unidad_id") @db.Uuid
-  fecha     DateTime           @db.Date
+  unidadId  String            @map("unidad_id") @db.Uuid
+  fecha     DateTime          @db.Date
   tipo      TipoHechoTraslado
-  vigente   Boolean            @default(true)
-  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  vigente   Boolean           @default(true)
+  createdAt DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([ticketId, unidadId, fecha, tipo], map: "ticket_hecho_traslado_unico_key")
   @@index([unidadId])
@@ -1261,11 +1291,11 @@ model TicketAvisoJornada {
 }
 
 model TicketAvisoAvance {
-  ticketId    String   @id @map("ticket_id") @db.Uuid
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  avanceReal  Decimal  @map("avance_real") @db.Decimal(5, 1)
-  avancePlan  Decimal  @map("avance_plan") @db.Decimal(5, 1)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  ticketId   String   @id @map("ticket_id") @db.Uuid
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  avanceReal Decimal  @map("avance_real") @db.Decimal(5, 1)
+  avancePlan Decimal  @map("avance_plan") @db.Decimal(5, 1)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("ticket_aviso_avance")
   @@schema("pumping")
