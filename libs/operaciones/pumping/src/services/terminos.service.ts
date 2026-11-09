@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
+import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { hashTexto } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,6 +25,7 @@ export class TerminosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly requisitos: RequisitosService,
+    private readonly bus: EventBus,
   ) {}
 
   async vigente() {
@@ -163,6 +165,22 @@ export class TerminosService {
         (await tx.aceptacionTerminos.create({
           data: { id: uuidv7(), ticketId, usuarioId: actor.id, versionCodigo: version.codigo },
         }));
+      // QHSE usa esta aceptación como la declaración del trabajador en la entrega de EPI: se le avisa solo la primera vez
+      if (!existente)
+        await this.bus.publish(
+          tx,
+          this.bus.create({
+            type: 'operaciones.pumping.terminos_aceptados',
+            subject: { type: 'pumping_ticket', id: ticketId },
+            data: {
+              ticketId,
+              usuarioId: actor.id,
+              versionCodigo: aceptacion.versionCodigo,
+              aceptadoAt: aceptacion.aceptadoAt.toISOString(),
+            },
+            actor: { userId: actor.id, role: actor.roleCode },
+          }),
+        );
       await this.requisitos.marcar(
         tx,
         { ticketId, codigo: REQ.terminos, usuarioId: actor.id },

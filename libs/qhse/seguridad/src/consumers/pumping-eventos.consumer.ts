@@ -15,6 +15,7 @@ const TIPOS = [
   'operaciones.fcr.ticket_creado',
   'operaciones.fcr.asignacion_realizada',
   'operaciones.pumping.dias_de_servicio_actualizados',
+  'operaciones.pumping.terminos_aceptados',
 ] as const;
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,6 +25,7 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
  *  - `ticket_creado`: QHSE conoce el ticket (para preparar el PTW, cargar sus documentos y referenciarlo);
  *  - `asignacion_realizada`: guarda los operadores asignados (la solicitud de EPI la hace el equipo de Pumping desde el ticket);
  *  - `dias_de_servicio_actualizados`: los días de servicio activos del ticket (cada aviso reemplaza al anterior); de ahí la tarea programada abre el PTW de cada día.
+ *  - `terminos_aceptados`: el operador aceptó los términos en Pumping; es su declaración en la entrega de EPI (no hay que registrarla aparte).
  * Un evento al que le faltan datos se ignora sin error.
  */
 @Injectable()
@@ -72,6 +74,34 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
       });
   }
 
+  /** El operador aceptó los términos y condiciones en Pumping: queda como su declaración para la entrega de EPI. */
+  private async terminosAceptados(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    d: Record<string, unknown>,
+  ): Promise<void> {
+    const { ticketId, usuarioId, versionCodigo, aceptadoAt } = d;
+    const cuando = typeof aceptadoAt === 'string' ? new Date(aceptadoAt) : null;
+    if (
+      !esUuid(ticketId) ||
+      !esUuid(usuarioId) ||
+      typeof versionCodigo !== 'string' ||
+      !cuando ||
+      Number.isNaN(cuando.getTime())
+    ) {
+      this.logger.warn('terminos_aceptados: faltan datos; se ignora');
+      return;
+    }
+    if (!(await tx.ticketRef.count({ where: { ticketId } }))) {
+      this.logger.warn(`terminos_aceptados: QHSE no conoce el ticket ${ticketId}; se ignora`);
+      return;
+    }
+    await tx.ticketOperadorTerminos.upsert({
+      where: { ticketId_usuarioId: { ticketId, usuarioId } },
+      create: { ticketId, usuarioId, versionCodigo, aceptadoAt: cuando },
+      update: { versionCodigo, aceptadoAt: cuando },
+    });
+  }
+
   /** Público para poder probarlo sin RabbitMQ. */
   async consumir(event: EventEnvelope): Promise<void> {
     if (!(TIPOS as readonly string[]).includes(event.type)) return;
@@ -81,6 +111,8 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
           const d = event.data;
           if (event.type === 'operaciones.pumping.dias_de_servicio_actualizados')
             return this.diasDeServicio(tx, d);
+          if (event.type === 'operaciones.pumping.terminos_aceptados')
+            return this.terminosAceptados(tx, d);
           const ticketId = d['ticketId'];
           const pedidoId = d['pedidoId'];
           if (!esUuid(ticketId) || !esUuid(pedidoId) || typeof d['pedidoCodigo'] !== 'string') {

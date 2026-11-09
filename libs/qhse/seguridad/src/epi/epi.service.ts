@@ -196,16 +196,24 @@ export class EpiService {
           select: {
             lugarBodegaId: true,
             firmaTrabajadorAt: true,
+            ticketId: true,
+            trabajadorId: true,
             _count: { select: { items: true } },
           },
         });
+        // la declaración del trabajador es su firma registrada por QHSE o, si ya aceptó los términos en Pumping, esa aceptación
+        const acepto =
+          !!e.ticketId &&
+          (await tx.ticketOperadorTerminos.count({
+            where: { ticketId: e.ticketId, usuarioId: e.trabajadorId },
+          })) > 0;
         if (e._count.items === 0)
           throw new BadRequestException(
             'Registre al menos un elemento entregado antes de despachar',
           );
         if (!e.lugarBodegaId)
           throw new BadRequestException('Indique el lugar de la entrega antes de despachar');
-        if (!e.firmaTrabajadorAt)
+        if (!e.firmaTrabajadorAt && !acepto)
           throw new BadRequestException(
             'Falta la declaración del trabajador (firma) para despachar la entrega',
           );

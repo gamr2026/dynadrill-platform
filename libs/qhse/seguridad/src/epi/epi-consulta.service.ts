@@ -126,7 +126,18 @@ export class EpiConsultaService {
   async detalle(id: string) {
     const e = await this.prisma.epiEntrega.findUnique({ where: { id }, include: INCLUDE_DETALLE });
     if (!e) throw new NotFoundException('La entrega de EPI no existe');
-    return this.completo(e);
+    // si el trabajador ya aceptó los términos en Pumping, esa aceptación es su declaración (no hace falta registrarla aparte)
+    const terminos = e.ticketId
+      ? await this.prisma.ticketOperadorTerminos.findUnique({
+          where: { ticketId_usuarioId: { ticketId: e.ticketId, usuarioId: e.trabajadorId } },
+        })
+      : null;
+    return {
+      ...this.completo(e),
+      terminosAceptados: terminos
+        ? { versionCodigo: terminos.versionCodigo, at: terminos.aceptadoAt }
+        : null,
+    };
   }
 
   private ticketDe(t: EntregaLista['ticket']) {

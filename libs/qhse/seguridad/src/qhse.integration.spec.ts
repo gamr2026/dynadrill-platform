@@ -133,6 +133,27 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     } as EventEnvelope;
   };
 
+  /** Lo que Pumping avisa cuando un operador acepta los términos y condiciones. */
+  const eventoTerminos = (ticketId: string, usuarioId: string): EventEnvelope => {
+    const id = uuidv7();
+    eventos.push(id);
+    return {
+      id,
+      type: 'operaciones.pumping.terminos_aceptados',
+      version: 1,
+      occurredAt: '2026-11-02T11:00:00.000Z',
+      source: 'operaciones',
+      subject: { type: 'pumping_ticket', id: ticketId },
+      actor: { userId: usuarioId, role: 'operador' },
+      data: {
+        ticketId,
+        usuarioId,
+        versionCodigo: 'PUMP-TyC-v1',
+        aceptadoAt: '2026-11-02T11:00:00.000Z',
+      },
+    } as EventEnvelope;
+  };
+
   const entregasDe = (ticketId: string) =>
     prisma.epiEntrega.findMany({ where: { ticketId }, orderBy: { createdAt: 'asc' } });
   /** QHSE registra a mano la entrega de un operador de un ticket (la asignación ya no la abre sola: la pide Pumping o la registra QHSE). */
@@ -320,6 +341,51 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
     expect(await prisma.ticketOperador.count({ where: { ticketId } })).toBe(0);
     // el ticket sí quedó referenciado: se conoce aunque nadie tenga operadores válidos
     expect(await prisma.ticketRef.count({ where: { ticketId } })).toBe(1);
+  });
+
+  it('la aceptación de términos que avisa Pumping cuenta como la declaración del trabajador al despachar el EPI', async () => {
+    const ticketId = uuidv7();
+    await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+    const entrega = (await solicitarAMano(ticketId, OP1.id)).body.id as string;
+    await http().post(`/api/qhse/epi/${entrega}/aprobar`).set(tecnico()).expect(201);
+    await http()
+      .put(`/api/qhse/epi/${entrega}/contenido`)
+      .set(tecnico())
+      .send({ lugarBodegaId: BODEGA.id, renglones: [renglon(false), renglon(true)] })
+      .expect(200);
+
+    // sin firma ni aceptación de los términos no se despacha
+    const sin = await http().post(`/api/qhse/epi/${entrega}/despachar`).set(gerente()).expect(400);
+    expect(sin.body.detail).toMatch(/declaración del trabajador/);
+    const antes = await http().get(`/api/qhse/epi/${entrega}`).set(tecnico()).expect(200);
+    expect(antes.body.terminosAceptados).toBeNull();
+
+    // el operador acepta en Pumping y el aviso llega a QHSE (repetido, no duplica)
+    const e = eventoTerminos(ticketId, OP1.id);
+    await consumer.consumir(e);
+    await consumer.consumir(e);
+    expect(await prisma.ticketOperadorTerminos.count({ where: { ticketId } })).toBe(1);
+    const despues = await http().get(`/api/qhse/epi/${entrega}`).set(tecnico()).expect(200);
+    expect(despues.body.terminosAceptados).toMatchObject({ versionCodigo: 'PUMP-TyC-v1' });
+    expect(despues.body.firmaTrabajador).toBeNull();
+
+    // con la aceptación ya no hace falta registrar la declaración
+    const r = await http().post(`/api/qhse/epi/${entrega}/despachar`).set(gerente()).expect(201);
+    expect(r.body.estado).toBe('despachado');
+  });
+
+  it('una reasignación no borra lo que el operador ya aceptó, y se ignora la aceptación de un ticket desconocido o sin datos', async () => {
+    const ticketId = uuidv7();
+    await consumer.consumir(eventoAsignacion(ticketId, [OP1.id]));
+    await consumer.consumir(eventoTerminos(ticketId, OP1.id));
+    await consumer.consumir(eventoAsignacion(ticketId, [OP1.id, OP2.id]));
+    expect(await prisma.ticketOperadorTerminos.count({ where: { ticketId } })).toBe(1);
+
+    await consumer.consumir(eventoTerminos(uuidv7(), OP1.id));
+    const roto = eventoTerminos(ticketId, OP2.id);
+    delete roto.data['versionCodigo'];
+    await expect(consumer.consumir(roto)).resolves.toBeUndefined();
+    expect(await prisma.ticketOperadorTerminos.count({ where: { ticketId } })).toBe(1);
   });
 
   it('abre el PTW del primer día de operación al crear el ticket o al asignar el equipo (una sola vez) y no abre nada sin fecha de inicio', async () => {

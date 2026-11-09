@@ -303,6 +303,10 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'articuloCodigo' LIKE '%-PU-' || $1",
       [String(n)],
     );
+    await admin.query(
+      "DELETE FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.terminos_aceptados' AND datos->'data'->>'usuarioId' = ANY($1::text[])",
+      [[OP1.id, OP2.id]],
+    );
     if (eventos.length) {
       await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [eventos]);
       await admin.query(
@@ -1158,6 +1162,17 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     expect(a.body.versionCodigo).toBe('PUMP-TyC-v1');
     await http().post(`${t.url}/terminos/aceptar`).set(op1()).expect(201); // idempotente
     expect(await prisma.aceptacionTerminos.count({ where: { ticketId: t.id } })).toBe(1);
+    // QHSE usa la aceptación como la declaración del trabajador en su entrega de EPI: se le avisa una sola vez (la repetida no avisa de nuevo)
+    const avisos = await admin.query(
+      "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.terminos_aceptados' AND datos->'data'->>'ticketId' = $1",
+      [t.id],
+    );
+    expect(avisos.rows).toHaveLength(1);
+    expect(avisos.rows[0].datos.data).toMatchObject({
+      ticketId: t.id,
+      usuarioId: OP1.id,
+      versionCodigo: 'PUMP-TyC-v1',
+    });
     const estado = (await http().get(`${t.url}/terminos`).set(supervisora()).expect(200)).body;
     expect(estado).toEqual([
       { usuarioId: OP2.id, nombre: OP2.nombre, aceptacion: null },

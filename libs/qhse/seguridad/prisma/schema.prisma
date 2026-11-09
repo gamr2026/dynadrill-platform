@@ -620,6 +620,19 @@ model TicketOperador {
   @@schema("qhse")
 }
 
+/// Aceptación de los términos y condiciones que el operador hizo en Pumping (llega por evento). Es su declaración en la entrega de EPI.
+/// Va aparte de `ticket_operador`: una reasignación reemplaza a los operadores, pero lo que el operador ya aceptó no se pierde.
+model TicketOperadorTerminos {
+  ticketId      String   @map("ticket_id") @db.Uuid
+  usuarioId     String   @map("usuario_id") @db.Uuid
+  versionCodigo String   @map("version_codigo")
+  aceptadoAt    DateTime @map("aceptado_at") @db.Timestamptz(6)
+
+  @@id([ticketId, usuarioId])
+  @@map("ticket_operador_terminos")
+  @@schema("qhse")
+}
+
 /// Catálogos de la matriz IPERC.
 model IpercProceso {
   id        String   @id @db.Uuid
