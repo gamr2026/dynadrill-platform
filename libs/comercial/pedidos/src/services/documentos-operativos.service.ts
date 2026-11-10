@@ -66,6 +66,8 @@ export interface Avance {
   guiaSugerida: boolean;
   /** Lo que falta, en lenguaje de la persona. */
   pendientes: string[];
+  /** Alcanza para generar la prefactura: hay al menos un día con Reporte Job (no hace falta la documentación completa). */
+  suficienteParaPrefactura: boolean;
 }
 
 /**
@@ -434,6 +436,7 @@ export class DocumentosOperativosService {
       guiaRegistrada,
       guiaSugerida,
       pendientes,
+      suficienteParaPrefactura: conReporte.size > 0,
     };
   }
 

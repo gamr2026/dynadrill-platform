@@ -39,6 +39,8 @@ export interface ContextoPrefactura {
 const VIGENTES = ['generada', 'enviada_para_firmas', 'firmada'] as const;
 /** Pedido listo para generar la prefactura. Los de operación pasan solos a "documentos completos" si la documentación está completa. */
 const EN_OPERACION = ['abierto', 'en_operacion', 'en_elaboracion_operativa'];
+const SIN_DOCUMENTACION =
+  'Para generar la prefactura falta la documentación de respaldo de al menos un día (el Reporte Job). No hace falta que esté completa.';
 const PUEDEN_GENERAR = ['documentos_completos', 'en_revision_prefacturacion', ...EN_OPERACION];
 
 const num = (d: Prisma.Decimal | number | null | undefined) =>
@@ -301,9 +303,10 @@ export class PrefacturasService {
         throw new ConflictException('El pedido ya tiene una prefactura vigente');
       }
       const avance = await this.documentos.avance(pedidoId);
-      if (!avance.completo) {
+      // para prefacturar basta con tener la documentación de al menos un día; no hace falta que esté completa
+      if (!avance.suficienteParaPrefactura) {
         throw new UnprocessableEntityException({
-          message: `La documentación de respaldo está incompleta. Falta: ${avance.pendientes.join(', ')}`,
+          message: SIN_DOCUMENTACION,
           code: 'DOCUMENTACION_INCOMPLETA',
         });
       }
@@ -338,7 +341,7 @@ export class PrefacturasService {
           estado,
           'documentos_completos',
           ctx.actor,
-          'documentación completa',
+          'documentación de respaldo suficiente',
         );
         estado = 'documentos_completos';
       }
@@ -400,9 +403,9 @@ export class PrefacturasService {
     });
     if (!pedido) throw new NotFoundException('El pedido no existe');
     const avance = await this.documentos.avance(pedidoId);
-    if (!avance.completo) {
+    if (!avance.suficienteParaPrefactura) {
       throw new UnprocessableEntityException({
-        message: `La documentación de respaldo está incompleta. Falta: ${avance.pendientes.join(', ')}`,
+        message: SIN_DOCUMENTACION,
         code: 'DOCUMENTACION_INCOMPLETA',
       });
     }

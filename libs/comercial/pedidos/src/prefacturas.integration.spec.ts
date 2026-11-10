@@ -861,10 +861,21 @@ run('prefactura (base de datos real)', () => {
     );
   });
 
-  it('no se genera sin la documentación completa ni sin permiso', async () => {
+  it('no se genera sin documentación de al menos un día ni sin permiso; con un día basta aunque no esté completa', async () => {
     const id = await pedido();
     const r = await generar(id).expect(422);
-    expect(r.body.message).toContain('Falta: el Reporte Job');
+    expect(r.body.message).toContain('al menos un día');
+    // un solo día de Reporte Job (sin herramientas ni los demás días): alcanza para prefacturar
+    const parcial = await pedido();
+    await doc(job(1), parcial).expect(201);
+    const avanceParcial = (
+      await http()
+        .get(`/api/comercial/pedidos/${parcial}/documentos-operativos/avance`)
+        .set(fact())
+        .expect(200)
+    ).body;
+    expect(avanceParcial).toMatchObject({ completo: false, suficienteParaPrefactura: true });
+    await generar(parcial).expect(201);
     await generar(await pedidoListo(), soloVer()).expect(403);
     await generar(uuidv7()).expect(404);
   });
@@ -1312,14 +1323,14 @@ run('prefactura (base de datos real)', () => {
       expect(await estadoDe(id)).toBe('ticket_firmado');
     });
 
-    it('sin la documentación completa no se firma, ni con un archivo que no es de este módulo', async () => {
+    it('sin documentación de al menos un día no se firma, ni con un archivo que no es de este módulo', async () => {
       const incompleto = await pedido();
       const r = await http()
         .post(`/api/comercial/pedidos/${incompleto}/prefactura/firma-company-man`)
         .set(sup())
         .send(firma)
         .expect(422);
-      expect(r.body.message).toContain('Falta:');
+      expect(r.body.message).toContain('al menos un día');
       const id = await pedidoListo();
       await http()
         .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)
