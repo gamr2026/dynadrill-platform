@@ -7,6 +7,7 @@
  *     en él solo se avisan). Es lo que hace el Excel: la cantidad del TICKET es el total de la fila del reporte.
  *  1b. Reportes anteriores (sin cantidad): una línea de RENTA por los días en operación o cargo diario y una de VENTA por los días en estado
  *     venta (el stand-by no se cobra).
+ *  1c. Movilización (km): no se reporta por uso; con el reporte por ítem se cobra por lo cotizado, en una sola línea por código.
  *  2. Ítems del pedido ("personal"), cuando no hay reporte por ítem: cantidad cotizada; si la unidad de la lista es por día, los días con
  *     Reporte Job.
  *  3. Ítems del pedido que ya no coinciden con la lista: se facturan con lo cotizado y se avisan ("personal_manual").
@@ -31,6 +32,8 @@ export interface ItemPedido {
   cantidad: number;
   valorUnitario: number;
   descuentoPct: number;
+  /** Movilización (kilómetros): no se reporta por uso; se cobra por lo cotizado. */
+  movilizacion?: boolean;
 }
 
 export interface HerramientaReportada {
@@ -170,7 +173,37 @@ export function calcularPrefactura(entrada: {
   );
   if (hayReportePorItem) {
     const reportados = new Set(entrada.herramientas.map((h) => h.codigo).filter(Boolean));
+    // la movilización no va en el Reporte de Herramientas: se cobra por lo cotizado, en una sola línea por código (suma sus repeticiones)
+    const movilizaciones = new Map<string, ItemPedido & { cantidadTotal: number }>();
     for (const it of entrada.itemsPedido) {
+      if (!it.movilizacion || it.cantidad <= 0) continue;
+      const previa = movilizaciones.get(it.codigo);
+      if (previa) previa.cantidadTotal += it.cantidad;
+      else movilizaciones.set(it.codigo, { ...it, cantidadTotal: it.cantidad });
+    }
+    for (const m of movilizaciones.values()) {
+      const li = porCodigo.get(m.codigo);
+      const precio = li?.precio ?? m.valorUnitario;
+      if (!li) {
+        advertencias.push(
+          `La movilización ${m.codigo} ya no está en la lista de precios: se facturó con el valor cotizado (${m.valorUnitario}).`,
+        );
+      }
+      agregar({
+        codigo: m.codigo,
+        descripcion: li?.descripcion ?? m.descripcion,
+        unidad: li?.unidad ?? m.unidad,
+        serie: null,
+        cantidad: redondear(m.cantidadTotal),
+        precioUnitario: precio,
+        descuentoPct: m.descuentoPct,
+        precioTotal: redondear(m.cantidadTotal * precio * (1 - m.descuentoPct / 100)),
+        tipo: li?.tipo ?? 'Servicio',
+        fuente: li ? 'personal' : 'personal_manual',
+      });
+    }
+    for (const it of entrada.itemsPedido) {
+      if (it.movilizacion) continue;
       if (it.cantidad > 0 && !reportados.has(it.codigo)) {
         advertencias.push(
           `El ítem cotizado ${it.codigo} (${it.cantidad}) no está en el Reporte de Herramientas: no se factura.`,

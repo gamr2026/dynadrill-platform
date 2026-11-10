@@ -121,6 +121,32 @@ describe('calcularPrefactura', () => {
     expect(r.advertencias.join(' ')).toContain('NO-EXISTE');
   });
 
+  it('reporte por ítem: la movilización se cobra por lo cotizado, en una sola línea que suma sus repeticiones, y no se avisa', () => {
+    const r = calcularPrefactura({
+      ...base,
+      itemsPedido: [
+        pedido('MOV', 100, { movilizacion: true }),
+        pedido('MOV', 50, { movilizacion: true }),
+        pedido('MAT-1', 1),
+      ],
+      herramientas: [
+        {
+          nombre: 'Material uno',
+          serie: null,
+          codigo: 'MAT-1',
+          unidad: 'Unidad',
+          cantidad: 1,
+          usos: [],
+        },
+      ],
+    });
+    expect(r.items.map((i) => [i.codigo, i.cantidad, i.precioTotal])).toEqual([
+      ['MAT-1', 1, 50],
+      ['MOV', 150, 30000],
+    ]);
+    expect(r.advertencias.join(' ')).not.toContain('MOV');
+  });
+
   it('venta de herramienta: una línea aparte por unidad; si es Material sale como material', () => {
     const r = calcularPrefactura({
       ...base,

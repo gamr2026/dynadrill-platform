@@ -1008,6 +1008,7 @@ export class PrefacturasService {
         cantidad: Number(i.cantidad),
         valorUnitario: Number(i.valorUnitario),
         descuentoPct: Number(i.descuentoPct ?? 0),
+        movilizacion: i.tipoLinea === 'movilizacion',
       })),
       herramientas,
       diasReporteJob: diasJob,
