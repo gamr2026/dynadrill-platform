@@ -327,7 +327,12 @@ export class TicketsService {
 
   async detalle(id: string, actor: AuthUser) {
     const t = await this.cargar(id);
-    return { ...this.aDetalle(t, actor), requisitos: await this.requisitos.estado(id) };
+    return {
+      ...this.aDetalle(t, actor),
+      requisitos: await this.requisitos.estado(id),
+      /** El día al que pertenece el traslado de salida en curso (nulo antes de que existan las jornadas: vale el primer día). */
+      diaCiclo: await this.jornadas.diaDelCiclo(this.prisma, id),
+    };
   }
 
   /** Pasa el ticket al siguiente paso. Solo los roles del paso actual (y Superadmin) pueden hacerlo. */
@@ -349,7 +354,7 @@ export class TicketsService {
       // cada día del servicio recorre el ciclo hasta la revisión final: de ahí se cierra (con todos los días resueltos) o se pasa al siguiente día
       if (t.pasoCodigo === 'revision_final') {
         if (hacia === 'cierre') await this.jornadas.exigirServicioCompleto(tx, id);
-        if (hacia === PASO_EJECUCION) {
+        if (hacia === 'traslado_salida') {
           await this.jornadas.exigirDiasPorTrabajar(tx, id);
           // el ciclo de los días resueltos terminó: el siguiente ciclo exige un día nuevo
           const ultimo = await tx.ticketJornada.findFirst({
@@ -362,6 +367,8 @@ export class TicketsService {
       }
       // para salir del paso deben estar cumplidos todos sus requisitos (la lista de lo que falta va en la respuesta)
       if (salida.exigeRequisitos) {
+        // del traslado de salida de un día siguiente, solo cuando ese día ya llegó
+        if (t.pasoCodigo === 'traslado_salida') await this.jornadas.exigirSalidaDelDia(tx, id);
         await this.requisitos.exigirCumplidos(tx, id, t.pasoCodigo, t.paso.nombre);
         // y de la Ejecución operativa solo se sale con todas las jornadas del servicio resueltas
         if (t.pasoCodigo === PASO_EJECUCION) await this.jornadas.exigirResueltas(tx, id);

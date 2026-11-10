@@ -470,7 +470,47 @@ export class JornadasService {
     });
   }
 
-  /** De la «Revisión final» se vuelve a la ejecución solo si quedan días por trabajar (el ciclo del siguiente día). */
+  /**
+   * El día del ciclo en curso: el primer día del servicio que todavía no se resolvió (pendiente o abierto). Es el día al que pertenecen el traslado
+   * de salida y su revisión. Sin jornadas (el primer ciclo, antes de la ejecución) devuelve `null` y vale el primer día del servicio.
+   */
+  async diaDelCiclo(
+    cliente: Prisma.TransactionClient | PrismaService,
+    ticketId: string,
+  ): Promise<{ fecha: string; numero: number } | null> {
+    const j = await cliente.ticketJornada.findFirst({
+      where: { ticketId, estado: { in: ['pendiente', 'abierta'] } },
+      orderBy: { fecha: 'asc' },
+      select: { fecha: true, numero: true },
+    });
+    return j ? { fecha: aFecha(j.fecha), numero: j.numero } : null;
+  }
+
+  /**
+   * El traslado de salida de un día siguiente se hace ese día: antes de que llegue no se puede pasar adelante. El primer día no se limita (el
+   * traslado puede adelantarse a la fecha de inicio).
+   */
+  private async exigirDiaDelCicloLlegado(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    desde: string,
+  ): Promise<void> {
+    const t = await tx.ticket.findUnique({ where: { id: ticketId }, select: { cicloHasta: true } });
+    if (!t?.cicloHasta) return;
+    const dia = await this.diaDelCiclo(tx, ticketId);
+    if (!dia || dia.fecha <= this.hoy()) return;
+    throw new ConflictException({
+      message: `No se puede continuar desde "${desde}". El Día ${dia.numero} (${diaCortoDeTexto(dia.fecha)}) todavía no llega: su traslado de salida se hace ese día.`,
+      code: 'DIA_NO_LLEGA',
+    });
+  }
+
+  /** Salir del Traslado de salida de un día siguiente exige que ese día ya haya llegado. */
+  async exigirSalidaDelDia(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    await this.exigirDiaDelCicloLlegado(tx, ticketId, 'Traslado de salida');
+  }
+
+  /** De la «Revisión final» se vuelve al traslado de salida solo si quedan días por trabajar (el ciclo del siguiente día). */
   async exigirDiasPorTrabajar(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
     if ((await this.diasSinResolver(tx, ticketId)).length) return;
     throw new ConflictException({
@@ -481,8 +521,8 @@ export class JornadasService {
 
   /**
    * De la «Revisión de reportes de salida» a la ejecución solo se pasa con la revisión hecha: la inspección de cada unidad aprobada por el
-   * Supervisor (la hizo el Conductor) y el reporte de unidad de salida firmado por su Operador, del primer día del servicio. Cada día siguiente
-   * vuelve a pasar por lo mismo en su jornada. Un ticket sin fecha de inicio no se puede validar y no se bloquea.
+   * Supervisor (la hizo el Conductor) y el reporte de unidad de salida firmado por su Operador, del día del ciclo en curso (el primero del servicio o,
+   * después de pasar al siguiente día, el primero sin resolver). Un ticket sin fecha de inicio no se puede validar y no se bloquea.
    */
   async exigirRevisionDeSalida(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
     const t = await tx.ticket.findUnique({
@@ -498,7 +538,10 @@ export class JornadasService {
       },
     });
     if (!t?.fechaInicioServicio) return;
-    const dia = t.fechaInicioServicio;
+    await this.exigirDiaDelCicloLlegado(tx, ticketId, 'Revisión de reportes de salida');
+    // el día del ciclo en curso: el primero del servicio o, en los ciclos siguientes, el primer día sin resolver
+    const delCiclo = await this.diaDelCiclo(tx, ticketId);
+    const dia = delCiclo ? new Date(`${delCiclo.fecha}T00:00:00.000Z`) : t.fechaInicioServicio;
     const [aprobadas, firmados] = await Promise.all([
       tx.ticketHechoTraslado.findMany({
         where: { ticketId, fecha: dia, tipo: 'inspeccion_aprobada', vigente: true },

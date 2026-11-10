@@ -4320,7 +4320,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ).toHaveLength(0);
     });
 
-    it('cada día recorre el ciclo hasta la revisión final: de ahí se cierra solo con todos los días resueltos; si quedan días, el ticket vuelve a la ejecución', async () => {
+    it('cada día recorre el ciclo hasta la revisión final: de ahí se cierra solo con todos los días resueltos; si quedan días, el ticket vuelve al traslado de salida', async () => {
       const t = await enEjecucion();
       await ver(t);
       await sinOp(t, DIAS[0], { motivoId: await motivo(), detalle: 'Lluvia el primer día' }).expect(
@@ -4338,12 +4338,30 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const sinCerrar = await desdeFinal('cierre').expect(409);
       expect(sinCerrar.body.code).toBe('JORNADAS_PENDIENTES');
       expect(sinCerrar.body.detail).toContain('Día 3 (07/11)');
-      // y el ticket pasa a esperar el siguiente día en la ejecución (sin exigir el Acta, que es del cierre)
-      await desdeFinal('ejecucion_operativa').expect(201);
+      // el día siguiente empieza en el traslado de salida (sin exigir el Acta, que es del cierre); la ejecución ya no es la vuelta
+      await desdeFinal('ejecucion_operativa').expect(409);
+      await desdeFinal('traslado_salida').expect(201);
       expect(
         (await admin.query('SELECT paso_codigo FROM pumping.ticket WHERE id = $1', [t.id])).rows[0]
           .paso_codigo,
-      ).toBe('ejecucion_operativa');
+      ).toBe('traslado_salida');
+      // el día del ciclo es el primero sin resolver, y su traslado de salida se hace ese día: el día 3 (futuro) todavía no llega
+      expect((await http().get(t.url).set(supervisora()).expect(200)).body.diaCiclo).toEqual({
+        fecha: DIAS[2],
+        numero: 3,
+      });
+      const antesDeTiempo = await http()
+        .post(`${t.url}/avanzar`)
+        .set(op1())
+        .send({ hacia: 'revision_reportes_salida' })
+        .expect(409);
+      expect(antesDeTiempo.body.code).toBe('DIA_NO_LLEGA');
+      expect(antesDeTiempo.body.detail).toContain('Día 3 (07/11)');
+      // (lo que sigue prueba el ciclo en la ejecución: se deja el ticket allí)
+      await admin.query(
+        "UPDATE pumping.ticket SET paso_codigo = 'ejecucion_operativa' WHERE id = $1",
+        [t.id],
+      );
       // el ciclo de hoy ya se completó: no se puede salir de la ejecución otra vez sin trabajar un día nuevo
       await reporteCompleto(t);
       const repetido = await avanzar(t).expect(409);
@@ -4358,7 +4376,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await admin.query("UPDATE pumping.ticket SET paso_codigo = 'revision_final' WHERE id = $1", [
         t.id,
       ]);
-      const sinDias = await desdeFinal('ejecucion_operativa').expect(409);
+      const sinDias = await desdeFinal('traslado_salida').expect(409);
       expect(sinDias.body.code).toBe('SIN_DIAS_POR_TRABAJAR');
       expect((await desdeFinal('cierre').expect(409)).body.detail).toContain(
         'Acta de Entrega de Locación',
