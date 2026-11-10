@@ -499,7 +499,8 @@ export class ViajesService {
   private puedeVerTodo(actor: ActorViaje): boolean {
     return (
       actor.permissions.includes(P.VIAJES_APROBAR) ||
-      actor.permissions.includes(P.VIAJES_AUTORIZAR_MAYOR)
+      actor.permissions.includes(P.VIAJES_AUTORIZAR_MAYOR) ||
+      actor.permissions.includes(P.VIAJES_VER)
     );
   }
 

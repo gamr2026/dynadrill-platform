@@ -507,6 +507,12 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Registrar y anular los documentos de un conductor',
     ModuleRoles.maintenance,
   ),
+  // el equipo de Pumping ve, solo para leer, los gerenciamientos de viaje de sus tickets (quién viaja, ruta, riesgo, respuestas)
+  nuevo('flota.viajes.ver', 'Ver (solo lectura) los Gerenciamientos de Viaje de los tickets', [
+    RoleCode.SUPERADMIN,
+    RoleCode.SUPERVISOR,
+    RoleCode.SUPERVISOR_PUMPING,
+  ]),
   // flota — gerenciamiento de viaje (tramo F4): `flota.viajes.aprobar` autoriza los niveles que la tabla `umbral_riesgo_viaje` le asigna
   // (BAJO y MEDIO); el ALTO exige este permiso, que además autoriza cualquier nivel.
   nuevo(
@@ -829,6 +835,7 @@ export const Permission = {
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
   VIAJES_AUTORIZAR_MAYOR: 'flota.viajes.autorizar_mayor',
+  VIAJES_VER: 'flota.viajes.ver',
   UNIDADES_VER: 'flota.unidades.ver',
   UNIDADES_CREAR: 'flota.unidades.crear',
   UNIDADES_EDITAR: 'flota.unidades.editar',

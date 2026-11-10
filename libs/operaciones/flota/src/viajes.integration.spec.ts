@@ -510,6 +510,15 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
         .body as Array<{ id: string }>;
       expect(todas.map((x) => x.id)).toContain(otro.body.id);
     });
+
+    it('quien solo tiene «ver» (Supervisor de Pumping) lee los gerenciamientos de un ticket, pero no decide', async () => {
+      const lector = token('supervisor_pumping', SUPERVISOR.nombre, [P.VIAJES_VER], SUPERVISOR.id);
+      const todas = (await http().get(base).set(lector).expect(200)).body as Array<{ id: string }>;
+      expect(todas.length).toBeGreaterThan(0);
+      const detalle = await http().get(`${base}/${todas[0].id}`).set(lector).expect(200);
+      expect(detalle.body.id).toBe(todas[0].id);
+      await http().post(`${base}/${todas[0].id}/autorizar`).set(lector).expect(403);
+    });
   });
 
   describe('reglas que garantiza la base', () => {

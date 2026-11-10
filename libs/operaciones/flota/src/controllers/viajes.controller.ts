@@ -121,13 +121,13 @@ export class ViajesController {
     return this.viajes.unidades();
   }
 
-  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR)
+  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR, P.VIAJES_VER)
   @Get()
   listar(@Query() q: ListarViajesDto, @CurrentUser() u: AuthUser) {
     return this.viajes.listar(q, actorDe(u));
   }
 
-  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR)
+  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR, P.VIAJES_VER)
   @Get(':id')
   obtener(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() u: AuthUser) {
     return this.viajes.obtener(id, actorDe(u));
