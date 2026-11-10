@@ -1769,16 +1769,44 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       "UPDATE pumping.ticket_jornada SET estado = 'cerrada', cerrada_at = now(), cerrada_por = $2 WHERE ticket_id = $1 AND estado IN ('pendiente', 'abierta')",
       [t.id, JEFE],
     );
+    // esta prueba solo recorre el primer día hasta el final: los demás días no cuentan
+    await admin.query(
+      "UPDATE pumping.ticket_jornada SET estado = 'no_aplica' WHERE ticket_id = $1 AND fecha <> $2::date",
+      [t.id, inicio],
+    );
     await http().post(`${t.url}/avanzar`).set(op1()).send({ hacia: 'control_retorno' }).expect(201);
 
-    // control de retorno: el gerenciamiento de viaje de retorno lo exige cada jornada
+    // control de retorno: el gerenciamiento de viaje de retorno de cada unidad y día trabajado (lo aprueba Flota)
+    const sinRetorno = await http()
+      .post(`${t.url}/avanzar`)
+      .set(supervisora())
+      .send({ hacia: 'traslado_llegada' })
+      .expect(409);
+    expect(sinRetorno.body.code).toBe('REQUISITOS_PENDIENTES');
+    expect(sinRetorno.body.detail).toContain('Gerenciamiento de viaje de retorno');
+    for (const v of [VEHICULO, VEHICULO_2])
+      await externos.consumir(
+        externo(
+          'flota.gerenciamiento_viaje.aprobado',
+          { ticketId: t.id, unidadId: v.unidadId, diaServicio: inicio, tipo: 'retorno' },
+          'flota',
+        ),
+      );
     await http()
       .post(`${t.url}/avanzar`)
       .set(supervisora())
       .send({ hacia: 'traslado_llegada' })
       .expect(201);
 
-    // traslado de llegada: cada operador firma la llegada de su unidad (publica el evento para Mantenimiento)
+    // traslado de llegada: sin el reporte de llegada firmado de cada unidad no se pasa a la revisión
+    const sinReporte = await http()
+      .post(`${t.url}/avanzar`)
+      .set(op1())
+      .send({ hacia: 'revision_reportes_llegada' })
+      .expect(409);
+    expect(sinReporte.body.code).toBe('REQUISITOS_PENDIENTES');
+    expect(sinReporte.body.detail).toContain('Firmar el reporte de unidad de llegada');
+    // cada operador firma la llegada de su unidad (publica el evento para Mantenimiento)
     const llegada = async (unidadId: string, extra: object = {}) => {
       const r = (
         await http().get(`${t.url}/reportes-unidad/${unidadId}`).set(supervisora()).expect(200)
@@ -1852,11 +1880,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
     // revisión final: el cierre exige el Acta de Entrega de Locación; el rechazo vuelve con motivo
     // revisión de llegada: el Supervisor aprueba la inspección de llegada (Flota) y el reporte de llegada de cada unidad y día trabajado.
-    // Esta prueba solo firmó el reporte del primer día: los demás días no cuentan
-    await admin.query(
-      "UPDATE pumping.ticket_jornada SET estado = 'no_aplica' WHERE ticket_id = $1 AND fecha <> $2::date",
-      [t.id, inicio],
-    );
     const revisor = () =>
       como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, [P.PUMPING_REPORTE_LLEGADA_REVISAR]);
     const urlRevision = (v: string) => `${t.url}/reportes-unidad/${v}/${inicio}/llegada/revision`;
@@ -3582,12 +3605,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ...Array(2).fill('reporte_unidad_salida_dia'),
       'sin_swa_dia',
     ];
-    const CIERRE_DIA = [
-      ...Array(2).fill('gerenciamiento_retorno_dia'),
-      'herramientas_dia',
-      'job_log_dia',
-      ...Array(2).fill('reporte_unidad_llegada_dia'),
-    ];
+    /** El cierre del día ya no exige la llegada: el retorno es del Control de retorno y el reporte de llegada, del Traslado de llegada. */
+    const CIERRE_DIA = ['herramientas_dia', 'job_log_dia'];
     const mas = (fecha: string, dias: number) =>
       new Date(Date.parse(`${fecha}T00:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
     /** Lo que QHSE hace por día llega a Pumping como eventos: el PTW aprobado y los documentos PT y ART cargados (el ART vale 15 días). Devuelven el id de origen. */
@@ -3703,26 +3722,26 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         estado: 'pendiente',
         companyManAcepto: true,
         companyManAceptoPor: SUPERVISORA.id,
-        pendientes: { apertura: 12, cierre: 6 }, // checklist, PTW, PT y ART, y por cada unidad la inspección (realizada y aprobada), el reporte de salida y el viaje
+        pendientes: { apertura: 12, cierre: 2 }, // checklist, PTW, PT y ART, y por cada unidad la inspección (realizada y aprobada), el reporte de salida y el viaje
       });
       // con el checklist del día completo todavía falta lo de QHSE; cuando QHSE cubre el día, el sistema abre la jornada
       await completarChecklist(t, DIAS[1]);
       expect((await ver(t)).body.jornadas[1]).toMatchObject({
         estado: 'pendiente',
-        pendientes: { apertura: 11, cierre: 6 },
+        pendientes: { apertura: 11, cierre: 2 },
       });
       // los traslados de salida de cada unidad: Flota inspecciona, aprueba y autoriza el viaje, y el operador firma el reporte
       await cumplirSalida(t, DIAS[1]);
       expect((await ver(t)).body.jornadas[1]).toMatchObject({
         estado: 'pendiente',
-        pendientes: { apertura: 3, cierre: 6 },
+        pendientes: { apertura: 3, cierre: 2 },
       });
       await cubrirQhse(t, DIAS[1]);
       const hoyJ = (await ver(t)).body.jornadas[1];
       expect(hoyJ).toMatchObject({
         estado: 'abierta',
         estadoVisible: 'abierta',
-        pendientes: { apertura: 0, cierre: 6 },
+        pendientes: { apertura: 0, cierre: 2 },
       });
       expect(
         (await prisma.ticketJornadaHistorial.findMany({ where: { jornadaId: hoyJ.id } })).map(
@@ -3951,7 +3970,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const t = await enEjecucion();
       const r = await ver(t).expect(200);
       const filas = await requisitosDe(t.id);
-      expect(filas).toHaveLength(60); // 3 días × 20 (7 del día y 13 de traslados por unidad: 6 por unidad y la SWA)
+      expect(filas).toHaveLength(48); // 3 días × 16 (7 del día y 9 de traslados por unidad: 4 por unidad y la SWA)
       expect(new Set(filas.map((f) => f.codigo))).toEqual(
         new Set([...APERTURA_DIA, ...CIERRE_DIA]),
       );
@@ -3969,7 +3988,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ...APERTURA_DIA.map((c) => [c, 'apertura']),
         ...CIERRE_DIA.map((c) => [c, 'cierre']),
       ]);
-      expect(r.body.jornadas[1]).toMatchObject({ pendientes: { apertura: 13, cierre: 6 } });
+      expect(r.body.jornadas[1]).toMatchObject({ pendientes: { apertura: 13, cierre: 2 } });
       expect(
         r.body.jornadas[1].bloqueos.map((b: { codigo: string; responsable: string }) => [
           b.codigo,
@@ -3985,7 +4004,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       ]);
       // pedirlas otra vez no duplica
       await ver(t).expect(200);
-      expect(await requisitosDe(t.id)).toHaveLength(60);
+      expect(await requisitosDe(t.id)).toHaveLength(48);
       // la lista de requisitos de salida de cada paso no mezcla los de las jornadas
       const estado = await http().get(`${t.url}/requisitos`).set(op1());
       if (estado.status === 200) {
@@ -4050,17 +4069,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await marcarHerramienta(t, DIAS[1]);
       await ver(t);
       expect(await estadoReq(t.id, DIAS[1], 'herramientas_dia')).toBe('cumplido');
-      // falta la llegada de cada unidad: su reporte y el viaje de retorno
-      const sinLlegada = await cerrar(t, DIAS[1]);
-      expect(sinLlegada.status).toBe(409);
-      expect(String(sinLlegada.body.detail)).toContain(
-        `Reporte de unidad de llegada del día (${VEHICULO.placa})`,
-      );
-      expect(String(sinLlegada.body.detail)).toContain(
-        `Gerenciamiento de viaje de retorno del día aprobado (${VEHICULO_2.placa})`,
-      );
-      await cumplirLlegada(t, DIAS[1]);
-      await ver(t);
+      // el cierre del día ya no exige la llegada (reporte de llegada y retorno van en sus pasos)
       await cerrar(t, DIAS[1]).expect(201);
       expect((await ver(t)).body).toMatchObject({ cerradas: 1 });
       // quitar la marca del día deja de cumplirlo
@@ -4077,11 +4086,11 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const r = await ver(t).expect(200);
       expect(r.body.jornadas[1]).toMatchObject({
         estadoVisible: 'bloqueada',
-        pendientes: { apertura: 13, cierre: 6 },
+        pendientes: { apertura: 13, cierre: 2 },
       });
       // un día futuro no se muestra bloqueado: todavía no toca
       expect(r.body.jornadas[2].estadoVisible).toBe('pendiente');
-      expect(r.body.pendientesPorArea).toMatchObject({ qhse: 3, flota: 8, pumping: 8 });
+      expect(r.body.pendientesPorArea).toMatchObject({ qhse: 3, flota: 6, pumping: 6 });
 
       // el Company Man acepta y el checklist queda completo, pero falta lo de QHSE: la jornada no se abre
       const acepta = await aceptar(t, DIAS[1]).expect(201);
@@ -4141,7 +4150,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         t.id,
         DIAS[2],
       ]);
-      expect((await requisitosDe(t.id)).length).toBe(antes - 20);
+      expect((await requisitosDe(t.id)).length).toBe(antes - 16);
     });
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -4781,7 +4790,6 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           ['reporte_salida', 'pendiente'],
           ['job_log', 'pendiente'],
           ['herramientas', 'pendiente'],
-          ['reporte_llegada', 'pendiente'],
           ['esperando_otras_areas', 'bloqueada'],
           ['jornada_atrasada', 'bloqueada'], // el día 1 ya pasó sin cerrarse
         ]);
@@ -4795,10 +4803,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           ['reporte_salida', 'hecha'],
           ['job_log', 'pendiente'],
           ['herramientas', 'pendiente'],
-          ['reporte_llegada', 'pendiente'],
           ['jornada_atrasada', 'bloqueada'],
         ]);
-        expect(abierta?.pendientes).toBe(4); // job log, herramientas, llegada y la jornada atrasada
+        expect(abierta?.pendientes).toBe(3); // job log, herramientas y la jornada atrasada
         // el otro operador es de otra unidad: ve lo suyo, no lo de su compañero
         const otro = await bloqueDe(t, 'operador', op2());
         expect(otro?.tareas.map((x) => x.clave)).toContain('reporte_salida');

@@ -368,6 +368,10 @@ export class TicketsService {
         // y de la revisión de salida solo con la inspección aprobada y el reporte firmado de cada unidad
         if (t.pasoCodigo === PASO_REVISION_SALIDA)
           await this.jornadas.exigirRevisionDeSalida(tx, id);
+        // del control de retorno, con el gerenciamiento de viaje de retorno aprobado; del traslado de llegada, con el reporte de llegada firmado
+        if (t.pasoCodigo === 'control_retorno') await this.jornadas.exigirRetornoAprobado(tx, id);
+        if (t.pasoCodigo === 'traslado_llegada')
+          await this.jornadas.exigirReportesDeLlegadaFirmados(tx, id);
         // y de la revisión de llegada solo con la inspección de llegada aprobada y el reporte de llegada aprobado por el Supervisor
         if (t.pasoCodigo === 'revision_reportes_llegada')
           await this.jornadas.exigirRevisionDeLlegada(tx, id);

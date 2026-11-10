@@ -72,6 +72,8 @@ export interface FilaRevisionLlegada {
   inspeccion: 'pendiente' | 'por_aprobar' | 'aprobada';
   reporte: 'sin_firmar' | 'por_revisar' | 'aprobado' | 'rechazado';
   motivo: string | null;
+  /** Gerenciamiento de viaje de retorno de ese día (lo pide el Conductor y lo aprueba Flota). Se exige al salir del Control de retorno. */
+  retorno: 'pendiente' | 'aprobado';
 }
 
 export function estadoVisible(
@@ -564,7 +566,13 @@ export class JornadasService {
         where: {
           ticketId,
           vigente: true,
-          tipo: { in: ['inspeccion_llegada_realizada', 'inspeccion_llegada_aprobada'] },
+          tipo: {
+            in: [
+              'inspeccion_llegada_realizada',
+              'inspeccion_llegada_aprobada',
+              'gerenciamiento_retorno',
+            ],
+          },
         },
         select: { unidadId: true, fecha: true, tipo: true },
       }),
@@ -612,6 +620,9 @@ export class JornadasService {
                 ? ('aprobado' as const)
                 : ('rechazado' as const),
           motivo: vigente?.decision === 'rechazada' ? (vigente.motivo ?? null) : null,
+          retorno: hecho(u.unidadId, j.fecha, 'gerenciamiento_retorno')
+            ? ('aprobado' as const)
+            : ('pendiente' as const),
         };
       }),
     );
@@ -664,6 +675,49 @@ export class JornadasService {
       });
     });
     return { ok: true };
+  }
+
+  /**
+   * Del «Control de retorno» al traslado de llegada solo se pasa con el gerenciamiento de viaje de retorno aprobado de cada unidad, de cada
+   * día trabajado (lo pide el Conductor desde Flota). Ya no se exige al cerrar el día: es de este paso.
+   */
+  async exigirRetornoAprobado(tx: Prisma.TransactionClient, ticketId: string): Promise<void> {
+    const filas = await this.revisionDeLlegada(tx, ticketId);
+    const pendientes = filas
+      .filter((f) => f.retorno !== 'aprobado')
+      .map((f) => ({
+        codigo: 'gerenciamiento_retorno_aprobado',
+        texto: `Gerenciamiento de viaje de retorno aprobado de ${f.unidad} (Día ${f.numero})`,
+      }));
+    if (!pendientes.length) return;
+    throw new ConflictException({
+      message: `No se puede continuar desde "Control de retorno". Falta: ${pendientes.map((p) => p.texto).join('; ')}. Lo pide el Conductor de la unidad desde Flota y lo aprueba Flota.`,
+      code: 'REQUISITOS_PENDIENTES',
+      pendientes,
+    });
+  }
+
+  /**
+   * Del «Traslado de llegada» a la revisión de reportes solo se pasa con el reporte de unidad de llegada firmado por el Operador de cada
+   * unidad, de cada día trabajado. Ya no se exige al cerrar el día: es de este paso.
+   */
+  async exigirReportesDeLlegadaFirmados(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+  ): Promise<void> {
+    const filas = await this.revisionDeLlegada(tx, ticketId);
+    const pendientes = filas
+      .filter((f) => f.reporte === 'sin_firmar')
+      .map((f) => ({
+        codigo: 'reporte_unidad_llegada_firmado',
+        texto: `Firmar el reporte de unidad de llegada de ${f.unidad} (Día ${f.numero})`,
+      }));
+    if (!pendientes.length) return;
+    throw new ConflictException({
+      message: `No se puede continuar desde "Traslado de llegada". Falta: ${pendientes.map((p) => p.texto).join('; ')}.`,
+      code: 'REQUISITOS_PENDIENTES',
+      pendientes,
+    });
   }
 
   /**
