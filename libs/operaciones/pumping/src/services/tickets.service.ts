@@ -137,6 +137,7 @@ const resumen = (t: TicketLista) => ({
   tiposServicio: t.tiposServicio.map((x) => x.tipoCodigo).sort(),
   fechaInicioServicio: aDia(t.fechaInicioServicio),
   fechaFinServicio: aDia(t.fechaFinServicio),
+  cicloHasta: aDia(t.cicloHasta),
   createdAt: t.createdAt,
 });
 
