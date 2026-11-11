@@ -58,6 +58,41 @@ const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 /** Orden de los pasos desde los que al Conductor le toca su gerenciamiento de viaje (ver `pumping.paso`). */
 const ORDEN_TRASLADO_SALIDA = 30;
 const ORDEN_EJECUCION = 50;
+
+const aDiaIso = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Los días a los que pertenecen los gerenciamientos de viaje del Conductor. Cada día del servicio tiene su salida y su retorno:
+ *  - `diaSalida`: hasta la ejecución, el primer día sin resolver (el que se está trabajando); después, el último día resuelto (el que recorre su ciclo).
+ *  - `diasRetorno`: desde la ejecución, el día en curso; desde el control de retorno, los días ya resueltos que todavía no terminaron su ciclo.
+ * Sin jornadas (el primer ciclo, antes de la ejecución) no hay día: vale el primer día del servicio.
+ */
+function diasDeViaje(t: {
+  fechaInicioServicio: Date | null;
+  cicloHasta: Date | null;
+  paso: { orden: number };
+  jornadas: Array<{ fecha: Date; estado: string }>;
+}): { diaSalida: string | null; diasRetorno: string[] } {
+  const sinResolver = t.jornadas.filter((j) => j.estado === 'pendiente' || j.estado === 'abierta');
+  const resueltas = t.jornadas.filter(
+    (j) => j.estado === 'cerrada' || j.estado === 'sin_operacion',
+  );
+  const enCurso = sinResolver[0] ? aDiaIso(sinResolver[0].fecha) : null;
+  const ultimaResuelta = resueltas.length ? aDiaIso(resueltas[resueltas.length - 1].fecha) : null;
+  const primero = t.fechaInicioServicio ? aDiaIso(t.fechaInicioServicio) : null;
+  const antesDeRetorno = t.paso.orden <= ORDEN_EJECUCION;
+  const diaSalida = antesDeRetorno ? (enCurso ?? primero) : (ultimaResuelta ?? enCurso ?? primero);
+  const ciclo = t.cicloHasta ? aDiaIso(t.cicloHasta) : null;
+  const diasRetorno =
+    t.paso.orden < ORDEN_EJECUCION
+      ? []
+      : t.paso.orden === ORDEN_EJECUCION
+        ? diaSalida
+          ? [diaSalida]
+          : []
+        : resueltas.map((j) => aDiaIso(j.fecha)).filter((f) => !ciclo || f > ciclo);
+  return { diaSalida, diasRetorno };
+}
 const PASO_EJECUCION = 'ejecucion_operativa';
 const PASO_REVISION_SALIDA = 'revision_reportes_salida';
 const NOMBRES = {
@@ -287,11 +322,13 @@ export class TicketsService {
           where: { OR: [{ rol: 'supervisor' }, { usuarioId }] },
           include: { usuario: true, unidad: UNIDAD_CON_PLACA },
         },
+        jornadas: { select: { fecha: true, estado: true }, orderBy: { fecha: 'asc' } },
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
     return filas.map((t) => ({
+      ...diasDeViaje(t),
       ticketId: t.id,
       ticketNumero: t.ticketNumero,
       pedidoCodigo: t.pedidoCodigo,

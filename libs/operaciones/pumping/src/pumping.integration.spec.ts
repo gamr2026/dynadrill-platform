@@ -1092,6 +1092,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       [
         'cliente',
         'destino',
+        'diaSalida',
+        'diasRetorno',
         'paso',
         'pedidoCodigo',
         'serviciosPrincipales',
@@ -1105,6 +1107,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
     // el conductor ve solo su unidad y el gerenciamiento de salida que le toca (el ticket está en Traslado de salida)
     expect(v.paso.codigo).toBe('traslado_salida');
     expect(v.tiposViaje).toEqual(['salida']);
+    // sin jornadas todavía (primer ciclo): no hay día de retorno y la salida es la del primer día del servicio
+    expect((v as unknown as { diasRetorno: string[] }).diasRetorno).toEqual([]);
     expect(v.unidades).toEqual([
       { unidadId: VEHICULO.unidadId, codigo: VEHICULO.unidadCodigo, placa: VEHICULO.placa },
     ]);
