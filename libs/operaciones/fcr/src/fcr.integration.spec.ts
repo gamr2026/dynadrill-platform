@@ -61,6 +61,9 @@ const CLIENTE = { id: uuidv7(), nombre: `Cliente FCR ${n}`, ruc: `87${String(n).
 const CAMPO = { id: uuidv7(), nombre: `SACHA FCR ${n}` };
 const BLOQUE = { id: uuidv7(), nombre: `Bloque 60 FCR ${n}` };
 const POZO = { id: uuidv7(), nombre: `FCR-POZO-${n}`, campoId: CAMPO.id, bloqueId: BLOQUE.id };
+/** Una herramienta del inventario (categoría con partes) para los tickets que necesitan al menos una. */
+const CAT_HERRAMIENTAS = uuidv7();
+const HERRAMIENTA = { id: uuidv7(), codigo: `HF-ASG-${n}` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { id: SUPERVISOR.id, nombre: SUPERVISOR.nombre, rol: 'supervisor' },
@@ -106,8 +109,7 @@ run(
     const operador = () => token('operador_fcr', OPERADOR.nombre, [P.FCR_OPERAR], OPERADOR.id);
     const otroOperador = () =>
       token('operador_fcr', OTRO_OPERADOR.nombre, [P.FCR_OPERAR], OTRO_OPERADOR.id);
-    const jefe = () =>
-      token('jefe_base', JEFE.nombre, [P.FCR_OPERAR], JEFE.id);
+    const jefe = () => token('jefe_base', JEFE.nombre, [P.FCR_OPERAR], JEFE.id);
     const sinPermiso = () => token('ingenieria_ventas', 'Vera Ventas', []);
 
     const pedidos: string[] = [];
@@ -172,13 +174,38 @@ run(
         )
       ).rows as Array<{ tipo: string; datos: { data: Record<string, unknown> } }>;
 
-    /** El pedido de estas pruebas no tiene herramientas: solo falta confirmar el listado para salir de la preparación. */
-    const confirmarListado = async (id: string, auth = supervisor()) =>
-      http()
+    /** El pedido de estas pruebas no trae herramientas: el Supervisor define una, Bodega la prepara y la envía y el Supervisor la recibe. */
+    const bodega = () =>
+      token(
+        'bodeguero',
+        BODEGUERO.nombre,
+        [P.FCR_OPERAR, P.FCR_VER, P.FCR_HERRAMIENTAS_PREPARAR],
+        BODEGUERO.id,
+      );
+    const conUnaHerramientaRecibida = async (id: string, auth = supervisor()) => {
+      const base = `/api/operaciones/fcr/tickets/${id}/herramientas`;
+      const agregada = await http()
+        .post(base)
+        .set(auth)
+        .send({ articuloId: HERRAMIENTA.id })
+        .expect(201);
+      const h = agregada.body.herramientas.find(
+        (x: { articuloId: string }) => x.articuloId === HERRAMIENTA.id,
+      );
+      await http().post(`${base}/solicitar`).set(auth).send({}).expect(201);
+      await http().post(`${base}/${h.id}/preparar`).set(bodega()).send({}).expect(201);
+      await http().post(`${base}/${h.id}/enviar`).set(bodega()).send({}).expect(201);
+      await http().post(`${base}/${h.id}/recibir`).set(auth).send({}).expect(201);
+    };
+    /** Sin al menos una herramienta no se confirma el listado: se define una, se recorre su flujo y se confirma. */
+    const confirmarListado = async (id: string, auth = supervisor()) => {
+      await conUnaHerramientaRecibida(id, auth);
+      return http()
         .post(`/api/operaciones/fcr/tickets/${id}/herramientas/confirmar-listado`)
         .set(auth)
         .send({ confirmado: true })
         .expect(201);
+    };
 
     /** Lleva un ticket de venta hasta el paso de Asignación, tomado por `supervisor`. */
     const hastaAsignacion = async (data: Record<string, unknown> = {}) => {
@@ -191,6 +218,15 @@ run(
 
     beforeAll(async () => {
       await sembrarMaestros(admin, MAESTROS);
+      await admin.query(
+        'INSERT INTO inventario.categoria_articulo (id, nombre, lleva_partes) VALUES ($1, $2, true)',
+        [CAT_HERRAMIENTAS, `CAT-HERR-ASG ${n}`],
+      );
+      await admin.query(
+        `INSERT INTO inventario.articulo (id, codigo, nombre, categoria_id, unidad_stock_id, activo)
+         VALUES ($1, $2, $3, $4, (SELECT id FROM catalogos.unidad_medida ORDER BY nombre LIMIT 1), true)`,
+        [HERRAMIENTA.id, HERRAMIENTA.codigo, `Herramienta ${HERRAMIENTA.codigo}`, CAT_HERRAMIENTAS],
+      );
       Object.assign(process.env, {
         SERVICE_NAME: 'operaciones-test',
         PORT: '3197',
@@ -238,6 +274,10 @@ run(
 
     afterAll(async () => {
       if (pedidos.length) {
+        await admin.query(
+          'DELETE FROM fcr.ticket_herramienta_evento WHERE herramienta_id IN (SELECT id FROM fcr.ticket_herramienta WHERE ticket_id IN (SELECT id FROM fcr.ticket WHERE pedido_id = ANY($1::uuid[])))',
+          [pedidos],
+        );
         await admin.query('DELETE FROM fcr.ticket WHERE pedido_id = ANY($1::uuid[])', [pedidos]);
         await admin.query(
           "DELETE FROM msg_operaciones.outbox WHERE datos->'data'->>'pedidoId' = ANY($1::text[])",
@@ -248,6 +288,10 @@ run(
         await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [
           eventos,
         ]);
+      await admin.query('DELETE FROM inventario.articulo WHERE id = $1', [HERRAMIENTA.id]);
+      await admin.query('DELETE FROM inventario.categoria_articulo WHERE id = $1', [
+        CAT_HERRAMIENTAS,
+      ]);
       await quitarMaestros(admin, MAESTROS);
       await admin.end();
       await appPool.end();

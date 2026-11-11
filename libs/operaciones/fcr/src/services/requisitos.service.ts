@@ -68,24 +68,26 @@ export class RequisitosService {
   }
 
   /**
-   * Mantiene los requisitos que dependen de las herramientas del ticket. `herramientas_recibidas`: cumplido cuando ninguna herramienta del ticket está sin recibir (sin herramientas también lo
-   * está). Lo llama cada cambio de herramientas, dentro de su transacción.
+   * Mantiene los requisitos que dependen de las herramientas del ticket. `herramientas_recibidas`: cumplido cuando el ticket tiene herramientas y
+   * ninguna está sin recibir. Un ticket sin herramientas **no** lo cumple: no hay nada que se haya recibido (antes se daba por cumplido y el ticket
+   * pasaba la preparación sin que Bodega ni el Supervisor intervinieran). Lo llama cada cambio de herramientas, dentro de su transacción.
    */
   async sincronizarDeHerramientas(
     tx: Prisma.TransactionClient,
     ticketId: string,
     actorId: string | null,
   ): Promise<void> {
+    const total = await tx.ticketHerramienta.count({ where: { ticketId } });
     const sinRecibir = await tx.ticketHerramienta.count({ where: { ticketId, recibidaAt: null } });
     const clave = { ticketId, codigo: REQ.herramientasRecibidas };
-    if (sinRecibir === 0) await this.marcar(tx, clave, 'sistema', actorId);
+    if (total > 0 && sinRecibir === 0) await this.marcar(tx, clave, 'sistema', actorId);
     else await this.reabrir(tx, clave);
-    // el retorno: cumplido cuando cada herramienta está devuelta o con su faltante (sin herramientas, también)
+    // el retorno: cumplido cuando el ticket tiene herramientas y cada una está devuelta o con su faltante
     const sinRetorno = await tx.ticketHerramienta.count({
       where: { ticketId, devueltaAt: null, faltanteAt: null },
     });
     const retorno = { ticketId, codigo: REQ.herramientasDevueltas };
-    if (sinRetorno === 0) await this.marcar(tx, retorno, 'sistema', actorId);
+    if (total > 0 && sinRetorno === 0) await this.marcar(tx, retorno, 'sistema', actorId);
     else await this.reabrir(tx, retorno);
     // agregar o quitar una herramienta también cambia lo que falta inspeccionar (solo existe en SERVICIOS)
     await this.sincronizarInspecciones(tx, ticketId, actorId);

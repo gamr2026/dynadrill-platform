@@ -351,8 +351,14 @@ export class HerramientasService {
       this.exigirSupervisor(t, actor);
       this.exigirPaso(t);
       const clave = { ticketId, codigo: REQ.listadoConfirmado };
-      if (confirmado) await this.requisitos.marcar(tx, clave, 'sistema', actor.id);
-      else await this.requisitos.reabrir(tx, clave);
+      if (confirmado) {
+        // el listado alimenta el formulario de inspección y reparación: sin al menos una herramienta no hay nada que hacer en él
+        if ((await tx.ticketHerramienta.count({ where: { ticketId } })) === 0)
+          throw this.conflicto(
+            'Defina al menos una herramienta antes de confirmar el listado: sin herramientas no hay nada que inspeccionar ni reparar.',
+          );
+        await this.requisitos.marcar(tx, clave, 'sistema', actor.id);
+      } else await this.requisitos.reabrir(tx, clave);
     });
     return this.detalle(ticketId);
   }

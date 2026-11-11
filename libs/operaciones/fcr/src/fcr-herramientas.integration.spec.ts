@@ -609,7 +609,7 @@ run(
         ]);
       });
 
-      it('un ticket sin herramientas tiene cumplido el requisito de herramientas recibidas; con herramientas, pendiente', async () => {
+      it('un ticket sin herramientas NO cumple el requisito de herramientas recibidas (no hay nada recibido); con herramientas, tampoco hasta recibirlas', async () => {
         const vacio = await crear({ lineas: [] });
         const con = await enPreparacion();
         const estado = async (id: string) =>
@@ -618,7 +618,7 @@ run(
               where: { ticketId: id, requisitoCodigo: 'herramientas_recibidas' },
             })
           ).estado;
-        expect(await estado(vacio.id)).toBe('cumplido');
+        expect(await estado(vacio.id)).toBe('pendiente');
         expect(await estado(con.id)).toBe('pendiente');
       });
 
@@ -1063,10 +1063,36 @@ run(
         ).toBe(true);
       });
 
-      it('un ticket sin herramientas por pedir puede salir de la preparación con solo confirmar el listado', async () => {
+      it('un ticket sin herramientas no puede confirmar el listado ni salir de la preparación: hace falta definir al menos una', async () => {
         const t = await crear({ lineas: [] });
         await avanzar(t.id, 'preparacion_herramientas').expect(201);
         await http().post(url(t.id, '/solicitar')).set(supervisor()).send({}).expect(409);
+        const sin = await http()
+          .post(url(t.id, '/confirmar-listado'))
+          .set(supervisor())
+          .send({ confirmado: true })
+          .expect(409);
+        expect(String(sin.body.detail ?? sin.body.message)).toContain('al menos una herramienta');
+        await avanzar(t.id, 'asignacion').expect(409);
+        // con una herramienta definida, recorrida por Bodega y recibida por el Supervisor, ya se confirma y se avanza
+        await http().post(url(t.id)).set(supervisor()).send({ articuloId: CANASTA.id }).expect(201);
+        const h = (await herramientas(t.id)).herramientas[0];
+        await http().post(url(t.id, '/solicitar')).set(supervisor()).send({}).expect(201);
+        await http()
+          .post(url(t.id, `/${h.id}/preparar`))
+          .set(bodega())
+          .send({})
+          .expect(201);
+        await http()
+          .post(url(t.id, `/${h.id}/enviar`))
+          .set(bodega())
+          .send({})
+          .expect(201);
+        await http()
+          .post(url(t.id, `/${h.id}/recibir`))
+          .set(supervisor())
+          .send({})
+          .expect(201);
         await http()
           .post(url(t.id, '/confirmar-listado'))
           .set(supervisor())
