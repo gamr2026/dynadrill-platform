@@ -399,6 +399,43 @@ export class JornadasService {
         );
       }
     }
+
+    // cierra la jornada cuando ya se cumplió todo lo que exige el cierre (job log, herramientas…): el último requisito la cierra, como el último de
+    // la apertura la abre. Solo un día que ya llegó. Una jornada que una persona reabrió con motivo se queda abierta hasta que se cierre a mano.
+    const deCierre = definiciones.filter((d) => d.momento === 'cierre');
+    if (deCierre.length === 0) return;
+    const hoy = this.hoy();
+    const abiertas = await tx.ticketJornada.findMany({
+      where: { ticketId, estado: 'abierta' },
+      select: { id: true, fecha: true },
+    });
+    for (const a of abiertas) {
+      const fecha = aFecha(a.fecha);
+      if (fecha > hoy) continue;
+      const falta = deCierre.some((d) =>
+        destinos(d).some((u) => estadoDe.get(clave(d.codigo, fecha, u))?.estado !== 'cumplido'),
+      );
+      if (falta) continue;
+      const ultima = await tx.ticketJornadaHistorial.findFirst({
+        where: { jornadaId: a.id },
+        orderBy: { createdAt: 'desc' },
+        select: { accion: true, motivo: true },
+      });
+      // la «reabierta» del sistema (dejó de cumplirse un requisito de apertura) no cuenta: solo la que pidió una persona
+      if (ultima?.accion === 'reabierta' && !(ultima.motivo ?? '').startsWith('Dejó de cumplirse'))
+        continue;
+      await tx.ticketJornada.update({
+        where: { id: a.id },
+        data: { estado: 'cerrada', cerradaAt: new Date(), cerradaPor: null },
+      });
+      await this.anotar(
+        tx,
+        a.id,
+        'cerrada',
+        'Cerrada por el sistema: se cumplió todo lo que exige el cierre',
+        null,
+      );
+    }
   }
 
   /**

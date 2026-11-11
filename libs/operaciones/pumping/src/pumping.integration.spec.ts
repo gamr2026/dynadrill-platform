@@ -3458,6 +3458,22 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       http().post(`${t.jornadas}/${f}/sin-operacion`).set(h).send(cuerpo);
     const cerrar = (t: { jornadas: string }, f: string, h = sup()) =>
       http().post(`${t.jornadas}/${f}/cerrar`).set(h);
+    /** Vuelve a correr la sincronización de los requisitos del día (lo que pasa al llegar cualquier hecho). */
+    const sincronizarTicket = async (t: { jornadas: string }) => {
+      await http().get(t.jornadas).set(op1()).expect(200);
+    };
+    /** Deja el día cerrado: el sistema lo cierra solo al cumplirse lo último, y si no, se cierra a mano. */
+    const cierraElDia = async (t: { jornadas: string; id: string }, f: string) => {
+      const estado = async () =>
+        (
+          await admin.query(
+            'SELECT estado FROM pumping.ticket_jornada WHERE ticket_id = $1 AND fecha = $2::date',
+            [t.id, f],
+          )
+        ).rows[0]?.estado;
+      if ((await estado()) !== 'cerrada') await cerrar(t, f).expect(201);
+      expect(await estado()).toBe('cerrada');
+    };
     const reabrir = (t: { jornadas: string }, f: string, cuerpo: object, h = jefeBase()) =>
       http().post(`${t.jornadas}/${f}/reabrir`).set(h).send(cuerpo);
     const motivo = async (codigo = 'clima') =>
@@ -3805,13 +3821,13 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await cerrar(t, DIAS[1], op1())).status).toBe(403);
       expect((await cerrar(t, DIAS[1], supAjeno())).status).toBe(403);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       const r = await ver(t);
       expect(r.body).toMatchObject({ cerradas: 1 });
       expect(r.body.jornadas[1]).toMatchObject({
         estado: 'cerrada',
         estadoVisible: 'cerrada',
-        cerradaPor: SUPERVISORA.id,
+        cerradaPor: null, // la cerró el sistema al cumplirse lo último
       });
       expect((await cerrar(t, DIAS[1])).status).toBe(409); // ya cerrada
       // un día futuro: aunque se acepte al Company Man ese día, no se cierra (decisión del cliente)
@@ -3826,7 +3842,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await ver(t);
       await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       expect((await reabrir(t, DIAS[1], { motivo: 'ab' })).status).toBe(400);
       expect(
         (await reabrir(t, DIAS[1], { motivo: 'Faltó registrar una actividad' }, op1())).status,
@@ -3850,9 +3866,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         ).map((h) => [h.accion, h.motivo]),
       ).toEqual([
         ['abierta', null],
-        ['cerrada', null],
+        ['cerrada', 'Cerrada por el sistema: se cumplió todo lo que exige el cierre'],
         ['reabierta', 'Faltó registrar una actividad'],
       ]);
+      // un día que una persona reabrió se queda abierto aunque todo esté cumplido: se cierra a mano
+      await sincronizarTicket(t);
+      expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
+      await cerrar(t, DIAS[1]).expect(201);
+      expect((await ver(t)).body.jornadas[1]).toMatchObject({
+        estado: 'cerrada',
+        cerradaPor: SUPERVISORA.id,
+      });
+      await reabrir(t, DIAS[1], { motivo: 'Segunda reapertura' }).expect(201);
 
       // un día sin operación se reabre y limpia sus datos (queda en la bitácora)
       await sinOp(t, DIAS[0], {
@@ -4074,7 +4099,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       await ver(t);
       expect(await estadoReq(t.id, DIAS[1], 'herramientas_dia')).toBe('cumplido');
       // el cierre del día ya no exige la llegada (reporte de llegada y retorno van en sus pasos)
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       expect((await ver(t)).body).toMatchObject({ cerradas: 1 });
       // quitar la marca del día deja de cumplirlo
       await admin.query(
@@ -4211,7 +4236,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       // una jornada cerrada ya no admite checklist
       await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       expect((await patch(DIAS[1])).status).toBe(409);
     });
 
@@ -4293,7 +4318,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       expect((await ver(t)).body).toMatchObject({ porCerrar: 1, cerradas: 1, sinOperacion: 1 });
 
       // con hoy registrado ya puede continuar con el ciclo de hoy; el servicio no se acorta y el día 3 sigue pendiente para cuando llegue
@@ -4332,7 +4357,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       await admin.query("UPDATE pumping.ticket SET paso_codigo = 'revision_final' WHERE id = $1", [
         t.id,
       ]);
@@ -4404,7 +4429,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       );
       await abrirDia(t, DIAS[1]);
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       await admin.query('UPDATE pumping.ticket SET fecha_fin_servicio = $2 WHERE id = $1', [
         t.id,
         DIAS[1],
@@ -4600,7 +4625,7 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await ver(t)).body.jornadas[1].estado).toBe('abierta');
       // una jornada cerrada no se toca por lo que pase después
       await cumplirCierre(t, DIAS[1]);
-      await cerrar(t, DIAS[1]).expect(201);
+      await cierraElDia(t, DIAS[1]);
       await externos.consumir(
         externo('qhse.documento_pedido.anulado', {
           documentoId: uuidv7(),
@@ -4849,11 +4874,8 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         expect(tarea(abierta, 'aceptar_company_man')).toMatchObject({ estado: 'hecha' });
         expect(tarea(abierta, 'cerrar_jornada')?.detalle).toContain('Se habilita cuando se cumpla');
 
+        // al cumplirse lo último que exige el cierre, el sistema cierra la jornada solo
         await cumplirCierre(t, DIAS[1]);
-        expect(tarea(await bloqueDe(t, 'supervisor', sup()), 'cerrar_jornada')?.detalle).toBe(
-          'Lista para cerrar',
-        );
-        await cerrar(t, DIAS[1]).expect(201);
         expect(tarea(await bloqueDe(t, 'supervisor', sup()), 'cerrar_jornada')).toMatchObject({
           estado: 'hecha',
         });
