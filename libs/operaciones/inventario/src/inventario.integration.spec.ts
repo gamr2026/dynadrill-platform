@@ -1397,6 +1397,83 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       });
     });
 
+    it('un ticket de FCR que solicita sus herramientas pide a Bodega la guía de remisión: solo materiales precargados, una pendiente por ticket', async () => {
+      const ticketFcr = uuidv7();
+      const pedidoFcr = uuidv7();
+      const evtFcr = (data: Record<string, unknown> = {}): EventEnvelope => {
+        const id = uuidv7();
+        eventosEnviados.push(id);
+        return {
+          id,
+          type: 'operaciones.fcr.herramientas_solicitadas',
+          version: 1,
+          occurredAt: new Date().toISOString(),
+          source: 'operaciones',
+          subject: { type: 'fcr_ticket', id: ticketFcr },
+          data: {
+            ticketId: ticketFcr,
+            ticketNumero: 4590,
+            pedidoId: pedidoFcr,
+            pedidoCodigo: 'PEC-FCR-1',
+            clienteId: null,
+            herramientas: 'Cepillo, Magneto',
+            materiales: [
+              {
+                codigo: `FCR${n}MAT`,
+                descripcion: 'Grasa para conexiones',
+                cantidad: 3,
+                unidadMedidaId: ids.unidad,
+                tipo: 'material',
+              },
+            ],
+            ...data,
+          },
+          actor: { userId: BODEGUERO.id, role: 'supervisor' },
+        } as EventEnvelope;
+      };
+      const e = evtFcr();
+      await despachosConsumer.consumir(e);
+      await despachosConsumer.consumir(evtFcr()); // otra solicitud mientras hay una pendiente: se ignora
+      const filas = (
+        await admin.query('SELECT * FROM inventario.despacho WHERE ticket_fcr_id = $1', [ticketFcr])
+      ).rows;
+      expect(filas).toHaveLength(1);
+      expect(filas[0]).toMatchObject({
+        origen: 'fcr',
+        ticket_fcr_numero: 4590,
+        pedido_codigo: 'PEC-FCR-1',
+        estado: 'solicitado',
+      });
+      expect(filas[0].nota_solicitud).toContain('elabore la guía de remisión');
+      expect(filas[0].nota_solicitud).toContain('Cepillo, Magneto');
+      const detalle = await http()
+        .get(`/api/operaciones/inventario/despachos/${filas[0].id}`)
+        .set(bodeguero());
+      expect(detalle.body).toMatchObject({
+        origen: 'fcr',
+        ticketFcr: { id: ticketFcr, numero: 4590 },
+        items: [{ codigo: `FCR${n}MAT`, cantidad: 3, tipo: 'material' }],
+      });
+      // sin materiales en el pedido también se solicita: Bodega agrega las herramientas en la guía
+      const sinMateriales = uuidv7();
+      await despachosConsumer.consumir(
+        evtFcr({ ticketId: sinMateriales, pedidoId: uuidv7(), materiales: [] }),
+      );
+      const vacia = (
+        await admin.query('SELECT id FROM inventario.despacho WHERE ticket_fcr_id = $1', [
+          sinMateriales,
+        ])
+      ).rows;
+      expect(vacia).toHaveLength(1);
+      await admin.query(
+        'DELETE FROM inventario.despacho_item WHERE despacho_id IN (SELECT id FROM inventario.despacho WHERE ticket_fcr_id = ANY($1::uuid[]))',
+        [[ticketFcr, sinMateriales]],
+      );
+      await admin.query('DELETE FROM inventario.despacho WHERE ticket_fcr_id = ANY($1::uuid[])', [
+        [ticketFcr, sinMateriales],
+      ]);
+    });
+
     it('ignora sin error una solicitud incompleta y una segunda mientras hay una pendiente', async () => {
       await despachosConsumer.consumir(evtSolicitud({ pedidoId: null }));
       await despachosConsumer.consumir(evtSolicitud({ items: [] }));

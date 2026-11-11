@@ -152,6 +152,107 @@ export class DespachosService {
     });
   }
 
+  /**
+   * Un ticket de FCR solicitó sus herramientas (`operaciones.fcr.herramientas_solicitadas`): Bodega recibe en su bandeja una solicitud para
+   * elaborar la guía de remisión. La guía nace con los materiales del pedido; Bodega agrega las herramientas en renta (tipo servicio) que
+   * falten, con su serie, y se excluyen la movilización y el personal. Un ticket tiene una sola solicitud pendiente a la vez.
+   */
+  async alSolicitarFcr(tx: Prisma.TransactionClient, event: EventEnvelope): Promise<void> {
+    const d = event.data as Record<string, unknown>;
+    const actorId = event.actor?.userId;
+    const materiales = Array.isArray(d['materiales']) ? (d['materiales'] as ItemSolicitado[]) : [];
+    const valido =
+      esUuid(d['ticketId']) &&
+      esUuid(d['pedidoId']) &&
+      (d['clienteId'] == null || esUuid(d['clienteId'])) &&
+      esUuid(actorId) &&
+      materiales.every(
+        (i) =>
+          texto(i.codigo) &&
+          texto(i.descripcion) &&
+          Number(i.cantidad) > 0 &&
+          esUuid(i.unidadMedidaId) &&
+          (i.listaPreciosItemId == null || esUuid(i.listaPreciosItemId)),
+      );
+    if (!valido) {
+      this.logger.warn(`Evento ${event.id}: solicitud de FCR incompleta o inválida; se ignora`);
+      return;
+    }
+    const ticketId = d['ticketId'] as string;
+    const pendiente = await tx.despacho.findFirst({
+      where: { ticketFcrId: ticketId, estado: 'solicitado' },
+      select: { numero: true },
+    });
+    if (pendiente) {
+      this.logger.warn(
+        `Evento ${event.id}: el ticket ${ticketId} ya tiene pendiente la solicitud ${pendiente.numero}; se ignora`,
+      );
+      return;
+    }
+    // la bodega de la solicitud: la Matriz (de ahí salen las herramientas) o, si no existe, la primera habilitada
+    const bodegas = await tx.catBodega.findMany({
+      where: { habilitado: true },
+      orderBy: { nombre: 'asc' },
+      select: { id: true, nombre: true },
+    });
+    const bodega = bodegas.find((b) => /matriz/i.test(b.nombre)) ?? bodegas[0];
+    if (!bodega) {
+      this.logger.warn(`Evento ${event.id}: no hay una bodega habilitada; se ignora`);
+      return;
+    }
+    const numero = d['ticketNumero'] == null ? null : Number(d['ticketNumero']);
+    const herramientas = texto(d['herramientas']);
+    const nota = [
+      `Ticket FCR ${numero ?? ''}: elabore la guía de remisión de este pedido y agregue en ella las herramientas de tipo servicio que no estén (con su serie). Los materiales del pedido vienen precargados; la movilización y el personal no van en la guía.`,
+      herramientas ? `Herramientas que eligió el Supervisor: ${herramientas}.` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const id = uuidv7();
+    await tx.despacho.create({
+      data: {
+        id,
+        pedidoId: d['pedidoId'] as string,
+        pedidoCodigo: texto(d['pedidoCodigo']),
+        clienteId: (d['clienteId'] as string | null) ?? null,
+        bodegaId: bodega.id,
+        fechaRequerida: new Date(
+          `${new Date(event.occurredAt).toISOString().slice(0, 10)}T00:00:00.000Z`,
+        ),
+        notaSolicitud: nota,
+        origen: 'fcr',
+        ticketFcrId: ticketId,
+        ticketFcrNumero: numero,
+        estado: 'solicitado',
+        solicitadoAt: new Date(event.occurredAt),
+        solicitadoPorId: actorId as string,
+        createdBy: actorId as string,
+        updatedBy: actorId as string,
+      },
+    });
+    if (materiales.length) {
+      const articulos = await this.articulosPorCodigo(
+        tx,
+        materiales.map((i) => i.codigo.trim()),
+      );
+      await tx.despachoItem.createMany({
+        data: materiales.map((i, k) => ({
+          id: uuidv7(),
+          despachoId: id,
+          orden: k + 1,
+          listaPreciosItemId: i.listaPreciosItemId ?? null,
+          codigo: i.codigo.trim(),
+          descripcion: i.descripcion.trim(),
+          cantidad: Number(i.cantidad),
+          unidadMedidaId: i.unidadMedidaId,
+          tipo: 'material' as const,
+          articuloId: articulos.get(i.codigo.trim().toLowerCase()) ?? null,
+          createdBy: actorId as string,
+        })),
+      });
+    }
+  }
+
   async listar(f: ListarDespachosDto) {
     const filas = await this.prisma.despacho.findMany({
       where: {
@@ -314,6 +415,9 @@ export class DespachosService {
       bodega: d.bodega,
       fechaRequerida: d.fechaRequerida.toISOString().slice(0, 10),
       nota: d.notaSolicitud,
+      /** Quién lo pidió: Facturación o un ticket de FCR. */
+      origen: d.origen,
+      ticketFcr: d.ticketFcrId ? { id: d.ticketFcrId, numero: d.ticketFcrNumero } : null,
       estado: d.estado,
       solicitadoAt: d.solicitadoAt.toISOString(),
       solicitadoPor: d.solicitadoPor,

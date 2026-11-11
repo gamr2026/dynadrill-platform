@@ -37,6 +37,14 @@ enum OrigenMovimiento {
   @@schema("inventario")
 }
 
+enum OrigenDespacho {
+  facturacion
+  fcr
+
+  @@map("origen_despacho")
+  @@schema("inventario")
+}
+
 enum EstadoDespacho {
   solicitado
   realizado
@@ -331,6 +339,10 @@ model Despacho {
   bodega            CatBodega      @relation(fields: [bodegaId], references: [id])
   fechaRequerida    DateTime       @map("fecha_requerida") @db.Date
   notaSolicitud     String?        @map("nota_solicitud")
+  /// Quién lo pidió: Facturación o un ticket de FCR (con `ticketFcrId`).
+  origen            OrigenDespacho @default(facturacion)
+  ticketFcrId       String?        @map("ticket_fcr_id") @db.Uuid
+  ticketFcrNumero   Int?           @map("ticket_fcr_numero")
   estado            EstadoDespacho
   solicitadoAt      DateTime       @map("solicitado_at") @db.Timestamptz(6)
   solicitadoPorId   String         @map("solicitado_por") @db.Uuid

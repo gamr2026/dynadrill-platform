@@ -259,7 +259,7 @@ export class HerramientasService {
       await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actor.id);
       const n = await tx.ticket.findUniqueOrThrow({
         where: { id: ticketId },
-        include: { cliente: true, pozo: true },
+        include: { cliente: true, pozo: true, lineas: true },
       });
       await this.bus.publish(
         tx,
@@ -271,9 +271,21 @@ export class HerramientasService {
             ticketNumero: n.ticketNumero,
             pedidoId: n.pedidoId,
             pedidoCodigo: n.pedidoCodigo,
+            clienteId: n.clienteId,
             cliente: nombreDe(n.cliente),
             pozo: n.pozo?.nombreCompleto ?? null,
             cantidad: filas.length,
+            // lo que Bodega precarga en la guía de remisión: los materiales del pedido (las herramientas en renta las agrega Bodega con su serie)
+            materiales: n.lineas
+              .filter((l) => l.tipoLinea === 'material')
+              .map((l) => ({
+                listaPreciosItemId: l.listaPreciosItemId,
+                codigo: l.codigo,
+                descripcion: l.descripcion,
+                cantidad: Number(l.cantidad),
+                unidadMedidaId: l.unidadMedidaId,
+                tipo: 'material',
+              })),
             herramientas: [...new Set(filas.map((f) => f.articulo.nombre))].join(', '),
             solicitadoPor: actor.name,
           },

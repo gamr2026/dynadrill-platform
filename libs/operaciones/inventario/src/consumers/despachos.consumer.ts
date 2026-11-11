@@ -19,6 +19,13 @@ export class DespachosConsumer implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    // un ticket de FCR que solicita sus herramientas pide a Bodega la guía de remisión
+    await this.bus.subscribe({
+      source: 'operaciones',
+      group: 'inventario-fcr',
+      patterns: ['operaciones.fcr.herramientas_solicitadas'],
+      handler: (event) => this.consumir(event),
+    });
     await this.bus.subscribe({
       source: 'comercial',
       // Pumping también consume de comercial en este contenedor: sin grupo propio compartirían la cola y se perderían eventos
@@ -35,6 +42,8 @@ export class DespachosConsumer implements OnApplicationBootstrap {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
           if (event.type === 'comercial.despacho.solicitado')
             await this.despachos.alSolicitar(tx, event);
+          if (event.type === 'operaciones.fcr.herramientas_solicitadas')
+            await this.despachos.alSolicitarFcr(tx, event);
         });
         if (!procesado) this.logger.warn(`Evento ${event.id} duplicado: se ignora`);
       });
