@@ -151,14 +151,17 @@ export class HerramientasService {
         ],
       },
       orderBy: { nombre: 'asc' },
-      take: 30,
+      take: 20,
       select: { id: true, codigo: true, nombre: true, categoria: { select: { nombre: true } } },
     });
-    return filas.map((a) => ({
+    // la existencia en Inventario de cada resultado, para saber si hay stock antes de agregarla (informativa: no hay reserva)
+    const existencias = await Promise.all(filas.map((a) => this.inventario.stockDe(a.id)));
+    return filas.map((a, i) => ({
       id: a.id,
       codigo: a.codigo,
       nombre: a.nombre,
       categoria: a.categoria.nombre,
+      existencia: existencias[i],
     }));
   }
 

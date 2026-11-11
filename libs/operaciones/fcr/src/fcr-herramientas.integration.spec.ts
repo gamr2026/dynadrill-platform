@@ -440,6 +440,8 @@ run(
           .set(ventas())
           .expect(200);
         expect(r.body.map((a: { codigo: string }) => a.codigo)).toEqual([CEPILLO.codigo]);
+        // cada resultado trae su existencia en Inventario (el cepillo de la prueba no tiene movimientos: 0)
+        expect(r.body[0].existencia).toBe(0);
         const q = await http()
           .get(`/api/operaciones/fcr/herramientas-disponibles?q=HF-QUI-${n}`)
           .set(ventas())
