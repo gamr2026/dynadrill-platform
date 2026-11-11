@@ -4,6 +4,7 @@ import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { ConfiguracionCodigosController } from './controllers/configuracion-codigos.controller';
 import { RetornoController } from './controllers/retorno.controller';
 import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
+import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
 import { EjecucionController } from './controllers/ejecucion.controller';
 import { DocumentosController } from './controllers/documentos.controller';
 import { HerramientasController } from './controllers/herramientas.controller';
@@ -75,6 +76,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     EjecucionService,
     RetornoService,
     ActaEntregaConsumer,
+    DespachoResultadoConsumer,
     ConfiguracionCodigosService,
     PedidosAbiertosConsumer,
   ],

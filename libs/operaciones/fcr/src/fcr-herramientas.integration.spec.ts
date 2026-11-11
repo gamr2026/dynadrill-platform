@@ -23,6 +23,7 @@ import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
 import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
+import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
@@ -278,6 +279,9 @@ run(
         .mockResolvedValue(undefined);
       jest
         .spyOn(ResultadoCambioItemsConsumer.prototype, 'onApplicationBootstrap')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(DespachoResultadoConsumer.prototype, 'onApplicationBootstrap')
         .mockResolvedValue(undefined);
       await app.init();
       prisma = app.get(PrismaService);
@@ -1099,6 +1103,57 @@ run(
           .send({ confirmado: true })
           .expect(201);
         await avanzar(t.id, 'asignacion').expect(201);
+      });
+
+      it('el despacho de Bodega hace avanzar el ticket: sus herramientas quedan recibidas; si lo rechaza, vuelven a sin solicitar con el motivo', async () => {
+        const despacho = app.get(DespachoResultadoConsumer);
+        const resultado = (tipo: string, ticketId: string, extra: Record<string, unknown> = {}) => {
+          const id = uuidv7();
+          eventos.push(id);
+          return {
+            id,
+            type: tipo,
+            version: 1,
+            occurredAt: '2026-11-02T10:00:00.000Z',
+            source: 'operaciones',
+            subject: { type: 'inventario_despacho', id: uuidv7() },
+            data: { origen: 'fcr', ticketFcrId: ticketId, pedidoId: uuidv7(), ...extra },
+            actor: { userId: BODEGUERO.id, role: 'bodeguero' },
+          } as EventEnvelope;
+        };
+        const estadoRecibidas = async (id: string) =>
+          (
+            await prisma.ticketRequisito.findFirstOrThrow({
+              where: { ticketId: id, requisitoCodigo: 'herramientas_recibidas' },
+            })
+          ).estado;
+        // despachado: queda todo preparado, enviado y recibido y el requisito se cumple
+        const a = await crear({ lineas: [] });
+        await avanzar(a.id, 'preparacion_herramientas').expect(201);
+        await http().post(url(a.id)).set(supervisor()).send({ articuloId: CANASTA.id }).expect(201);
+        await http().post(url(a.id, '/solicitar')).set(supervisor()).send({}).expect(201);
+        expect(await estadoRecibidas(a.id)).toBe('pendiente');
+        await despacho.consumir(resultado('operaciones.inventario.despacho.realizado', a.id));
+        const h = (await herramientas(a.id)).herramientas[0];
+        expect(h).toMatchObject({ estado: 'recibida' });
+        expect(await estadoRecibidas(a.id)).toBe('cumplido');
+        // un despacho de Facturación (otro origen) no toca nada
+        const b = await crear({ lineas: [] });
+        await avanzar(b.id, 'preparacion_herramientas').expect(201);
+        await http().post(url(b.id)).set(supervisor()).send({ articuloId: CANASTA.id }).expect(201);
+        await http().post(url(b.id, '/solicitar')).set(supervisor()).send({}).expect(201);
+        await despacho.consumir(
+          resultado('operaciones.inventario.despacho.realizado', b.id, { origen: 'facturacion' }),
+        );
+        expect((await herramientas(b.id)).herramientas[0]).toMatchObject({ estado: 'solicitada' });
+        // rechazado: vuelve a sin solicitar y el motivo queda a la vista
+        await despacho.consumir(
+          resultado('operaciones.inventario.despacho.rechazado', b.id, { motivo: 'Sin stock' }),
+        );
+        const vuelta = (await herramientas(b.id)).herramientas[0];
+        expect(vuelta).toMatchObject({ estado: 'seleccionada' });
+        expect(JSON.stringify(vuelta)).toContain('Sin stock');
+        await http().post(url(b.id, '/solicitar')).set(supervisor()).send({}).expect(201);
       });
 
       it('un ticket cerrado solo se consulta', async () => {

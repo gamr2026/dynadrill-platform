@@ -1400,6 +1400,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     it('un ticket de FCR que solicita sus herramientas pide a Bodega la guía de remisión: solo materiales precargados, una pendiente por ticket', async () => {
       const ticketFcr = uuidv7();
       const pedidoFcr = uuidv7();
+      const herramientaFcr = await crearArticulo('FCRH');
       const evtFcr = (data: Record<string, unknown> = {}): EventEnvelope => {
         const id = uuidv7();
         eventosEnviados.push(id);
@@ -1417,6 +1418,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
             pedidoCodigo: 'PEC-FCR-1',
             clienteId: null,
             herramientas: 'Cepillo, Magneto',
+            items: [{ articuloId: herramientaFcr.id, numeroSerie: 'DY-RT-415' }],
             materiales: [
               {
                 codigo: `FCR${n}MAT`,
@@ -1444,16 +1446,20 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
         pedido_codigo: 'PEC-FCR-1',
         estado: 'solicitado',
       });
-      expect(filas[0].nota_solicitud).toContain('elabore la guía de remisión');
-      expect(filas[0].nota_solicitud).toContain('Cepillo, Magneto');
+      expect(filas[0].nota_solicitud).toContain('prepare y despache');
+      expect(filas[0].nota_solicitud).toContain('la emite Facturación');
       const detalle = await http()
         .get(`/api/operaciones/inventario/despachos/${filas[0].id}`)
         .set(bodeguero());
       expect(detalle.body).toMatchObject({
         origen: 'fcr',
         ticketFcr: { id: ticketFcr, numero: 4590 },
-        items: [{ codigo: `FCR${n}MAT`, cantidad: 3, tipo: 'material' }],
+        items: [
+          { tipo: 'herramienta', cantidad: 1, articulo: { id: herramientaFcr.id } },
+          { codigo: `FCR${n}MAT`, cantidad: 3, tipo: 'material' },
+        ],
       });
+      expect(detalle.body.items[0].descripcion).toContain('serie DY-RT-415');
       // sin materiales en el pedido también se solicita: Bodega agrega las herramientas en la guía
       const sinMateriales = uuidv7();
       await despachosConsumer.consumir(

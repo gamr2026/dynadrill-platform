@@ -33,6 +33,12 @@ const esFecha = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d
 const texto = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const TIPOS: readonly string[] = ['material', 'herramienta'];
 
+/** Una herramienta tal como la publica FCR en `operaciones.fcr.herramientas_solicitadas`. */
+interface HerramientaSolicitada {
+  articuloId: string;
+  numeroSerie?: string | null;
+}
+
 /** Un ítem tal como lo publica Comercial en `comercial.despacho.solicitado`. */
 interface ItemSolicitado {
   listaPreciosItemId?: string | null;
@@ -161,6 +167,9 @@ export class DespachosService {
     const d = event.data as Record<string, unknown>;
     const actorId = event.actor?.userId;
     const materiales = Array.isArray(d['materiales']) ? (d['materiales'] as ItemSolicitado[]) : [];
+    const herramientas: HerramientaSolicitada[] = Array.isArray(d['items'])
+      ? (d['items'] as HerramientaSolicitada[]).filter((h) => esUuid(h.articuloId))
+      : [];
     const valido =
       esUuid(d['ticketId']) &&
       esUuid(d['pedidoId']) &&
@@ -201,13 +210,7 @@ export class DespachosService {
       return;
     }
     const numero = d['ticketNumero'] == null ? null : Number(d['ticketNumero']);
-    const herramientas = texto(d['herramientas']);
-    const nota = [
-      `Ticket FCR ${numero ?? ''}: elabore la guía de remisión de este pedido y agregue en ella las herramientas de tipo servicio que no estén (con su serie). Los materiales del pedido vienen precargados; la movilización y el personal no van en la guía.`,
-      herramientas ? `Herramientas que eligió el Supervisor: ${herramientas}.` : null,
-    ]
-      .filter(Boolean)
-      .join(' ');
+    const nota = `Ticket FCR ${numero ?? ''}: prepare y despache las herramientas y los materiales de la lista. Registre la salida de stock de cada ítem y confirme el despacho adjuntando el documento de respaldo (la delivery de almacén). Con su confirmación el ticket continúa; la guía de remisión la emite Facturación al finalizar el ticket.`;
     const id = uuidv7();
     await tx.despacho.create({
       data: {
@@ -230,16 +233,45 @@ export class DespachosService {
         updatedBy: actorId as string,
       },
     });
+    // las herramientas que eligió el Supervisor (cada una con su serie, si la tiene) y los materiales del pedido
+    if (herramientas.length) {
+      const arts = await tx.articulo.findMany({
+        where: { id: { in: herramientas.map((h) => h.articuloId) } },
+        select: { id: true, codigo: true, nombre: true, unidadStockId: true },
+      });
+      const porId = new Map(arts.map((a) => [a.id, a]));
+      const validas = herramientas.filter((h) => porId.has(h.articuloId));
+      await tx.despachoItem.createMany({
+        data: validas.map((h, k) => {
+          const a = porId.get(h.articuloId)!;
+          const serie = texto(h.numeroSerie);
+          return {
+            id: uuidv7(),
+            despachoId: id,
+            orden: k + 1,
+            listaPreciosItemId: null,
+            codigo: a.codigo,
+            descripcion: serie ? `${a.nombre} · serie ${serie}` : a.nombre,
+            cantidad: 1,
+            unidadMedidaId: a.unidadStockId,
+            tipo: 'herramienta' as const,
+            articuloId: a.id,
+            createdBy: actorId as string,
+          };
+        }),
+      });
+    }
     if (materiales.length) {
       const articulos = await this.articulosPorCodigo(
         tx,
         materiales.map((i) => i.codigo.trim()),
       );
+      const desde = herramientas.length;
       await tx.despachoItem.createMany({
         data: materiales.map((i, k) => ({
           id: uuidv7(),
           despachoId: id,
-          orden: k + 1,
+          orden: desde + k + 1,
           listaPreciosItemId: i.listaPreciosItemId ?? null,
           codigo: i.codigo.trim(),
           descripcion: i.descripcion.trim(),
@@ -357,7 +389,14 @@ export class DespachosService {
   private async pendiente(tx: Prisma.TransactionClient, id: string) {
     const d = await tx.despacho.findUnique({
       where: { id },
-      select: { id: true, numero: true, pedidoId: true, estado: true },
+      select: {
+        id: true,
+        numero: true,
+        pedidoId: true,
+        estado: true,
+        origen: true,
+        ticketFcrId: true,
+      },
     });
     if (!d) throw new NotFoundException('El despacho no existe');
     if (d.estado !== 'solicitado') {
@@ -372,7 +411,13 @@ export class DespachosService {
   private async publicar(
     tx: Prisma.TransactionClient,
     type: string,
-    d: { id: string; numero: number; pedidoId: string },
+    d: {
+      id: string;
+      numero: number;
+      pedidoId: string;
+      origen?: string;
+      ticketFcrId?: string | null;
+    },
     actor: ActorInventario,
     extra: Record<string, unknown>,
   ) {
@@ -381,7 +426,14 @@ export class DespachosService {
       this.bus.create({
         type,
         subject: { type: 'inventario_despacho', id: d.id },
-        data: { despachoId: d.id, numero: d.numero, pedidoId: d.pedidoId, ...extra },
+        data: {
+          despachoId: d.id,
+          numero: d.numero,
+          pedidoId: d.pedidoId,
+          origen: d.origen ?? 'facturacion',
+          ticketFcrId: d.ticketFcrId ?? null,
+          ...extra,
+        },
         actor: { userId: actor.id, role: actor.roleCode },
         traceparent: currentTraceparent(),
       }),

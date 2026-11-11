@@ -272,6 +272,13 @@ export class HerramientasService {
             pedidoId: n.pedidoId,
             pedidoCodigo: n.pedidoCodigo,
             clienteId: n.clienteId,
+            // lo que Bodega debe despachar: cada herramienta solicitada, con su serie si ya se conoce
+            items: filas.map((f) => ({
+              articuloId: f.articuloId,
+              codigo: f.articulo.codigo,
+              descripcion: f.articulo.nombre,
+              numeroSerie: f.numeroSerie,
+            })),
             cliente: nombreDe(n.cliente),
             pozo: n.pozo?.nombreCompleto ?? null,
             cantidad: filas.length,
@@ -295,6 +302,82 @@ export class HerramientasService {
       );
     });
     return this.detalle(ticketId);
+  }
+
+  /**
+   * Bodega despachó lo que pidió el Supervisor (`operaciones.inventario.despacho.realizado` de un despacho de FCR): las herramientas solicitadas
+   * y todavía sin recibir quedan preparadas, enviadas y recibidas. El despacho físico es lo que hace avanzar el ticket: ya no hay un envío y una
+   * recepción aparte.
+   */
+  async alDespacharBodega(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    actorId: string,
+  ): Promise<void> {
+    const filas = await tx.ticketHerramienta.findMany({
+      where: { ticketId, solicitadaAt: { not: null }, recibidaAt: null },
+      select: { id: true, preparadaAt: true, enviadaAt: true },
+    });
+    if (!filas.length) return;
+    const ahora = new Date();
+    await tx.ticketHerramienta.updateMany({
+      where: { id: { in: filas.map((f) => f.id) } },
+      data: {
+        preparadaAt: ahora,
+        preparadaPor: actorId,
+        enviadaAt: ahora,
+        enviadaPor: actorId,
+        recibidaAt: ahora,
+        recibidaPor: actorId,
+        bodegaNovedad: null,
+        recepcionNovedad: null,
+        updatedBy: actorId,
+      },
+    });
+    for (const tipo of ['preparada', 'enviada', 'recibida'] as const)
+      await this.registrar(
+        tx,
+        filas.map((f) => f.id),
+        tipo,
+        actorId,
+        'Despacho de Bodega',
+      );
+    await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actorId);
+  }
+
+  /** Bodega rechazó el despacho: las herramientas vuelven a «sin solicitar» con el motivo, para que el Supervisor las ajuste y las pida de nuevo. */
+  async alRechazarBodega(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    actorId: string,
+    motivo: string,
+  ): Promise<void> {
+    const filas = await tx.ticketHerramienta.findMany({
+      where: { ticketId, solicitadaAt: { not: null }, recibidaAt: null },
+      select: { id: true },
+    });
+    if (!filas.length) return;
+    await tx.ticketHerramienta.updateMany({
+      where: { id: { in: filas.map((f) => f.id) } },
+      data: {
+        solicitadaAt: null,
+        solicitadaPor: null,
+        preparadaAt: null,
+        preparadaPor: null,
+        enviadaAt: null,
+        enviadaPor: null,
+        bodegaNovedad: `Bodega rechazó el despacho: ${motivo}`,
+        updatedBy: actorId,
+      },
+    });
+    await this.registrar(
+      tx,
+      filas.map((f) => f.id),
+      'preparada_con_novedad',
+      actorId,
+      motivo,
+    );
+    await this.requisitos.sincronizarDeHerramientas(tx, ticketId, actorId);
   }
 
   /** El Supervisor recibe la herramienta que Bodega le envió; con novedad queda detenida hasta resolverla. */
