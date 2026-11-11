@@ -1,12 +1,19 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
+  Max,
   MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
@@ -36,6 +43,35 @@ export class ConfirmarListadoDto {
   @IsBoolean() confirmado!: boolean;
 }
 
+export class ParteNuevaDto {
+  @IsOptional() @IsString() @MaxLength(20) item?: string;
+  @IsOptional() @IsString() @MaxLength(60) codigo?: string;
+  @IsString() @MinLength(1) @MaxLength(400) descripcion!: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10000) cantidadEsperada?: number;
+}
+
+export class NuevaHerramientaDto {
+  /** Sin código se genera uno. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  @Matches(/^\S+$/, { message: 'El código no puede llevar espacios' })
+  codigo?: string;
+  @IsString() @MinLength(1) @MaxLength(400) nombre!: string;
+  @IsUUID() categoriaId!: string;
+  @IsOptional() @IsString() @MaxLength(100) numeroSerie?: string;
+  @IsOptional() @IsString() @MaxLength(2000) nota?: string;
+  /** Existencia con la que se da de alta (saldo inicial). */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(1000000) stockInicial?: number;
+  @IsOptional() @IsUUID() bodegaId?: string;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(300)
+  @ValidateNested({ each: true })
+  @Type(() => ParteNuevaDto)
+  partes?: ParteNuevaDto[];
+}
+
 export class BuscarHerramientasDto {
   @IsOptional() @IsString() @MaxLength(100) q?: string;
 }
@@ -63,6 +99,31 @@ export class HerramientasController {
   @Get('tickets/:id/herramientas')
   detalle(@Param('id', ParseUUIDPipe) id: string) {
     return this.herramientas.detalle(id);
+  }
+
+  /** Las categorías de herramientas (con partes) en las que se puede dar de alta una nueva. */
+  @RequirePermission(P.FCR_OPERAR)
+  @Get('herramientas-categorias')
+  categorias() {
+    return this.herramientas.categoriasDeHerramienta();
+  }
+
+  /** Las bodegas donde puede nacer el saldo de una herramienta nueva. */
+  @RequirePermission(P.FCR_OPERAR)
+  @Get('herramientas-bodegas')
+  bodegas() {
+    return this.herramientas.bodegasParaAlta();
+  }
+
+  /** Da de alta una herramienta que no está en el inventario (con sus partes) y la agrega al ticket. */
+  @RequirePermission(P.FCR_OPERAR)
+  @Post('tickets/:id/herramientas/nueva')
+  crearNueva(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: NuevaHerramientaDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.herramientas.crearNueva(id, dto, actor);
   }
 
   @RequirePermission(P.FCR_OPERAR)

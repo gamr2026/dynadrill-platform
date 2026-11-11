@@ -28,6 +28,6 @@ import { PartesService } from './services/partes.service';
     PartesService,
     DespachosConsumer,
   ],
-  exports: [MovimientosService, ArticulosService],
+  exports: [MovimientosService, ArticulosService, PartesService],
 })
 export class InventarioModule {}

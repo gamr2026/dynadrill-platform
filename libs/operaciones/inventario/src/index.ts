@@ -12,4 +12,5 @@ export {
 } from './services/movimientos.service';
 export { DespachosConsumer } from './consumers/despachos.consumer';
 export { ArticulosService } from './services/articulos.service';
+export { PartesService } from './services/partes.service';
 export type { EntradaKardex } from './services/kardex';

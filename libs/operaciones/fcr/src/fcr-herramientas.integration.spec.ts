@@ -309,6 +309,11 @@ run(
         await admin.query('DELETE FROM msg_operaciones.inbox WHERE id = ANY($1::uuid[])', [
           eventos,
         ]);
+      // las herramientas dadas de alta en las pruebas dejaron su entrada en el kardex
+      await admin.query(
+        'DELETE FROM inventario.movimiento WHERE articulo_id IN (SELECT id FROM inventario.articulo WHERE categoria_id = ANY($1::uuid[]))',
+        [[CAT_HERRAMIENTAS, CAT_QUIMICA]],
+      );
       await admin.query('DELETE FROM inventario.articulo WHERE categoria_id = ANY($1::uuid[])', [
         [CAT_HERRAMIENTAS, CAT_QUIMICA],
       ]);
@@ -1156,6 +1161,99 @@ run(
         expect(vuelta).toMatchObject({ estado: 'seleccionada' });
         expect(JSON.stringify(vuelta)).toContain('Sin stock');
         await http().post(url(b.id, '/solicitar')).set(supervisor()).send({}).expect(201);
+      });
+
+      it('el Supervisor da de alta una herramienta que no está en el inventario, con sus partes y su serie, y queda en el ticket', async () => {
+        const t = await crear({ lineas: [] });
+        await avanzar(t.id, 'preparacion_herramientas').expect(201);
+        // las categorías ofrecidas son las que llevan partes (no la química)
+        const cats = (
+          await http()
+            .get('/api/operaciones/fcr/herramientas-categorias')
+            .set(supervisor())
+            .expect(200)
+        ).body as Array<{ id: string; nombre: string }>;
+        expect(cats.map((c) => c.id)).toContain(CAT_HERRAMIENTAS);
+        expect(cats.map((c) => c.id)).not.toContain(CAT_QUIMICA);
+        const codigo = `HF-NUEVA-${n}`;
+        const r = await http()
+          .post(url(t.id, '/nueva'))
+          .set(supervisor())
+          .send({
+            codigo,
+            nombre: 'Sarta de limpieza en tándem',
+            categoriaId: CAT_HERRAMIENTAS,
+            numeroSerie: 'DY-RT-777',
+            stockInicial: 3,
+            partes: [
+              { descripcion: 'Casing scraper 7"', cantidadEsperada: 1 },
+              { codigo: 'CEP-01', descripcion: 'Cepillo', cantidadEsperada: 2 },
+            ],
+          })
+          .expect(201);
+        const h = r.body.herramientas.find((x: { codigo: string }) => x.codigo === codigo);
+        expect(h).toMatchObject({
+          nombre: 'Sarta de limpieza en tándem',
+          numeroSerie: 'DY-RT-777',
+        });
+        // quedó en Inventario, en la categoría de herramientas, con sus partes numeradas
+        const art = (
+          await admin.query('SELECT id, categoria_id FROM inventario.articulo WHERE codigo = $1', [
+            codigo,
+          ])
+        ).rows[0];
+        expect(art.categoria_id).toBe(CAT_HERRAMIENTAS);
+        const partes = (
+          await admin.query(
+            'SELECT orden, item, codigo, descripcion, cantidad_esperada FROM inventario.articulo_parte WHERE articulo_id = $1 ORDER BY orden',
+            [art.id],
+          )
+        ).rows;
+        expect(partes).toHaveLength(2);
+        expect(partes[0]).toMatchObject({ orden: 1, item: '1', descripcion: 'Casing scraper 7"' });
+        expect(partes[1]).toMatchObject({ orden: 2, codigo: 'CEP-01', cantidad_esperada: 2 });
+        // el stock quedó como entrada en el kardex (ajuste por conteo: la herramienta ya existía) y la búsqueda lo muestra
+        const bodegas = (
+          await http()
+            .get('/api/operaciones/fcr/herramientas-bodegas')
+            .set(supervisor())
+            .expect(200)
+        ).body as Array<{ id: string; nombre: string }>;
+        expect(bodegas.length).toBeGreaterThan(0);
+        const buscada = (
+          await http()
+            .get(`/api/operaciones/fcr/herramientas-disponibles?q=${codigo}`)
+            .set(supervisor())
+            .expect(200)
+        ).body;
+        expect(buscada[0]).toMatchObject({ codigo, existencia: 3 });
+        const mov = await admin.query(
+          "SELECT m.cantidad::int AS cantidad FROM inventario.movimiento m JOIN inventario.motivo_movimiento mo ON mo.id = m.motivo_id WHERE m.articulo_id = $1 AND mo.tipo = 'entrada'",
+          [art.id],
+        );
+        expect(mov.rows).toEqual([{ cantidad: 3 }]);
+        // sin código se genera uno; una categoría que no lleva partes se rechaza; un código repetido también
+        const sinCodigo = await http()
+          .post(url(t.id, '/nueva'))
+          .set(supervisor())
+          .send({ nombre: 'Herramienta sin código', categoriaId: CAT_HERRAMIENTAS })
+          .expect(201);
+        expect(
+          sinCodigo.body.herramientas.some((x: { codigo: string }) => x.codigo.startsWith('HF-')),
+        ).toBe(true);
+        await http()
+          .post(url(t.id, '/nueva'))
+          .set(supervisor())
+          .send({ nombre: 'Química', categoriaId: CAT_QUIMICA })
+          .expect(400);
+        await http()
+          .post(url(t.id, '/nueva'))
+          .set(supervisor())
+          .send({ codigo, nombre: 'Repetida', categoriaId: CAT_HERRAMIENTAS })
+          .expect(409);
+        // con el listado confirmado no se agrega nada más
+        await http().post(url(t.id, '/solicitar')).set(supervisor()).send({}).expect(201);
+        await admin.query('DELETE FROM inventario.articulo_parte WHERE articulo_id = $1', [art.id]);
       });
 
       it('un ticket cerrado solo se consulta', async () => {

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { currentTraceparent, type AuthUser } from '@dyn/common';
-import { MovimientosService } from '@dyn/inventario';
+import { ArticulosService, MovimientosService, PartesService } from '@dyn/inventario';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { REQ } from '../catalog/sembrar-pasos';
@@ -39,6 +39,25 @@ const texto = (v: string | undefined | null, que: string): string => {
   return t;
 };
 
+/** Lo que se pide para dar de alta una herramienta nueva con sus partes. */
+export interface NuevaHerramienta {
+  codigo?: string;
+  nombre: string;
+  categoriaId: string;
+  numeroSerie?: string;
+  nota?: string;
+  /** Existencia con la que se da de alta (saldo inicial en el kardex); sin ella, 0. */
+  stockInicial?: number;
+  /** Bodega del saldo inicial; sin ella, la Matriz. */
+  bodegaId?: string;
+  partes?: Array<{
+    item?: string;
+    codigo?: string | null;
+    descripcion: string;
+    cantidadEsperada?: number;
+  }>;
+}
+
 /**
  * Herramientas del ticket de FCR. Nacen de las líneas del pedido (precarga) o las agrega el Supervisor a mano; el Supervisor las
  * solicita a Bodega, Bodega las prepara y las envía, y el Supervisor las recibe. Cada paso lo marca quien lo hace y queda en la
@@ -53,6 +72,8 @@ export class HerramientasService {
     private readonly precarga: PrecargaService,
     private readonly requisitos: RequisitosService,
     private readonly inventario: MovimientosService,
+    private readonly articulos: ArticulosService,
+    private readonly partes: PartesService,
   ) {}
 
   // ── lectura ─────────────────────────────────────────────────────────────────────────────────
@@ -163,6 +184,113 @@ export class HerramientasService {
       categoria: a.categoria.nombre,
       existencia: existencias[i],
     }));
+  }
+
+  /** Las bodegas habilitadas, para el saldo inicial de una herramienta nueva (la Matriz primero). */
+  async bodegasParaAlta() {
+    const filas = await this.prisma.$queryRaw<Array<{ id: string; nombre: string }>>`
+      SELECT id::text AS id, nombre FROM catalogos.bodega WHERE habilitado ORDER BY nombre`;
+    return filas.sort(
+      (a, b) => Number(/matriz/i.test(b.nombre)) - Number(/matriz/i.test(a.nombre)),
+    );
+  }
+
+  /** Las categorías de Inventario que cuentan como herramienta (llevan partes): para dar de alta una nueva. */
+  async categoriasDeHerramienta() {
+    return this.prisma.invCategoria.findMany({
+      where: { llevaPartes: true },
+      orderBy: { nombre: 'asc' },
+      select: { id: true, nombre: true },
+    });
+  }
+
+  /**
+   * El Supervisor da de alta una herramienta que no está en el inventario, con sus partes si las tiene, y la agrega al ticket de una vez. Se crea en
+   * Inventario (categoría con partes) para que Bodega y el checklist de inspección la reconozcan. Sin código, se genera uno.
+   */
+  async crearNueva(ticketId: string, dto: NuevaHerramienta, actor: AuthUser) {
+    // las mismas reglas que agregar una herramienta: Supervisor del ticket y listado todavía abierto
+    await this.prisma.$transaction(async (tx) => {
+      const t = await this.tickets.cargarEnTx(tx, ticketId);
+      this.exigirSupervisor(t, actor);
+      if (t.pasoCodigo === PASO_PREPARACION) await this.exigirListadoAbierto(tx, ticketId);
+    });
+    const categoria = await this.prisma.invCategoria.findUnique({
+      where: { id: dto.categoriaId },
+      select: { id: true, llevaPartes: true },
+    });
+    if (!categoria?.llevaPartes) {
+      throw new BadRequestException(
+        'Elija una categoría de herramientas (las que llevan partes) para la nueva herramienta',
+      );
+    }
+    const unidad =
+      (await this.prisma.catUnidadMedida.findFirst({
+        where: { habilitado: true, nombre: { equals: 'Unidad', mode: 'insensitive' } },
+        select: { id: true },
+      })) ??
+      (await this.prisma.catUnidadMedida.findFirst({
+        where: { habilitado: true },
+        orderBy: { nombre: 'asc' },
+        select: { id: true },
+      }));
+    if (!unidad)
+      throw new ConflictException('No hay una unidad de medida habilitada en Inventario');
+    const codigo = dto.codigo?.trim() || `HF-${Date.now().toString(36).toUpperCase()}`;
+    const quien = { id: actor.id, roleCode: actor.roleCode };
+    const articulo = await this.articulos.crear(
+      {
+        codigo,
+        nombre: dto.nombre.trim(),
+        categoriaId: categoria.id,
+        unidadStockId: unidad.id,
+        nota: dto.nota?.trim() || undefined,
+      },
+      quien,
+    );
+    for (const [i, p] of (dto.partes ?? []).entries()) {
+      await this.partes.crear(
+        articulo.id,
+        {
+          item: p.item?.trim() || String(i + 1),
+          codigo: p.codigo?.trim() || null,
+          descripcion: p.descripcion.trim(),
+          cantidadEsperada: p.cantidadEsperada ?? 1,
+        },
+        actor.id,
+      );
+    }
+    // la existencia con la que nace, como saldo inicial en el kardex (Bodega la necesita para registrar su salida al despachar)
+    const stock = Math.floor(Number(dto.stockInicial ?? 0));
+    if (stock > 0) {
+      const bodega = dto.bodegaId ?? (await this.bodegasParaAlta())[0]?.id;
+      if (!bodega)
+        throw new ConflictException('No hay una bodega habilitada para el saldo inicial');
+      const [motivo] = await this.prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT id::text AS id FROM inventario.motivo_movimiento WHERE nombre = 'Ajuste por conteo físico (sobrante)' LIMIT 1`;
+      if (!motivo)
+        throw new ConflictException('Falta el motivo de entrada por conteo físico en Inventario');
+      await this.inventario.registrarManual(
+        {
+          articuloId: articulo.id,
+          bodegaId: bodega,
+          motivoId: motivo.id,
+          cantidad: stock,
+          observacion: 'Saldo inicial al dar de alta la herramienta desde un ticket de FCR',
+        },
+        quien,
+      );
+    }
+    const detalle = await this.agregar(ticketId, articulo.id, actor);
+    const serie = dto.numeroSerie?.trim();
+    if (serie) {
+      await this.prisma.ticketHerramienta.updateMany({
+        where: { ticketId, articuloId: articulo.id },
+        data: { numeroSerie: serie, updatedBy: actor.id },
+      });
+      return this.detalle(ticketId);
+    }
+    return detalle;
   }
 
   // ── del Supervisor ──────────────────────────────────────────────────────────────────────────
