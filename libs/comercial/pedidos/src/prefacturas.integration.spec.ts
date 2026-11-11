@@ -1323,14 +1323,23 @@ run('prefactura (base de datos real)', () => {
       expect(await estadoDe(id)).toBe('ticket_firmado');
     });
 
-    it('sin documentación de al menos un día no se firma, ni con un archivo que no es de este módulo', async () => {
+    it('sin la documentación de todos los días no se firma, ni con un archivo que no es de este módulo', async () => {
       const incompleto = await pedido();
       const r = await http()
         .post(`/api/comercial/pedidos/${incompleto}/prefactura/firma-company-man`)
         .set(sup())
         .send(firma)
         .expect(422);
-      expect(r.body.message).toContain('al menos un día');
+      expect(r.body.message).toContain('Falta:');
+      // con un solo día no alcanza para firmar (sí para generar la prefactura): el día siguiente llegaría a un pedido ya firmado
+      const parcial = await pedido();
+      await doc(job(1), parcial).expect(201);
+      const unDia = await http()
+        .post(`/api/comercial/pedidos/${parcial}/prefactura/firma-company-man`)
+        .set(sup())
+        .send(firma)
+        .expect(422);
+      expect(unDia.body.message).toContain('todos los días');
       const id = await pedidoListo();
       await http()
         .post(`/api/comercial/pedidos/${id}/prefactura/firma-company-man`)

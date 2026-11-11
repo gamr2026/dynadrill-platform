@@ -402,10 +402,12 @@ export class PrefacturasService {
       select: { estado: true },
     });
     if (!pedido) throw new NotFoundException('El pedido no existe');
+    // la firma del Company Man cierra el pedido a nuevos documentos: se pide con la documentación de TODOS los días (a diferencia de generar la
+    // prefactura, que basta con un día). Si no, el Reporte Job del día siguiente llegaría a un pedido ya firmado y se rechazaría.
     const avance = await this.documentos.avance(pedidoId);
-    if (!avance.suficienteParaPrefactura) {
+    if (!avance.completo) {
       throw new UnprocessableEntityException({
-        message: SIN_DOCUMENTACION,
+        message: `La documentación de respaldo está incompleta. Falta: ${avance.pendientes.join(', ')}. La firma del Company Man se registra con la documentación de todos los días del servicio.`,
         code: 'DOCUMENTACION_INCOMPLETA',
       });
     }
