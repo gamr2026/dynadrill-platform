@@ -199,7 +199,7 @@ export class BitacoraService {
   }
 
   /**
-   * `bitacora_enviada` se cumple cuando TODOS los días del servicio están enviados a Facturación (un día que Facturación corrigió y dejó sin
+   * `bitacora_enviada` se cumple cuando TODOS los días del servicio hasta hoy están enviados a Facturación (un día que Facturación corrigió y dejó sin
    * actividades ya no se espera). Sin fechas de servicio basta con un día enviado. Si falta algún día (se amplió el servicio, se reabrió uno),
    * el requisito vuelve a pendiente.
    */
@@ -220,10 +220,15 @@ export class BitacoraService {
     const alMenosUno = dias.some((d) => d.enviadaAt !== null);
     let completo = alMenosUno;
     if (t?.fechaInicioServicio && t.fechaFinServicio) {
+      // solo se espera hasta hoy (hora de Ecuador): los días que aún no llegan no se pueden enviar
+      const hoyMs = Date.parse(
+        `${new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10)}T00:00:00.000Z`,
+      );
+      const hasta = Math.min(t.fechaFinServicio.getTime(), hoyMs);
       const esperados: string[] = [];
       for (
         let ms = t.fechaInicioServicio.getTime();
-        ms <= t.fechaFinServicio.getTime() && esperados.length < 366;
+        ms <= hasta && esperados.length < 366;
         ms += 86_400_000
       )
         esperados.push(new Date(ms).toISOString().slice(0, 10));
