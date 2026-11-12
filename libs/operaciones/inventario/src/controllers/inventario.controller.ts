@@ -23,6 +23,7 @@ import {
   CrearArticuloDto,
   ListarArticulosDto,
   ListarDespachosDto,
+  ListarDevolucionesPendientesDto,
   ListarMotivosDto,
   ListarMovimientosDto,
   ParteDto,
@@ -34,6 +35,7 @@ import {
 } from '../dto/inventario.dto';
 import { ArticulosService } from '../services/articulos.service';
 import { DespachosService } from '../services/despachos.service';
+import { DevolucionesPendientesService } from '../services/devoluciones-pendientes.service';
 import { CatalogosService } from '../services/catalogos.service';
 import { MinimosService } from '../services/minimos.service';
 import { MovimientosService } from '../services/movimientos.service';
@@ -54,6 +56,7 @@ export class InventarioController {
     private readonly partes: PartesService,
     private readonly catalogos: CatalogosService,
     private readonly despachos: DespachosService,
+    private readonly devolucionesPendientes: DevolucionesPendientesService,
   ) {}
 
   // --- artículos ---
@@ -223,6 +226,23 @@ export class InventarioController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.despachos.rechazar(id, dto, actor);
+  }
+
+  // --- devoluciones pendientes de una anulación de pedido (lo que no pudo volver a bodega) ---
+  @RequirePermission(P.DESPACHOS_VER)
+  @Get('devoluciones-pendientes')
+  listarDevolucionesPendientes(@Query() q: ListarDevolucionesPendientesDto) {
+    return this.devolucionesPendientes.listar(q);
+  }
+
+  @RequirePermission(P.DESPACHOS_GESTIONAR)
+  @Post('devoluciones-pendientes/:id/resolver')
+  @HttpCode(200)
+  resolverDevolucionPendiente(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.devolucionesPendientes.resolver(id, actor);
   }
 
   // --- partes de una herramienta ---

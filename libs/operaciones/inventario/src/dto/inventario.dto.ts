@@ -158,6 +158,13 @@ export class ListarDespachosDto {
   @IsOptional() @IsUUID() pedidoId?: string;
 }
 
+/** Devoluciones pendientes de Bodega (lo que una anulación de pedido no pudo devolver): por omisión, las que siguen abiertas. */
+export class ListarDevolucionesPendientesDto {
+  @IsOptional()
+  @IsIn(['pendiente', 'resuelta'])
+  estado?: 'pendiente' | 'resuelta';
+}
+
 /** Bodega despacha: documento de respaldo (obligatorio) y, si hay químicos, la hoja MSDS; ambos subidos antes a `archivos`. */
 export class RealizarDespachoDto {
   @IsUUID() archivoRespaldoId!: string;

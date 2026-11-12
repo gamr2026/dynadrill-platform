@@ -30,6 +30,8 @@ import { normalizarCodigos } from '../prisma/normalizar-codigos';
 import { sembrarCatalogos } from './catalog/sembrar-catalogos';
 import { DespachosConsumer } from './consumers/despachos.consumer';
 import { InventarioModule } from './inventario.module';
+import { Prisma } from './generated/client';
+import { repartirEnProporcion } from './services/kardex';
 import { MovimientosService } from './services/movimientos.service';
 import { PrismaService } from './prisma/prisma.service';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -59,6 +61,8 @@ const BODEGA_A = { id: uuidv7(), nombre: `Bodega IT-A ${n}` };
 const BODEGA_B = { id: uuidv7(), nombre: `Bodega IT-B ${n}` };
 const TICKET_A = uuidv7();
 const TICKET_B = uuidv7();
+const TICKETS_ANULACION = [uuidv7(), uuidv7(), uuidv7(), uuidv7()];
+const [TICKET_ANUL_1, TICKET_ANUL_2, TICKET_ANUL_3, TICKET_ANUL_4] = TICKETS_ANULACION;
 const ARCHIVO_RESPALDO = uuidv7();
 const ARCHIVO_MSDS = uuidv7();
 const PEDIDO_DESPACHO = uuidv7();
@@ -157,7 +161,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
 
   beforeAll(async () => {
     await sembrarMaestros(admin, MAESTROS);
-    for (const t of [TICKET_A, TICKET_B]) {
+    for (const t of [TICKET_A, TICKET_B, ...TICKETS_ANULACION]) {
       await admin.query(
         "INSERT INTO pumping.ticket (id, pedido_id, pedido_codigo, paso_codigo) VALUES ($1, $2, $3, 'revision_inicial')",
         [t, uuidv7(), `PED-INV${n}`],
@@ -252,9 +256,13 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     );
     await admin.query(
       'DELETE FROM inventario.consumo_ticket WHERE ticket_pumping_id = ANY($1::uuid[])',
-      [[TICKET_A, TICKET_B]],
+      [[TICKET_A, TICKET_B, ...TICKETS_ANULACION]],
     );
     if (articulos.length) {
+      await admin.query(
+        'DELETE FROM inventario.devolucion_pendiente WHERE articulo_id = ANY($1::uuid[])',
+        [articulos],
+      );
       await admin.query('DELETE FROM inventario.stock_minimo WHERE articulo_id = ANY($1::uuid[])', [
         articulos,
       ]);
@@ -280,7 +288,7 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
     );
     await admin.query('DELETE FROM inventario.despacho WHERE pedido_id = $1', [PEDIDO_DESPACHO]);
     await admin.query('DELETE FROM pumping.ticket WHERE id = ANY($1::uuid[])', [
-      [TICKET_A, TICKET_B],
+      [TICKET_A, TICKET_B, ...TICKETS_ANULACION],
     ]);
     await admin.query('DELETE FROM archivos.archivo WHERE id = ANY($1::uuid[])', [
       [ARCHIVO_RESPALDO, ARCHIVO_MSDS],
@@ -1306,6 +1314,301 @@ run('Inventario: catálogo y kardex (base de datos real)', () => {
       );
       expect(rs.filter((r) => r.status === 'fulfilled')).toHaveLength(6);
       expect(await movimientosSvc.stockDe(a.id)).toBe(0);
+    });
+  });
+
+  describe('anulación del pedido: lo que el ticket tenía a su cargo vuelve a bodega (lo hace el sistema)', () => {
+    const actor = { id: BODEGUERO.id, roleCode: 'bodeguero' as RoleCode };
+    const enTx = <T>(
+      f: (tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0]) => Promise<T>,
+    ) => prisma.$transaction((tx) => f(tx));
+    const D = (v: number | string) => new Prisma.Decimal(v);
+    const URL_PENDIENTES = '/api/operaciones/inventario/devoluciones-pendientes';
+
+    /** Un químico con stock en las bodegas dadas, del que ya salió todo para el ticket. */
+    const conSalida = async (
+      sufijo: string,
+      ticket: string,
+      salidas: Array<{ bodega: string; cantidad: number }>,
+    ) => {
+      const a = await crearArticulo(sufijo);
+      for (const s of salidas) {
+        await mover(a.id, s.bodega, ids.motivoCompra, s.cantidad);
+        await enTx((tx) =>
+          movimientosSvc.registrarSalida(
+            tx,
+            { ticketPumpingId: ticket, articuloId: a.id, bodegaId: s.bodega, cantidad: s.cantidad },
+            actor,
+          ),
+        );
+      }
+      return a;
+    };
+    const consumir = (ticket: string, articuloId: string, cantidad: number) =>
+      enTx((tx) =>
+        movimientosSvc.registrarConsumo(
+          tx,
+          { ticketPumpingId: ticket, articuloId, cantidad },
+          actor,
+        ),
+      );
+    const habilitarBodega = (habilitado: boolean) =>
+      admin.query('UPDATE catalogos.bodega SET habilitado = $2 WHERE id = $1', [
+        BODEGA_B.id,
+        habilitado,
+      ]);
+    const devolucionesDe = async (articuloId: string) =>
+      (
+        await admin.query(
+          `SELECT bodega_id, cantidad::float8 AS cantidad, responsable_id, a_pedido_de_id, observacion
+             FROM inventario.movimiento WHERE articulo_id = $1 AND origen = 'devolucion_anulacion' ORDER BY secuencia`,
+          [articuloId],
+        )
+      ).rows as Array<{
+        bodega_id: string;
+        cantidad: number;
+        responsable_id: string | null;
+        a_pedido_de_id: string | null;
+        observacion: string | null;
+      }>;
+    const pendientesDe = async (articuloId: string) =>
+      (
+        await admin.query(
+          'SELECT id, bodega_id, cantidad::float8 AS cantidad, resuelta_at, resuelta_por, movimiento_id FROM inventario.devolucion_pendiente WHERE articulo_id = $1 ORDER BY created_at, id',
+          [articuloId],
+        )
+      ).rows as Array<{
+        id: string;
+        bodega_id: string;
+        cantidad: number;
+        resuelta_at: Date | null;
+        resuelta_por: string | null;
+        movimiento_id: string | null;
+      }>;
+    const resolver = (id: string, cabecera: { Authorization: string }) =>
+      http().post(`${URL_PENDIENTES}/${id}/resolver`).set(cabecera);
+
+    it('sin actor ni rol: el sistema devuelve lo pendiente, sin autor, con quien anuló como referencia y el motivo "Pedido anulado"; repetirlo no devuelve dos veces', async () => {
+      const a = await conSalida('A1', TICKET_ANUL_1, [{ bodega: BODEGA_A.id, cantidad: 10 }]);
+      await consumir(TICKET_ANUL_1, a.id, 3);
+      expect(await movimientosSvc.stockDe(a.id)).toBe(0);
+
+      const r = await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_1, VENTAS.id);
+      expect(r).toEqual([{ articuloId: a.id, bodegaId: BODEGA_A.id, devuelta: 7, pendiente: 0 }]);
+      expect(await movimientosSvc.stockDe(a.id)).toBe(7);
+      const filas = await devolucionesDe(a.id);
+      expect(filas).toHaveLength(1);
+      expect(filas[0]).toMatchObject({
+        cantidad: 7,
+        responsable_id: null,
+        a_pedido_de_id: VENTAS.id,
+        observacion: 'Pedido anulado',
+      });
+      const [b] = await movimientosSvc.balanceDeTicket(TICKET_ANUL_1, a.id);
+      expect([b.asignada, b.usada, b.devuelta, b.pendiente].map(Number)).toEqual([10, 3, 7, 0]);
+      // el hecho se publica como cualquier devolución, sin actor
+      const ev = (
+        await admin.query(
+          "SELECT datos FROM msg_operaciones.outbox WHERE tipo = 'operaciones.inventario.devolucion_registrada' AND datos->'data'->>'articuloId' = $1",
+          [a.id],
+        )
+      ).rows;
+      expect(ev).toHaveLength(1);
+      expect(ev[0].datos.data).toMatchObject({ origen: 'devolucion_anulacion', cantidad: 7 });
+      expect(ev[0].datos.actor ?? null).toBeNull();
+
+      // el consumidor de la anulación se reintenta: el resultado es el mismo y no se devuelve otra vez
+      expect(await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_1, VENTAS.id)).toEqual(r);
+      expect(await movimientosSvc.stockDe(a.id)).toBe(7);
+      expect(await devolucionesDe(a.id)).toHaveLength(1);
+      expect(await pendientesDe(a.id)).toHaveLength(0);
+    });
+
+    it('sin saber quién anuló también devuelve; y la base solo admite el autor vacío en este origen', async () => {
+      const a = await conSalida('A2', TICKET_ANUL_1, [{ bodega: BODEGA_A.id, cantidad: 2 }]);
+      await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_1, null);
+      expect(await devolucionesDe(a.id)).toEqual([
+        expect.objectContaining({ cantidad: 2, responsable_id: null, a_pedido_de_id: null }),
+      ]);
+      const insertar = (origen: string, responsable: string | null, aPedidoDe: string | null) =>
+        admin.query(
+          `INSERT INTO inventario.movimiento (id, articulo_id, bodega_id, tipo, origen, motivo_id, cantidad, saldo_resultante, fecha, responsable_id, a_pedido_de_id, ticket_pumping_id)
+           SELECT $1::uuid, $2::uuid, $3::uuid, m.tipo, m.origen, m.id, 1, 100, now(), $4::uuid, $5::uuid, $6::uuid
+             FROM inventario.motivo_movimiento m WHERE m.origen = $7::inventario.origen_movimiento LIMIT 1`,
+          [
+            uuidv7(),
+            a.id,
+            BODEGA_A.id,
+            responsable,
+            aPedidoDe,
+            origen === 'compra' ? null : TICKET_ANUL_1,
+            origen,
+          ],
+        );
+      // otro origen sin autor, la devolución de anulación con autor, o la referencia fuera de su origen: la base lo rechaza
+      await expect(insertar('compra', null, null)).rejects.toThrow(/movimiento_autor_check/);
+      await expect(insertar('devolucion_anulacion', BODEGUERO.id, null)).rejects.toThrow(
+        /movimiento_autor_check/,
+      );
+      await expect(insertar('compra', BODEGUERO.id, VENTAS.id)).rejects.toThrow(
+        /movimiento_a_pedido_de_check/,
+      );
+    });
+
+    it('el reparto es proporcional a lo que cada bodega tiene en poder del ticket, en milésimas y sin pasar de lo que tiene', () => {
+      const texto = (r: ReturnType<typeof repartirEnProporcion>) =>
+        r.map((x) => [x.bodegaId, x.cantidad.toString()]);
+      const A6B4 = [
+        { bodegaId: 'A', enPoder: D(6) },
+        { bodegaId: 'B', enPoder: D(4) },
+      ];
+      expect(texto(repartirEnProporcion(D(7), A6B4))).toEqual([
+        ['A', '4.2'],
+        ['B', '2.8'],
+      ]);
+      // el redondeo no pierde ni inventa nada
+      const tres = repartirEnProporcion(
+        D(1),
+        ['A', 'B', 'C'].map((bodegaId) => ({ bodegaId, enPoder: D(5) })),
+      );
+      expect(tres.reduce((t, x) => t.plus(x.cantidad), D(0)).toString()).toBe('1');
+      // una bodega que ya recibió todo lo suyo no recibe más
+      expect(
+        texto(
+          repartirEnProporcion(D(3), [
+            { bodegaId: 'A', enPoder: D(0) },
+            { bodegaId: 'B', enPoder: D(5) },
+          ]),
+        ),
+      ).toEqual([['B', '3']]);
+      // nunca más de lo que hay en poder del ticket
+      expect(
+        texto(
+          repartirEnProporcion(D(10), [
+            { bodegaId: 'A', enPoder: D(2) },
+            { bodegaId: 'B', enPoder: D(3) },
+          ]),
+        ),
+      ).toEqual([
+        ['A', '2'],
+        ['B', '3'],
+      ]);
+      expect(repartirEnProporcion(D(0), A6B4)).toEqual([]);
+    });
+
+    it('un químico que salió de dos bodegas vuelve a las dos, en proporción a lo que cada una entregó', async () => {
+      const a = await conSalida('A3', TICKET_ANUL_2, [
+        { bodega: BODEGA_A.id, cantidad: 6 },
+        { bodega: BODEGA_B.id, cantidad: 4 },
+      ]);
+      await consumir(TICKET_ANUL_2, a.id, 3); // quedan 7 a cargo del ticket: 4,2 a la bodega A y 2,8 a la B
+      const detalle = (await movimientosSvc.quimicosDeTicket(TICKET_ANUL_2)).find(
+        (q) => q.articuloId === a.id,
+      );
+      expect(detalle?.bodegas.map((b) => [b.bodegaId, b.salida, b.devuelta, b.enPoder])).toEqual(
+        expect.arrayContaining([
+          [BODEGA_A.id, 6, 0, 6],
+          [BODEGA_B.id, 4, 0, 4],
+        ]),
+      );
+
+      const r = await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_2, VENTAS.id);
+      expect(r).toHaveLength(2);
+      expect(r).toEqual(
+        expect.arrayContaining([
+          { articuloId: a.id, bodegaId: BODEGA_A.id, devuelta: 4.2, pendiente: 0 },
+          { articuloId: a.id, bodegaId: BODEGA_B.id, devuelta: 2.8, pendiente: 0 },
+        ]),
+      );
+      expect(await movimientosSvc.stockDe(a.id, BODEGA_A.id)).toBe(4.2);
+      expect(await movimientosSvc.stockDe(a.id, BODEGA_B.id)).toBe(2.8);
+      const [b] = await movimientosSvc.balanceDeTicket(TICKET_ANUL_2, a.id);
+      expect(Number(b.pendiente)).toBe(0);
+    });
+
+    it('si la devolución falla queda una sola devolución pendiente; reintentar no la duplica ni devuelve nada; Bodega la resuelve y el stock se mueve', async () => {
+      const a = await conSalida('A4', TICKET_ANUL_3, [{ bodega: BODEGA_B.id, cantidad: 5 }]);
+      await habilitarBodega(false);
+      try {
+        const r = await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_3, VENTAS.id);
+        expect(r).toEqual([{ articuloId: a.id, bodegaId: BODEGA_B.id, devuelta: 0, pendiente: 5 }]);
+        expect(await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_3, VENTAS.id)).toEqual(r);
+        const filas = await pendientesDe(a.id);
+        expect(filas).toHaveLength(1);
+        expect(filas[0]).toMatchObject({ bodega_id: BODEGA_B.id, cantidad: 5, resuelta_at: null });
+        expect(await movimientosSvc.stockDe(a.id)).toBe(0);
+        expect(await devolucionesDe(a.id)).toHaveLength(0);
+
+        // Bodega la ve en su lista, con el artículo, la bodega y el motivo; quien no gestiona despachos ni la ve ni la resuelve
+        const lista = await http().get(URL_PENDIENTES).set(bodeguero()).expect(200);
+        const fila = (lista.body as Array<Record<string, unknown>>).find(
+          (x) => x['id'] === filas[0].id,
+        );
+        expect(fila).toMatchObject({
+          ticketId: TICKET_ANUL_3,
+          articulo: { id: a.id, codigo: a.codigo },
+          bodega: { id: BODEGA_B.id },
+          cantidad: 5,
+          resueltaAt: null,
+        });
+        expect(String(fila?.['motivo'])).toMatch(/bodega/i);
+        await http().get(URL_PENDIENTES).set(lector()).expect(403);
+        await resolver(filas[0].id, lector()).expect(403);
+        // con la bodega aún inhabilitada no se puede resolver y la devolución sigue abierta
+        await resolver(filas[0].id, bodeguero()).expect(409);
+        expect((await pendientesDe(a.id))[0].resuelta_at).toBeNull();
+      } finally {
+        await habilitarBodega(true);
+      }
+
+      const [abierta] = await pendientesDe(a.id);
+      const res = await resolver(abierta.id, bodeguero()).expect(200);
+      expect(res.body).toMatchObject({
+        cantidad: 5,
+        devuelta: 5,
+        resueltaPor: { id: BODEGUERO.id },
+      });
+      expect(await movimientosSvc.stockDe(a.id, BODEGA_B.id)).toBe(5);
+      const [cerrada] = await pendientesDe(a.id);
+      expect(cerrada.resuelta_at).not.toBeNull();
+      expect(cerrada.resuelta_por).toBe(BODEGUERO.id);
+      const mov = await admin.query(
+        'SELECT origen, responsable_id FROM inventario.movimiento WHERE id = $1',
+        [cerrada.movimiento_id],
+      );
+      expect(mov.rows[0]).toEqual({ origen: 'devolucion_ticket', responsable_id: BODEGUERO.id });
+      const [b] = await movimientosSvc.balanceDeTicket(TICKET_ANUL_3, a.id);
+      expect(Number(b.pendiente)).toBe(0);
+      // resolverla otra vez es un conflicto y no mueve nada
+      await resolver(cerrada.id, bodeguero()).expect(409);
+      expect(await movimientosSvc.stockDe(a.id, BODEGA_B.id)).toBe(5);
+      // ya no está entre las abiertas; sí entre las resueltas
+      const abiertas = await http().get(URL_PENDIENTES).set(bodeguero()).expect(200);
+      expect((abiertas.body as Array<{ id: string }>).some((x) => x.id === cerrada.id)).toBe(false);
+      const resueltas = await http()
+        .get(`${URL_PENDIENTES}?estado=resuelta`)
+        .set(bodeguero())
+        .expect(200);
+      expect((resueltas.body as Array<{ id: string }>).some((x) => x.id === cerrada.id)).toBe(true);
+    });
+
+    it('si el problema se arregla y la anulación se reintenta, devuelve ella misma y cierra la devolución pendiente sin duplicar', async () => {
+      const a = await conSalida('A5', TICKET_ANUL_4, [{ bodega: BODEGA_B.id, cantidad: 3 }]);
+      await habilitarBodega(false);
+      try {
+        await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_4, VENTAS.id);
+      } finally {
+        await habilitarBodega(true);
+      }
+      expect(await pendientesDe(a.id)).toHaveLength(1);
+      const r = await movimientosSvc.devolverPorAnulacion(TICKET_ANUL_4, VENTAS.id);
+      expect(r).toEqual([{ articuloId: a.id, bodegaId: BODEGA_B.id, devuelta: 3, pendiente: 0 }]);
+      expect(await movimientosSvc.stockDe(a.id, BODEGA_B.id)).toBe(3);
+      const filas = await pendientesDe(a.id);
+      expect(filas).toHaveLength(1);
+      expect(filas[0].resuelta_at).not.toBeNull();
+      expect(filas[0].resuelta_por).toBeNull(); // se resolvió sola
+      expect(await devolucionesDe(a.id)).toHaveLength(1);
     });
   });
 

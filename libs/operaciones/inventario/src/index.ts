@@ -4,6 +4,7 @@ export {
   MovimientosService,
   type ActorInventario,
   type ConsumoDeTicket,
+  type DevolucionPorAnulacion,
   type EntradaManual,
   type MovimientoDeDespacho,
   type MovimientoDeTicket,

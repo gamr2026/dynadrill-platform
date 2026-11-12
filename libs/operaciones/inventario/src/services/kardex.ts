@@ -8,7 +8,10 @@ export interface EntradaKardex {
   bodegaId: string;
   motivoId: string;
   cantidad: Prisma.Decimal | number | string;
-  responsableId: string;
+  /** Vacío solo en la devolución por anulación, que la registra el sistema (lo exige la base). */
+  responsableId: string | null;
+  /** Solo en la devolución por anulación: la cuenta que anuló el pedido, si se sabe. */
+  aPedidoDeId?: string | null;
   /** Por defecto, ahora. No puede ser futura. */
   fecha?: Date;
   observacion?: string | null;
@@ -111,6 +114,7 @@ export async function registrarEnKardex(tx: Prisma.TransactionClient, e: Entrada
       fecha,
       observacion: e.observacion?.trim() || null,
       responsableId: e.responsableId,
+      aPedidoDeId: e.aPedidoDeId ?? null,
       ticketPumpingId: e.ticketPumpingId ?? null,
       despachoId: e.despachoId ?? null,
     },
@@ -159,7 +163,7 @@ export async function balanceDeTicket(
     const suma = (origen: string) =>
       movs.find((m) => m.articuloId === id && m.origen === origen)?._sum.cantidad ?? cero;
     const asignada = suma('salida_ticket');
-    const devuelta = suma('devolucion_ticket');
+    const devuelta = suma('devolucion_ticket').plus(suma('devolucion_anulacion'));
     const usada = consumos.find((c) => c.articuloId === id)?._sum.cantidad ?? cero;
     return {
       articuloId: id,
@@ -169,4 +173,77 @@ export async function balanceDeTicket(
       pendiente: asignada.minus(usada).minus(devuelta),
     };
   });
+}
+
+/** Lo que un ticket tiene todavía en poder suyo, de lo que salió de cada bodega (salidas − devoluciones a esa bodega). */
+export interface EnPoderPorBodega {
+  articuloId: string;
+  bodegaId: string;
+  salida: Prisma.Decimal;
+  devuelta: Prisma.Decimal;
+  enPoder: Prisma.Decimal;
+}
+
+/**
+ * Por artículo y bodega: cuánto salió para el ticket, cuánto volvió a esa bodega y cuánto sigue en poder del ticket. El consumo no se
+ * anota por bodega, así que la suma de `enPoder` de un artículo puede superar lo que el ticket aún tiene a su cargo (lo usado).
+ */
+export async function enPoderPorBodega(
+  tx: Pick<Prisma.TransactionClient, 'movimiento'>,
+  ticketPumpingId: string,
+  articuloId?: string,
+): Promise<EnPoderPorBodega[]> {
+  const filas = await tx.movimiento.groupBy({
+    by: ['articuloId', 'bodegaId', 'origen'],
+    where: {
+      ticketPumpingId,
+      origen: { in: ['salida_ticket', 'devolucion_ticket', 'devolucion_anulacion'] },
+      ...(articuloId ? { articuloId } : {}),
+    },
+    _sum: { cantidad: true },
+  });
+  const cero = new Prisma.Decimal(0);
+  const claves = new Map<string, { articuloId: string; bodegaId: string }>();
+  for (const f of filas) claves.set(`${f.articuloId}|${f.bodegaId}`, f);
+  return [...claves.values()]
+    .map(({ articuloId: a, bodegaId: b }) => {
+      const suma = (origenes: string[]) =>
+        filas
+          .filter((f) => f.articuloId === a && f.bodegaId === b && origenes.includes(f.origen))
+          .reduce((t, f) => t.plus(f._sum.cantidad ?? cero), cero);
+      const salida = suma(['salida_ticket']);
+      const devuelta = suma(['devolucion_ticket', 'devolucion_anulacion']);
+      return { articuloId: a, bodegaId: b, salida, devuelta, enPoder: salida.minus(devuelta) };
+    })
+    .sort((x, y) => x.bodegaId.localeCompare(y.bodegaId));
+}
+
+/**
+ * Reparte `total` entre las bodegas en proporción a lo que cada una tiene en poder del ticket (milésimas, como el kardex) y nunca pone en una
+ * más de lo que tiene en poder. Lo que sobra del redondeo va a las de mayor peso. Sin peso suficiente para cubrir `total`, devuelve lo que alcanza.
+ */
+export function repartirEnProporcion(
+  total: Prisma.Decimal,
+  bodegas: ReadonlyArray<{ bodegaId: string; enPoder: Prisma.Decimal }>,
+): Array<{ bodegaId: string; cantidad: Prisma.Decimal }> {
+  const cero = new Prisma.Decimal(0);
+  const con = bodegas.filter((b) => b.enPoder.gt(0));
+  const suma = con.reduce((t, b) => t.plus(b.enPoder), cero);
+  if (!con.length || total.lte(0)) return [];
+  const aRepartir = Prisma.Decimal.min(total, suma);
+  const partes = con.map((b) => ({
+    bodegaId: b.bodegaId,
+    tope: b.enPoder,
+    cantidad: aRepartir.times(b.enPoder).div(suma).toDecimalPlaces(3, Prisma.Decimal.ROUND_DOWN),
+  }));
+  let resto = aRepartir.minus(partes.reduce((t, p) => t.plus(p.cantidad), cero));
+  for (const p of [...partes].sort((x, y) => y.tope.comparedTo(x.tope))) {
+    if (resto.lte(0)) break;
+    const extra = Prisma.Decimal.min(resto, p.tope.minus(p.cantidad));
+    p.cantidad = p.cantidad.plus(extra);
+    resto = resto.minus(extra);
+  }
+  return partes
+    .filter((p) => p.cantidad.gt(0))
+    .map(({ bodegaId, cantidad }) => ({ bodegaId, cantidad }));
 }

@@ -31,6 +31,8 @@ enum OrigenMovimiento {
   despacho_bodega
   salida_ticket
   devolucion_ticket
+  /// Lo que vuelve a bodega porque se anuló el pedido del ticket: la registra el sistema (sin autor).
+  devolucion_anulacion
   consumo_mantenimiento
 
   @@map("origen_movimiento")
@@ -120,8 +122,8 @@ model CatUnidadMedida {
   simbolo    String
   habilitado Boolean
 
-  articulos      Articulo[]
-  despachoItems  DespachoItem[]
+  articulos     Articulo[]
+  despachoItems DespachoItem[]
 
   @@map("unidad_medida")
   @@schema("catalogos")
@@ -197,13 +199,14 @@ model Articulo {
   updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy            String?               @map("updated_by") @db.Uuid
 
-  codigos       ArticuloCodigo[]
-  equivalencias ArticuloEquivalencia[]
-  partes        ArticuloParte[]
-  movimientos   Movimiento[]
-  minimos       StockMinimo[]
-  consumos      ConsumoTicket[]
-  despachoItems DespachoItem[]
+  codigos                ArticuloCodigo[]
+  equivalencias          ArticuloEquivalencia[]
+  partes                 ArticuloParte[]
+  movimientos            Movimiento[]
+  devolucionesPendientes DevolucionPendiente[]
+  minimos                StockMinimo[]
+  consumos               ConsumoTicket[]
+  despachoItems          DespachoItem[]
 
   @@index([categoriaId])
   @@index([subcategoriaId])
@@ -302,8 +305,12 @@ model Movimiento {
   saldoResultante Decimal          @map("saldo_resultante") @db.Decimal(14, 3)
   fecha           DateTime         @db.Timestamptz(6)
   observacion     String?
-  responsableId   String           @map("responsable_id") @db.Uuid
-  responsable     IdUsuario        @relation("movimientoResponsable", fields: [responsableId], references: [id])
+  /// Quién registró el movimiento; vacío solo en `devolucion_anulacion` (la registra el sistema).
+  responsableId   String?          @map("responsable_id") @db.Uuid
+  responsable     IdUsuario?       @relation("movimientoResponsable", fields: [responsableId], references: [id])
+  /// Solo en `devolucion_anulacion`: la cuenta que anuló el pedido, cuando se sabe (referencia, no autor).
+  aPedidoDeId     String?          @map("a_pedido_de_id") @db.Uuid
+  aPedidoDe       IdUsuario?       @relation("movimientoAPedidoDe", fields: [aPedidoDeId], references: [id])
   /// Ticket de Pumping (salida o devolución). FCR agregará su propia columna.
   ticketPumpingId String?          @map("ticket_pumping_id") @db.Uuid
   ticketPumping   PumpTicket?      @relation(fields: [ticketPumpingId], references: [id])
@@ -312,9 +319,11 @@ model Movimiento {
   despacho        Despacho?        @relation(fields: [despachoId], references: [id])
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  salidaMantenimiento SalidaMantenimiento?
+  salidaMantenimiento    SalidaMantenimiento?
+  devolucionesPendientes DevolucionPendiente[]
 
   @@index([articuloId, bodegaId, secuencia])
+  @@index([aPedidoDeId])
   @@index([ticketPumpingId])
   @@index([despachoId])
   @@index([fecha])
@@ -441,12 +450,13 @@ model SalidaMantenimiento {
 // ---------------------------------------------------------------------------------------------------------------
 
 model CatBodega {
-  id          String        @id @db.Uuid
-  nombre      String
-  habilitado  Boolean
-  movimientos Movimiento[]
-  minimos     StockMinimo[]
-  despachos   Despacho[]
+  id                     String                @id @db.Uuid
+  nombre                 String
+  habilitado             Boolean
+  movimientos            Movimiento[]
+  minimos                StockMinimo[]
+  despachos              Despacho[]
+  devolucionesPendientes DevolucionPendiente[]
 
   @@map("bodega")
   @@schema("catalogos")
@@ -463,11 +473,40 @@ model CatCliente {
   @@schema("catalogos")
 }
 
+/// Lo que una anulación de pedido no pudo devolver a bodega: sigue a cargo del ticket hasta que Bodega lo resuelve.
+model DevolucionPendiente {
+  id              String      @id @db.Uuid
+  ticketPumpingId String      @map("ticket_pumping_id") @db.Uuid
+  ticketPumping   PumpTicket  @relation(fields: [ticketPumpingId], references: [id])
+  articuloId      String      @map("articulo_id") @db.Uuid
+  articulo        Articulo    @relation(fields: [articuloId], references: [id])
+  bodegaId        String      @map("bodega_id") @db.Uuid
+  bodega          CatBodega   @relation(fields: [bodegaId], references: [id])
+  cantidad        Decimal     @db.Decimal(14, 3)
+  /// Por qué no se pudo devolver.
+  motivo          String
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  resueltaAt      DateTime?   @map("resuelta_at") @db.Timestamptz(6)
+  /// Quien la resolvió; vacío si se resolvió sola.
+  resueltaPor     String?     @map("resuelta_por") @db.Uuid
+  resolvio        IdUsuario?  @relation("devolucionResuelta", fields: [resueltaPor], references: [id])
+  movimientoId    String?     @map("movimiento_id") @db.Uuid
+  movimiento      Movimiento? @relation(fields: [movimientoId], references: [id])
+
+  @@index([articuloId])
+  @@index([bodegaId])
+  @@index([resueltaPor])
+  @@index([movimientoId])
+  @@map("devolucion_pendiente")
+  @@schema("inventario")
+}
+
 /// `pumping.ticket`: solo el id (la FK del kardex y del consumo). El resto es de Pumping.
 model PumpTicket {
-  id          String          @id @db.Uuid
-  movimientos Movimiento[]
-  consumos    ConsumoTicket[]
+  id                     String                @id @db.Uuid
+  movimientos            Movimiento[]
+  consumos               ConsumoTicket[]
+  devolucionesPendientes DevolucionPendiente[]
 
   @@map("ticket")
   @@schema("pumping")
@@ -501,11 +540,13 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  movimientos          Movimiento[]    @relation("movimientoResponsable")
-  consumos             ConsumoTicket[] @relation("consumoResponsable")
-  despachosSolicitados Despacho[]      @relation("despachoSolicitante")
-  despachosRealizados  Despacho[]      @relation("despachoEjecutor")
-  despachosRechazados  Despacho[]      @relation("despachoRechazador")
+  movimientos           Movimiento[]          @relation("movimientoResponsable")
+  movimientosAPedido    Movimiento[]          @relation("movimientoAPedidoDe")
+  devolucionesResueltas DevolucionPendiente[] @relation("devolucionResuelta")
+  consumos              ConsumoTicket[]       @relation("consumoResponsable")
+  despachosSolicitados  Despacho[]            @relation("despachoSolicitante")
+  despachosRealizados   Despacho[]            @relation("despachoEjecutor")
+  despachosRechazados   Despacho[]            @relation("despachoRechazador")
 
   @@map("usuario")
   @@schema("identidad")

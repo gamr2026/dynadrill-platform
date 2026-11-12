@@ -13,7 +13,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   balanceDeTicket,
   bloquearArticulo,
+  enPoderPorBodega,
   registrarEnKardex,
+  repartirEnProporcion,
   saldosPorBodega,
   validarCantidad,
   type BalanceTicketArticulo,
@@ -58,6 +60,14 @@ export interface SalidaDeMantenimiento {
   bodegaId: string;
   cantidad: number | string;
   observacion?: string | null;
+}
+
+/** Lo que la anulación de un pedido hizo con un químico en una bodega: lo que volvió a ella y lo que quedó como devolución pendiente para Bodega. */
+export interface DevolucionPorAnulacion {
+  articuloId: string;
+  bodegaId: string;
+  devuelta: number;
+  pendiente: number;
 }
 
 /** Un renglón de químico que sale de bodega (o vuelve a ella) por un ticket de Pumping. */
@@ -111,6 +121,7 @@ export const INCLUIR_MOVIMIENTO = INCLUIR;
 const EVENTO_POR_ORIGEN: Partial<Record<OrigenMovimiento, string>> = {
   salida_ticket: 'operaciones.inventario.salida_registrada',
   devolucion_ticket: 'operaciones.inventario.devolucion_registrada',
+  devolucion_anulacion: 'operaciones.inventario.devolucion_registrada',
 };
 const EVENTO_GENERICO = 'operaciones.inventario.movimiento_registrado';
 /** IN4: una salida dejó el saldo de un artículo en una bodega por debajo de su mínimo (se publica al cruzarlo, no en cada movimiento). */
@@ -132,9 +143,9 @@ export class MovimientosService {
   async registrar(
     tx: Prisma.TransactionClient,
     entrada: Omit<EntradaKardex, 'responsableId'>,
-    actor: ActorInventario,
+    actor: ActorInventario | null,
   ) {
-    const m = await registrarEnKardex(tx, { ...entrada, responsableId: actor.id });
+    const m = await registrarEnKardex(tx, { ...entrada, responsableId: actor?.id ?? null });
     const articulo = await tx.articulo.findUniqueOrThrow({
       where: { id: m.articuloId },
       select: { codigo: true },
@@ -156,7 +167,7 @@ export class MovimientosService {
           ticketId: m.ticketPumpingId,
           despachoId: m.despachoId,
         },
-        actor: { userId: actor.id, role: actor.roleCode },
+        ...(actor ? { actor: { userId: actor.id, role: actor.roleCode } } : {}),
         traceparent: currentTraceparent(),
       }),
     );
@@ -182,7 +193,7 @@ export class MovimientosService {
             movimientoId: m.id,
             ticketId: m.ticketPumpingId,
           },
-          actor: { userId: actor.id, role: actor.roleCode },
+          ...(actor ? { actor: { userId: actor.id, role: actor.roleCode } } : {}),
           traceparent: currentTraceparent(),
         }),
       );
@@ -223,13 +234,36 @@ export class MovimientosService {
     e: MovimientoDeTicket,
     actor: ActorInventario,
   ) {
+    return this.devolverAlKardex(tx, e, 'devolucion_ticket', actor, null);
+  }
+
+  /**
+   * Devolución a bodega por anulación del pedido: la registra el sistema (sin autor ni rol), con quién anuló el pedido como referencia
+   * cuando se sabe. Mismo núcleo que `registrarDevolucion`: no devuelve más de lo que sigue a cargo del ticket.
+   */
+  async registrarDevolucionPorAnulacion(
+    tx: Prisma.TransactionClient,
+    e: MovimientoDeTicket,
+    aPedidoDeId: string | null,
+  ) {
+    return this.devolverAlKardex(tx, e, 'devolucion_anulacion', null, aPedidoDeId);
+  }
+
+  /** Núcleo de toda devolución de ticket: cantidad válida, artículo bloqueado y nada por encima de lo que el ticket tiene a su cargo. */
+  private async devolverAlKardex(
+    tx: Prisma.TransactionClient,
+    e: MovimientoDeTicket,
+    origen: 'devolucion_ticket' | 'devolucion_anulacion',
+    actor: ActorInventario | null,
+    aPedidoDeId: string | null,
+  ) {
     const cantidad = new Prisma.Decimal(e.cantidad);
     validarCantidad(cantidad);
     await bloquearArticulo(tx, e.articuloId);
     await this.exigirPendiente(tx, e.ticketPumpingId, e.articuloId, cantidad, 'devolver');
     return this.registrar(
       tx,
-      { ...e, motivoId: await this.motivoDe(tx, 'devolucion_ticket') },
+      { ...e, motivoId: await this.motivoDe(tx, origen), aPedidoDeId },
       actor,
     );
   }
@@ -427,6 +461,122 @@ export class MovimientosService {
     });
   }
 
+  /**
+   * Lo que el ticket aún tiene a su cargo vuelve a las bodegas de las que salió, en proporción a lo que cada una tiene en poder del ticket
+   * (nunca más de eso por bodega). Lo inicia el sistema cuando se anula el pedido: no depende de ningún rol ni de que se sepa quién lo anuló
+   * (`aPedidoDeId` es solo la referencia). Cada artículo es una transacción: o vuelve entero o queda como devolución pendiente (una fila por
+   * artículo y bodega) a la vista de Bodega, así lo que falla no se pierde ni frena a los demás. Se puede repetir: el balance sale del kardex,
+   * de modo que lo ya devuelto no vuelve a devolverse, y la fila pendiente abierta es única por ticket, artículo y bodega.
+   */
+  async devolverPorAnulacion(
+    ticketPumpingId: string,
+    aPedidoDeId: string | null,
+    motivo = 'Pedido anulado',
+  ): Promise<DevolucionPorAnulacion[]> {
+    const balance = await balanceDeTicket(this.prisma, ticketPumpingId);
+    for (const b of balance.filter((x) => x.pendiente.gt(0))) {
+      try {
+        await this.prisma.$transaction((tx) =>
+          this.devolverArticuloPorAnulacion(tx, ticketPumpingId, b.articuloId, aPedidoDeId, motivo),
+        );
+      } catch (e) {
+        await this.dejarPendiente(ticketPumpingId, b.articuloId, e);
+      }
+    }
+    return this.resumenDeAnulacion(ticketPumpingId);
+  }
+
+  /**
+   * Lo que la anulación devolvió a cada bodega (del kardex, así un reintento lo reporta igual) y lo que quedó pendiente de devolver (filas
+   * abiertas de `devolucion_pendiente`), por artículo y bodega.
+   */
+  async resumenDeAnulacion(ticketPumpingId: string): Promise<DevolucionPorAnulacion[]> {
+    const [devueltas, pendientes] = await Promise.all([
+      this.prisma.movimiento.groupBy({
+        by: ['articuloId', 'bodegaId'],
+        where: { ticketPumpingId, origen: 'devolucion_anulacion' },
+        _sum: { cantidad: true },
+      }),
+      this.prisma.devolucionPendiente.findMany({ where: { ticketPumpingId, resueltaAt: null } }),
+    ]);
+    const lineas = new Map<string, DevolucionPorAnulacion>();
+    const de = (articuloId: string, bodegaId: string) => {
+      const k = `${articuloId}|${bodegaId}`;
+      if (!lineas.has(k)) lineas.set(k, { articuloId, bodegaId, devuelta: 0, pendiente: 0 });
+      return lineas.get(k) as DevolucionPorAnulacion;
+    };
+    for (const d of devueltas) de(d.articuloId, d.bodegaId).devuelta = Number(d._sum.cantidad ?? 0);
+    for (const p of pendientes) de(p.articuloId, p.bodegaId).pendiente = Number(p.cantidad);
+    return [...lineas.values()];
+  }
+
+  /** Un artículo del ticket vuelve a sus bodegas dentro de la transacción recibida; lo que una pasada anterior dejó pendiente de él se cierra. */
+  private async devolverArticuloPorAnulacion(
+    tx: Prisma.TransactionClient,
+    ticketPumpingId: string,
+    articuloId: string,
+    aPedidoDeId: string | null,
+    motivo: string,
+  ): Promise<void> {
+    for (const r of await this.repartoDeAnulacion(tx, ticketPumpingId, articuloId)) {
+      await this.registrarDevolucionPorAnulacion(
+        tx,
+        {
+          ticketPumpingId,
+          articuloId,
+          bodegaId: r.bodegaId,
+          cantidad: r.cantidad.toString(),
+          observacion: motivo,
+        },
+        aPedidoDeId,
+      );
+    }
+    await tx.devolucionPendiente.updateMany({
+      where: { ticketPumpingId, articuloId, resueltaAt: null },
+      data: { resueltaAt: new Date() },
+    });
+  }
+
+  /** Cuánto devolver a cada bodega de un artículo del ticket (bloquea el artículo: el balance no cambia mientras se reparte). */
+  private async repartoDeAnulacion(
+    tx: Prisma.TransactionClient,
+    ticketPumpingId: string,
+    articuloId: string,
+  ) {
+    await bloquearArticulo(tx, articuloId);
+    const [b] = await balanceDeTicket(tx, ticketPumpingId, articuloId);
+    if (!b || b.pendiente.lte(0)) return [];
+    return repartirEnProporcion(
+      b.pendiente,
+      await enPoderPorBodega(tx, ticketPumpingId, articuloId),
+    );
+  }
+
+  /** La devolución de un artículo falló: queda como devolución pendiente (una abierta por ticket, artículo y bodega), sin duplicar en un reintento. */
+  private async dejarPendiente(
+    ticketPumpingId: string,
+    articuloId: string,
+    causa: unknown,
+  ): Promise<void> {
+    const mensaje = causa instanceof Error ? causa.message : String(causa);
+    const motivo = `No se pudo devolver al anular el pedido: ${mensaje}`.slice(0, 500);
+    await this.prisma.$transaction(async (tx) => {
+      const reparto = await this.repartoDeAnulacion(tx, ticketPumpingId, articuloId);
+      // `skipDuplicates`: si ya hay una abierta para ese ticket, artículo y bodega (un reintento), no se crea otra
+      await tx.devolucionPendiente.createMany({
+        data: reparto.map((r) => ({
+          id: uuidv7(),
+          ticketPumpingId,
+          articuloId,
+          bodegaId: r.bodegaId,
+          cantidad: r.cantidad,
+          motivo,
+        })),
+        skipDuplicates: true,
+      });
+    });
+  }
+
   /** Lo usado en la ejecución: no mueve stock; no puede superar lo que el ticket aún tiene a su cargo. */
   async registrarConsumoDeTicket(
     ticketPumpingId: string,
@@ -466,6 +616,8 @@ export class MovimientosService {
     const bodegas = await this.prisma.catBodega.findMany({
       where: { id: { in: [...new Set(salidas.map((s) => s.bodegaId))] } },
     });
+    // lo que cada bodega entregó al ticket y lo que le devolvió
+    const poderes = await enPoderPorBodega(this.prisma, ticketPumpingId);
     // lo usado cada día del servicio
     const porDia = await this.prisma.consumoTicket.groupBy({
       by: ['articuloId', 'diaServicio'],
@@ -494,10 +646,19 @@ export class MovimientosService {
             })),
           bodegas: salidas
             .filter((s) => s.articuloId === b.articuloId)
-            .map((s) => ({
-              bodegaId: s.bodegaId,
-              bodega: bodegas.find((x) => x.id === s.bodegaId)?.nombre ?? '',
-            })),
+            .map((s) => {
+              const p = poderes.find(
+                (x) => x.articuloId === b.articuloId && x.bodegaId === s.bodegaId,
+              );
+              return {
+                bodegaId: s.bodegaId,
+                bodega: bodegas.find((x) => x.id === s.bodegaId)?.nombre ?? '',
+                /** Lo que salió de esa bodega para el ticket, lo que volvió a ella y lo que sigue en poder del ticket. */
+                salida: Number(p?.salida ?? 0),
+                devuelta: Number(p?.devuelta ?? 0),
+                enPoder: Number(p?.enPoder ?? 0),
+              };
+            }),
         };
       })
       .sort((x, y) => x.codigo.localeCompare(y.codigo));
