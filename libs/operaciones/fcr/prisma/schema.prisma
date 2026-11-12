@@ -24,6 +24,7 @@ enum MacroEstado {
   esperando_aprobacion
   aprobado
   rechazado
+  anulado
 
   @@map("macro_estado")
   @@schema("fcr")
@@ -49,6 +50,8 @@ enum TipoOt {
 enum EstadoRequisito {
   pendiente
   cumplido
+  /// Una persona lo dispensó con motivo: no bloquea la salida del paso y ningún recálculo automático lo toca.
+  exonerado
 
   @@map("estado_requisito")
   @@schema("fcr")
@@ -162,13 +165,18 @@ model Transicion {
 /// Condiciones que el proceso exige (catálogo): de qué ámbito son, qué módulo es dueño del dato que las cumple y, si aplica a un solo
 /// tipo de OT, cuál.
 model Requisito {
-  codigo      String          @id
-  nombre      String
-  descripcion String?
-  ambito      AmbitoRequisito
-  modulo      ModuloDueno
-  tipoOt      TipoOt?         @map("tipo_ot")
-  activo      Boolean         @default(true)
+  codigo         String          @id
+  nombre         String
+  descripcion    String?
+  ambito         AmbitoRequisito
+  modulo         ModuloDueno
+  tipoOt         TipoOt?         @map("tipo_ot")
+  activo         Boolean         @default(true)
+  /// Horas que tiene el responsable para cumplirlo desde que se crea; NULL: sin plazo.
+  plazoHoras     Int?            @map("plazo_horas")
+  /// Rol de cuenta (`identidad.rol.codigo`) a quien le corresponde cumplirlo; NULL: no hay uno único.
+  rolResponsable String?         @map("rol_responsable")
+  rol            IdRol?          @relation(fields: [rolResponsable], references: [codigo])
 
   pasos   PasoRequisito[]
   tickets TicketRequisito[]
@@ -286,6 +294,9 @@ model Ticket {
   /// Operador FCR que repara e inspecciona las herramientas (solo SERVICIOS).
   inspectorId    String?       @map("inspector_id") @db.Uuid
   inspector      IdUsuario?    @relation("ticketInspector", fields: [inspectorId], references: [id])
+  /// Supervisor de FCR a quien le pertenece el ticket en la bandeja; NULL: sin asignar. No restringe la visibilidad.
+  responsableId  String?       @map("responsable_id") @db.Uuid
+  responsable    IdUsuario?    @relation("ticketResponsable", fields: [responsableId], references: [id])
 
   // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
   clienteId           String?     @map("cliente_id") @db.Uuid
@@ -311,27 +322,53 @@ model Ticket {
   updatedBy String?    @map("updated_by") @db.Uuid
   editor    IdUsuario? @relation("ticketEditor", fields: [updatedBy], references: [id])
 
-  tiposServicio  TicketTipoServicio[]
-  historial      TicketHistorial[]
-  observaciones  TicketObservacion[]
-  personas       TicketPersona[]
-  requisitos     TicketRequisito[]
-  lineas         TicketLinea[]
-  herramientas   TicketHerramienta[]
-  reporteItems   ReporteItem[]
+  tiposServicio          TicketTipoServicio[]
+  historial              TicketHistorial[]
+  observaciones          TicketObservacion[]
+  personas               TicketPersona[]
+  requisitos             TicketRequisito[]
+  lineas                 TicketLinea[]
+  herramientas           TicketHerramienta[]
+  reporteItems           ReporteItem[]
   /// Cuándo se precargó el Reporte de Herramientas con los ítems cotizados (una sola vez, al llegar a la Ejecución operativa).
-  reportePrecargadoAt DateTime? @map("reporte_precargado_at") @db.Timestamptz(6)
+  reportePrecargadoAt    DateTime?                    @map("reporte_precargado_at") @db.Timestamptz(6)
   solicitudesCambioItems SolicitudCambioItems[]
-  avisosPrecarga TicketAvisoPrecarga[]
-  documentos     TicketDocumento[]
-  reunion        ReunionOperativa?
-  bitacora       BitacoraDia[]
+  avisosPrecarga         TicketAvisoPrecarga[]
+  documentos             TicketDocumento[]
+  reunion                ReunionOperativa?
+  bitacora               BitacoraDia[]
+  responsableHistorial   TicketResponsableHistorial[]
 
   @@index([pasoCodigo])
+  @@index([responsableId])
   @@index([clienteId])
   @@index([pozoId])
   @@index([campoId])
   @@map("ticket")
+  @@schema("fcr")
+}
+
+/// Quién fue responsable del ticket y cuándo cambió (tomar, asignar, reasignar, liberar). Inmutable.
+model TicketResponsableHistorial {
+  id         String     @id @db.Uuid
+  ticketId   String     @map("ticket_id") @db.Uuid
+  ticket     Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// NULL: el ticket no tenía responsable.
+  anteriorId String?    @map("anterior_id") @db.Uuid
+  anterior   IdUsuario? @relation("responsableAnterior", fields: [anteriorId], references: [id])
+  /// NULL: el ticket quedó sin responsable.
+  nuevoId    String?    @map("nuevo_id") @db.Uuid
+  nuevo      IdUsuario? @relation("responsableNuevo", fields: [nuevoId], references: [id])
+  motivo     String?
+  actorId    String?    @map("actor_id") @db.Uuid
+  actor      IdUsuario? @relation("responsableActor", fields: [actorId], references: [id])
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@index([anteriorId])
+  @@index([nuevoId])
+  @@index([actorId])
+  @@map("ticket_responsable_historial")
   @@schema("fcr")
 }
 
@@ -368,16 +405,16 @@ model TicketHistorial {
 
 /// Observaciones del ticket, con autor y fecha. Inmutables.
 model TicketObservacion {
-  id        String     @id @db.Uuid
-  ticketId  String     @map("ticket_id") @db.Uuid
-  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id        String    @id @db.Uuid
+  ticketId  String    @map("ticket_id") @db.Uuid
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   mensaje   String
   /// Rol con el que escribió (dato histórico: la cuenta puede cambiar de rol después).
-  autorRol  String     @map("autor_rol")
-  rol       IdRol      @relation(fields: [autorRol], references: [codigo])
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy String     @map("created_by") @db.Uuid
-  autor     IdUsuario  @relation("observacionAutor", fields: [createdBy], references: [id])
+  autorRol  String    @map("autor_rol")
+  rol       IdRol     @relation(fields: [autorRol], references: [codigo])
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String    @map("created_by") @db.Uuid
+  autor     IdUsuario @relation("observacionAutor", fields: [createdBy], references: [id])
 
   @@index([ticketId, createdAt])
   @@index([createdBy])
@@ -387,14 +424,14 @@ model TicketObservacion {
 
 /// Personas del equipo: un supervisor y uno o más operadores.
 model TicketPersona {
-  ticketId    String       @map("ticket_id") @db.Uuid
-  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  usuarioId   String       @map("usuario_id") @db.Uuid
-  usuario     IdUsuario    @relation("personaAsignada", fields: [usuarioId], references: [id])
+  ticketId    String      @map("ticket_id") @db.Uuid
+  ticket      Ticket      @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  usuarioId   String      @map("usuario_id") @db.Uuid
+  usuario     IdUsuario   @relation("personaAsignada", fields: [usuarioId], references: [id])
   rol         RolAsignado
   /// FK a `identidad.usuario` (solo en la base de datos).
-  asignadoPor String?      @map("asignado_por") @db.Uuid
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  asignadoPor String?     @map("asignado_por") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@id([ticketId, usuarioId])
   @@index([usuarioId])
@@ -418,14 +455,49 @@ model TicketRequisito {
   /// FK a `identidad.usuario` (solo en la base de datos).
   cumplidoPor     String?             @map("cumplido_por") @db.Uuid
   origen          OrigenCumplimiento?
+  /// Motivo de la exoneración (obligatorio si `estado = exonerado`) o de su reversión.
   motivo          String?
+  /// Hasta cuándo debe cumplirse (plazo del catálogo; en la bitácora, el fin del día siguiente al primer día sin enviar).
+  venceAt         DateTime?           @map("vence_at") @db.Timestamptz(6)
+  /// Cuándo la revisión periódica lo marcó vencido; se limpia al reabrirse.
+  vencidoAt       DateTime?           @map("vencido_at") @db.Timestamptz(6)
+  exoneradoAt     DateTime?           @map("exonerado_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos). Va junto con `exoneradoAt`.
+  exoneradoPor    String?             @map("exonerado_por") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  historial TicketRequisitoHistorial[]
 
   @@index([ticketId, estado])
   @@index([requisitoCodigo])
   @@index([usuarioId])
   @@map("ticket_requisito")
+  @@schema("fcr")
+}
+
+/// Historia de cada requisito del ticket. La escribe un trigger de la base (AFTER INSERT/UPDATE de `ticket_requisito`); la aplicación solo lee.
+/// Sus ids son UUIDv4 (`gen_random_uuid()` del trigger): se ordena por `createdAt`.
+model TicketRequisitoHistorial {
+  id                String           @id @db.Uuid
+  ticketRequisitoId String           @map("ticket_requisito_id") @db.Uuid
+  requisito         TicketRequisito  @relation(fields: [ticketRequisitoId], references: [id], onDelete: Cascade)
+  ticketId          String           @map("ticket_id") @db.Uuid
+  /// NULL al crearse el requisito.
+  estadoAnterior    EstadoRequisito? @map("estado_anterior")
+  estadoNuevo       EstadoRequisito  @map("estado_nuevo")
+  vencido           Boolean
+  /// sistema, evento, manual o revision.
+  origen            String
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  actorId           String?          @map("actor_id") @db.Uuid
+  motivo            String?
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketRequisitoId, createdAt])
+  @@index([ticketId])
+  @@index([actorId])
+  @@map("ticket_requisito_historial")
   @@schema("fcr")
 }
 
@@ -525,18 +597,18 @@ model ConfiguracionCodigoKit {
 
 /// Línea cotizada del pedido (código, descripción, unidad, cantidad y tipo).
 model TicketLinea {
-  id          String    @id @db.Uuid
-  ticketId    String    @map("ticket_id") @db.Uuid
-  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  orden       Int       @db.SmallInt
-  codigo      String
-  descripcion String
-  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
-  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
-  cantidad    Decimal   @db.Decimal(12, 3)
-  tipoLinea   TipoLinea @map("tipo_linea")
+  id                 String          @id @db.Uuid
+  ticketId           String          @map("ticket_id") @db.Uuid
+  ticket             Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden              Int             @db.SmallInt
+  codigo             String
+  descripcion        String
+  unidadMedidaId     String          @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
+  cantidad           Decimal         @db.Decimal(12, 3)
+  tipoLinea          TipoLinea       @map("tipo_linea")
   /// Ítem de la lista de precios del cliente en `comercial` (otro contenedor, D1): uuid sin FK; vacío si el ítem vino de AS2 sin enlace.
-  listaPreciosItemId String? @map("lista_precios_item_id") @db.Uuid
+  listaPreciosItemId String?         @map("lista_precios_item_id") @db.Uuid
 
   @@unique([ticketId, orden])
   @@map("ticket_linea")
@@ -804,22 +876,22 @@ model ReunionOperativa {
 
 /// Bitácora de un día del ticket: fuente del Reporte Job de ese día.
 model BitacoraDia {
-  id          String     @id @db.Uuid
-  ticketId    String     @map("ticket_id") @db.Uuid
-  ticket      Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  fecha       DateTime   @db.Date
-  enviadaAt   DateTime?  @map("enviada_at") @db.Timestamptz(6)
-  enviadaPor  String?    @map("enviada_por") @db.Uuid
-  enviador    IdUsuario? @relation("bitacoraEnviador", fields: [enviadaPor], references: [id])
+  id           String     @id @db.Uuid
+  ticketId     String     @map("ticket_id") @db.Uuid
+  ticket       Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fecha        DateTime   @db.Date
+  enviadaAt    DateTime?  @map("enviada_at") @db.Timestamptz(6)
+  enviadaPor   String?    @map("enviada_por") @db.Uuid
+  enviador     IdUsuario? @relation("bitacoraEnviador", fields: [enviadaPor], references: [id])
   /// Facturación corrigió este día en el pedido: el ticket ya no lo edita ni lo reenvía.
-  corregidaAt DateTime?  @map("corregida_at") @db.Timestamptz(6)
+  corregidaAt  DateTime?  @map("corregida_at") @db.Timestamptz(6)
   /// Quién lo corrigió (actor del evento de Comercial); su rol es el de su usuario. Va junto con `corregidaAt`.
-  corregidaPor String?   @map("corregida_por") @db.Uuid
-  corrector   IdUsuario? @relation("bitacoraCorrector", fields: [corregidaPor], references: [id])
-  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy   String     @map("created_by") @db.Uuid
-  updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy   String     @map("updated_by") @db.Uuid
+  corregidaPor String?    @map("corregida_por") @db.Uuid
+  corrector    IdUsuario? @relation("bitacoraCorrector", fields: [corregidaPor], references: [id])
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String     @map("created_by") @db.Uuid
+  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String     @map("updated_by") @db.Uuid
 
   actividades BitacoraActividad[]
 
@@ -883,24 +955,24 @@ enum EstadoItemReporte {
 /// Fila del Reporte de Herramientas (DYN-FCR-RE-008): un código de la lista de precios del cliente con su serie y su cantidad real. De esa
 /// cantidad salen la guía de remisión, la prefactura y la orden de trabajo. Código, descripción y unidad son copias de la lista (otro contenedor).
 model ReporteItem {
-  id          String   @id @db.Uuid
-  ticketId    String   @map("ticket_id") @db.Uuid
-  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  orden       Int      @db.SmallInt
+  id                 String           @id @db.Uuid
+  ticketId           String           @map("ticket_id") @db.Uuid
+  ticket             Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden              Int              @db.SmallInt
   /// Ítem de la lista de precios del cliente en `comercial` (otro contenedor): uuid sin FK; con él se propone el cambio del pedido. Vacío si el ítem
   /// vino de AS2 sin enlace a la lista.
-  listaPreciosItemId String? @map("lista_precios_item_id") @db.Uuid
-  codigo      String
-  descripcion String
-  unidadMedidaId String?          @map("unidad_medida_id") @db.Uuid
-  unidadMedida   CatUnidadMedida? @relation(fields: [unidadMedidaId], references: [id])
+  listaPreciosItemId String?          @map("lista_precios_item_id") @db.Uuid
+  codigo             String
+  descripcion        String
+  unidadMedidaId     String?          @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida? @relation(fields: [unidadMedidaId], references: [id])
   /// La unidad es de tiempo: sus celdas son marcas (O/D/V) que valen 1; en las demás filas cada celda lleva su cantidad.
-  porDia      Boolean  @map("por_dia")
-  serie       String?
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy   String   @map("created_by") @db.Uuid
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy   String   @map("updated_by") @db.Uuid
+  porDia             Boolean          @map("por_dia")
+  serie              String?
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String           @map("created_by") @db.Uuid
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy          String           @map("updated_by") @db.Uuid
 
   dias ReporteItemDia[]
 
@@ -1020,12 +1092,13 @@ model CatTaladro {
 
 /// `identidad.rol`: para comprobar que quien se asigna tiene el rol que corresponde y para ligar los pasos a sus roles.
 model IdRol {
-  id       String              @id @db.Uuid
-  codigo   String              @unique
-  nombre   String
-  usuarios IdUsuario[]
-  pasos    PasoRol[]
-  firmas   FirmaRolPermitido[]
+  id            String              @id @db.Uuid
+  codigo        String              @unique
+  nombre        String
+  usuarios      IdUsuario[]
+  pasos         PasoRol[]
+  requisitos    Requisito[]
+  firmas        FirmaRolPermitido[]
   observaciones TicketObservacion[]
 
   @@map("rol")
@@ -1041,24 +1114,28 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  asignaciones          TicketPersona[]           @relation("personaAsignada")
-  historial             TicketHistorial[]         @relation("historialActor")
-  requisitos            TicketRequisito[]         @relation("requisitoOperador")
-  inspecciones          Ticket[]                  @relation("ticketInspector")
-  creados               Ticket[]                  @relation("ticketCreador")
-  editados              Ticket[]                  @relation("ticketEditor")
-  observaciones         TicketObservacion[]       @relation("observacionAutor")
-  herramientaEventos    TicketHerramientaEvento[] @relation("herramientaEventoActor")
-  inspeccionesEnviadas  InspeccionHerramienta[]   @relation("inspeccionEnviador")
-  inspeccionesDecididas InspeccionHerramienta[]   @relation("inspeccionDecisor")
-  firmasInspeccion      InspeccionFirma[]         @relation("inspeccionFirmante")
-  documentosSubidos     TicketDocumento[]         @relation("documentoAutor")
-  reuniones             ReunionOperativa[]        @relation("reunionFirmante")
-  bitacorasEnviadas     BitacoraDia[]             @relation("bitacoraEnviador")
-  bitacorasCorregidas    BitacoraDia[]             @relation("bitacoraCorrector")
-  actividadesBitacora   BitacoraActividad[]       @relation("bitacoraAutor")
-  cambiosSolicitados    SolicitudCambioItems[]    @relation("solicitanteCambio")
-  cambiosRevisados      SolicitudCambioItems[]    @relation("revisorCambio")
+  asignaciones          TicketPersona[]              @relation("personaAsignada")
+  historial             TicketHistorial[]            @relation("historialActor")
+  requisitos            TicketRequisito[]            @relation("requisitoOperador")
+  inspecciones          Ticket[]                     @relation("ticketInspector")
+  responsables          Ticket[]                     @relation("ticketResponsable")
+  responsableAnterior   TicketResponsableHistorial[] @relation("responsableAnterior")
+  responsableNuevo      TicketResponsableHistorial[] @relation("responsableNuevo")
+  responsableActor      TicketResponsableHistorial[] @relation("responsableActor")
+  creados               Ticket[]                     @relation("ticketCreador")
+  editados              Ticket[]                     @relation("ticketEditor")
+  observaciones         TicketObservacion[]          @relation("observacionAutor")
+  herramientaEventos    TicketHerramientaEvento[]    @relation("herramientaEventoActor")
+  inspeccionesEnviadas  InspeccionHerramienta[]      @relation("inspeccionEnviador")
+  inspeccionesDecididas InspeccionHerramienta[]      @relation("inspeccionDecisor")
+  firmasInspeccion      InspeccionFirma[]            @relation("inspeccionFirmante")
+  documentosSubidos     TicketDocumento[]            @relation("documentoAutor")
+  reuniones             ReunionOperativa[]           @relation("reunionFirmante")
+  bitacorasEnviadas     BitacoraDia[]                @relation("bitacoraEnviador")
+  bitacorasCorregidas   BitacoraDia[]                @relation("bitacoraCorrector")
+  actividadesBitacora   BitacoraActividad[]          @relation("bitacoraAutor")
+  cambiosSolicitados    SolicitudCambioItems[]       @relation("solicitanteCambio")
+  cambiosRevisados      SolicitudCambioItems[]       @relation("revisorCambio")
 
   @@map("usuario")
   @@schema("identidad")
@@ -1170,15 +1247,14 @@ model SolicitudCambioItem {
   listaPreciosItemId String               @map("lista_precios_item_id") @db.Uuid
   codigo             String
   descripcion        String
-  unidadMedidaId String          @map("unidad_medida_id") @db.Uuid
-  unidadMedida   CatUnidadMedida @relation(fields: [unidadMedidaId], references: [id])
+  unidadMedidaId     String               @map("unidad_medida_id") @db.Uuid
+  unidadMedida       CatUnidadMedida      @relation(fields: [unidadMedidaId], references: [id])
   cantidad           Decimal              @db.Decimal(12, 3)
   descuentoPct       Decimal?             @map("descuento_pct") @db.Decimal(5, 2)
-  tipoLinea          TipoLinea        @map("tipo_linea")
+  tipoLinea          TipoLinea            @map("tipo_linea")
 
   @@unique([solicitudId, orden])
   @@unique([solicitudId, listaPreciosItemId])
   @@map("solicitud_cambio_item")
   @@schema("fcr")
 }
-

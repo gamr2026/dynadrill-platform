@@ -10,7 +10,7 @@ import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma, TipoLinea } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { nombreDe } from './tickets.service';
+import { exigirNoAnulado, nombreDe } from './tickets.service';
 
 export const EVENTO_CAMBIO_APROBADO = 'operaciones.fcr.cambio_items_aprobado';
 
@@ -55,6 +55,7 @@ export class CambiosItemsService {
         select: { id: true, pasoCodigo: true, personas: { select: { usuarioId: true } } },
       });
       if (!t) throw new NotFoundException('El ticket no existe');
+      exigirNoAnulado(t.pasoCodigo);
       if (t.personas.length === 0) {
         throw new ConflictException('El ticket todavía no tiene equipo asignado');
       }
@@ -246,11 +247,16 @@ export class CambiosItemsService {
           include: { unidadMedida: { select: { nombre: true } } },
         },
         ticket: {
-          select: { pedidoId: true, personas: { select: { usuarioId: true, rol: true } } },
+          select: {
+            pedidoId: true,
+            pasoCodigo: true,
+            personas: { select: { usuarioId: true, rol: true } },
+          },
         },
       },
     });
     if (!s) throw new NotFoundException('La solicitud no existe');
+    exigirNoAnulado(s.ticket.pasoCodigo);
     if (s.estado !== 'pendiente') {
       throw new ConflictException({
         message: 'Esta solicitud ya fue revisada',

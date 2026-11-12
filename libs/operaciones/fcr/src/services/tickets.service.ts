@@ -11,6 +11,7 @@ import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma, TipoOt } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PASO_ANULADO } from '../catalog/sembrar-pasos';
 import { PrecargaService, type LineaPedido } from './precarga.service';
 import { RequisitosService } from './requisitos.service';
 
@@ -50,6 +51,12 @@ const deDia = (f: string | null | undefined) => (f ? new Date(`${f}T00:00:00.000
 const ROL_SUPERADMIN = 'superadmin';
 /** Roles que coordinan el servicio: ven y actúan sin estar en el equipo asignado. */
 export const ROLES_COORDINA = [ROL_SUPERADMIN, 'jefe_base'];
+/** Roles que supervisan el ticket: los de FCR que lo llevan y quienes coordinan. Exoneran requisitos y asignan o reasignan al responsable. */
+export const ROLES_SUPERVISAN = [
+  ...ROLES_COORDINA,
+  'supervisor',
+  'supervisor_operaciones_fcr',
+] as const;
 /** Rol de cuenta del Supervisor de FCR: toma el ticket al sacarlo de los pasos de arranque. */
 export const ROL_SUPERVISOR = 'supervisor';
 
@@ -57,11 +64,13 @@ export const ROL_SUPERVISOR = 'supervisor';
 const NOMBRES = { cliente: true, campo: true, bloque: true, pozo: true, taladro: true } as const;
 const INCLUDE_LISTA = {
   ...NOMBRES,
+  responsable: { select: { id: true, nombre: true } },
   paso: { include: { roles: true } },
   tiposServicio: true,
 } as const;
 const INCLUDE_DETALLE = {
   ...NOMBRES,
+  responsable: { select: { id: true, nombre: true } },
   paso: {
     include: {
       roles: true,
@@ -80,6 +89,19 @@ const INCLUDE_DETALLE = {
 type TicketLista = Prisma.TicketGetPayload<{ include: typeof INCLUDE_LISTA }>;
 type TicketDetalle = Prisma.TicketGetPayload<{ include: typeof INCLUDE_DETALLE }>;
 export type TicketParaMover = Prisma.TicketGetPayload<{ include: typeof INCLUDE_DETALLE }>;
+
+/**
+ * Un ticket anulado (el pedido se anuló) es de solo lectura: toda acción que lo cambia lo rechaza con este 409. Lo comprueba `cargarEnTx`,
+ * por donde pasan las acciones de escritura, y las que cargan el ticket por su cuenta lo llaman directamente.
+ */
+export function exigirNoAnulado(pasoCodigo: string): void {
+  if (pasoCodigo === PASO_ANULADO) {
+    throw new ConflictException({
+      message: 'El ticket está anulado porque se anuló el pedido: ya no admite cambios',
+      code: 'TICKET_ANULADO',
+    });
+  }
+}
 
 export const puedeActuar = (roles: { rolCodigo: string }[], rol: string) =>
   rol === ROL_SUPERADMIN || roles.some((r) => r.rolCodigo === rol);
@@ -125,6 +147,9 @@ const resumen = (t: TicketLista) => ({
   pozo: t.pozo?.nombreCompleto ?? null,
   taladro: t.rigless ? 'RIGLESS' : (t.taladro?.nombre ?? null),
   tiposServicio: t.tiposServicio.map((x) => x.tipoCodigo).sort(),
+  /** Supervisor de FCR a quien le pertenece el ticket en la bandeja (`null`: sin asignar). No restringe quién lo ve. */
+  responsableId: t.responsableId,
+  responsableNombre: t.responsable?.nombre ?? null,
   fechaInicioServicio: aDia(t.fechaInicioServicio),
   createdAt: t.createdAt,
 });
@@ -271,13 +296,110 @@ export class TicketsService {
   }
 
   /**
-   * Bandeja: todos los tickets, o los que esperan a un rol (`rol`), o de un paso. Con `rol` y `usuarioId` quien no coordina ve solo los
+   * El pedido se anuló en `comercial` (`comercial.pedido.anulado`): el ticket pasa al paso terminal «anulado» (lo hace el sistema, con el motivo
+   * y el actor del evento), queda de solo lectura y sale de las revisiones periódicas (que solo miran tickets abiertos). Publica
+   * `operaciones.fcr.ticket_anulado` con las herramientas que ya se habían solicitado a Bodega, para que Inventario pueda cancelar la solicitud de
+   * despacho. Un ticket que no existe (el pedido no era de FCR), que ya está anulado o que ya se cerró no cambia. Idempotente.
+   */
+  async anularDesdePedido(
+    tx: Prisma.TransactionClient,
+    event: EventEnvelope<{ codigo?: string; motivo?: string | null }>,
+  ): Promise<boolean> {
+    const t = await tx.ticket.findUnique({
+      where: { pedidoId: event.subject.id },
+      include: { paso: true, personas: true },
+    });
+    if (!t || t.pasoCodigo === PASO_ANULADO) return false;
+    if (t.paso.terminal) {
+      this.logger.warn(
+        `Pedido ${t.pedidoCodigo} anulado, pero su ticket ya está cerrado: no se anula`,
+      );
+      return false;
+    }
+    const motivo = event.data.motivo?.trim() || 'Pedido anulado';
+    const actorId = event.actor?.userId;
+    const actor = actorId && (await this.existeCuenta(tx, actorId)) ? actorId : null;
+    const r = await tx.ticket.updateMany({
+      where: { id: t.id, pasoCodigo: t.pasoCodigo },
+      data: { pasoCodigo: PASO_ANULADO, version: { increment: 1 }, updatedBy: actor },
+    });
+    if (r.count === 0) throw new ConflictException('El ticket cambió de paso; vuelva a intentarlo');
+    await tx.ticketHistorial.create({
+      data: {
+        id: uuidv7(),
+        ticketId: t.id,
+        pasoAnterior: t.pasoCodigo,
+        pasoNuevo: PASO_ANULADO,
+        motivo,
+        actorId: actor,
+        actorRol: actor ? (event.actor?.role ?? null) : null,
+        origen: 'sistema',
+      },
+    });
+    // lo que Inventario necesita para cancelar la solicitud de despacho: las herramientas solicitadas a Bodega que siguen en el ticket
+    const solicitadas = await tx.ticketHerramienta.findMany({
+      where: { ticketId: t.id, solicitadaAt: { not: null }, devueltaAt: null, faltanteAt: null },
+      include: { articulo: { select: { codigo: true, nombre: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.fcr.ticket_anulado',
+        subject: { type: 'fcr_ticket', id: t.id },
+        data: {
+          ticketId: t.id,
+          ticketNumero: t.ticketNumero,
+          pedidoId: t.pedidoId,
+          pedidoCodigo: t.pedidoCodigo,
+          motivo,
+          pasoAnterior: t.pasoCodigo,
+          anuladoPorId: actor,
+          anuladoAt: new Date().toISOString(),
+          // se le avisa al equipo del ticket y a quien lo tenía en su bandeja
+          responsableId: t.responsableId,
+          asignados: t.personas
+            .filter((p) => p.rol === 'supervisor' || p.rol === 'operador')
+            .map((p) => ({ usuarioId: p.usuarioId, rolCodigo: p.rol })),
+          // `enviada`: Bodega ya la despachó, así que además de cancelar la solicitud hay que recuperarla; si no, solo se cancela
+          herramientasSolicitadas: solicitadas.map((h) => ({
+            herramientaId: h.id,
+            articuloId: h.articuloId,
+            codigo: h.articulo.codigo,
+            descripcion: h.articulo.nombre,
+            numeroSerie: h.numeroSerie,
+            solicitadaAt: h.solicitadaAt?.toISOString() ?? null,
+            enviada: h.enviadaAt !== null,
+            recibida: h.recibidaAt !== null,
+          })),
+          cancelarDespacho: solicitadas.some((h) => h.enviadaAt === null),
+        },
+        causationId: event.id,
+        correlationId: event.correlationId,
+        ...(actor ? { actor: { userId: actor, role: event.actor?.role ?? '' } } : {}),
+        traceparent: currentTraceparent(),
+      }),
+    );
+    return true;
+  }
+
+  /**
+   * Bandeja: todos los tickets, o los que esperan a un rol (`rol`), o de un paso, o los de un responsable (`bandeja`; no restringe la visibilidad). Con `rol` y `usuarioId` quien no coordina ve solo los
    * pasos sin equipo y los tickets de los que es parte del equipo. Se busca por número de ticket, pedido, cliente o pozo.
    */
-  async listar(f: { paso?: string; rol?: string; usuarioId?: string; q?: string }) {
+  async listar(f: {
+    paso?: string;
+    rol?: string;
+    usuarioId?: string;
+    q?: string;
+    /** `mias`: las que tiene a su cargo `usuarioId`; `sin_asignar`: las que no tienen responsable; `todas` (o sin valor): sin filtro. */
+    bandeja?: 'mias' | 'sin_asignar' | 'todas';
+  }) {
     const q = f.q?.trim();
     const y: Prisma.TicketWhereInput[] = [];
     if (f.paso) y.push({ pasoCodigo: f.paso });
+    if (f.bandeja === 'mias') y.push({ responsableId: f.usuarioId ?? null });
+    if (f.bandeja === 'sin_asignar') y.push({ responsableId: null });
     if (f.rol) {
       y.push({ paso: { roles: { some: { rolCodigo: f.rol } } } });
       if (f.usuarioId && !ROLES_COORDINA.includes(f.rol)) {
@@ -474,15 +596,93 @@ export class TicketsService {
     t: TicketParaMover,
     actor: AuthUser,
   ): Promise<void> {
+    // también queda como su responsable en la bandeja, si nadie lo era
+    if (t.responsableId === null) {
+      await this.cambiarResponsable(tx, t, actor.id, actor, {
+        accion: 'tomar',
+        motivo: 'Tomó el ticket al sacarlo del paso de arranque',
+      });
+    }
     if (t.personas.some((p) => p.rol === 'supervisor')) return;
     await tx.ticketPersona.create({
       data: { ticketId: t.id, usuarioId: actor.id, rol: 'supervisor', asignadoPor: actor.id },
     });
   }
 
+  /**
+   * Cambia quién es el responsable del ticket (o lo deja sin responsable con `nuevoId = null`) dentro de la transacción de quien llama: lo
+   * cambia solo si sigue siendo el que se leyó (control de concurrencia), deja el historial (append-only) y publica
+   * `operaciones.fcr.responsable_asignado` con el anterior y el nuevo. Sin comprobar roles: eso es de quien llama.
+   */
+  async cambiarResponsable(
+    tx: Prisma.TransactionClient,
+    t: {
+      id: string;
+      ticketNumero: number | null;
+      pedidoId: string;
+      pedidoCodigo: string;
+      responsableId: string | null;
+    },
+    nuevoId: string | null,
+    actor: AuthUser,
+    o: { accion: 'tomar' | 'asignar' | 'liberar'; motivo?: string | null },
+  ): Promise<void> {
+    const r = await tx.ticket.updateMany({
+      where: { id: t.id, responsableId: t.responsableId },
+      data: { responsableId: nuevoId, updatedBy: actor.id },
+    });
+    if (r.count === 0) {
+      throw new ConflictException('El responsable del ticket cambió; vuelva a intentarlo');
+    }
+    const motivo = o.motivo?.trim() || null;
+    await tx.ticketResponsableHistorial.create({
+      data: {
+        id: uuidv7(),
+        ticketId: t.id,
+        anteriorId: t.responsableId,
+        nuevoId,
+        motivo,
+        actorId: actor.id,
+      },
+    });
+    const ids = [t.responsableId, nuevoId].filter((x): x is string => x !== null);
+    const nombres = new Map(
+      (ids.length
+        ? await tx.idUsuario.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, nombre: true },
+          })
+        : []
+      ).map((u) => [u.id, u.nombre]),
+    );
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.fcr.responsable_asignado',
+        subject: { type: 'fcr_ticket', id: t.id },
+        data: {
+          ticketId: t.id,
+          ticketNumero: t.ticketNumero,
+          pedidoId: t.pedidoId,
+          pedidoCodigo: t.pedidoCodigo,
+          accion: o.accion,
+          anteriorId: t.responsableId,
+          anteriorNombre: t.responsableId ? (nombres.get(t.responsableId) ?? null) : null,
+          nuevoId,
+          nuevoNombre: nuevoId ? (nombres.get(nuevoId) ?? null) : null,
+          motivo,
+          asignadoPor: actor.name,
+        },
+        actor: { userId: actor.id, role: actor.roleCode },
+        traceparent: currentTraceparent(),
+      }),
+    );
+  }
+
   async cargarEnTx(tx: Prisma.TransactionClient, id: string): Promise<TicketParaMover> {
     const t = await tx.ticket.findUnique({ where: { id }, include: INCLUDE_DETALLE });
     if (!t) throw new NotFoundException('El ticket no existe');
+    exigirNoAnulado(t.pasoCodigo);
     return t;
   }
 

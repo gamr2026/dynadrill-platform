@@ -502,10 +502,17 @@ run(
           origen: 'manual',
         });
         const out = await salidas(t.pedidoId);
+        // al sacarlo del paso de arranque el Supervisor también queda como responsable del ticket en la bandeja
         expect(out.map((s) => s.tipo)).toEqual([
           'operaciones.fcr.ticket_creado',
+          'operaciones.fcr.responsable_asignado',
           'operaciones.fcr.paso_cambiado',
         ]);
+        expect(out[1].datos.data).toMatchObject({
+          accion: 'tomar',
+          anteriorId: null,
+          nuevoId: SUPERVISOR.id,
+        });
       });
 
       it('desde la preparación solo actúa el equipo: otro Supervisor ve el ticket pero no lo mueve ni lo ve en su bandeja', async () => {

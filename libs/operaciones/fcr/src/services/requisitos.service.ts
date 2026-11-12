@@ -25,6 +25,9 @@ export interface RequisitoPendiente {
   /** A quién o a qué corresponde (nombre del operador); `null` si es del ticket. */
   para: string | null;
   texto: string;
+  /** Rol de cuenta al que le corresponde cumplirlo (catálogo); `null` si no hay uno único. */
+  rolResponsable: string | null;
+  vencido: boolean;
 }
 
 const textoDe = (nombre: string, para: string | null) => (para ? `${nombre} (${para})` : nombre);
@@ -32,6 +35,8 @@ const textoDe = (nombre: string, para: string | null) => (para ? `${nombre} (${p
 /**
  * Requisitos de cada paso (catálogo en la base de datos). Al completar la asignación se crean las filas del ticket; cada una se cumple
  * desde FCR (`sistema`), por un evento de otro módulo (`evento`). El puente manual (`manual_temporal`) se retiró el 27/10/2026. Para salir de un paso no puede quedar ninguno pendiente.
+ * Un requisito **exonerado** (una persona lo dispensó con motivo) no bloquea y no lo toca ningún recálculo ni evento tardío: `marcar` y `reabrir`
+ * solo actúan sobre filas pendientes o cumplidas, y la base impide que pase de exonerado a cumplido. Solo se revierte desde `ExoneracionesService`.
  */
 @Injectable()
 export class RequisitosService {
@@ -58,7 +63,10 @@ export class RequisitosService {
 
     const data: Prisma.TicketRequisitoCreateManyInput[] = [];
     for (const r of definiciones) {
-      const base = { id: '', ticketId, requisitoCodigo: r.codigo };
+      // con plazo en el catálogo, vence tantas horas después de crearse (sin plazo: sin fecha de vencimiento)
+      const venceAt =
+        r.plazoHoras === null ? null : new Date(Date.now() + r.plazoHoras * 3_600_000);
+      const base = { id: '', ticketId, requisitoCodigo: r.codigo, venceAt };
       if (r.ambito === 'ticket') data.push({ ...base, id: uuidv7() });
       if (r.ambito === 'operador')
         for (const o of operadores) data.push({ ...base, id: uuidv7(), usuarioId: o.usuarioId });
@@ -140,21 +148,66 @@ export class RequisitosService {
     return r.count;
   }
 
-  /** Vuelve a pendiente un requisito cumplido (p. ej. el checklist de ingreso quedó incompleto otra vez). */
-  async reabrir(db: Db, k: ClaveRequisito): Promise<number> {
-    const r = await db.ticketRequisito.updateMany({
+  /**
+   * Vuelve a pendiente un requisito cumplido (p. ej. el checklist de ingreso quedó incompleto otra vez). Un exonerado no se reabre. Limpia la
+   * marca de vencido. `venceAt`: nuevo vencimiento; sin indicar, el plazo del catálogo contado desde ahora (o ninguno).
+   */
+  async reabrir(db: Db, k: ClaveRequisito, venceAt?: Date | null): Promise<number> {
+    const filas = await db.ticketRequisito.findMany({
       where: {
         ticketId: k.ticketId,
         requisitoCodigo: k.codigo,
         usuarioId: k.usuarioId ?? null,
         estado: 'cumplido',
       },
-      data: {
+      select: { id: true, requisito: { select: { plazoHoras: true } } },
+    });
+    let n = 0;
+    for (const f of filas) {
+      const plazo = f.requisito.plazoHoras;
+      const r = await db.ticketRequisito.updateMany({
+        where: { id: f.id, estado: 'cumplido' },
+        data: {
+          estado: 'pendiente',
+          cumplidoAt: null,
+          cumplidoPor: null,
+          origen: null,
+          motivo: null,
+          vencidoAt: null,
+          venceAt:
+            venceAt !== undefined
+              ? venceAt
+              : plazo === null
+                ? null
+                : new Date(Date.now() + plazo * 3_600_000),
+        },
+      });
+      n += r.count;
+    }
+    return n;
+  }
+
+  /**
+   * Fija el vencimiento de un requisito que sigue pendiente (la bitácora lo mueve según el primer día sin enviar). Si el nuevo vencimiento
+   * es futuro, se limpia la marca de vencido. Un exonerado o cumplido no se toca.
+   */
+  async fijarVence(
+    db: Db,
+    k: ClaveRequisito,
+    venceAt: Date | null,
+    ahora: Date = new Date(),
+  ): Promise<number> {
+    const r = await db.ticketRequisito.updateMany({
+      where: {
+        ticketId: k.ticketId,
+        requisitoCodigo: k.codigo,
+        usuarioId: k.usuarioId ?? null,
         estado: 'pendiente',
-        cumplidoAt: null,
-        cumplidoPor: null,
-        origen: null,
-        motivo: null,
+        OR: [{ venceAt: null }, { venceAt: { not: venceAt } }],
+      },
+      data: {
+        venceAt,
+        ...(venceAt === null || venceAt.getTime() > ahora.getTime() ? { vencidoAt: null } : {}),
       },
     });
     return r.count;
@@ -185,6 +238,8 @@ export class RequisitosService {
         nombre: f.requisito.nombre,
         para,
         texto: textoDe(f.requisito.nombre, para),
+        rolResponsable: f.requisito.rolResponsable,
+        vencido: f.vencidoAt !== null,
       };
     });
   }
@@ -217,6 +272,19 @@ export class RequisitosService {
       },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
     });
+    // quien exoneró: `exonerado_por` es una FK solo de la base de datos (sin relación en Prisma), el nombre se busca aparte
+    const exoneradores = [
+      ...new Set(filas.flatMap((f) => (f.exoneradoPor ? [f.exoneradoPor] : []))),
+    ];
+    const nombres = new Map(
+      (exoneradores.length
+        ? await this.prisma.idUsuario.findMany({
+            where: { id: { in: exoneradores } },
+            select: { id: true, nombre: true },
+          })
+        : []
+      ).map((u) => [u.id, u.nombre]),
+    );
     return filas
       .map((f) => ({
         id: f.id,
@@ -233,6 +301,14 @@ export class RequisitosService {
         cumplidoAt: f.cumplidoAt,
         origen: f.origen,
         motivo: f.motivo,
+        venceAt: f.venceAt,
+        vencidoAt: f.vencidoAt,
+        /** Marcado vencido por la revisión periódica y todavía pendiente. */
+        vencido: f.estado === 'pendiente' && f.vencidoAt !== null,
+        rolResponsable: f.requisito.rolResponsable,
+        exoneradoAt: f.exoneradoAt,
+        exoneradoPor: f.exoneradoPor,
+        exoneradoPorNombre: f.exoneradoPor ? (nombres.get(f.exoneradoPor) ?? null) : null,
       }))
       .sort(
         (a, b) =>

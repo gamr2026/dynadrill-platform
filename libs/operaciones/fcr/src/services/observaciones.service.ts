@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
+import { exigirNoAnulado } from './tickets.service';
 
 /**
  * Observaciones del ticket (botón «Observaciones» de la demo): notas con autor, rol y fecha que se agregan desde cualquier fase y no se
@@ -32,6 +33,7 @@ export class ObservacionesService {
   /** Agrega una observación a nombre de quien la escribe, con el rol con el que actúa. */
   async agregar(ticketId: string, mensaje: string, actor: AuthUser) {
     const t = await this.exigirTicket(ticketId);
+    exigirNoAnulado(t.pasoCodigo);
     if (t.paso.terminal) {
       throw new ConflictException('El ticket está cerrado: ya no admite observaciones');
     }
@@ -58,7 +60,7 @@ export class ObservacionesService {
   private async exigirTicket(ticketId: string) {
     const t = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { paso: { select: { terminal: true } } },
+      select: { pasoCodigo: true, paso: { select: { terminal: true } } },
     });
     if (!t) throw new NotFoundException('El ticket no existe');
     return t;

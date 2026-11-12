@@ -9,11 +9,18 @@ export const EVENTO_PEDIDO_ABIERTO = 'comercial.pedido.abierto';
 export const EVENTO_PEDIDO_ACTUALIZADO = 'comercial.pedido.actualizado';
 /** Facturación corrigió un día del Reporte Job en el pedido: el ticket deja de poder editarlo y reenviarlo (contrato 4.4). */
 export const EVENTO_DIA_CORREGIDO = 'comercial.documento_operativo.corregido';
-const EVENTOS = [EVENTO_PEDIDO_ABIERTO, EVENTO_PEDIDO_ACTUALIZADO, EVENTO_DIA_CORREGIDO];
+/** El pedido se anuló: el ticket pasa a «anulado» y deja de admitir cambios. */
+export const EVENTO_PEDIDO_ANULADO = 'comercial.pedido.anulado';
+const EVENTOS = [
+  EVENTO_PEDIDO_ABIERTO,
+  EVENTO_PEDIDO_ACTUALIZADO,
+  EVENTO_DIA_CORREGIDO,
+  EVENTO_PEDIDO_ANULADO,
+];
 
 /**
- * Recibe los eventos del pedido que Ventas lleva en `comercial`: si se abre un pedido de la línea FCR crea su ticket, y si un pedido ya
- * abierto cambia (fechas del servicio, ítems) actualiza el del ticket. Los dos van en una sola suscripción (una sola cola del grupo `fcr`).
+ * Recibe los eventos del pedido que Ventas lleva en `comercial`: si se abre un pedido de la línea FCR crea su ticket, si un pedido ya
+ * abierto cambia (fechas del servicio, ítems) actualiza el del ticket y si se anula anula el ticket. Los dos van en una sola suscripción (una sola cola del grupo `fcr`).
  * El inbox evita procesar dos veces un evento entregado repetido, y todo ocurre en una sola transacción.
  */
 @Injectable()
@@ -49,6 +56,14 @@ export class PedidosAbiertosConsumer implements OnApplicationBootstrap {
               event as unknown as EventEnvelope<PedidoAbiertoData>,
             );
             if (r) this.logger.log(`Pedido ${String(event.data['codigo'])}: ticket creado`);
+            return;
+          }
+          if (event.type === EVENTO_PEDIDO_ANULADO) {
+            const anulado = await this.tickets.anularDesdePedido(
+              tx,
+              event as unknown as EventEnvelope<{ codigo?: string; motivo?: string | null }>,
+            );
+            if (anulado) this.logger.log(`Pedido ${String(event.data['codigo'])}: ticket anulado`);
             return;
           }
           if (event.type === EVENTO_DIA_CORREGIDO) {

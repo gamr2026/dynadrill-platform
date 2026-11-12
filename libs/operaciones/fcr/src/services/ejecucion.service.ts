@@ -3,6 +3,8 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { REQ } from '../catalog/sembrar-pasos';
 import { PrismaService } from '../prisma/prisma.service';
+import { BitacoraService } from './bitacora.service';
+import { hoyEcuador } from './dias-servicio';
 import { ReporteHerramientasService } from './reporte-herramientas.service';
 import { RequisitosService } from './requisitos.service';
 import { TicketsService } from './tickets.service';
@@ -12,7 +14,7 @@ const aDia = (d: Date) => d.toISOString().slice(0, 10);
 /**
  * Reunión operativa, finalización de la ejecución y revisión de reportes.
  *  - El Supervisor confirma el acta de la reunión operativa (con su fecha) para pasar a la ejecución.
- *  - El Operador finaliza la ejecución: la bitácora debe estar enviada (todos sus días) y el Reporte de Herramientas confirmado. Al finalizar se
+ *  - El Operador finaliza la ejecución: la bitácora debe estar enviada (todos los días del servicio hasta hoy, también los que nunca se abrieron) y el Reporte de Herramientas confirmado. Al finalizar se
  *    envía a Comercial el Reporte de Herramientas (una sola vez, por código de la lista de precios y con la cantidad real; consulta F-21) y el ticket pasa a la
  *    revisión de reportes, donde el operador ya no corrige.
  *  - El Supervisor aprueba los reportes (pasa al control de retorno) o los rechaza con motivo (vuelve a la ejecución).
@@ -25,6 +27,7 @@ export class EjecucionService {
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
     private readonly reporte: ReporteHerramientasService,
+    private readonly bitacora: BitacoraService,
   ) {}
 
   async reunion(ticketId: string) {
@@ -78,6 +81,14 @@ export class EjecucionService {
         throw new ConflictException({
           message: `Hay ${sinEnviar} día(s) de la bitácora sin enviar a Facturación`,
           code: 'BITACORA_SIN_ENVIAR',
+        });
+      }
+      // no basta con los días que existen: cada día del servicio hasta hoy (o hasta su fin) debe estar enviado o corregido por Facturación
+      const faltan = await this.bitacora.diasFaltantes(tx, ticketId, hoyEcuador());
+      if (faltan.length) {
+        throw new ConflictException({
+          message: `Faltan ${faltan.length} día(s) de la bitácora por enviar a Facturación: ${faltan.join(', ')}`,
+          code: 'BITACORA_DIAS_FALTANTES',
         });
       }
       await this.requisitos.exigirCumplidos(tx, ticketId, t.pasoCodigo, t.paso.nombre);

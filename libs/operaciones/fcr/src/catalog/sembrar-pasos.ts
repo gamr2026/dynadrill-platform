@@ -36,6 +36,9 @@ export const REQ = {
   actaEntregaLocacion: 'acta_entrega_locacion',
 } as const;
 
+/** Paso terminal al que pasa el ticket cuando el pedido se anula. */
+export const PASO_ANULADO = 'anulado';
+
 interface PasoDef {
   codigo: string;
   nombre: string;
@@ -53,6 +56,7 @@ interface PasoDef {
  * Entrada SERVICIOS: tipo_operador → inspeccion → aprobacion_supervisor_operaciones → preparacion_herramientas
  * Tronco común:     preparacion_herramientas → asignacion → reunion_operativa → ejecucion_operativa → revision_reportes
  *                   → control_retorno → cierre → cerrado
+ * Terminal aparte: `anulado`, al que se llega desde cualquier paso no terminal cuando se anula el pedido (lo hace el sistema).
  */
 export const PASOS: PasoDef[] = [
   {
@@ -122,6 +126,14 @@ export const PASOS: PasoDef[] = [
     roles: ['supervisor'],
     terminal: true,
   },
+  {
+    codigo: PASO_ANULADO,
+    nombre: 'Anulado',
+    macro: 'anulado',
+    roles: ['supervisor'],
+    requiereEquipo: false,
+    terminal: true,
+  },
 ];
 
 /** Paso en el que nace el ticket según el tipo de OT del pedido: lo único que separa los dos recorridos. */
@@ -167,6 +179,14 @@ export const TRANSICIONES: Array<{
   },
   { de: 'control_retorno', a: 'cierre' },
   { de: 'cierre', a: 'cerrado' },
+  // La anulación del pedido (la hace el sistema, con motivo): desde cualquier paso que no sea terminal. No exige requisitos.
+  ...PASOS.filter((p) => !p.terminal).map((p) => ({
+    de: p.codigo,
+    a: PASO_ANULADO,
+    motivo: true,
+    exigeRequisitos: false,
+    porAccion: true,
+  })),
 ];
 
 interface RequisitoDef {
@@ -178,6 +198,10 @@ interface RequisitoDef {
   tipoOt?: TipoOt;
   /** Paso del que se SALE cuando se cumple. */
   paso: string;
+  /** Rol de cuenta al que le corresponde cumplirlo; solo donde el catálogo no deja duda. */
+  rolResponsable?: string;
+  /** Horas para cumplirlo desde que se crea el requisito (sin valor: sin plazo). */
+  plazoHoras?: number;
 }
 
 export const REQUISITOS: RequisitoDef[] = [
@@ -189,6 +213,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'control_retorno',
+    rolResponsable: 'bodeguero',
   },
   {
     codigo: REQ.actaEntregaLocacion,
@@ -198,6 +223,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'qhse',
     paso: 'cierre',
+    rolResponsable: 'gerente_hse',
   },
   {
     codigo: REQ.actaReunionOperativa,
@@ -206,6 +232,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'reunion_operativa',
+    rolResponsable: 'supervisor',
   },
   {
     codigo: REQ.bitacoraEnviada,
@@ -215,6 +242,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'ejecucion_operativa',
+    rolResponsable: 'operador_fcr',
   },
   {
     codigo: REQ.listadoUsoConfirmado,
@@ -224,6 +252,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'ejecucion_operativa',
+    rolResponsable: 'operador_fcr',
   },
   {
     codigo: REQ.inspeccionesEnviadas,
@@ -234,6 +263,7 @@ export const REQUISITOS: RequisitoDef[] = [
     modulo: 'fcr',
     tipoOt: 'servicio',
     paso: 'inspeccion',
+    rolResponsable: 'operador_fcr',
   },
   {
     codigo: REQ.formularioInspeccionExterno,
@@ -243,6 +273,7 @@ export const REQUISITOS: RequisitoDef[] = [
     modulo: 'fcr',
     tipoOt: 'servicio',
     paso: 'inspeccion',
+    rolResponsable: 'operador_fcr',
   },
   {
     codigo: REQ.tipoOperadorDefinido,
@@ -253,6 +284,7 @@ export const REQUISITOS: RequisitoDef[] = [
     modulo: 'fcr',
     tipoOt: 'servicio',
     paso: 'tipo_operador',
+    rolResponsable: 'supervisor',
   },
   {
     codigo: REQ.listadoConfirmado,
@@ -262,6 +294,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'fcr',
     paso: 'preparacion_herramientas',
+    rolResponsable: 'supervisor',
   },
   {
     codigo: REQ.herramientasRecibidas,
@@ -373,6 +406,8 @@ export async function sembrarPasos(db: Cliente): Promise<{
           ambito: r.ambito,
           modulo: r.modulo,
           tipoOt: r.tipoOt ?? null,
+          rolResponsable: r.rolResponsable ?? null,
+          plazoHoras: r.plazoHoras ?? null,
         },
       });
       await db.pasoRequisito.create({ data: { pasoCodigo: r.paso, requisitoCodigo: r.codigo } });

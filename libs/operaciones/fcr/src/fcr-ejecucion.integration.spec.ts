@@ -26,6 +26,7 @@ import { ActaEntregaConsumer } from './consumers/acta-entrega.consumer';
 import { ResultadoCambioItemsConsumer } from './consumers/resultado-cambio-items.consumer';
 import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
+import { RequisitosRevisionService } from './services/requisitos-revision.service';
 import { FcrModule } from './fcr.module';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
@@ -49,6 +50,7 @@ const n = Date.now();
 const P = Permission;
 const u = (nombre: string, rol: string) => ({ id: uuidv7(), nombre, rol });
 const SUPERVISOR = u('Sara Supervisora', 'supervisor');
+const SUPERVISOR_2 = u('Sergio Supervisor', 'supervisor');
 const OPERADOR = u('Olga Operadora', 'operador_fcr');
 const OTRO_OPERADOR = u('Omar Operador', 'operador_fcr');
 const BODEGUERO = u('Bruno Bodeguero', 'bodeguero');
@@ -62,7 +64,7 @@ const art = (s: string) => ({ id: uuidv7(), codigo: `EJ-${s}-${n}` });
 const CEPILLO = art('CEP');
 const MAGNETO = art('MAG');
 const MAESTROS: MaestrosDePrueba = {
-  usuarios: [SUPERVISOR, OPERADOR, OTRO_OPERADOR, BODEGUERO, VENTAS],
+  usuarios: [SUPERVISOR, SUPERVISOR_2, OPERADOR, OTRO_OPERADOR, BODEGUERO, VENTAS],
   clientes: [CLIENTE],
   campos: [CAMPO],
   bloques: [BLOQUE],
@@ -1321,12 +1323,15 @@ run(
       it('no finaliza sin bitácora enviada ni reporte de herramientas confirmado, ni con días por enviar', async () => {
         const t = await enEjecucion();
         const falta = await finalizar(t.id).expect(409);
-        expect(q(falta)).toMatch(/Bitácora enviada a Facturación/);
+        expect(falta.body.code).toBe('BITACORA_DIAS_FALTANTES');
+        expect(q(falta)).toMatch(/Faltan 8 día\(s\) de la bitácora.*2026-11-05.*2026-11-12/);
         await guardar(t.id, '2026-11-05').expect(200);
         expect((await finalizar(t.id).expect(409)).body.code).toBe('BITACORA_SIN_ENVIAR');
         await enviar(t.id, '2026-11-05').expect(201);
         // el servicio dura 8 días: con un solo día enviado todavía falta la bitácora de los demás
-        expect(q(await finalizar(t.id).expect(409))).toMatch(/Bitácora enviada a Facturación/);
+        expect(q(await finalizar(t.id).expect(409))).toMatch(
+          /Faltan 7 día\(s\) de la bitácora.*2026-11-06/,
+        );
         await enviarTodosLosDias(t.id);
         const sinListado = await finalizar(t.id).expect(409);
         expect(q(sinListado)).toMatch(/Reporte de herramientas confirmado/);
@@ -1581,6 +1586,722 @@ run(
           [t.id],
           /no puede pasar de/,
         );
+      });
+    });
+
+    describe('requisitos: exoneración, historial y vencimiento', () => {
+      interface Req {
+        id: string;
+        codigo: string;
+        estado: string;
+        venceAt: string | null;
+        rolResponsable: string | null;
+      }
+      interface Hist {
+        estadoAnterior: string | null;
+        estadoNuevo: string;
+        origen: string;
+      }
+      const requisitosDe = async (id: string) =>
+        (await http().get(base(id)).set(supervisor()).expect(200)).body.requisitos as Array<Req>;
+      const requisito = async (id: string, codigo: string) => {
+        const r = (await requisitosDe(id)).find((x) => x.codigo === codigo);
+        if (!r) throw new Error(`sin requisito ${codigo}`);
+        return r;
+      };
+      const ruta = (t: string, r: string) => `${base(t)}/requisitos/${r}`;
+
+      it('lo devuelve con vencimiento, rol responsable y datos de la exoneración', async () => {
+        const t = await enEjecucion();
+        const r = await requisito(t.id, 'bitacora_enviada');
+        expect(r).toMatchObject({
+          estado: 'pendiente',
+          vencido: false,
+          vencidoAt: null,
+          rolResponsable: 'operador_fcr',
+          exoneradoAt: null,
+          exoneradoPor: null,
+        });
+        // vence al terminar el día siguiente al primero sin enviar (el 5): el 7 a las 00:00 de Ecuador
+        await guardar(t.id, '2026-11-05').expect(200);
+        await enviar(t.id, '2026-11-05').expect(201);
+        const tras = await requisito(t.id, 'bitacora_enviada');
+        expect(new Date(String(tras.venceAt)).toISOString()).toBe('2026-11-08T05:00:00.000Z');
+        // el Acta de Entrega de Locación la carga QHSE: su responsable es el Gerente HSE
+        expect((await requisito(t.id, 'acta_entrega_locacion')).rolResponsable).toBe('gerente_hse');
+      });
+
+      it('exonerar pide motivo y es del Supervisor; el exonerado no bloquea y ningún recálculo lo toca; revertirlo lo deja pendiente', async () => {
+        const t = await enEjecucion();
+        const uso = await requisito(t.id, 'listado_uso_confirmado');
+        await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(supervisor())
+          .send({})
+          .expect(400);
+        await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: '   ' })
+          .expect(400);
+        await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(operador())
+          .send({ motivo: 'No hace falta' })
+          .expect(403);
+        const ok = await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'El cliente no pidió reporte de herramientas' })
+          .expect(201);
+        expect(ok.body).toMatchObject({
+          estado: 'exonerado',
+          motivo: 'El cliente no pidió reporte de herramientas',
+          exoneradoPor: SUPERVISOR.id,
+          exoneradoPorNombre: SUPERVISOR.nombre,
+        });
+        expect(ok.body.exoneradoAt).toBeTruthy();
+        await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'otra vez' })
+          .expect(409);
+        // editar el reporte (recálculo) y confirmarlo no lo reabren ni lo cumplen
+        const fila = (
+          await http()
+            .get(`${base(t.id)}/reporte-herramientas`)
+            .set(operador())
+            .expect(200)
+        ).body.items[0];
+        await http()
+          .patch(`${base(t.id)}/reporte-herramientas/items/${fila.id}`)
+          .set(operador())
+          .send({ serie: 'S-1' })
+          .expect(200);
+        await confirmarUso(t.id);
+        expect((await requisito(t.id, 'listado_uso_confirmado')).estado).toBe('exonerado');
+        // no bloquea: con la bitácora completa el ticket finaliza sin que el reporte esté confirmado
+        await enviarTodosLosDias(t.id);
+        await finalizar(t.id).expect(201);
+        // la base tampoco deja cumplirlo por la espalda
+        await expect(
+          admin.query(
+            "UPDATE fcr.ticket_requisito SET estado = 'cumplido', cumplido_at = now(), exonerado_at = NULL, exonerado_por = NULL WHERE id = $1",
+            [uso.id],
+          ),
+        ).rejects.toThrow(/exonerado no se puede cumplir/);
+      });
+
+      it('revertir la exoneración vuelve a pendiente, con su actor en el historial; un cumplido o inexistente no se exonera', async () => {
+        const t = await enEjecucion();
+        const uso = await requisito(t.id, 'listado_uso_confirmado');
+        await http()
+          .post(`${ruta(t.id, uso.id)}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'Motivo de la exoneración' })
+          .expect(201);
+        await http()
+          .post(`${ruta(t.id, uso.id)}/revertir-exoneracion`)
+          .set(operador())
+          .send({})
+          .expect(403);
+        const rev = await http()
+          .post(`${ruta(t.id, uso.id)}/revertir-exoneracion`)
+          .set(supervisor())
+          .send({ motivo: 'Se revierte' })
+          .expect(201);
+        expect(rev.body).toMatchObject({
+          estado: 'pendiente',
+          exoneradoAt: null,
+          exoneradoPor: null,
+        });
+        await http()
+          .post(`${ruta(t.id, uso.id)}/revertir-exoneracion`)
+          .set(supervisor())
+          .send({})
+          .expect(409);
+        const h = (
+          await http()
+            .get(`${ruta(t.id, uso.id)}/historial`)
+            .set(operador())
+            .expect(200)
+        ).body.historial as Hist[];
+        expect(h.map((x) => [x.estadoAnterior, x.estadoNuevo, x.origen])).toEqual([
+          [null, 'pendiente', 'sistema'],
+          ['pendiente', 'exonerado', 'manual'],
+          ['exonerado', 'pendiente', 'manual'],
+        ]);
+        expect(h[1]).toMatchObject({
+          motivo: 'Motivo de la exoneración',
+          actor: { id: SUPERVISOR.id, nombre: SUPERVISOR.nombre },
+        });
+        expect(h[2]).toMatchObject({ motivo: 'Se revierte', actor: { id: SUPERVISOR.id } });
+        await http()
+          .get(`${ruta(t.id, uuidv7())}/historial`)
+          .set(operador())
+          .expect(404);
+        // un requisito cumplido no se exonera
+        await enviarTodosLosDias(t.id);
+        const bit = await requisito(t.id, 'bitacora_enviada');
+        expect(bit.estado).toBe('cumplido');
+        await http()
+          .post(`${ruta(t.id, bit.id)}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'x' })
+          .expect(409);
+        await http()
+          .post(`${ruta(t.id, uuidv7())}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'x' })
+          .expect(404);
+      });
+
+      it('el historial es inmutable para la aplicación y solo lo escribe el trigger', async () => {
+        const t = await enEjecucion();
+        const uso = await requisito(t.id, 'listado_uso_confirmado');
+        await expect(
+          appPool.query(
+            "UPDATE fcr.ticket_requisito_historial SET motivo = 'x' WHERE ticket_requisito_id = $1",
+            [uso.id],
+          ),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          appPool.query(
+            'DELETE FROM fcr.ticket_requisito_historial WHERE ticket_requisito_id = $1',
+            [uso.id],
+          ),
+        ).rejects.toThrow(/permission denied/);
+        // lo que no cambia el estado ni el vencimiento no deja fila
+        const antes = await admin.query(
+          'SELECT count(*)::int AS n FROM fcr.ticket_requisito_historial WHERE ticket_requisito_id = $1',
+          [uso.id],
+        );
+        await admin.query('UPDATE fcr.ticket_requisito SET updated_at = now() WHERE id = $1', [
+          uso.id,
+        ]);
+        const despues = await admin.query(
+          'SELECT count(*)::int AS n FROM fcr.ticket_requisito_historial WHERE ticket_requisito_id = $1',
+          [uso.id],
+        );
+        expect(despues.rows[0].n).toBe(antes.rows[0].n);
+        expect(antes.rows[0].n).toBe(1);
+      });
+
+      it('la base exige que exonerado vaya con fecha, autor y motivo, y un plazo no negativo', async () => {
+        const t = await enEjecucion();
+        const uso = await requisito(t.id, 'listado_uso_confirmado');
+        const upd = (set: string) =>
+          admin.query(`UPDATE fcr.ticket_requisito SET ${set} WHERE id = $1`, [uso.id]);
+        await expect(upd("estado = 'exonerado'")).rejects.toThrow(
+          /ticket_requisito_exonerado_check/,
+        );
+        await expect(
+          upd(
+            `estado = 'exonerado', exonerado_at = now(), exonerado_por = '${SUPERVISOR.id}', motivo = '  '`,
+          ),
+        ).rejects.toThrow(/ticket_requisito_exonerado_check/);
+        await expect(
+          upd(`exonerado_at = now(), exonerado_por = '${SUPERVISOR.id}'`),
+        ).rejects.toThrow(/ticket_requisito_exonerado_check/);
+        await expect(
+          admin.query('UPDATE fcr.requisito SET plazo_horas = -1 WHERE codigo = $1', [
+            'bitacora_enviada',
+          ]),
+        ).rejects.toThrow(/requisito_plazo_horas_check/);
+      });
+    });
+
+    describe('revisión periódica de requisitos y bitácora al día', () => {
+      const revision = () => app.get(RequisitosRevisionService);
+      const requisitoBit = async (id: string) =>
+        (
+          await admin.query(
+            "SELECT id, estado, vence_at, vencido_at FROM fcr.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = 'bitacora_enviada'",
+            [id],
+          )
+        ).rows[0] as { id: string; estado: string; vence_at: Date | null; vencido_at: Date | null };
+      const vencidos = (pedidoId: string) => salidas(pedidoId, 'operaciones.fcr.requisito_vencido');
+
+      it('el requisito cumplido no se queda así cuando pasan los días sin enviar: la revisión lo reabre, lo marca vencido y avisa una sola vez', async () => {
+        const t = await enEjecucion();
+        await enviarTodosLosDias(t.id);
+        expect((await requisitoBit(t.id)).estado).toBe('cumplido');
+        // se amplía el servicio hasta el 20: nada recalcula la bitácora, el requisito sigue cumplido mientras pasan los días
+        await consumer.consumir(
+          evento('comercial.pedido.actualizado', t.pedidoId, { fechaFinServicio: '2026-11-20' }),
+        );
+        expect((await requisitoBit(t.id)).estado).toBe('cumplido');
+        // el 16 faltan el 13, 14 y 15 (hasta ayer); el 13 venció al terminar el 14
+        const r = await revision().emitir('2026-11-16', [t.id]);
+        expect(r).toEqual({ revisados: 1, vencidos: 1 });
+        const fila = await requisitoBit(t.id);
+        expect(fila.estado).toBe('pendiente');
+        expect(fila.vence_at?.toISOString()).toBe('2026-11-15T05:00:00.000Z');
+        expect(fila.vencido_at).not.toBeNull();
+        const ev = await vencidos(t.pedidoId);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          requisitoCodigo: 'bitacora_enviada',
+          requisitoNombre: 'Bitácora enviada a Facturación',
+          diasFaltantes: ['2026-11-13', '2026-11-14', '2026-11-15'],
+          rolResponsable: 'operador_fcr',
+        });
+        expect(ev[0].d['asignados']).toEqual(
+          expect.arrayContaining([{ usuarioId: OPERADOR.id, rolCodigo: 'operador' }]),
+        );
+        // otra pasada no repite el evento
+        expect(await revision().emitir('2026-11-16', [t.id])).toEqual({
+          revisados: 1,
+          vencidos: 0,
+        });
+        expect(await vencidos(t.pedidoId)).toHaveLength(1);
+        // el historial del requisito lo registra
+        const h = (
+          await admin.query(
+            'SELECT estado_anterior, estado_nuevo, vencido, origen FROM fcr.ticket_requisito_historial WHERE ticket_requisito_id = $1 ORDER BY created_at',
+            [fila.id],
+          )
+        ).rows;
+        expect(h.at(-1)).toMatchObject({
+          estado_nuevo: 'pendiente',
+          vencido: true,
+          origen: 'revision',
+        });
+        expect(
+          h.some(
+            (x: { estado_anterior: string; estado_nuevo: string }) =>
+              x.estado_anterior === 'cumplido' && x.estado_nuevo === 'pendiente',
+          ),
+        ).toBe(true);
+      });
+
+      it('sin días vencidos no reabre ni avisa; un exonerado no se toca', async () => {
+        const t = await enEjecucion();
+        await enviarTodosLosDias(t.id);
+        expect(await revision().emitir('2026-11-13', [t.id])).toEqual({
+          revisados: 1,
+          vencidos: 0,
+        });
+        expect((await requisitoBit(t.id)).estado).toBe('cumplido');
+        // un ticket con días sin enviar y su requisito exonerado: la revisión no lo reabre ni lo marca vencido
+        const u = await enEjecucion();
+        const bit = await requisitoBit(u.id);
+        await http()
+          .post(`${base(u.id)}/requisitos/${bit.id}/exonerar`)
+          .set(supervisor())
+          .send({ motivo: 'Bitácora en papel' })
+          .expect(201);
+        expect(await revision().emitir('2026-11-30', [u.id])).toEqual({
+          revisados: 1,
+          vencidos: 0,
+        });
+        expect((await requisitoBit(u.id)).estado).toBe('exonerado');
+        expect(await vencidos(u.pedidoId)).toHaveLength(0);
+      });
+
+      it('un requisito con plazo vencido se marca y avisa una vez', async () => {
+        const t = await enEjecucion();
+        const fila = await admin.query(
+          "UPDATE fcr.ticket_requisito SET vence_at = '2026-11-01T00:00:00Z' WHERE ticket_id = $1 AND requisito_codigo = 'listado_uso_confirmado' RETURNING id",
+          [t.id],
+        );
+        expect(await revision().emitir('2026-11-03', [t.id])).toMatchObject({ vencidos: 1 });
+        const ev = (await vencidos(t.pedidoId)).filter(
+          (e) => e.d['requisitoId'] === fila.rows[0].id,
+        );
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({
+          requisitoCodigo: 'listado_uso_confirmado',
+          diasFaltantes: [],
+        });
+        expect(await revision().emitir('2026-11-03', [t.id])).toMatchObject({ vencidos: 0 });
+      });
+
+      it('el Acta de Entrega de Locación es del Gerente HSE: el aviso de vencido viaja con su rol y sin equipo del ticket', async () => {
+        const rol = await admin.query(
+          "SELECT rol_responsable FROM fcr.requisito WHERE codigo = 'acta_entrega_locacion'",
+        );
+        expect(rol.rows[0].rol_responsable).toBe('gerente_hse');
+        const t = await enEjecucion();
+        const fila = await admin.query(
+          "UPDATE fcr.ticket_requisito SET vence_at = '2026-11-01T00:00:00Z' WHERE ticket_id = $1 AND requisito_codigo = 'acta_entrega_locacion' RETURNING id",
+          [t.id],
+        );
+        expect(fila.rows).toHaveLength(1);
+        expect(await revision().emitir('2026-11-03', [t.id])).toMatchObject({ vencidos: 1 });
+        const ev = (await vencidos(t.pedidoId)).filter(
+          (e) => e.d['requisitoId'] === fila.rows[0].id,
+        );
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({ rolResponsable: 'gerente_hse', asignados: [] });
+      });
+
+      it('finalizar rechaza si algún día del servicio hasta la fecha no tiene bitácora enviada y los lista', async () => {
+        const t = await enEjecucion();
+        for (const dia of [
+          '2026-11-05',
+          '2026-11-06',
+          '2026-11-07',
+          '2026-11-09',
+          '2026-11-10',
+          '2026-11-11',
+          '2026-11-12',
+        ]) {
+          await guardar(t.id, dia).expect(200);
+          await enviar(t.id, dia).expect(201);
+        }
+        const r = await finalizar(t.id).expect(409);
+        expect(r.body.code).toBe('BITACORA_DIAS_FALTANTES');
+        expect(q(r)).toMatch(/2026-11-08/);
+        await guardar(t.id, '2026-11-08').expect(200);
+        await enviar(t.id, '2026-11-08').expect(201);
+        await finalizar(t.id).expect((x) =>
+          expect(x.body.code).not.toBe('BITACORA_DIAS_FALTANTES'),
+        );
+      });
+    });
+
+    describe('anulación del ticket cuando se anula el pedido', () => {
+      const anulado = (pedidoId: string, motivo = 'El cliente canceló el servicio') => ({
+        ...evento('comercial.pedido.anulado', pedidoId, { codigo: `PED-EJ${n}`, motivo }),
+        actor: { userId: VENTAS.id, role: 'ingenieria_ventas' },
+      });
+      const paso = async (id: string) =>
+        (await admin.query('SELECT paso_codigo FROM fcr.ticket WHERE id = $1', [id])).rows[0]
+          .paso_codigo as string;
+
+      it('lleva el ticket a «anulado» con motivo y actor del evento, avisa con lo que Inventario necesita y no se repite', async () => {
+        const t = await enEjecucion();
+        const e = anulado(t.pedidoId);
+        await consumer.consumir(e);
+        expect(await paso(t.id)).toBe('anulado');
+        const h = (
+          await admin.query(
+            'SELECT paso_anterior, paso_nuevo, motivo, actor_id, actor_rol, origen FROM fcr.ticket_historial WHERE ticket_id = $1 ORDER BY created_at DESC LIMIT 1',
+            [t.id],
+          )
+        ).rows[0];
+        expect(h).toEqual({
+          paso_anterior: 'ejecucion_operativa',
+          paso_nuevo: 'anulado',
+          motivo: 'El cliente canceló el servicio',
+          actor_id: VENTAS.id,
+          actor_rol: 'ingenieria_ventas',
+          origen: 'sistema',
+        });
+        const ev = await salidas(t.pedidoId, 'operaciones.fcr.ticket_anulado');
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          motivo: 'El cliente canceló el servicio',
+          pasoAnterior: 'ejecucion_operativa',
+          anuladoPorId: VENTAS.id,
+          cancelarDespacho: false,
+        });
+        // las dos herramientas ya solicitadas (y despachadas) a Bodega viajan para que Inventario sepa qué cancelar o recuperar
+        const hs = ev[0].d['herramientasSolicitadas'] as Array<Record<string, unknown>>;
+        expect(hs.map((x) => x['articuloId']).sort()).toEqual([CEPILLO.id, MAGNETO.id].sort());
+        expect(hs.every((x) => x['enviada'] === true)).toBe(true);
+        // la misma entrega repetida (inbox) y un evento nuevo del mismo pedido no lo vuelven a anular
+        await consumer.consumir(e);
+        await consumer.consumir(anulado(t.pedidoId, 'otra vez'));
+        expect(await salidas(t.pedidoId, 'operaciones.fcr.ticket_anulado')).toHaveLength(1);
+        // un pedido sin ticket (no es de FCR) no falla
+        await consumer.consumir(anulado(uuidv7()));
+      });
+
+      it('se anula desde un paso temprano y ya no se revisa', async () => {
+        const e = evento('comercial.pedido.abierto', uuidv7(), {
+          codigo: `PED-EJ${n}-A`,
+          lineaServicio: 'fcr',
+          tipoOt: 'venta',
+          tiposServicio: ['pesca'],
+          ticketNumero: seq++,
+          clienteId: CLIENTE.id,
+          campoId: CAMPO.id,
+          pozoId: POZO.id,
+          fechaInicioServicio: '2026-11-05',
+          fechaFinServicio: '2026-11-12',
+          lineas: [],
+        });
+        await consumer.consumir(e);
+        const t = await prisma.ticket.findUniqueOrThrow({ where: { pedidoId: e.subject.id } });
+        expect(t.pasoCodigo).toBe('revision_inicial');
+        await consumer.consumir(anulado(e.subject.id));
+        expect(await paso(t.id)).toBe('anulado');
+        const ev = await salidas(e.subject.id, 'operaciones.fcr.ticket_anulado');
+        expect(ev[0].d).toMatchObject({ herramientasSolicitadas: [], cancelarDespacho: false });
+        // un pendiente con plazo vencido de un ticket anulado ya no se marca ni avisa
+        await admin.query(
+          "UPDATE fcr.ticket_requisito SET vence_at = '2026-11-01T00:00:00Z' WHERE ticket_id = $1",
+          [t.id],
+        );
+        expect(await app.get(RequisitosRevisionService).emitir('2026-11-30', [t.id])).toEqual({
+          revisados: 0,
+          vencidos: 0,
+        });
+      });
+
+      it('un ticket anulado rechaza toda acción de escritura con un 409 claro y se sigue pudiendo consultar', async () => {
+        const t = await enEjecucion();
+        await consumer.consumir(anulado(t.pedidoId));
+        const rechazada = (r: { status: number; body: { code?: string; message?: string } }) => {
+          expect(r.status).toBe(409);
+          expect(r.body.code).toBe('TICKET_ANULADO');
+        };
+        const llamadas = [
+          () => guardar(t.id, '2026-11-05'),
+          () => enviar(t.id, '2026-11-05'),
+          () => finalizar(t.id),
+          () =>
+            http()
+              .post(`${base(t.id)}/avanzar`)
+              .set(supervisor())
+              .send({ hacia: 'revision_reportes' }),
+          () =>
+            http()
+              .post(`${base(t.id)}/observaciones`)
+              .set(supervisor())
+              .send({ mensaje: 'hola' }),
+          () =>
+            http()
+              .post(`${base(t.id)}/herramientas/solicitar`)
+              .set(supervisor())
+              .send({}),
+          () =>
+            http()
+              .post(`${base(t.id)}/cambios-items`)
+              .set(tok(OPERADOR, [P.FCR_OPERAR, P.FCR_CAMBIOS_SOLICITAR]))
+              .send({
+                motivo: 'Se usó menos',
+                items: [
+                  {
+                    listaPreciosItemId: uuidv7(),
+                    codigo: 'SFS6001',
+                    descripcion: 'Hydraulic jar',
+                    unidadMedidaId: U('Día'),
+                    cantidad: 2,
+                    tipoLinea: 'servicio',
+                  },
+                ],
+              }),
+        ];
+        for (const llamar of llamadas) rechazada(await llamar());
+        const req = (await http().get(base(t.id)).set(supervisor()).expect(200)).body;
+        expect(req.paso).toMatchObject({ codigo: 'anulado', macro: 'anulado' });
+        const uso = req.requisitos.find(
+          (r: { codigo: string }) => r.codigo === 'listado_uso_confirmado',
+        );
+        rechazada(
+          await http()
+            .post(`${base(t.id)}/requisitos/${uso.id}/exonerar`)
+            .set(supervisor())
+            .send({ motivo: 'x' }),
+        );
+        await http()
+          .get(`${base(t.id)}/bitacora`)
+          .set(operador())
+          .expect(200);
+        // la base tampoco deja sacarlo de «anulado»
+        await expect(
+          admin.query("UPDATE fcr.ticket SET paso_codigo = 'ejecucion_operativa' WHERE id = $1", [
+            t.id,
+          ]),
+        ).rejects.toThrow(/no puede pasar de/);
+      });
+    });
+
+    describe('supervisor responsable del ticket', () => {
+      const sup2 = () => tok(SUPERVISOR_2);
+      const abierto = async () => {
+        const e = evento('comercial.pedido.abierto', uuidv7(), {
+          codigo: `PED-EJ${n}-R`,
+          lineaServicio: 'fcr',
+          tipoOt: 'venta',
+          tiposServicio: ['pesca'],
+          ticketNumero: seq++,
+          clienteId: CLIENTE.id,
+          campoId: CAMPO.id,
+          pozoId: POZO.id,
+          fechaInicioServicio: '2026-11-05',
+          fechaFinServicio: '2026-11-12',
+          lineas: [],
+        });
+        await consumer.consumir(e);
+        return prisma.ticket.findUniqueOrThrow({ where: { pedidoId: e.subject.id } });
+      };
+      const bandeja = async (b: string, auth = supervisor()) =>
+        (
+          (await http().get(`/api/operaciones/fcr/tickets?bandeja=${b}`).set(auth).expect(200))
+            .body as Array<{ id: string; responsableId: string | null }>
+        ).map((x) => x.id);
+      const eventos = (pedidoId: string) =>
+        salidas(pedidoId, 'operaciones.fcr.responsable_asignado');
+
+      it('tomar: el Supervisor se queda con un ticket sin responsable; la bandeja lo separa pero no restringe la visibilidad', async () => {
+        const t = await abierto();
+        expect(await bandeja('sin_asignar')).toContain(t.id);
+        expect(await bandeja('mias')).not.toContain(t.id);
+        await http()
+          .post(`${base(t.id)}/responsable/tomar`)
+          .set(operador())
+          .expect(403);
+        const r = await http()
+          .post(`${base(t.id)}/responsable/tomar`)
+          .set(supervisor())
+          .expect(201);
+        expect(r.body).toMatchObject({
+          responsableId: SUPERVISOR.id,
+          responsableNombre: SUPERVISOR.nombre,
+        });
+        expect(await bandeja('mias')).toContain(t.id);
+        expect(await bandeja('sin_asignar')).not.toContain(t.id);
+        // el otro Supervisor sigue viéndolo (en «todas» y por su detalle) y no lo tiene en «mías»
+        expect(await bandeja('mias', sup2())).not.toContain(t.id);
+        expect(await bandeja('todas', sup2())).toContain(t.id);
+        const det = await http().get(base(t.id)).set(sup2()).expect(200);
+        expect(det.body).toMatchObject({
+          responsableId: SUPERVISOR.id,
+          responsableNombre: SUPERVISOR.nombre,
+        });
+        // ya tiene responsable
+        const ya = await http()
+          .post(`${base(t.id)}/responsable/tomar`)
+          .set(sup2())
+          .expect(409);
+        expect(ya.body.code).toBe('TICKET_CON_RESPONSABLE');
+        // tomarlo de nuevo siendo el responsable no hace nada
+        await http()
+          .post(`${base(t.id)}/responsable/tomar`)
+          .set(supervisor())
+          .expect(201);
+        const ev = await eventos(t.pedidoId);
+        expect(ev).toHaveLength(1);
+        expect(ev[0].d).toMatchObject({
+          ticketId: t.id,
+          accion: 'tomar',
+          anteriorId: null,
+          nuevoId: SUPERVISOR.id,
+          nuevoNombre: SUPERVISOR.nombre,
+        });
+        await http().get('/api/operaciones/fcr/tickets?bandeja=otra').set(supervisor()).expect(400);
+      });
+
+      it('asignar y reasignar a un Supervisor de FCR; liberar; todo con historial inmutable y evento con el anterior y el nuevo', async () => {
+        const t = await abierto();
+        const asignar = (usuarioId: string, auth = supervisor(), motivo?: string) =>
+          http()
+            .put(`${base(t.id)}/responsable`)
+            .set(auth)
+            .send({ usuarioId, motivo });
+        await asignar(SUPERVISOR.id, operador()).expect(403);
+        await asignar(OPERADOR.id).expect(400); // no es Supervisor de FCR
+        await asignar(uuidv7()).expect(400);
+        await http()
+          .put(`${base(t.id)}/responsable`)
+          .set(supervisor())
+          .send({})
+          .expect(400);
+        await asignar(SUPERVISOR.id, supervisor(), 'Le toca a Sara').expect(200);
+        // reasignarlo: lo hace otro supervisor
+        const re = await asignar(SUPERVISOR_2.id, sup2(), 'Sara sale de turno').expect(200);
+        expect(re.body).toMatchObject({
+          responsableId: SUPERVISOR_2.id,
+          responsableNombre: SUPERVISOR_2.nombre,
+        });
+        // el mismo otra vez no hace nada
+        await asignar(SUPERVISOR_2.id, sup2()).expect(200);
+        // liberar: solo su responsable o quien coordina
+        await http()
+          .post(`${base(t.id)}/responsable/liberar`)
+          .set(supervisor())
+          .send({})
+          .expect(403);
+        await http()
+          .post(`${base(t.id)}/responsable/liberar`)
+          .set(operador())
+          .send({})
+          .expect(403);
+        const lib = await http()
+          .post(`${base(t.id)}/responsable/liberar`)
+          .set(sup2())
+          .send({ motivo: 'Vuelve a la bolsa' })
+          .expect(201);
+        expect(lib.body).toMatchObject({ responsableId: null, responsableNombre: null });
+        const dos = await http()
+          .post(`${base(t.id)}/responsable/liberar`)
+          .set(sup2())
+          .send({})
+          .expect(409);
+        expect(dos.body.code).toBe('TICKET_SIN_RESPONSABLE');
+        const ev = await eventos(t.pedidoId);
+        expect(ev.map((x) => [x.d['accion'], x.d['anteriorId'], x.d['nuevoId']])).toEqual([
+          ['asignar', null, SUPERVISOR.id],
+          ['asignar', SUPERVISOR.id, SUPERVISOR_2.id],
+          ['liberar', SUPERVISOR_2.id, null],
+        ]);
+        const h = (
+          await admin.query(
+            'SELECT anterior_id, nuevo_id, motivo, actor_id FROM fcr.ticket_responsable_historial WHERE ticket_id = $1 ORDER BY created_at',
+            [t.id],
+          )
+        ).rows;
+        expect(h).toEqual([
+          {
+            anterior_id: null,
+            nuevo_id: SUPERVISOR.id,
+            motivo: 'Le toca a Sara',
+            actor_id: SUPERVISOR.id,
+          },
+          {
+            anterior_id: SUPERVISOR.id,
+            nuevo_id: SUPERVISOR_2.id,
+            motivo: 'Sara sale de turno',
+            actor_id: SUPERVISOR_2.id,
+          },
+          {
+            anterior_id: SUPERVISOR_2.id,
+            nuevo_id: null,
+            motivo: 'Vuelve a la bolsa',
+            actor_id: SUPERVISOR_2.id,
+          },
+        ]);
+        await expect(
+          appPool.query(
+            "UPDATE fcr.ticket_responsable_historial SET motivo = 'x' WHERE ticket_id = $1",
+            [t.id],
+          ),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          appPool.query('DELETE FROM fcr.ticket_responsable_historial WHERE ticket_id = $1', [
+            t.id,
+          ]),
+        ).rejects.toThrow(/permission denied/);
+      });
+
+      it('quien saca el ticket del paso de arranque queda como su responsable; un ticket anulado no cambia de responsable', async () => {
+        const t = await enEjecucion();
+        const det = await http().get(base(t.id)).set(operador()).expect(200);
+        expect(det.body).toMatchObject({
+          responsableId: SUPERVISOR.id,
+          responsableNombre: SUPERVISOR.nombre,
+        });
+        expect(await bandeja('mias')).toContain(t.id);
+        await consumer.consumir({
+          ...evento('comercial.pedido.anulado', t.pedidoId, {
+            codigo: `PED-EJ${n}`,
+            motivo: 'Cancelado',
+          }),
+        });
+        const r = await http()
+          .post(`${base(t.id)}/responsable/liberar`)
+          .set(supervisor())
+          .send({})
+          .expect(409);
+        expect(r.body.code).toBe('TICKET_ANULADO');
       });
     });
   },

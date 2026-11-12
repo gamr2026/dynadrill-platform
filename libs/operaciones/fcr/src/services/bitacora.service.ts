@@ -7,9 +7,10 @@ import {
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import { REQ } from '../catalog/sembrar-pasos';
+import { PASO_ANULADO, REQ } from '../catalog/sembrar-pasos';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { diasDelServicio, hoyEcuador, inicioDelDia, sumarDias, venceDelDia } from './dias-servicio';
 import { RequisitosService } from './requisitos.service';
 import { TicketsService, type TicketParaMover } from './tickets.service';
 
@@ -193,21 +194,29 @@ export class BitacoraService {
         data: { enviadaAt: new Date(), enviadaPor: actor.id, updatedBy: actor.id },
       });
       await this.publicar(tx, t, d.id, actor);
-      await this.actualizarRequisito(tx, ticketId, actor.id);
+      await this.recalcularRequisito(tx, ticketId, actor.id);
     });
     return this.obtener(ticketId, fecha);
   }
 
   /**
-   * `bitacora_enviada` se cumple cuando TODOS los días del servicio hasta hoy están enviados a Facturación (un día que Facturación corrigió y dejó sin
-   * actividades ya no se espera). Sin fechas de servicio basta con un día enviado. Si falta algún día (se amplió el servicio, se reabrió uno),
-   * el requisito vuelve a pendiente.
+   * `bitacora_enviada` se cumple cuando TODOS los días del servicio vencidos (hasta ayer, hora de Ecuador) están enviados a Facturación (un día que
+   * Facturación corrigió y dejó sin actividades ya no se espera). Sin fechas de servicio basta con un día enviado. Si falta algún día (pasó un día sin
+   * enviarse, se amplió el servicio, se reabrió uno), el requisito vuelve a pendiente: por eso la revisión periódica lo recalcula también con el
+   * paso de los días, no solo cuando se envía o se corrige uno. Un requisito exonerado no se toca.
+   *
+   * Vencimiento (`vence_at`): cada día vence al terminar el día siguiente. Como el requisito es uno solo por ticket, vence cuando vence el PRIMER día
+   * sin enviar (el más urgente); al enviarse ese día, pasa al siguiente. Sin fechas de servicio no tiene vencimiento.
+   * `hoy` (AAAA-MM-DD, Ecuador): solo se cambia en pruebas.
    */
-  private async actualizarRequisito(
+  async recalcularRequisito(
     tx: Prisma.TransactionClient,
     ticketId: string,
     actorId: string | null,
+    hoy?: string,
   ): Promise<void> {
+    const ahora = hoy ? inicioDelDia(hoy) : new Date();
+    hoy ??= hoyEcuador(ahora.getTime());
     const t = await tx.ticket.findUnique({
       where: { id: ticketId },
       select: { fechaInicioServicio: true, fechaFinServicio: true },
@@ -219,24 +228,47 @@ export class BitacoraService {
     const resueltos = new Set(dias.map((d) => aDia(d.fecha)));
     const alMenosUno = dias.some((d) => d.enviadaAt !== null);
     let completo = alMenosUno;
+    let vence: Date | null = null;
     if (t?.fechaInicioServicio && t.fechaFinServicio) {
-      // solo se espera hasta hoy (hora de Ecuador): los días que aún no llegan no se pueden enviar
-      const hoyMs = Date.parse(
-        `${new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10)}T00:00:00.000Z`,
+      const vencidos = diasDelServicio(
+        t.fechaInicioServicio,
+        t.fechaFinServicio,
+        sumarDias(hoy, -1),
       );
-      const hasta = Math.min(t.fechaFinServicio.getTime(), hoyMs);
-      const esperados: string[] = [];
-      for (
-        let ms = t.fechaInicioServicio.getTime();
-        ms <= hasta && esperados.length < 366;
-        ms += 86_400_000
-      )
-        esperados.push(new Date(ms).toISOString().slice(0, 10));
-      completo = alMenosUno && esperados.every((f) => resueltos.has(f));
+      completo = alMenosUno && vencidos.every((f) => resueltos.has(f));
+      const primero = diasDelServicio(t.fechaInicioServicio, t.fechaFinServicio).find(
+        (f) => !resueltos.has(f),
+      );
+      vence = primero ? venceDelDia(primero) : null;
     }
     const clave = { ticketId, codigo: REQ.bitacoraEnviada };
-    if (completo) await this.requisitos.marcar(tx, clave, 'sistema', actorId);
-    else await this.requisitos.reabrir(tx, clave);
+    if (completo) {
+      await this.requisitos.marcar(tx, clave, 'sistema', actorId);
+      return;
+    }
+    await this.requisitos.reabrir(tx, clave, vence);
+    await this.requisitos.fijarVence(tx, clave, vence, ahora);
+  }
+
+  /** Los días del servicio vencidos (hasta ayer, Ecuador) que no se enviaron a Facturación ni corrigió Facturación. Vacío sin fechas de servicio. */
+  async diasFaltantes(
+    db: Prisma.TransactionClient,
+    ticketId: string,
+    hasta: string = sumarDias(hoyEcuador(), -1),
+  ): Promise<string[]> {
+    const t = await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { fechaInicioServicio: true, fechaFinServicio: true },
+    });
+    if (!t?.fechaInicioServicio || !t.fechaFinServicio) return [];
+    const dias = await db.bitacoraDia.findMany({
+      where: { ticketId, OR: [{ enviadaAt: { not: null } }, { corregidaAt: { not: null } }] },
+      select: { fecha: true },
+    });
+    const resueltos = new Set(dias.map((d) => aDia(d.fecha)));
+    return diasDelServicio(t.fechaInicioServicio, t.fechaFinServicio, hasta).filter(
+      (f) => !resueltos.has(f),
+    );
   }
 
   /**
@@ -252,9 +284,10 @@ export class BitacoraService {
     if (!FECHA.test(fecha)) return;
     const t = await tx.ticket.findUnique({
       where: { pedidoId },
-      select: { id: true, fechaInicioServicio: true, fechaFinServicio: true },
+      select: { id: true, pasoCodigo: true, fechaInicioServicio: true, fechaFinServicio: true },
     });
-    if (!t) return;
+    // un ticket anulado no cambia
+    if (!t || t.pasoCodigo === PASO_ANULADO) return;
     const previo = await tx.bitacoraDia.findUnique({
       where: { ticketId_fecha: { ticketId: t.id, fecha: deDia(fecha) } },
     });
@@ -268,7 +301,7 @@ export class BitacoraService {
           where: { id: previo.id },
           data: { corregidaAt: new Date(), corregidaPor: conocido?.id ?? previo.updatedBy },
         });
-        await this.actualizarRequisito(tx, t.id, null); // un día corregido ya no se espera
+        await this.recalcularRequisito(tx, t.id, null); // un día corregido ya no se espera
       }
       return;
     }
@@ -297,7 +330,7 @@ export class BitacoraService {
         updatedBy: autor.actorId,
       },
     });
-    await this.actualizarRequisito(tx, t.id, null); // un día corregido ya no se espera
+    await this.recalcularRequisito(tx, t.id, null); // un día corregido ya no se espera
   }
 
   // ── piezas internas ─────────────────────────────────────────────────────────────────────────

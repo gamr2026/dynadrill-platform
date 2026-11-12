@@ -11,6 +11,7 @@ import { HerramientasController } from './controllers/herramientas.controller';
 import { InspeccionesController } from './controllers/inspecciones.controller';
 import { ObservacionesController } from './controllers/observaciones.controller';
 import { ObservacionesService } from './services/observaciones.service';
+import { RequisitosController } from './controllers/requisitos.controller';
 import { TicketsController } from './controllers/tickets.controller';
 import { PrismaService } from './prisma/prisma.service';
 import { AsignacionService } from './services/asignacion.service';
@@ -29,6 +30,9 @@ import { DocumentosService } from './services/documentos.service';
 import { HerramientasService } from './services/herramientas.service';
 import { InspeccionesService } from './services/inspecciones.service';
 import { PrecargaService } from './services/precarga.service';
+import { ExoneracionesService } from './services/exoneraciones.service';
+import { ResponsableService } from './services/responsable.service';
+import { RequisitosRevisionService } from './services/requisitos-revision.service';
 import { RequisitosService } from './services/requisitos.service';
 import { TicketsService } from './services/tickets.service';
 import { TipoOperadorService } from './services/tipo-operador.service';
@@ -54,6 +58,7 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     RetornoController,
     CambiosItemsController,
     ObservacionesController,
+    RequisitosController,
   ],
   providers: [
     PrismaService,
@@ -64,6 +69,9 @@ import { TipoOperadorService } from './services/tipo-operador.service';
     TipoOperadorService,
     CatalogosService,
     RequisitosService,
+    ExoneracionesService,
+    ResponsableService,
+    RequisitosRevisionService,
     PrecargaService,
     HerramientasService,
     InspeccionesService,

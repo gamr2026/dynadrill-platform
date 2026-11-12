@@ -9,7 +9,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { ArticulosService, MovimientosService, PartesService } from '@dyn/inventario';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import { REQ } from '../catalog/sembrar-pasos';
+import { PASO_ANULADO, REQ } from '../catalog/sembrar-pasos';
 import type { Prisma, TipoEventoHerramienta } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { estadoDeHerramienta } from './herramienta-estado';
@@ -445,6 +445,7 @@ export class HerramientasService {
     ticketId: string,
     actorId: string,
   ): Promise<void> {
+    if (await this.anulado(tx, ticketId)) return;
     const filas = await tx.ticketHerramienta.findMany({
       where: { ticketId, solicitadaAt: { not: null }, recibidaAt: null },
       select: { id: true, preparadaAt: true, enviadaAt: true },
@@ -483,6 +484,7 @@ export class HerramientasService {
     actorId: string,
     motivo: string,
   ): Promise<void> {
+    if (await this.anulado(tx, ticketId)) return;
     const filas = await tx.ticketHerramienta.findMany({
       where: { ticketId, solicitadaAt: { not: null }, recibidaAt: null },
       select: { id: true },
@@ -693,6 +695,12 @@ export class HerramientasService {
     if (t.paso.requiereEquipo && !esDelEquipo(t, actor.id)) {
       throw new ForbiddenException('Solo el equipo asignado a este ticket puede hacerlo');
     }
+  }
+
+  /** Un ticket anulado no cambia: la respuesta tardía de Bodega a un despacho que ya se canceló se ignora. */
+  private async anulado(tx: Prisma.TransactionClient, ticketId: string): Promise<boolean> {
+    const t = await tx.ticket.findUnique({ where: { id: ticketId }, select: { pasoCodigo: true } });
+    return t?.pasoCodigo === PASO_ANULADO;
   }
 
   private exigirNoTerminal(t: TicketParaMover): void {
