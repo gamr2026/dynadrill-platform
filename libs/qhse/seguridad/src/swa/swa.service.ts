@@ -10,6 +10,7 @@ import { uuidv7 } from '@dyn/utils';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { EstadoSwa } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { exigirTicketActivo } from '../comun/ticket-activo';
 import { SwaConsultaService, codigoSwa } from './swa-consulta.service';
 
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
@@ -50,6 +51,7 @@ export class SwaService {
         !(await tx.ticketRef.count({ where: { ticketId: entrada.ticketId } }))
       )
         throw new BadRequestException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+      await exigirTicketActivo(tx, entrada.ticketId);
       await tx.swa.create({
         data: {
           id,

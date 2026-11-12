@@ -36,6 +36,27 @@ enum TipoDocumentoPedido {
   @@schema("qhse")
 }
 
+/// Revisión de QHSE de un documento por pedido. Un rechazado también está anulado.
+enum EstadoRevisionDocumento {
+  cargado
+  aprobado
+  rechazado
+
+  @@map("estado_revision_documento")
+  @@schema("qhse")
+}
+
+/// Estados que recorre un documento por pedido en su historia (agrega `anulado`).
+enum EstadoHistorialDocumento {
+  cargado
+  aprobado
+  rechazado
+  anulado
+
+  @@map("estado_historial_documento")
+  @@schema("qhse")
+}
+
 /// Resultado de la lectura automática de una firma (ayuda para revisar; no certifica la autenticidad).
 enum VerificacionFirma {
   no_verificada
@@ -176,6 +197,9 @@ model TicketRef {
   cliente      String?
   campo        String?
   pozo         String?
+  /// Pedido anulado en comercial (comercial.pedido.anulado): no se abren documentos, PTW ni demás registros nuevos.
+  anuladoAt     DateTime? @map("anulado_at") @db.Timestamptz(6)
+  anuladoMotivo String?   @map("anulado_motivo")
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -346,6 +370,12 @@ model DocumentoPedido {
   anuladoPor      String?             @map("anulado_por") @db.Uuid
   anulador        IdUsuario?          @relation("documentoAnulador", fields: [anuladoPor], references: [id])
   motivoAnulacion String?             @map("motivo_anulacion")
+  /// Revisión de QHSE: cargado (sin revisar), aprobado o rechazado. Un rechazado también está anulado.
+  revisionEstado  EstadoRevisionDocumento @default(cargado) @map("revision_estado")
+  revisadoAt      DateTime?           @map("revisado_at") @db.Timestamptz(6)
+  revisadoPor     String?             @map("revisado_por") @db.Uuid
+  revisor         IdUsuario?          @relation("documentoRevisor", fields: [revisadoPor], references: [id])
+  motivoRechazo   String?             @map("motivo_rechazo")
   /// Lectura automática de la firma del documento cargado: solo un indicador (con `verificacion_at` y `no_verificada`, el servicio no respondió).
   verificacion          VerificacionFirma @default(no_verificada)
   verificacionConfianza Decimal?          @map("verificacion_confianza") @db.Decimal(4, 3)
@@ -361,11 +391,30 @@ model DocumentoPedido {
   ptwArt       Ptw[] @relation("ptwArt")
   ptwPt        Ptw[] @relation("ptwPt")
   ptwSfi       Ptw[] @relation("ptwSfi")
+  revisiones   DocumentoPedidoRevision[]
 
   @@index([pedidoId, tipo])
   @@index([ticketId])
   @@index([archivoId])
   @@map("documento_pedido")
+  @@schema("qhse")
+}
+
+/// Rastro de cada cambio de estado de un documento por pedido (solo se agrega: la aplicación solo puede leer e insertar).
+model DocumentoPedidoRevision {
+  id                String                    @id @db.Uuid
+  documentoPedidoId String                    @map("documento_pedido_id") @db.Uuid
+  documento         DocumentoPedido           @relation(fields: [documentoPedidoId], references: [id], onDelete: Cascade)
+  estadoAnterior    EstadoHistorialDocumento? @map("estado_anterior")
+  estadoNuevo       EstadoHistorialDocumento  @map("estado_nuevo")
+  motivo            String?
+  actorId           String                    @map("actor_id") @db.Uuid
+  actor             IdUsuario                 @relation("documentoRevisionActor", fields: [actorId], references: [id])
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([documentoPedidoId, createdAt])
+  @@index([actorId])
+  @@map("documento_pedido_revision")
   @@schema("qhse")
 }
 
@@ -1246,6 +1295,8 @@ model IdUsuario {
   documentosCreados        DocumentoPedido[]      @relation("documentoCreador")
   documentosEditados       DocumentoPedido[]      @relation("documentoEditor")
   documentosAnulados       DocumentoPedido[]      @relation("documentoAnulador")
+  documentosRevisados      DocumentoPedido[]      @relation("documentoRevisor")
+  documentoRevisiones      DocumentoPedidoRevision[] @relation("documentoRevisionActor")
   ticketsSupervisados      TicketRef[]            @relation("ticketSupervisor")
   ticketsComoOperador      TicketOperador[]       @relation("ticketOperador")
   ptwCreados               Ptw[]                  @relation("ptwCreador")

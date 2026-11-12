@@ -11,6 +11,7 @@ import { firmaDeUnaLinea } from '../comun/firma';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { AccionPtw, FasePtw, TipoFirmaPtw } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { exigirTicketActivo } from '../comun/ticket-activo';
 import { PtwConsultaService } from './ptw-consulta.service';
 import { codigoPtw, requisitosDeGabinete } from './ptw-documentos';
 import { requisitosIperc } from './ptw-iperc';
@@ -76,6 +77,11 @@ export class PtwService {
     const t = await tx.ticketRef.findUnique({ where: { ticketId } });
     if (!t)
       throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+    // el pedido anulado no abre PTW: a mano es un 409; por evento o por la tarea programada simplemente no se abre
+    if (t.anuladoAt) {
+      if (!rechazarSiExiste) return null;
+      await exigirTicketActivo(tx, ticketId);
+    }
     const existente = await tx.ptw.findFirst({
       where: { pedidoId: t.pedidoId, diaOperacion: dia, anuladoAt: null },
       select: { numero: true },
@@ -171,21 +177,24 @@ export class PtwService {
   async anular(id: string, motivo: string, actor: AuthUser) {
     const m = texto(motivo);
     if (!m) throw new BadRequestException('Indique el motivo de la anulación');
-    await this.prisma.$transaction(async (tx) => {
-      await this.vigente(tx, id);
-      await tx.ptw.update({
-        where: { id },
-        data: {
-          anuladoAt: new Date(),
-          anuladoPor: actor.id,
-          motivoAnulacion: m,
-          updatedBy: actor.id,
-        },
-      });
-      await this.historia(tx, id, AccionPtw.anulado, actor, m);
-      await this.publicar(tx, 'qhse.ptw.anulado', id, actor, m);
-    });
+    await this.prisma.$transaction((tx) => this.anularEn(tx, id, m, actor));
     return this.consulta.detalle(id);
+  }
+
+  /** La anulación dentro de una transacción ajena (también la usa el consumidor de `comercial.pedido.anulado` para cerrar los PTW sin aprobar). */
+  async anularEn(tx: Tx, id: string, motivo: string, actor: ActorPtw): Promise<void> {
+    await this.vigente(tx, id);
+    await tx.ptw.update({
+      where: { id },
+      data: {
+        anuladoAt: new Date(),
+        anuladoPor: actor.id,
+        motivoAnulacion: motivo,
+        updatedBy: actor.id,
+      },
+    });
+    await this.historia(tx, id, AccionPtw.anulado, actor, motivo);
+    await this.publicar(tx, 'qhse.ptw.anulado', id, actor, motivo);
   }
 
   /**
@@ -200,6 +209,7 @@ export class PtwService {
       const p = await tx.ptw.findUnique({ where: { id } });
       if (!p) throw new NotFoundException('El PTW no existe');
       if (!p.anuladoAt) throw new ConflictException('El PTW no está anulado');
+      await exigirTicketActivo(tx, p.ticketId);
       const otro = await tx.ptw.findFirst({
         where: { pedidoId: p.pedidoId, diaOperacion: p.diaOperacion, anuladoAt: null },
         select: { numero: true },

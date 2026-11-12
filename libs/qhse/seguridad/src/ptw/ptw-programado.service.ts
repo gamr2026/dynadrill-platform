@@ -70,7 +70,8 @@ export class PtwProgramadoService implements OnApplicationBootstrap, OnModuleDes
     this.enCurso = true;
     try {
       const dias = await this.prisma.ticketDiaServicio.findMany({
-        where: { fecha: aFecha(hoy) },
+        // un ticket de un pedido anulado no abre PTW
+        where: { fecha: aFecha(hoy), ticket: { anuladoAt: null } },
         select: {
           ticketId: true,
           ticket: { select: { pedidoId: true, supervisorId: true, ticketNumero: true } },

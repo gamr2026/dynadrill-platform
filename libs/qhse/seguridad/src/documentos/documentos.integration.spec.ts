@@ -702,4 +702,273 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       ).rejects.toThrow(/ya está anulado/i);
     });
   });
+
+  // --------------------------------------------------------------------------------------------- revisión de documentos
+
+  describe('revisión: aprobar y rechazar un documento', () => {
+    const cargarDoc = async (
+      ticket: { ticketId: string; pedidoId: string },
+      tipo: string,
+      extra: Record<string, unknown> = {},
+    ) =>
+      (
+        await t
+          .http()
+          .post('/api/qhse/documentos')
+          .set(tecnico())
+          .send({
+            pedidoId: ticket.pedidoId,
+            ticketId: ticket.ticketId,
+            tipo,
+            archivoId: await archivo('qhse_documento_pedido'),
+            ...extra,
+          })
+          .expect(201)
+      ).body;
+    const aprobar = (id: string, quien = tecnico()) =>
+      t.http().post(`/api/qhse/documentos/${id}/aprobar`).set(quien);
+    const rechazar = (id: string, cuerpo: Record<string, unknown>, quien = tecnico()) =>
+      t.http().post(`/api/qhse/documentos/${id}/rechazar`).set(quien).send(cuerpo);
+    const historial = async (id: string) =>
+      (await t.http().get(`/api/qhse/documentos/${id}/historial`).set(tecnico()).expect(200)).body;
+    const pasos = async (id: string) =>
+      (await historial(id)).map(
+        (h: { estadoAnterior: string | null; estadoNuevo: string }) =>
+          `${h.estadoAnterior}>${h.estadoNuevo}`,
+      );
+    const estadoDe = async (ticketId: string) =>
+      (await t.http().get(`/api/qhse/documentos/ticket/${ticketId}`).set(tecnico()).expect(200))
+        .body;
+
+    it('un documento nace cargado, con su fila de historia; aprobarlo registra quién y cuándo, publica .aprobado y no cambia el estado que ve Operaciones', async () => {
+      const tk = await ticketNuevo();
+      const doc = await cargarDoc(tk, 'sfi');
+      expect(doc).toMatchObject({
+        revisionEstado: 'cargado',
+        revisadoAt: null,
+        revisadoPor: null,
+        motivoRechazo: null,
+      });
+      expect((await estadoDe(tk.ticketId)).sfi).toMatchObject({
+        id: doc.id,
+        revisionEstado: 'cargado',
+      });
+
+      // quien no gestiona documentos no revisa
+      expect((await aprobar(doc.id, supervisor())).status).toBe(403);
+      const r = await aprobar(doc.id);
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
+        revisionEstado: 'aprobado',
+        revisadoPor: TECNICO.nombre,
+        motivoRechazo: null,
+        anulado: false,
+      });
+      expect(r.body.revisadoAt).toBeTruthy();
+
+      const ev = await eventos('qhse.documento_pedido.aprobado', tk.ticketId);
+      expect(ev).toHaveLength(1);
+      expect(ev[0].datos.actor?.userId).toBe(TECNICO.id);
+      expect(ev[0].datos.data).toMatchObject({
+        documentoId: doc.id,
+        tipoDocumento: 'sfi',
+        pedidoId: tk.pedidoId,
+        ticketId: tk.ticketId,
+        revisadoPor: TECNICO.id,
+      });
+      // sigue valiendo: el estado que ve Operaciones es el mismo y no se publicó ninguna anulación
+      expect((await estadoDe(tk.ticketId)).sfi).toMatchObject({
+        id: doc.id,
+        archivoId: doc.archivoId,
+        revisionEstado: 'aprobado',
+        revisadoPor: TECNICO.nombre,
+      });
+      expect(await eventos('qhse.documento_pedido.anulado', tk.ticketId)).toHaveLength(0);
+
+      // una sola revisión: no se aprueba ni se rechaza de nuevo
+      expect((await aprobar(doc.id)).status).toBe(409);
+      expect((await rechazar(doc.id, { motivo: 'tarde' })).status).toBe(409);
+      expect(await pasos(doc.id)).toEqual(['null>cargado', 'cargado>aprobado']);
+
+      // un documento aprobado todavía se puede anular (con su motivo); la historia lo recuerda
+      expect((await anular(doc.id, 'Se cargó el archivo equivocado')).status).toBe(201);
+      expect(await pasos(doc.id)).toEqual(['null>cargado', 'cargado>aprobado', 'aprobado>anulado']);
+    });
+
+    it('rechazar exige motivo, deja el documento sin valor como uno anulado (publica .anulado y .rechazado) y permite cargar otro del mismo tipo y día', async () => {
+      const tk = await ticketNuevo();
+      const hoy = fechaEn(0);
+      const pt = await cargarDoc(tk, 'pt', { fecha: hoy });
+      expect((await estadoDe(tk.ticketId)).ptHoy).toMatchObject({
+        id: pt.id,
+        revisionEstado: 'cargado',
+      });
+
+      expect((await rechazar(pt.id, {})).status).toBe(400);
+      expect((await rechazar(pt.id, { motivo: '   ' })).status).toBe(400);
+      expect((await rechazar(pt.id, { motivo: 'x' }, supervisor())).status).toBe(403);
+      const r = await rechazar(pt.id, { motivo: 'Firma ilegible' });
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({
+        revisionEstado: 'rechazado',
+        revisadoPor: TECNICO.nombre,
+        motivoRechazo: 'Firma ilegible',
+        anulado: true,
+        motivoAnulacion: 'Firma ilegible',
+      });
+
+      // mismo efecto aguas abajo que una anulación: el evento .anulado (Operaciones reabre su requisito) y además .rechazado con el PT del día
+      const anulado = await eventos('qhse.documento_pedido.anulado', tk.ticketId);
+      expect(anulado).toHaveLength(1);
+      expect(anulado[0].datos.data).toMatchObject({
+        documentoId: pt.id,
+        tipoDocumento: 'pt',
+        fecha: hoy,
+        motivo: 'Firma ilegible',
+      });
+      const rechazado = await eventos('qhse.documento_pedido.rechazado', tk.ticketId);
+      expect(rechazado).toHaveLength(1);
+      expect(rechazado[0].datos.data).toMatchObject({
+        documentoId: pt.id,
+        tipoDocumento: 'pt',
+        pedidoId: tk.pedidoId,
+        ticketId: tk.ticketId,
+        fecha: hoy,
+        motivo: 'Firma ilegible',
+        revisadoPor: TECNICO.id,
+      });
+
+      // ya no cuenta como cargado, pero el motivo queda a la vista de la bandeja
+      const estado = await estadoDe(tk.ticketId);
+      expect(estado.ptHoy).toBeNull();
+      expect(estado.rechazados).toEqual([
+        expect.objectContaining({
+          id: pt.id,
+          tipo: 'pt',
+          fecha: hoy,
+          revisionEstado: 'rechazado',
+          revisadoPor: TECNICO.nombre,
+          motivoRechazo: 'Firma ilegible',
+        }),
+      ]);
+      // no se aprueba ni se rechaza de nuevo
+      expect((await aprobar(pt.id)).status).toBe(409);
+      expect((await rechazar(pt.id, { motivo: 'otra vez' })).status).toBe(409);
+
+      // el rechazado no bloquea la carga de otro PT del mismo día (el índice único mira solo los vigentes)
+      const nuevo = await cargarDoc(tk, 'pt', { fecha: hoy });
+      expect(nuevo).toMatchObject({ revisionEstado: 'cargado', anulado: false });
+      const despues = await estadoDe(tk.ticketId);
+      expect(despues.ptHoy).toMatchObject({ id: nuevo.id });
+      expect(despues.rechazados).toEqual([]);
+
+      // la lista trae la revisión de cada documento (también el rechazado, con incluirAnulados)
+      const lista = (
+        await t
+          .http()
+          .get(`/api/qhse/documentos?pedidoId=${tk.pedidoId}&incluirAnulados=true`)
+          .set(tecnico())
+          .expect(200)
+      ).body as Array<{ id: string; revisionEstado: string; motivoRechazo: string | null }>;
+      expect(lista.find((x) => x.id === pt.id)).toMatchObject({
+        revisionEstado: 'rechazado',
+        motivoRechazo: 'Firma ilegible',
+      });
+      expect(lista.find((x) => x.id === nuevo.id)).toMatchObject({ revisionEstado: 'cargado' });
+
+      const h = await historial(pt.id);
+      expect(h).toHaveLength(2);
+      expect(h[1]).toMatchObject({
+        estadoAnterior: 'cargado',
+        estadoNuevo: 'rechazado',
+        motivo: 'Firma ilegible',
+        actorId: TECNICO.id,
+        actor: TECNICO.nombre,
+      });
+      // lo lee quien ve documentos; el Supervisor (solo Acta) no
+      await t.http().get(`/api/qhse/documentos/${pt.id}/historial`).set(supervisor()).expect(403);
+      await t.http().get(`/api/qhse/documentos/${uuidv7()}/historial`).set(tecnico()).expect(404);
+    });
+
+    it('rechazar el Acta publica acta_entrega.anulada (el ticket vuelve a exigirla) y .rechazado, y se puede subir otra', async () => {
+      const tk = await ticketNuevo();
+      const a1 = await archivo('qhse_acta_entrega');
+      const acta1 = (await acta(tk.ticketId, { archivoId: a1 }).expect(201)).body;
+      expect((await rechazar(acta1.id, { motivo: 'Sin sello' })).status).toBe(201);
+      expect(await eventos('qhse.acta_entrega.anulada', tk.ticketId)).toHaveLength(1);
+      expect(await eventos('qhse.documento_pedido.rechazado', tk.ticketId)).toHaveLength(1);
+      const a2 = await archivo('qhse_acta_entrega');
+      expect((await acta(tk.ticketId, { archivoId: a2 })).status).toBe(201);
+    });
+
+    describe('reglas de la base', () => {
+      it('CHECK: el rechazo exige quién, cuándo, motivo y estar anulado; aprobar no lleva motivo', async () => {
+        const tk = await ticketNuevo();
+        const id = (await cargarDoc(tk, 'sfi')).id as string;
+        const quien = `revisado_at = now(), revisado_por = '${TECNICO.id}'`;
+        const upd = (set: string) =>
+          t.admin.query(`UPDATE qhse.documento_pedido SET ${set} WHERE id = $1`, [id]);
+        await expect(
+          upd(
+            `revision_estado = 'rechazado', ${quien}, motivo_rechazo = '  ', anulado_at = now(), anulado_por = '${TECNICO.id}', motivo_anulacion = 'x'`,
+          ),
+        ).rejects.toThrow(/revision_check/);
+        await expect(
+          upd(`revision_estado = 'rechazado', ${quien}, motivo_rechazo = 'x'`),
+        ).rejects.toThrow(/rechazo_anulado_check/);
+        await expect(
+          upd(`revision_estado = 'aprobado', ${quien}, motivo_rechazo = 'x'`),
+        ).rejects.toThrow(/revision_check/);
+        // sin cambiar de estado, la revisión no se toca (lo impide el trigger antes que el CHECK)
+        await expect(upd(`revisado_por = '${TECNICO.id}'`)).rejects.toThrow(
+          /no se puede cambiar/,
+        );
+      });
+
+      it('el trigger impide aprobar un documento anulado y cambiar una revisión; la aplicación solo lee e inserta la historia', async () => {
+        const tk = await ticketNuevo();
+        const doc = await cargarDoc(tk, 'sfi');
+        await anular(doc.id, 'Equivocado').expect(201);
+        await expect(
+          t.prisma.documentoPedido.update({
+            where: { id: doc.id },
+            data: {
+              revisionEstado: 'aprobado',
+              revisadoAt: new Date(),
+              revisadoPor: TECNICO.id,
+            },
+          }),
+        ).rejects.toThrow(/anulado/i);
+
+        const otro = await cargarDoc(tk, 'formato_recepcion');
+        await aprobar(otro.id).expect(201);
+        await expect(
+          t.prisma.documentoPedido.update({
+            where: { id: otro.id },
+            data: { motivoRechazo: 'cambio' },
+          }),
+        ).rejects.toThrow(/revisi/i);
+
+        // historia append-only
+        const fila = await t.prisma.documentoPedidoRevision.findFirstOrThrow({
+          where: { documentoPedidoId: otro.id },
+        });
+        await expect(
+          t.prisma.documentoPedidoRevision.update({
+            where: { id: fila.id },
+            data: { motivo: 'editado' },
+          }),
+        ).rejects.toThrow(/permission denied|denegado/i);
+        await expect(
+          t.prisma.documentoPedidoRevision.delete({ where: { id: fila.id } }),
+        ).rejects.toThrow(/permission denied|denegado/i);
+        await expect(
+          t.admin.query(
+            "INSERT INTO qhse.documento_pedido_revision (id, documento_pedido_id, estado_anterior, estado_nuevo, actor_id) VALUES (gen_random_uuid(), $1, 'cargado', 'rechazado', $2)",
+            [otro.id, TECNICO.id],
+          ),
+        ).rejects.toThrow(/motivo_check/);
+      });
+    });
+  });
 });

@@ -7,7 +7,13 @@ import {
 import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
-import { TipoDocumentoPedido, type Prisma } from '../generated/client';
+import {
+  EstadoHistorialDocumento,
+  EstadoRevisionDocumento,
+  TipoDocumentoPedido,
+  type Prisma,
+} from '../generated/client';
+import { exigirPedidoActivo, exigirTicketActivo } from '../comun/ticket-activo';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { PrismaService } from '../prisma/prisma.service';
 import { VerificadorFirmas } from './verificador-firmas';
@@ -75,6 +81,7 @@ export class DocumentosPedidoService {
         ticket: { select: { ticketNumero: true, pedidoCodigo: true, supervisorId: true } },
         creador: { select: { nombre: true } },
         anulador: { select: { nombre: true } },
+        revisor: { select: { nombre: true } },
       },
     });
     const hoy = new Date().toISOString().slice(0, 10);
@@ -98,6 +105,11 @@ export class DocumentosPedidoService {
       anuladoAt: d.anuladoAt,
       anuladoPor: d.anulador?.nombre ?? null,
       motivoAnulacion: d.motivoAnulacion,
+      /** Revisión de QHSE: `cargado` (sin revisar), `aprobado` o `rechazado`. Un rechazado también figura como anulado (deja de valer). */
+      revisionEstado: d.revisionEstado,
+      revisadoAt: d.revisadoAt,
+      revisadoPor: d.revisor?.nombre ?? null,
+      motivoRechazo: d.motivoRechazo,
       /** Lectura automática de la firma: solo un indicador (Firmado o no); `null` en `verificacionAt` = todavía sin resultado. */
       verificacion: d.verificacion,
       verificacionConfianza:
@@ -220,44 +232,159 @@ export class DocumentosPedidoService {
     await this.prisma.$transaction(async (tx) => {
       const d = await tx.documentoPedido.findUnique({ where: { id } });
       if (!d) throw new NotFoundException('El documento no existe');
-      if (d.anuladoAt) throw new ConflictException('El documento ya está anulado');
-      // un documento en uso por un PTW vigente no se anula (la base también lo impide: trigger documento_pedido_en_uso)
-      const enUso = await tx.ptw.findFirst({
-        where: {
-          anuladoAt: null,
-          OR: [
-            { documentoRecepcionId: id },
-            { documentoArtId: id },
-            { documentoPtId: id },
-            { documentoSfiId: id },
-          ],
-        },
-        select: { numero: true },
-      });
-      if (enUso)
-        throw new ConflictException(
-          `El documento está en uso por el PTW ${codigoPtw(enUso.numero)}; anule primero ese PTW`,
-        );
-      await tx.documentoPedido.update({
-        where: { id },
+      await this.anularEn(tx, d, m, actor);
+      await this.historia(tx, id, d.revisionEstado, EstadoHistorialDocumento.anulado, actor, m);
+    });
+    return this.uno(id);
+  }
+
+  /**
+   * Aprueba un documento cargado (solo uno vigente y todavía sin revisar). No cambia lo que Operaciones ve: el documento sigue valiendo igual;
+   * queda constancia de quién lo aprobó y cuándo, y se publica `qhse.documento_pedido.aprobado`.
+   */
+  async aprobar(id: string, actor: AuthUser) {
+    await this.prisma.$transaction(async (tx) => {
+      const d = await this.paraRevisar(tx, id);
+      const cambio = await tx.documentoPedido.updateMany({
+        where: { id, revisionEstado: EstadoRevisionDocumento.cargado, anuladoAt: null },
         data: {
-          anuladoAt: new Date(),
-          anuladoPor: actor.id,
-          motivoAnulacion: m,
+          revisionEstado: EstadoRevisionDocumento.aprobado,
+          revisadoAt: new Date(),
+          revisadoPor: actor.id,
           updatedBy: actor.id,
         },
       });
-      await this.publicar(
-        tx,
-        d.tipo === TipoDocumentoPedido.formato_entrega
-          ? 'qhse.acta_entrega.anulada'
-          : 'qhse.documento_pedido.anulado',
-        id,
-        actor,
-        m,
-      );
+      if (cambio.count !== 1)
+        throw new ConflictException('El documento cambió; recargue e intente de nuevo');
+      await this.historia(tx, id, d.revisionEstado, EstadoHistorialDocumento.aprobado, actor);
+      await this.publicar(tx, 'qhse.documento_pedido.aprobado', id, actor);
     });
     return this.uno(id);
+  }
+
+  /**
+   * Rechaza un documento cargado, con su motivo. Un documento rechazado deja de valer igual que uno anulado: queda anulado por el mismo camino
+   * (publica `anulado`, o `acta_entrega.anulada`, para que Operaciones reabra su requisito), no cuenta como cargado y se puede subir otro del
+   * mismo tipo para el mismo pedido y día. Además se publica `qhse.documento_pedido.rechazado`.
+   */
+  async rechazar(id: string, motivo: string, actor: AuthUser) {
+    const m = texto(motivo);
+    if (!m) throw new BadRequestException('Indique el motivo del rechazo');
+    await this.prisma.$transaction(async (tx) => {
+      const d = await this.paraRevisar(tx, id);
+      await this.anularEn(tx, d, m, actor, {
+        revisionEstado: EstadoRevisionDocumento.rechazado,
+        revisadoAt: new Date(),
+        revisadoPor: actor.id,
+        motivoRechazo: m,
+      });
+      await this.historia(tx, id, d.revisionEstado, EstadoHistorialDocumento.rechazado, actor, m);
+      await this.publicar(tx, 'qhse.documento_pedido.rechazado', id, actor, m);
+    });
+    return this.uno(id);
+  }
+
+  /** Historia del documento: carga, revisión y anulación, de la más antigua a la más reciente. */
+  async historial(id: string) {
+    if (!(await this.prisma.documentoPedido.count({ where: { id } })))
+      throw new NotFoundException('El documento no existe');
+    const filas = await this.prisma.documentoPedidoRevision.findMany({
+      where: { documentoPedidoId: id },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: { actor: { select: { nombre: true } } },
+    });
+    return filas.map((h) => ({
+      id: h.id,
+      estadoAnterior: h.estadoAnterior,
+      estadoNuevo: h.estadoNuevo,
+      motivo: h.motivo,
+      actorId: h.actorId,
+      actor: h.actor.nombre,
+      createdAt: h.createdAt,
+    }));
+  }
+
+  /** Solo un documento cargado, vigente y sin revisar se aprueba o se rechaza. */
+  private async paraRevisar(tx: Tx, id: string) {
+    const d = await tx.documentoPedido.findUnique({ where: { id } });
+    if (!d) throw new NotFoundException('El documento no existe');
+    if (d.revisionEstado === EstadoRevisionDocumento.rechazado)
+      throw new ConflictException('El documento ya fue rechazado');
+    if (d.anuladoAt) throw new ConflictException('El documento está anulado');
+    if (d.revisionEstado === EstadoRevisionDocumento.aprobado)
+      throw new ConflictException('El documento ya fue aprobado');
+    return d;
+  }
+
+  /**
+   * Anula el documento y publica el evento de anulación (el Acta tiene el suyo). Es el único camino por el que un documento deja de valer, así
+   * que el rechazo lo reutiliza (con los datos de su revisión en la misma actualización).
+   */
+  private async anularEn(
+    tx: Tx,
+    d: { id: string; tipo: TipoDocumentoPedido; anuladoAt: Date | null },
+    motivo: string,
+    actor: AuthUser,
+    revision: Prisma.DocumentoPedidoUncheckedUpdateInput = {},
+  ): Promise<void> {
+    if (d.anuladoAt) throw new ConflictException('El documento ya está anulado');
+    // un documento en uso por un PTW vigente no se anula (la base también lo impide: trigger documento_pedido_en_uso)
+    const enUso = await tx.ptw.findFirst({
+      where: {
+        anuladoAt: null,
+        OR: [
+          { documentoRecepcionId: d.id },
+          { documentoArtId: d.id },
+          { documentoPtId: d.id },
+          { documentoSfiId: d.id },
+        ],
+      },
+      select: { numero: true },
+    });
+    if (enUso)
+      throw new ConflictException(
+        `El documento está en uso por el PTW ${codigoPtw(enUso.numero)}; anule primero ese PTW`,
+      );
+    await tx.documentoPedido.update({
+      where: { id: d.id },
+      data: {
+        ...revision,
+        anuladoAt: new Date(),
+        anuladoPor: actor.id,
+        motivoAnulacion: motivo,
+        updatedBy: actor.id,
+      },
+    });
+    await this.publicar(
+      tx,
+      d.tipo === TipoDocumentoPedido.formato_entrega
+        ? 'qhse.acta_entrega.anulada'
+        : 'qhse.documento_pedido.anulado',
+      d.id,
+      actor,
+      motivo,
+    );
+  }
+
+  /** Una fila de la historia del documento (se escribe en la misma transacción que el cambio). */
+  private async historia(
+    tx: Tx,
+    documentoId: string,
+    anterior: EstadoHistorialDocumento | null,
+    nuevo: EstadoHistorialDocumento,
+    actor: AuthUser,
+    motivo?: string,
+  ): Promise<void> {
+    await tx.documentoPedidoRevision.create({
+      data: {
+        id: uuidv7(),
+        documentoPedidoId: documentoId,
+        estadoAnterior: anterior,
+        estadoNuevo: nuevo,
+        motivo: motivo ?? null,
+        actorId: actor.id,
+      },
+    });
   }
 
   // ------------------------------------------------------------------------------------------------------- internos
@@ -286,6 +413,9 @@ export class DocumentosPedidoService {
     // un pedido solo es válido si QHSE lo conoce por alguno de sus tickets (otro contenedor: no hay FK)
     if (!(await tx.ticketRef.count({ where: { pedidoId: e.pedidoId } })))
       throw new BadRequestException('QHSE no conoce ese pedido (no tiene tickets registrados)');
+    // un pedido anulado en comercial no recibe documentos nuevos (los ya cargados se conservan)
+    await exigirPedidoActivo(tx, e.pedidoId);
+    await exigirTicketActivo(tx, e.ticketId);
     if (e.ticketId) {
       const t = await tx.ticketRef.findFirst({
         where: { ticketId: e.ticketId, pedidoId: e.pedidoId },
@@ -315,6 +445,7 @@ export class DocumentosPedidoService {
         createdBy: actor.id,
       },
     });
+    await this.historia(tx, id, null, EstadoHistorialDocumento.cargado, actor);
     return id;
   }
 
@@ -409,6 +540,10 @@ export class DocumentosPedidoService {
           ...(d.fecha ? { fecha: d.fecha.toISOString().slice(0, 10) } : {}),
           ...(d.vigenteHasta ? { vigenteHasta: d.vigenteHasta.toISOString().slice(0, 10) } : {}),
           ...(motivo ? { motivo } : {}),
+          // aprobado / rechazado: quién lo revisó y cuándo (el motivo del rechazo va en `motivo`)
+          ...(d.revisadoPor && d.revisadoAt
+            ? { revisadoPor: d.revisadoPor, revisadoAt: d.revisadoAt.toISOString() }
+            : {}),
         },
         actor: enActor(actor),
         traceparent: currentTraceparent(),

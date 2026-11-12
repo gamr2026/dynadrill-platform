@@ -11,6 +11,7 @@ import type { Prisma } from '../generated/client';
 import { EstadoEpi } from '../generated/client';
 import { firmaDeUnaLinea } from '../comun/firma';
 import { PrismaService } from '../prisma/prisma.service';
+import { exigirTicketActivo } from '../comun/ticket-activo';
 import { EpiConsultaService } from './epi-consulta.service';
 import { EpiRenglonesService } from './epi-renglones.service';
 import { codigoDe, texto, type RenglonEntrada, type Tx } from './epi-tipos';
@@ -62,6 +63,7 @@ export class EpiService {
       const ticket = await tx.ticketRef.findUnique({ where: { ticketId } });
       if (!ticket)
         throw new NotFoundException('QHSE no conoce ese ticket (aún no se creó o no se asignó)');
+      await exigirTicketActivo(tx, ticketId);
       const asignado = await tx.ticketOperador.count({
         where: { ticketId, usuarioId: entrada.trabajadorId },
       });
@@ -110,6 +112,7 @@ export class EpiService {
           throw new BadRequestException(
             'El ticket indicado no es conocido por QHSE (aún no se asignó el servicio)',
           );
+        await exigirTicketActivo(tx, ticketId);
         await this.exigirSinVigente(tx, ticketId, entrada.trabajadorId);
       }
       const renglones = entrada.renglones ?? [];

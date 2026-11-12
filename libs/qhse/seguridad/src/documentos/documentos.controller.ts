@@ -1,6 +1,15 @@
 import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { TipoDocumentoPedido } from '../generated/client';
@@ -45,6 +54,11 @@ export class CargarActaDto {
 
 export class AnularDto {
   @IsString() @MaxLength(500) motivo!: string;
+}
+
+export class RechazarDocumentoDto {
+  /** Obligatorio: por qué se rechaza el documento (queda en su historia y viaja en el evento). */
+  @IsString() @IsNotEmpty() @MaxLength(500) motivo!: string;
 }
 
 /**
@@ -103,6 +117,34 @@ export class DocumentosController {
     @CurrentUser() actor: AuthUser,
   ) {
     return this.documentos.anular(id, dto.motivo, actor);
+  }
+
+  /**
+   * Aprueba un documento cargado. Lo revisa quien puede gestionar los documentos (los mismos roles que los anulan: administradores, técnico y
+   * gerente HSE). Pendiente de producto: un permiso propio `qhse.documentos.revisar` (ver el informe de la tarea).
+   */
+  @RequirePermission(P.DOCUMENTOS_GESTIONAR)
+  @Post('documentos/:id/aprobar')
+  aprobar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    return this.documentos.aprobar(id, actor);
+  }
+
+  /** Rechaza un documento cargado (con motivo): deja de valer como uno anulado y se puede cargar otro. */
+  @RequirePermission(P.DOCUMENTOS_GESTIONAR)
+  @Post('documentos/:id/rechazar')
+  rechazar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RechazarDocumentoDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.documentos.rechazar(id, dto.motivo, actor);
+  }
+
+  /** Historia del documento: carga, aprobación o rechazo y anulación, con quién y por qué. */
+  @RequirePermission(P.DOCUMENTOS_VER)
+  @Get('documentos/:id/historial')
+  historial(@Param('id', ParseUUIDPipe) id: string) {
+    return this.documentos.historial(id);
   }
 
   /** El Acta vigente del ticket (y las anuladas) y el supervisor asignado. */

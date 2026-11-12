@@ -6,6 +6,7 @@ import { aFecha, hoyEcuador, masMeses } from '../comun/fechas';
 import { texto, type Tx } from '../epi/epi-tipos';
 import { ResultadoInspeccion } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { exigirTicketActivo } from '../comun/ticket-activo';
 import { InspeccionesConsultaService, codigoInspeccion } from './inspecciones-consulta.service';
 
 const enActor = (a: AuthUser) => ({ userId: a.id, role: a.roleCode });
@@ -59,6 +60,7 @@ export class InspeccionesService {
         throw new BadRequestException('Este tipo de inspección no lleva bump test');
       if (e.ticketId && !(await tx.ticketRef.count({ where: { ticketId: e.ticketId } })))
         throw new BadRequestException('QHSE no conoce ese ticket');
+      await exigirTicketActivo(tx, e.ticketId);
 
       // se evalúan todos los criterios del tipo, una sola vez cada uno
       const evaluados = new Map(e.resultados.map((r) => [r.criterioId, r.cumple]));

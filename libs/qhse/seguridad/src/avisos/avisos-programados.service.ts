@@ -202,7 +202,11 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
   /** ART: el vigente de cada pedido (el de vencimiento más lejano) que vence en 3 días o ya venció. */
   private async art(hoy: string): Promise<Candidato[]> {
     const docs = await this.prisma.documentoPedido.findMany({
-      where: { tipo: TipoDocumentoPedido.art, anuladoAt: null, vigenteHasta: { not: null } },
+      where: {
+        tipo: TipoDocumentoPedido.art,
+        anuladoAt: null,
+        vigenteHasta: { not: null },
+      },
       select: { id: true, pedidoId: true, vigenteHasta: true },
     });
     // si el pedido ya tiene otro ART que vence después, el vencido no es motivo de aviso
@@ -213,12 +217,26 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
         ultimo.set(d.pedidoId, d);
     }
     const limite = masDias(hoy, DIAS_AVISO_ART);
-    const aviso = [...ultimo.values()].filter((d) => aDia(d.vigenteHasta as Date) <= limite);
-    if (!aviso.length) return [];
-    const tickets = await this.prisma.ticketRef.findMany({
-      where: { pedidoId: { in: aviso.map((d) => d.pedidoId) } },
-      select: { pedidoId: true, pedidoCodigo: true, cliente: true, campo: true, pozo: true },
+    const porVencer = [...ultimo.values()].filter((d) => aDia(d.vigenteHasta as Date) <= limite);
+    if (!porVencer.length) return [];
+    const todos = await this.prisma.ticketRef.findMany({
+      where: { pedidoId: { in: porVencer.map((d) => d.pedidoId) } },
+      select: {
+        pedidoId: true,
+        pedidoCodigo: true,
+        cliente: true,
+        campo: true,
+        pozo: true,
+        anuladoAt: true,
+      },
     });
+    // un pedido anulado (todos sus tickets anulados) no genera avisos de ART
+    const tickets = todos.filter((t) => t.anuladoAt === null);
+    const aviso = porVencer.filter(
+      (d) =>
+        !todos.some((t) => t.pedidoId === d.pedidoId) ||
+        tickets.some((t) => t.pedidoId === d.pedidoId),
+    );
     return aviso.map((d) => {
       const vence = aDia(d.vigenteHasta as Date);
       const t = tickets.find((x) => x.pedidoId === d.pedidoId);
@@ -248,7 +266,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
   private async documentosDeIngresoFaltantes(hoy: string): Promise<Candidato[]> {
     const desde = aFecha(masDias(hoy, -DIAS_VENTANA_DOCUMENTOS_INGRESO));
     const tickets = await this.prisma.ticketRef.findMany({
-      where: { createdAt: { gte: desde }, operadores: { some: {} } },
+      where: { createdAt: { gte: desde }, anuladoAt: null, operadores: { some: {} } },
       select: {
         ticketId: true,
         ticketNumero: true,
@@ -298,6 +316,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
         anuladoAt: null,
         documentoPtId: null,
         fase: { not: 'aprobado' },
+        ticket: { anuladoAt: null },
       },
       select: {
         id: true,
@@ -361,7 +380,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
    */
   async servicioSinPtw(hoy: string): Promise<Candidato[]> {
     const dias = await this.prisma.ticketDiaServicio.findMany({
-      where: { fecha: aFecha(hoy) },
+      where: { fecha: aFecha(hoy), ticket: { anuladoAt: null } },
       select: { ticket: { select: this.seleccionTicket } },
     });
     if (!dias.length) return [];
@@ -391,7 +410,12 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
   async ptwSinAprobarALaHora(hoy: string, hora: string): Promise<Candidato[]> {
     if (hora < this.horaInicio) return [];
     const filas = await this.prisma.ptw.findMany({
-      where: { diaOperacion: aFecha(hoy), anuladoAt: null, fase: { not: 'aprobado' } },
+      where: {
+        diaOperacion: aFecha(hoy),
+        anuladoAt: null,
+        fase: { not: 'aprobado' },
+        ticket: { anuladoAt: null },
+      },
       select: {
         id: true,
         numero: true,
@@ -422,7 +446,7 @@ export class AvisosProgramadosService implements OnApplicationBootstrap, OnModul
     if (hora < this.horaPtManana) return [];
     const manana = masDias(hoy, 1);
     const dias = await this.prisma.ticketDiaServicio.findMany({
-      where: { fecha: aFecha(manana) },
+      where: { fecha: aFecha(manana), ticket: { anuladoAt: null } },
       select: { ticket: { select: this.seleccionTicket } },
     });
     if (!dias.length) return [];

@@ -1,10 +1,26 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { TipoDocumentoPedido } from '../generated/client';
+import { EstadoRevisionDocumento, TipoDocumentoPedido } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-interface DocumentoVigente {
+/** Revisión de QHSE de un documento (la misma en todo lo que lo lista). */
+interface RevisionDocumento {
+  revisionEstado: 'cargado' | 'aprobado' | 'rechazado';
+  revisadoAt: Date | null;
+  revisadoPor: string | null;
+  motivoRechazo: string | null;
+}
+
+interface DocumentoVigente extends RevisionDocumento {
   id: string;
   archivoId: string;
+}
+
+/** Último documento rechazado de un tipo que todavía no tiene otro vigente: es lo que se debe volver a cargar. */
+interface DocumentoRechazado extends RevisionDocumento {
+  id: string;
+  tipo: TipoDocumentoPedido;
+  archivoId: string;
+  fecha: string | null;
 }
 
 const DIA_MS = 86_400_000;
@@ -47,9 +63,13 @@ export class DocumentosEstadoService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    // los documentos son del pedido (el ticket es opcional): se buscan por `pedido_id`, no por la relación del ticket
-    const documentos = await this.prisma.documentoPedido.findMany({
-      where: { pedidoId: { in: [...new Set(tickets.map((t) => t.pedidoId))] }, anuladoAt: null },
+    // los documentos son del pedido (el ticket es opcional): se buscan por `pedido_id`, no por la relación del ticket.
+    // Un documento rechazado está anulado: no cuenta como cargado (el pedido lo tiene por faltante); se trae aparte para mostrar el motivo.
+    const todos = await this.prisma.documentoPedido.findMany({
+      where: {
+        pedidoId: { in: [...new Set(tickets.map((t) => t.pedidoId))] },
+        OR: [{ anuladoAt: null }, { revisionEstado: EstadoRevisionDocumento.rechazado }],
+      },
       select: {
         id: true,
         pedidoId: true,
@@ -58,7 +78,21 @@ export class DocumentosEstadoService {
         fecha: true,
         vigenteHasta: true,
         createdAt: true,
+        anuladoAt: true,
+        revisionEstado: true,
+        revisadoAt: true,
+        motivoRechazo: true,
+        revisor: { select: { nombre: true } },
       },
+    });
+    const documentos = todos.filter(
+      (d) => d.anuladoAt === null && d.revisionEstado !== EstadoRevisionDocumento.rechazado,
+    );
+    const revision = (d: (typeof todos)[number]): RevisionDocumento => ({
+      revisionEstado: d.revisionEstado,
+      revisadoAt: d.revisadoAt,
+      revisadoPor: d.revisor?.nombre ?? null,
+      motivoRechazo: d.motivoRechazo,
     });
     const hoy = new Date();
     const hoyDia = aDia(hoy);
@@ -68,11 +102,36 @@ export class DocumentosEstadoService {
 
     const filas = [...porPedido.entries()].map(([pedidoId, ts]) => {
       const docs = documentos.filter((d) => d.pedidoId === pedidoId);
+      // el último rechazado de cada tipo, solo si ese tipo (y, en el PT, ese día) no tiene ya otro vigente
+      const rechazados: DocumentoRechazado[] = [];
+      for (const r of todos
+        .filter(
+          (d) => d.pedidoId === pedidoId && d.revisionEstado === EstadoRevisionDocumento.rechazado,
+        )
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())) {
+        const dia = r.fecha ? aDia(r.fecha) : null;
+        const repuesto = docs.some(
+          (x) =>
+            x.tipo === r.tipo &&
+            (r.tipo !== TipoDocumentoPedido.pt || (x.fecha && aDia(x.fecha) === dia)),
+        );
+        const yaListado = rechazados.some(
+          (x) => x.tipo === r.tipo && (r.tipo !== TipoDocumentoPedido.pt || x.fecha === dia),
+        );
+        if (!repuesto && !yaListado)
+          rechazados.push({
+            id: r.id,
+            tipo: r.tipo,
+            archivoId: r.archivoId,
+            fecha: dia,
+            ...revision(r),
+          });
+      }
       const ultimo = (tipo: TipoDocumentoPedido): DocumentoVigente | null => {
         const d = docs
           .filter((x) => x.tipo === tipo)
           .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-        return d ? { id: d.id, archivoId: d.archivoId } : null;
+        return d ? { id: d.id, archivoId: d.archivoId, ...revision(d) } : null;
       };
       // el ART con la vigencia más lejana es el que cuenta (puede haber varios por pedido)
       const art = docs
@@ -102,11 +161,13 @@ export class DocumentosEstadoService {
         formatoRecepcion: ultimo(TipoDocumentoPedido.formato_recepcion),
         sfi: ultimo(TipoDocumentoPedido.sfi),
         actaEntrega: ultimo(TipoDocumentoPedido.formato_entrega),
-        ptHoy: ptHoy ? { id: ptHoy.id, archivoId: ptHoy.archivoId } : null,
+        ptHoy: ptHoy ? { id: ptHoy.id, archivoId: ptHoy.archivoId, ...revision(ptHoy) } : null,
+        rechazados,
         art: art
           ? {
               id: art.id,
               archivoId: art.archivoId,
+              ...revision(art),
               emitidoEl: art.fecha ? aDia(art.fecha) : null,
               vigenteHasta: aDia(art.vigenteHasta as Date),
               venceEnDias,

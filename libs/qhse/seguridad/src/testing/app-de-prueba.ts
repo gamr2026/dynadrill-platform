@@ -18,6 +18,7 @@ import {
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { ArticulosEpiConsumer } from '../consumers/articulos-epi.consumer';
+import { PedidosEventosConsumer } from '../consumers/pedidos-eventos.consumer';
 import { PumpingEventosConsumer } from '../consumers/pumping-eventos.consumer';
 import { PrismaService } from '../prisma/prisma.service';
 import { QhseModule } from '../qhse.module';
@@ -78,7 +79,7 @@ export async function levantarAppDePrueba(puerto: string): Promise<AppDePrueba> 
   const app = mod.createNestApplication();
   configureApp(app, { corsOrigins: ['http://localhost:4200'] });
   // sin RabbitMQ: los consumidores se invocan a mano; se evita que intenten suscribirse al arrancar
-  for (const c of [PumpingEventosConsumer, ArticulosEpiConsumer]) {
+  for (const c of [PumpingEventosConsumer, PedidosEventosConsumer, ArticulosEpiConsumer]) {
     jest.spyOn(c.prototype, 'onApplicationBootstrap').mockResolvedValue(undefined);
   }
   await app.init();

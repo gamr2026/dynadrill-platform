@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ArticulosEpiConsumer } from './consumers/articulos-epi.consumer';
+import { PedidosEventosConsumer } from './consumers/pedidos-eventos.consumer';
 import { PumpingEventosConsumer } from './consumers/pumping-eventos.consumer';
 import { DocumentosEstadoService } from './documentos/documentos-estado.service';
 import { DocumentosPedidoService } from './documentos/documentos-pedido.service';
@@ -157,6 +158,7 @@ import { InvestigacionesService } from './investigaciones/investigaciones.servic
     EmergenciasHeridosService,
     EmergenciasCierreService,
     PumpingEventosConsumer,
+    PedidosEventosConsumer,
     ArticulosEpiConsumer,
     InvestigacionesService,
     InvestigacionesConsultaService,

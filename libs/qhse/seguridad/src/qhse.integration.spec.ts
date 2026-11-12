@@ -21,6 +21,7 @@ import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { ArticulosEpiConsumer } from './consumers/articulos-epi.consumer';
+import { PedidosEventosConsumer } from './consumers/pedidos-eventos.consumer';
 import { PumpingEventosConsumer } from './consumers/pumping-eventos.consumer';
 import { PrismaService } from './prisma/prisma.service';
 import { QhseModule } from './qhse.module';
@@ -256,6 +257,9 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       .mockResolvedValue(undefined);
     jest
       .spyOn(ArticulosEpiConsumer.prototype, 'onApplicationBootstrap')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(PedidosEventosConsumer.prototype, 'onApplicationBootstrap')
       .mockResolvedValue(undefined);
     await app.init();
     prisma = app.get(PrismaService);
@@ -701,9 +705,12 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
         .set(tecnico())
         .expect(201);
 
-      // cada firma deja su evidencia para Firmas (contrato 4.14), 
+      // cada firma deja su evidencia para Firmas (contrato 4.14),
       const firmas = (await salida(entregaId)).filter((p) => p.tipo === 'qhse.epi.firmado');
-      expect(firmas.map((p) => p.datos.data['rolFirmante'])).toEqual(['trabajador', 'talento_humano']);
+      expect(firmas.map((p) => p.datos.data['rolFirmante'])).toEqual([
+        'trabajador',
+        'talento_humano',
+      ]);
       expect(firmas[0].datos.data).toMatchObject({
         documentoTipo: 'qhse_entrega_epi',
         documentoId: entregaId,
