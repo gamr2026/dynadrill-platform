@@ -1,4 +1,5 @@
 import { ModuleRoles } from './module-roles';
+import { MENU_PERMISSION_CATALOG } from './menu-permissions';
 import { ADMIN_ROLE_CODES, RoleCode } from './role-code';
 
 /**
@@ -357,6 +358,27 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Bodega: preparar y enviar las herramientas que el Supervisor de FCR solicitó, y recibir su retorno',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.BODEGUERO],
   ),
+  // Quien supervisa el ticket de FCR (los Supervisores y quienes coordinan): exonera requisitos y maneja su responsable. Antes colgaba de `fcr.tickets.operar` + el rol.
+  nuevo(
+    'fcr.requisitos.exonerar',
+    'Exonerar con motivo un requisito de un ticket FCR y revertir la exoneración',
+    [
+      RoleCode.SUPERADMIN,
+      RoleCode.JEFE_BASE,
+      RoleCode.SUPERVISOR,
+      RoleCode.SUPERVISOR_OPERACIONES_FCR,
+    ],
+  ),
+  nuevo(
+    'fcr.tickets.gestionar_responsable',
+    'Tomar, asignar, reasignar o liberar al Supervisor responsable de un ticket FCR',
+    [
+      RoleCode.SUPERADMIN,
+      RoleCode.JEFE_BASE,
+      RoleCode.SUPERVISOR,
+      RoleCode.SUPERVISOR_OPERACIONES_FCR,
+    ],
+  ),
   // encuestas (plataforma, sección de administración)
   nuevo(
     'encuestas.administracion.gestionar',
@@ -425,6 +447,21 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   nuevo(
     'pumping.jornadas.cambiar_duracion',
     'Acortar o ampliar la duración del servicio de un ticket de Pumping (lo decide el Jefe de Base)',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
+  ),
+  nuevo(
+    'pumping.requisitos.exonerar',
+    'Exonerar con motivo un requisito de un ticket de Pumping y revertir la exoneración',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE, RoleCode.SUPERVISOR, RoleCode.SUPERVISOR_PUMPING],
+  ),
+  nuevo(
+    'pumping.tickets.gestionar_responsable',
+    'Tomar, asignar, reasignar o liberar al Jefe de Base responsable de un ticket de Pumping (tomar sigue siendo solo del Jefe de Base)',
+    [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
+  ),
+  nuevo(
+    'pumping.tickets.ver_disponibilidad',
+    'Ver qué personal (supervisores, operadores, conductores) está disponible para asignar a un ticket o a un rango de fechas',
     [RoleCode.SUPERADMIN, RoleCode.JEFE_BASE],
   ),
   // flota
@@ -602,6 +639,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Cargar y anular los documentos de seguridad de un pedido y anular el Acta de Entrega',
     ModuleRoles.qhse,
   ),
+  nuevo(
+    'qhse.documentos.revisar',
+    'Revisar los documentos de seguridad de un pedido: aprobarlos o rechazarlos con motivo',
+    ModuleRoles.qhse,
+  ),
   // ---- qhse: Permiso de Trabajo (PTW, HSE-SITIO-001).
   nuevo('qhse.ptw.ver', 'Ver los permisos de trabajo (PTW) y sus documentos', ModuleRoles.qhse),
   nuevo(
@@ -744,6 +786,8 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'Leer el archivo de una firma manuscrita y guardar el resultado',
     [RoleCode.SUPERADMIN],
   ),
+  // ---- menu: qué destinos ve cada rol en el menú lateral (ver menu-permissions.ts). No dan acceso a ninguna función.
+  ...MENU_PERMISSION_CATALOG,
 ];
 
 /** Códigos de permiso para usar en `@RequirePermission(Permission.X)` sin escribir strings sueltos. */
@@ -817,6 +861,8 @@ export const Permission = {
   FCR_VER: 'fcr.tickets.ver',
   FCR_CONFIGURACION_GESTIONAR: 'fcr.configuracion.gestionar',
   FCR_HERRAMIENTAS_PREPARAR: 'fcr.herramientas.preparar',
+  FCR_REQUISITOS_EXONERAR: 'fcr.requisitos.exonerar',
+  FCR_RESPONSABLE_GESTIONAR: 'fcr.tickets.gestionar_responsable',
   ENCUESTAS_GESTIONAR: 'encuestas.administracion.gestionar',
   PUMPING_OPERAR: 'pumping.tickets.operar',
   PUMPING_VER: 'pumping.tickets.ver',
@@ -831,6 +877,9 @@ export const Permission = {
   PUMPING_REPORTE_LLEGADA_REVISAR: 'pumping.reportes_llegada.revisar',
   PUMPING_JORNADA_REABRIR: 'pumping.jornadas.reabrir',
   PUMPING_JORNADA_CAMBIAR_DURACION: 'pumping.jornadas.cambiar_duracion',
+  PUMPING_REQUISITOS_EXONERAR: 'pumping.requisitos.exonerar',
+  PUMPING_RESPONSABLE_GESTIONAR: 'pumping.tickets.gestionar_responsable',
+  PUMPING_DISPONIBILIDAD_VER: 'pumping.tickets.ver_disponibilidad',
   INSPECCIONES_APROBAR: 'flota.inspecciones.aprobar',
   VIAJES_SOLICITAR: 'flota.viajes.solicitar',
   VIAJES_APROBAR: 'flota.viajes.aprobar',
@@ -867,6 +916,7 @@ export const Permission = {
   DOCUMENTOS_VER: 'qhse.documentos.ver',
   DOCUMENTOS_VER_TICKET: 'qhse.documentos.ver_ticket',
   DOCUMENTOS_GESTIONAR: 'qhse.documentos.gestionar',
+  DOCUMENTOS_REVISAR: 'qhse.documentos.revisar',
   ACTA_ENTREGA_CARGAR: 'qhse.acta_entrega.cargar',
   ACTA_ENTREGA_VER: 'qhse.acta_entrega.ver',
   PTW_VER: 'qhse.ptw.ver',

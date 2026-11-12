@@ -20,7 +20,12 @@ import {
   jwtVerifyEnvSchema,
   rabbitEnvSchema,
 } from '@dyn/config';
-import { ALL_PERMISSION_CODES, type PermissionDef } from '@dyn/authz';
+import {
+  ALL_PERMISSION_CODES,
+  PERMISSION_CATALOG,
+  type PermissionDef,
+  type RoleCode,
+} from '@dyn/authz';
 import { CommonModule, configureApp } from '@dyn/common';
 import { MessagingModule } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
@@ -989,6 +994,15 @@ run('identidad (base de datos real)', () => {
         matrixKey: null,
         defaultRoles: [],
       };
+      const defMenuNuevo: PermissionDef = {
+        code: 'menu.zzprueba_destino.ver',
+        modulo: 'menu',
+        recurso: 'zzprueba_destino',
+        accion: 'ver',
+        descripcion: 'Ver en el menú: destino de prueba',
+        matrixKey: null,
+        defaultRoles: ['jefe_base', 'bodeguero'],
+      };
       const crearViejoAsignado = async (rolId: string) => {
         const p = await prisma.permiso.create({
           data: {
@@ -1004,7 +1018,7 @@ run('identidad (base de datos real)', () => {
       };
 
       afterAll(async () => {
-        const codigos = [viejo, defNuevo.code];
+        const codigos = [viejo, defNuevo.code, defMenuNuevo.code];
         await prisma.rolPermiso.deleteMany({ where: { permiso: { codigo: { in: codigos } } } });
         await prisma.permiso.deleteMany({ where: { codigo: { in: codigos } } });
       });
@@ -1080,6 +1094,105 @@ run('identidad (base de datos real)', () => {
         ).rejects.toThrow(/no existen en el catálogo/);
         expect(await prisma.permiso.findUnique({ where: { codigo: viejo } })).not.toBeNull();
         expect(await codigosEnBase(rolId)).toContain(viejo);
+      });
+
+      it('un permiso de menú nuevo en una base existente se asigna una sola vez a sus roles por defecto y la edición posterior no se pisa', async () => {
+        const opts = { catalog: [defMenuNuevo], replacements: [] };
+        const conPermiso = async (rol: string) =>
+          (await codigosEnBase(roles[rol])).includes(defMenuNuevo.code);
+
+        expect(await syncPermisos(prisma, opts)).toEqual({
+          nuevos: 1,
+          asignacionesPorDefecto: 2,
+          traspasadas: 0,
+          retirados: 0,
+        });
+        expect(await conPermiso('jefe_base')).toBe(true);
+        expect(await conPermiso('bodeguero')).toBe(true);
+        expect(await conPermiso('operador')).toBe(false);
+
+        // un administrador se lo quita al Bodeguero y se lo da al Operador desde la app
+        const bodeguero = await codigosEnBase(roles['bodeguero']);
+        const operador = await codigosEnBase(roles['operador']);
+        await put(
+          roles['bodeguero'],
+          bodeguero.filter((c) => c !== defMenuNuevo.code),
+        ).expect(200);
+        await put(roles['operador'], [...operador, defMenuNuevo.code]).expect(200);
+
+        expect(await syncPermisos(prisma, opts)).toEqual({
+          nuevos: 0,
+          asignacionesPorDefecto: 0,
+          traspasadas: 0,
+          retirados: 0,
+        });
+        expect(await conPermiso('bodeguero')).toBe(false); // no se restituye
+        expect(await conPermiso('operador')).toBe(true); // no se revoca
+      });
+
+      it('los permisos dedicados nuevos llegan a una base existente una sola vez, con sus roles por defecto', async () => {
+        const codigos = [
+          'pumping.requisitos.exonerar',
+          'pumping.tickets.gestionar_responsable',
+          'pumping.tickets.ver_disponibilidad',
+          'fcr.requisitos.exonerar',
+          'fcr.tickets.gestionar_responsable',
+          'qhse.documentos.revisar',
+        ];
+        const catalog = PERMISSION_CATALOG.filter((p) => codigos.includes(p.code));
+        expect(catalog).toHaveLength(codigos.length);
+        // base «existente»: sin estos permisos todavía
+        await admin.query(
+          'DELETE FROM identidad.rol_permiso WHERE permiso_id IN (SELECT id FROM identidad.permiso WHERE codigo = ANY($1))',
+          [codigos],
+        );
+        await admin.query('DELETE FROM identidad.permiso WHERE codigo = ANY($1)', [codigos]);
+
+        const esperadas = catalog.reduce((n, p) => n + p.defaultRoles.length, 0);
+        expect(await syncPermisos(prisma, { catalog, replacements: [] })).toEqual({
+          nuevos: codigos.length,
+          asignacionesPorDefecto: esperadas,
+          traspasadas: 0,
+          retirados: 0,
+        });
+        for (const p of catalog) {
+          const r = await admin.query(
+            `SELECT ro.codigo FROM identidad.rol_permiso rp
+               JOIN identidad.permiso pe ON pe.id = rp.permiso_id
+               JOIN identidad.rol ro ON ro.id = rp.rol_id
+              WHERE pe.codigo = $1 ORDER BY 1`,
+            [p.code],
+          );
+          expect(r.rows.map((x: { codigo: string }) => x.codigo)).toEqual(
+            [...p.defaultRoles].sort(),
+          );
+        }
+        // una segunda corrida no vuelve a asignar nada
+        expect(await syncPermisos(prisma, { catalog, replacements: [] })).toEqual({
+          nuevos: 0,
+          asignacionesPorDefecto: 0,
+          traspasadas: 0,
+          retirados: 0,
+        });
+      });
+
+      it('la siembra real deja a cada rol el menú por defecto del catálogo (Jefe de Base, Supervisor Pumping, Gerente HSE, Bodeguero, Superadmin)', async () => {
+        await syncPermisos(prisma);
+        for (const rol of [
+          'jefe_base',
+          'supervisor_pumping',
+          'gerente_hse',
+          'bodeguero',
+          'superadmin',
+        ]) {
+          const esperados = PERMISSION_CATALOG.filter(
+            (p) => p.modulo === 'menu' && p.defaultRoles.includes(rol as RoleCode),
+          ).map((p) => p.code);
+          expect(esperados.length).toBeGreaterThan(0);
+          const enBase = (await codigosEnBase(roles[rol])).filter((c) => c.startsWith('menu.'));
+          // los asignados por defecto están (otras pruebas pueden haber editado el rol: solo se exige lo sembrado)
+          expect(enBase).toEqual(expect.arrayContaining(esperados));
+        }
       });
 
       it('volver a sembrar NO revierte lo que un administrador editó (solo asigna por defecto a permisos nuevos)', async () => {
