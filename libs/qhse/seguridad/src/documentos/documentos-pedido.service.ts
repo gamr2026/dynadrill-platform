@@ -26,6 +26,15 @@ export const MODULO_ARCHIVO_DOCUMENTO = 'qhse_documento_pedido';
 /** Vigencia legal del ART (días desde su emisión). */
 export const VIGENCIA_ART_DIAS = 15;
 
+/** Nombre del tipo de documento tal como lo lee la gente (viaja en el aviso de rechazo). */
+const NOMBRE_TIPO: Record<TipoDocumentoPedido, string> = {
+  formato_recepcion: 'Formato de recepción',
+  art: 'ART',
+  pt: 'Permiso de Trabajo (PT)',
+  sfi: 'SFI',
+  formato_entrega: 'Acta de Entrega de Locación',
+};
+
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface CargarDocumentoEntrada {
@@ -511,6 +520,37 @@ export class DocumentosPedidoService {
     return ids.length;
   }
 
+  /**
+   * Quién debe enterarse de un rechazo: quien subió el documento y el supervisor del ticket del documento (o, si el documento es solo del
+   * pedido, el de sus tickets). Sin repetidos y sin quien rechaza, que ya lo sabe.
+   */
+  private async avisadosDelRechazo(
+    tx: Tx,
+    d: {
+      createdBy: string;
+      pedidoId: string;
+      ticketId: string | null;
+      creador: { rol: { codigo: string } };
+    },
+    actor: AuthUser,
+  ): Promise<Array<{ usuarioId: string; rolCodigo: string }>> {
+    const supervisores = await tx.ticketRef.findMany({
+      where: {
+        supervisorId: { not: null },
+        ...(d.ticketId ? { ticketId: d.ticketId } : { pedidoId: d.pedidoId }),
+      },
+      select: { supervisor: { select: { id: true, rol: { select: { codigo: true } } } } },
+    });
+    const candidatos = [
+      { usuarioId: d.createdBy, rolCodigo: d.creador.rol.codigo },
+      ...supervisores.flatMap((t) =>
+        t.supervisor ? [{ usuarioId: t.supervisor.id, rolCodigo: t.supervisor.rol.codigo }] : [],
+      ),
+    ];
+    const vistos = new Set<string>([actor.id]);
+    return candidatos.filter((c) => !vistos.has(c.usuarioId) && !!vistos.add(c.usuarioId));
+  }
+
   private async publicar(
     tx: Tx,
     tipo: string,
@@ -520,8 +560,15 @@ export class DocumentosPedidoService {
   ): Promise<void> {
     const d = await tx.documentoPedido.findUniqueOrThrow({
       where: { id: documentoId },
-      include: { ticket: { select: { ticketNumero: true, pedidoCodigo: true } } },
+      include: {
+        ticket: { select: { ticketNumero: true, pedidoCodigo: true } },
+        creador: { select: { rol: { select: { codigo: true } } } },
+      },
     });
+    const asignados =
+      tipo === 'qhse.documento_pedido.rechazado'
+        ? await this.avisadosDelRechazo(tx, d, actor)
+        : null;
     await this.bus.publish(
       tx,
       this.bus.create({
@@ -540,6 +587,8 @@ export class DocumentosPedidoService {
           ...(d.fecha ? { fecha: d.fecha.toISOString().slice(0, 10) } : {}),
           ...(d.vigenteHasta ? { vigenteHasta: d.vigenteHasta.toISOString().slice(0, 10) } : {}),
           ...(motivo ? { motivo } : {}),
+          // rechazado: a quién se le avisa (quien subió el documento y el supervisor del ticket, sin quien lo rechaza)
+          ...(asignados ? { asignados, tipoDocumentoNombre: NOMBRE_TIPO[d.tipo] } : {}),
           // aprobado / rechazado: quién lo revisó y cuándo (el motivo del rechazo va en `motivo`)
           ...(d.revisadoPor && d.revisadoAt
             ? { revisadoPor: d.revisadoPor, revisadoAt: d.revisadoAt.toISOString() }

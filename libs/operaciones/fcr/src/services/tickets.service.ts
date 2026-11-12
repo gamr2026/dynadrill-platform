@@ -650,11 +650,16 @@ export class TicketsService {
       (ids.length
         ? await tx.idUsuario.findMany({
             where: { id: { in: ids } },
-            select: { id: true, nombre: true },
+            select: { id: true, nombre: true, rol: { select: { codigo: true } } },
           })
         : []
-      ).map((u) => [u.id, u.nombre]),
+      ).map((u) => [u.id, { nombre: u.nombre, rol: u.rol.codigo }] as const),
     );
+    // a quién se le avisa: el nuevo responsable (si no lo hizo él mismo) y, si lo perdió, el anterior; cada uno con su rol de cuenta
+    const aviso = (uid: string | null) =>
+      uid && uid !== actor.id && nombres.get(uid)
+        ? [{ usuarioId: uid, rolCodigo: nombres.get(uid)!.rol }]
+        : [];
     await this.bus.publish(
       tx,
       this.bus.create({
@@ -667,11 +672,13 @@ export class TicketsService {
           pedidoCodigo: t.pedidoCodigo,
           accion: o.accion,
           anteriorId: t.responsableId,
-          anteriorNombre: t.responsableId ? (nombres.get(t.responsableId) ?? null) : null,
+          anteriorNombre: t.responsableId ? (nombres.get(t.responsableId)?.nombre ?? null) : null,
           nuevoId,
-          nuevoNombre: nuevoId ? (nombres.get(nuevoId) ?? null) : null,
+          nuevoNombre: nuevoId ? (nombres.get(nuevoId)?.nombre ?? null) : null,
           motivo,
           asignadoPor: actor.name,
+          asignados: aviso(nuevoId),
+          desasignados: aviso(t.responsableId),
         },
         actor: { userId: actor.id, role: actor.roleCode },
         traceparent: currentTraceparent(),

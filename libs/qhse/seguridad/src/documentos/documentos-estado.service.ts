@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { EstadoRevisionDocumento, TipoDocumentoPedido } from '../generated/client';
+import { estadoAnulacion } from '../comun/ticket-activo';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Revisión de QHSE de un documento (la misma en todo lo que lo lista). */
@@ -28,7 +29,8 @@ const aDia = (d: Date): string => d.toISOString().slice(0, 10);
 
 /**
  * Bandeja «Documentos por pedido»: qué tiene y qué le falta a cada pedido que QHSE conoce. Todo se calcula al consultar (nada se guarda):
- * el ART vence a los 15 días de su emisión y avisa 3 días antes; el PT es el de hoy.
+ * el ART vence a los 15 días de su emisión y avisa 3 días antes; el PT es el de hoy. Cada fila trae `pedidoAnulado`, `anuladoAt` y
+ * `anuladoMotivo` para que la pantalla avise antes de que una carga falle con 409.
  */
 @Injectable()
 export class DocumentosEstadoService {
@@ -155,6 +157,8 @@ export class DocumentosEstadoService {
         campo: ts.find((t) => t.campo)?.campo ?? null,
         pozo: ts.find((t) => t.pozo)?.pozo ?? null,
         creadoAt: ts[0].createdAt,
+        // pedido anulado en comercial (se rechaza todo registro nuevo): desde cuándo y por qué. Consultado por ticket, vale el estado de ese ticket.
+        ...estadoAnulacion(filtro.ticketId ? ts.filter((t) => t.ticketId === filtro.ticketId) : ts),
         tickets: ts
           .map((t) => ({ ticketId: t.ticketId, numero: t.ticketNumero }))
           .sort((a, b) => (a.numero ?? 0) - (b.numero ?? 0)),

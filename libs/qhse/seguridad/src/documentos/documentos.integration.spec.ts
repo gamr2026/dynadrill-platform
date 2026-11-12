@@ -56,7 +56,13 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
     t.token(
       'tecnico_hse',
       TECNICO.nombre,
-      [P.DOCUMENTOS_VER, P.DOCUMENTOS_GESTIONAR, P.ACTA_ENTREGA_VER, P.ACTA_ENTREGA_CARGAR],
+      [
+        P.DOCUMENTOS_VER,
+        P.DOCUMENTOS_GESTIONAR,
+        P.DOCUMENTOS_REVISAR,
+        P.ACTA_ENTREGA_VER,
+        P.ACTA_ENTREGA_CARGAR,
+      ],
       TECNICO.id,
     );
   /** El Supervisor solo trae los dos permisos del Acta. */
@@ -740,6 +746,31 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
       (await t.http().get(`/api/qhse/documentos/ticket/${ticketId}`).set(tecnico()).expect(200))
         .body;
 
+    it('rechazar avisa (asignados) a quien subió el documento y al supervisor del ticket, sin repetidos y sin quien rechaza', async () => {
+      const tk = await ticketNuevo(SUPERVISOR.id);
+      const pt = await cargarDoc(tk, 'pt', { fecha: fechaEn(0) });
+      const revisor = t.token(
+        'gerente_hse',
+        SUPLENTE.nombre,
+        [P.DOCUMENTOS_VER, P.DOCUMENTOS_REVISAR],
+        SUPLENTE.id,
+      );
+      await rechazar(pt.id, { motivo: 'Firma ilegible' }, revisor).expect(201);
+      const [ev] = await eventos('qhse.documento_pedido.rechazado', tk.ticketId);
+      expect(ev.datos.data['tipoDocumentoNombre']).toBe('Permiso de Trabajo (PT)');
+      expect(ev.datos.data['asignados']).toEqual([
+        { usuarioId: TECNICO.id, rolCodigo: 'tecnico_hse' },
+        { usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' },
+      ]);
+      // si quien rechaza es quien lo subió y el supervisor del ticket es otro, solo se avisa al supervisor
+      const pt2 = await cargarDoc(tk, 'pt', { fecha: fechaEn(1) });
+      await rechazar(pt2.id, { motivo: 'Vencido' }).expect(201);
+      const eventosRech = await eventos('qhse.documento_pedido.rechazado', tk.ticketId);
+      expect(eventosRech[1].datos.data['asignados']).toEqual([
+        { usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' },
+      ]);
+    });
+
     it('un documento nace cargado, con su fila de historia; aprobarlo registra quién y cuándo, publica .aprobado y no cambia el estado que ve Operaciones', async () => {
       const tk = await ticketNuevo();
       const doc = await cargarDoc(tk, 'sfi');
@@ -920,9 +951,7 @@ run('QHSE: documentos por pedido y Acta de Entrega (base de datos real)', () => 
           upd(`revision_estado = 'aprobado', ${quien}, motivo_rechazo = 'x'`),
         ).rejects.toThrow(/revision_check/);
         // sin cambiar de estado, la revisión no se toca (lo impide el trigger antes que el CHECK)
-        await expect(upd(`revisado_por = '${TECNICO.id}'`)).rejects.toThrow(
-          /no se puede cambiar/,
-        );
+        await expect(upd(`revisado_por = '${TECNICO.id}'`)).rejects.toThrow(/no se puede cambiar/);
       });
 
       it('el trigger impide aprobar un documento anulado y cambiar una revisión; la aplicación solo lee e inserta la historia', async () => {

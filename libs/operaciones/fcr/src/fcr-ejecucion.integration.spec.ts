@@ -89,7 +89,12 @@ run(
     });
     const tok = (
       x: { id: string; nombre: string; rol: string },
-      permisos: string[] = [P.FCR_OPERAR, P.FCR_VER],
+      permisos: string[] = [
+        P.FCR_OPERAR,
+        P.FCR_VER,
+        P.FCR_REQUISITOS_EXONERAR,
+        P.FCR_RESPONSABLE_GESTIONAR,
+      ],
     ) => ({
       Authorization: `Bearer ${signer.sign({ sub: x.id, email: `${x.rol}@test.local`, name: x.nombre, roleId: 'r', roleCode: x.rol, permissions: permisos })}`,
     });
@@ -2243,6 +2248,12 @@ run(
           ['asignar', SUPERVISOR.id, SUPERVISOR_2.id],
           ['liberar', SUPERVISOR_2.id, null],
         ]);
+        // `asignados`/`desasignados` (sin el actor): a quién avisa Avisos
+        expect(ev.map((x) => [x.d['asignados'], x.d['desasignados']])).toEqual([
+          [[], []], // se asignó a sí mismo: no se avisa al actor
+          [[], [{ usuarioId: SUPERVISOR.id, rolCodigo: 'supervisor' }]], // otro supervisor se lo quitó
+          [[], []], // lo liberó su propio responsable
+        ]);
         const h = (
           await admin.query(
             'SELECT anterior_id, nuevo_id, motivo, actor_id FROM fcr.ticket_responsable_historial WHERE ticket_id = $1 ORDER BY created_at',
@@ -2280,6 +2291,22 @@ run(
             t.id,
           ]),
         ).rejects.toThrow(/permission denied/);
+      });
+
+      it('el evento de responsable lleva `asignados` con el rol de cuenta del nuevo responsable cuando otro se lo asigna', async () => {
+        const t = await abierto();
+        await http()
+          .put(`${base(t.id)}/responsable`)
+          .set(supervisor())
+          .send({ usuarioId: SUPERVISOR_2.id, motivo: 'Cubre el turno' })
+          .expect(200);
+        const [ev] = await eventos(t.pedidoId);
+        expect(ev.d).toMatchObject({
+          accion: 'asignar',
+          nuevoId: SUPERVISOR_2.id,
+          asignados: [{ usuarioId: SUPERVISOR_2.id, rolCodigo: 'supervisor' }],
+          desasignados: [],
+        });
       });
 
       it('quien saca el ticket del paso de arranque queda como su responsable; un ticket anulado no cambia de responsable', async () => {

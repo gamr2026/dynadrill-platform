@@ -120,17 +120,17 @@ export class DocumentosController {
   }
 
   /**
-   * Aprueba un documento cargado. Lo revisa quien puede gestionar los documentos (los mismos roles que los anulan: administradores, técnico y
-   * gerente HSE). Pendiente de producto: un permiso propio `qhse.documentos.revisar` (ver el informe de la tarea).
+   * Aprueba un documento cargado. Exige `qhse.documentos.revisar` (por omisión los mismos roles que gestionan los documentos: administradores,
+   * técnico y gerente HSE).
    */
-  @RequirePermission(P.DOCUMENTOS_GESTIONAR)
+  @RequirePermission(P.DOCUMENTOS_REVISAR)
   @Post('documentos/:id/aprobar')
   aprobar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     return this.documentos.aprobar(id, actor);
   }
 
   /** Rechaza un documento cargado (con motivo): deja de valer como uno anulado y se puede cargar otro. */
-  @RequirePermission(P.DOCUMENTOS_GESTIONAR)
+  @RequirePermission(P.DOCUMENTOS_REVISAR)
   @Post('documentos/:id/rechazar')
   rechazar(
     @Param('id', ParseUUIDPipe) id: string,

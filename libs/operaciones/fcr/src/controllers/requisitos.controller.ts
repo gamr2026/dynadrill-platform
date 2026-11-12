@@ -23,14 +23,14 @@ export class RevertirExoneracionDto {
 }
 
 /**
- * Exoneración de requisitos del ticket y su historia. Exonerar y revertir son del Supervisor, del Supervisor de Operaciones FCR y de quienes
- * coordinan (Superadmin, Jefe de Base); el servicio lo comprueba por el rol de la cuenta.
+ * Exoneración de requisitos del ticket y su historia. Exonerar y revertir exigen `fcr.requisitos.exonerar` (por omisión el Supervisor, el Supervisor de Operaciones FCR y
+ * quienes coordinan: Superadmin, Jefe de Base); el servicio mantiene además su comprobación por el rol de la cuenta.
  */
 @Controller('operaciones/fcr/tickets/:id/requisitos')
 export class RequisitosController {
   constructor(private readonly exoneraciones: ExoneracionesService) {}
 
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_REQUISITOS_EXONERAR)
   @Post(':requisitoId/exonerar')
   exonerar(
     @Param('id', ParseUUIDPipe) id: string,
@@ -41,7 +41,7 @@ export class RequisitosController {
     return this.exoneraciones.exonerar(id, requisitoId, dto.motivo, actor);
   }
 
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_REQUISITOS_EXONERAR)
   @Post(':requisitoId/revertir-exoneracion')
   revertir(
     @Param('id', ParseUUIDPipe) id: string,

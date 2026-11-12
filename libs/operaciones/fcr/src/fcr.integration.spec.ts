@@ -101,16 +101,38 @@ run(
     const token = (roleCode: string, name: string, permissions: string[], sub = uuidv7()) => ({
       Authorization: `Bearer ${signer.sign({ sub, email: `${roleCode}@test.local`, name, roleId: 'r', roleCode, permissions })}`,
     });
-    const supervisor = () => token('supervisor', SUPERVISOR.nombre, [P.FCR_OPERAR], SUPERVISOR.id);
+    const supervisor = () =>
+      token(
+        'supervisor',
+        SUPERVISOR.nombre,
+        [P.FCR_OPERAR, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        SUPERVISOR.id,
+      );
     const otroSupervisor = () =>
-      token('supervisor', OTRO_SUPERVISOR.nombre, [P.FCR_OPERAR], OTRO_SUPERVISOR.id);
+      token(
+        'supervisor',
+        OTRO_SUPERVISOR.nombre,
+        [P.FCR_OPERAR, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        OTRO_SUPERVISOR.id,
+      );
     const supervisorOps = () =>
-      token('supervisor_operaciones_fcr', SUPERVISOR_OPS.nombre, [P.FCR_OPERAR], SUPERVISOR_OPS.id);
+      token(
+        'supervisor_operaciones_fcr',
+        SUPERVISOR_OPS.nombre,
+        [P.FCR_OPERAR, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        SUPERVISOR_OPS.id,
+      );
     const inspector = () => token('operador_fcr', INSPECTOR.nombre, [P.FCR_OPERAR], INSPECTOR.id);
     const operador = () => token('operador_fcr', OPERADOR.nombre, [P.FCR_OPERAR], OPERADOR.id);
     const otroOperador = () =>
       token('operador_fcr', OTRO_OPERADOR.nombre, [P.FCR_OPERAR], OTRO_OPERADOR.id);
-    const jefe = () => token('jefe_base', JEFE.nombre, [P.FCR_OPERAR], JEFE.id);
+    const jefe = () =>
+      token(
+        'jefe_base',
+        JEFE.nombre,
+        [P.FCR_OPERAR, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        JEFE.id,
+      );
     const sinPermiso = () => token('ingenieria_ventas', 'Vera Ventas', []);
 
     const pedidos: string[] = [];

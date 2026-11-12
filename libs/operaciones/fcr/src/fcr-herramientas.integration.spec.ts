@@ -104,9 +104,19 @@ run(
       Authorization: `Bearer ${signer.sign({ sub, email: `${roleCode}@test.local`, name, roleId: 'r', roleCode, permissions })}`,
     });
     const supervisor = () =>
-      token('supervisor', SUPERVISOR.nombre, [P.FCR_OPERAR, P.FCR_VER], SUPERVISOR.id);
+      token(
+        'supervisor',
+        SUPERVISOR.nombre,
+        [P.FCR_OPERAR, P.FCR_VER, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        SUPERVISOR.id,
+      );
     const otroSupervisor = () =>
-      token('supervisor', OTRO_SUPERVISOR.nombre, [P.FCR_OPERAR, P.FCR_VER], OTRO_SUPERVISOR.id);
+      token(
+        'supervisor',
+        OTRO_SUPERVISOR.nombre,
+        [P.FCR_OPERAR, P.FCR_VER, P.FCR_REQUISITOS_EXONERAR, P.FCR_RESPONSABLE_GESTIONAR],
+        OTRO_SUPERVISOR.id,
+      );
     const ventas = () =>
       token(
         'ingenieria_ventas',

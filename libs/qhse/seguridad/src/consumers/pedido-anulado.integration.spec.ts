@@ -180,6 +180,40 @@ run('QHSE: pedido anulado en comercial (base de datos real)', () => {
     ).rejects.toThrow(/no se puede reabrir/i);
   });
 
+  it('el estado de documentos del pedido avisa que está anulado (pedidoAnulado, anuladoAt, anuladoMotivo) en la bandeja y por ticket', async () => {
+    const a = await ticketNuevo();
+    const vivo = await ticketNuevo();
+    const porTicket = (id: string) =>
+      t.http().get(`/api/qhse/documentos/ticket/${id}`).set(tecnico()).expect(200);
+    expect((await porTicket(a.ticketId)).body).toMatchObject({
+      pedidoAnulado: false,
+      anuladoAt: null,
+      anuladoMotivo: null,
+    });
+    await consumer.consumir(anulado(a.pedidoId));
+    const marcaA = (await marca(a.ticketId)).anulado_at as Date;
+    const anulada = (await porTicket(a.ticketId)).body;
+    expect(anulada).toMatchObject({ pedidoAnulado: true, anuladoMotivo: 'Cliente desistió' });
+    expect(new Date(anulada.anuladoAt).getTime()).toBe(marcaA.getTime());
+    // la bandeja lo trae igual, y otro pedido sigue activo
+    const bandeja = (
+      await t
+        .http()
+        .get('/api/qhse/documentos/pedidos')
+        .query({ q: `PED-ANU${n}` })
+        .set(tecnico())
+        .expect(200)
+    ).body as Array<{ pedidoId: string; pedidoAnulado: boolean; anuladoMotivo: string | null }>;
+    expect(bandeja.find((f) => f.pedidoId === a.pedidoId)).toMatchObject({
+      pedidoAnulado: true,
+      anuladoMotivo: 'Cliente desistió',
+    });
+    expect(bandeja.find((f) => f.pedidoId === vivo.pedidoId)).toMatchObject({
+      pedidoAnulado: false,
+      anuladoMotivo: null,
+    });
+  });
+
   it('cierra por el camino normal los PTW abiertos del pedido (con su historial y su evento) y deja los documentos tal cual', async () => {
     const tk = await ticketNuevo();
     const abierto = (await abrirPtw(tk.ticketId, HOY).expect(201)).body;

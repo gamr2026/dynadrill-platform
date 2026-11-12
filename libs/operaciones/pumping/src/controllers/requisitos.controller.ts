@@ -21,8 +21,8 @@ export class RevertirExoneracionDto {
 export class RequisitosController {
   constructor(private readonly requisitos: RequisitosService) {}
 
-  /** Exonera un requisito pendiente (motivo obligatorio): deja de bloquear. Lo hacen quienes pueden reabrir jornadas (Jefe de Base, Supervisor, administración). */
-  @RequirePermission(P.PUMPING_JORNADA_REABRIR)
+  /** Exonera un requisito pendiente (motivo obligatorio): deja de bloquear. Exige `pumping.requisitos.exonerar` (por omisión Jefe de Base, Supervisor, Supervisor de Pumping y administración). */
+  @RequirePermission(P.PUMPING_REQUISITOS_EXONERAR)
   @Post('tickets/:id/requisitos/:requisitoId/exonerar')
   exonerar(
     @Param('id', ParseUUIDPipe) id: string,
@@ -34,7 +34,7 @@ export class RequisitosController {
   }
 
   /** Revierte una exoneración: el requisito vuelve a pendiente. */
-  @RequirePermission(P.PUMPING_JORNADA_REABRIR)
+  @RequirePermission(P.PUMPING_REQUISITOS_EXONERAR)
   @Post('tickets/:id/requisitos/:requisitoId/revertir-exoneracion')
   revertir(
     @Param('id', ParseUUIDPipe) id: string,

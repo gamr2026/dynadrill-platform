@@ -139,7 +139,13 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
   const token = (roleCode: string, name: string, permissions: string[], sub = uuidv7()) => ({
     Authorization: `Bearer ${signer.sign({ sub, email: `${roleCode}@test.local`, name, roleId: 'r', roleCode, permissions })}`,
   });
-  const jefe = () => token('jefe_base', 'Jaime Jefe de Base', [P.PUMPING_OPERAR], JEFE);
+  const jefe = () =>
+    token(
+      'jefe_base',
+      'Jaime Jefe de Base',
+      [P.PUMPING_OPERAR, P.PUMPING_RESPONSABLE_GESTIONAR, P.PUMPING_DISPONIBILIDAD_VER],
+      JEFE,
+    );
   const operador = () =>
     token('operador', 'Oscar Operador', [P.PUMPING_OPERAR], OPERADOR_QUE_ACTUA);
   const sinPermiso = () => token('ingenieria_ventas', 'Vera Ventas', []);
@@ -3498,13 +3504,18 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       P.PUMPING_JORNADA_ACEPTAR_COMPANY_MAN,
       P.PUMPING_JORNADA_CERRAR,
       P.PUMPING_JORNADA_REABRIR,
+      P.PUMPING_REQUISITOS_EXONERAR,
     ];
     const sup = () => como('supervisor', SUPERVISORA.id, SUPERVISORA.nombre, permisosSup);
     // un supervisor con los permisos pero que no es el asignado a este ticket
     const supAjeno = () =>
       como('supervisor_pumping', SUPERVISOR_PUMPING.id, SUPERVISOR_PUMPING.nombre, permisosSup);
     const jefeBase = () =>
-      como('jefe_base', JEFE, 'Jaime Jefe de Base', [P.PUMPING_JORNADA_REABRIR, P.PUMPING_VER]);
+      como('jefe_base', JEFE, 'Jaime Jefe de Base', [
+        P.PUMPING_JORNADA_REABRIR,
+        P.PUMPING_REQUISITOS_EXONERAR,
+        P.PUMPING_VER,
+      ]);
     let hoy = DIAS[1];
     beforeAll(() => {
       const svc = app.get(JornadasService) as unknown as { hoy: () => string };
@@ -6047,8 +6058,19 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
 
   describe('Jefe de Base responsable del ticket', () => {
     const jefe2 = () =>
-      token('jefe_base', JEFE_2.nombre, [P.PUMPING_OPERAR, P.PUMPING_VER], JEFE_2.id);
-    const admin2 = () => token('superadmin', 'Sofía Superadmin', [P.PUMPING_OPERAR], JEFE);
+      token(
+        'jefe_base',
+        JEFE_2.nombre,
+        [P.PUMPING_OPERAR, P.PUMPING_VER, P.PUMPING_RESPONSABLE_GESTIONAR],
+        JEFE_2.id,
+      );
+    const admin2 = () =>
+      token(
+        'superadmin',
+        'Sofía Superadmin',
+        [P.PUMPING_OPERAR, P.PUMPING_RESPONSABLE_GESTIONAR],
+        JEFE,
+      );
     const nuevo = async () => {
       const e = evento();
       await consumer.consumir(e);
@@ -6348,9 +6370,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       const t = await ticketEnAsignacion();
       expect((await lista(t, {}, op1())).status).toBe(403);
       expect((await lista(t, {}, sinPermiso())).status).toBe(403);
-      expect((await lista(t, {}, token('superadmin', 'Sofía', [P.PUMPING_OPERAR]))).status).toBe(
-        200,
-      );
+      expect(
+        (await lista(t, {}, token('superadmin', 'Sofía', [P.PUMPING_DISPONIBILIDAD_VER]))).status,
+      ).toBe(200);
       expect((await lista(t, { desde: 'ayer' })).status).toBe(400);
       expect((await lista(t, { desde: '2026-11-05', hasta: '2026-11-01' })).status).toBe(400);
       expect((await lista({ url: `${base}/tickets/${uuidv7()}` })).status).toBe(404);

@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   Param,
   ParseUUIDPipe,
@@ -32,7 +31,7 @@ import { AsignacionService } from '../services/asignacion.service';
 import { ResponsableService } from '../services/responsable.service';
 import { DisponibilidadService } from '../services/disponibilidad.service';
 import { QuimicosService } from '../services/quimicos.service';
-import { ROLES_COORDINA, TicketsService, type Bandeja } from '../services/tickets.service';
+import { TicketsService, type Bandeja } from '../services/tickets.service';
 import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
@@ -187,7 +186,7 @@ export class TicketsController {
   }
 
   /** El Jefe de Base se queda con el ticket si nadie lo tiene (409 si ya tiene responsable). */
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_RESPONSABLE_GESTIONAR)
   @Post('tickets/:id/responsable/tomar')
   async tomar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     await this.responsable.tomar(id, actor);
@@ -195,7 +194,7 @@ export class TicketsController {
   }
 
   /** Asigna o reasigna el ticket a un Jefe de Base (motivo obligatorio si ya había responsable). */
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_RESPONSABLE_GESTIONAR)
   @Post('tickets/:id/responsable')
   async asignarResponsable(
     @Param('id', ParseUUIDPipe) id: string,
@@ -207,7 +206,7 @@ export class TicketsController {
   }
 
   /** Deja el ticket sin responsable. */
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_RESPONSABLE_GESTIONAR)
   @Post('tickets/:id/responsable/liberar')
   async liberarResponsable(
     @Param('id', ParseUUIDPipe) id: string,
@@ -225,32 +224,20 @@ export class TicketsController {
     return this.asignacion.personalOcupado(id);
   }
 
-  /** Quien ve la disponibilidad es quien puede asignar: el Jefe de Base y Superadmin. */
-  private exigirCoordina(actor: AuthUser) {
-    if (!ROLES_COORDINA.includes(actor.roleCode))
-      throw new ForbiddenException('Solo el Jefe de Base puede ver la disponibilidad del personal');
-  }
-
   /**
    * Cada supervisor, operador y conductor activo con `disponible` frente al rango (por omisión, el servicio del ticket) y, si no lo está, los
    * tickets que lo ocupan (número, pedido, cliente y fechas). Es la lista de la pantalla de asignación; la asignación aplica la misma regla.
    */
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_DISPONIBILIDAD_VER)
   @Get('tickets/:id/personal-disponible')
-  personalDisponible(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Query() q: DisponibilidadQueryDto,
-    @CurrentUser() actor: AuthUser,
-  ) {
-    this.exigirCoordina(actor);
+  personalDisponible(@Param('id', ParseUUIDPipe) id: string, @Query() q: DisponibilidadQueryDto) {
     return this.disponibilidad.personal(id, q.desde, q.hasta);
   }
 
   /** Lo mismo para un rango explícito, sin ticket (`desde` obligatorio; `hasta` por omisión, el mismo día). */
-  @RequirePermission(P.PUMPING_OPERAR)
+  @RequirePermission(P.PUMPING_DISPONIBILIDAD_VER)
   @Get('personal-disponible')
-  personalDisponibleEnRango(@Query() q: DisponibilidadQueryDto, @CurrentUser() actor: AuthUser) {
-    this.exigirCoordina(actor);
+  personalDisponibleEnRango(@Query() q: DisponibilidadQueryDto) {
     return this.disponibilidad.personal(null, q.desde, q.hasta);
   }
 

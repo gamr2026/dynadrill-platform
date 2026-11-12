@@ -129,14 +129,14 @@ export class TicketsController {
   }
 
   /** El Supervisor toma el ticket: queda como su responsable si nadie lo era. */
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_RESPONSABLE_GESTIONAR)
   @Post('tickets/:id/responsable/tomar')
   tomar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
     return this.responsable.tomar(id, actor);
   }
 
   /** Quien supervisa o coordina asigna (o reasigna) el ticket a un Supervisor de FCR. */
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_RESPONSABLE_GESTIONAR)
   @Put('tickets/:id/responsable')
   asignarResponsable(
     @Param('id', ParseUUIDPipe) id: string,
@@ -147,7 +147,7 @@ export class TicketsController {
   }
 
   /** Deja el ticket sin responsable (su responsable o quien coordina). */
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_RESPONSABLE_GESTIONAR)
   @Post('tickets/:id/responsable/liberar')
   liberarResponsable(
     @Param('id', ParseUUIDPipe) id: string,

@@ -101,7 +101,12 @@ run(
     });
     const tok = (
       x: { id: string; nombre: string; rol: string },
-      permisos: string[] = [P.FCR_OPERAR, P.FCR_VER],
+      permisos: string[] = [
+        P.FCR_OPERAR,
+        P.FCR_VER,
+        P.FCR_REQUISITOS_EXONERAR,
+        P.FCR_RESPONSABLE_GESTIONAR,
+      ],
     ) => ({
       Authorization: `Bearer ${signer.sign({ sub: x.id, email: `${x.rol}@test.local`, name: x.nombre, roleId: 'r', roleCode: x.rol, permissions: permisos })}`,
     });
