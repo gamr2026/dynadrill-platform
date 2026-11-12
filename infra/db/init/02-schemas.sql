@@ -1,5 +1,7 @@
 -- 20 schemas: los 19 del modelo de datos v1 (Propuesta de Base de Datos, cap. 4) más `integraciones` (13/10/2026).
--- Cada módulo es dueño de su schema; sin FK entre schemas.
+-- Cada módulo es dueño de su schema. Los módulos de la plataforma pueden referenciarse entre sí con claves foráneas entre
+-- schemas (decisión del dueño): la consecuencia es una sola base compartida y UNA corrida de migraciones en orden global
+-- por timestamp (`npm run db:migrate:todo`), no un `db:migrate:<modulo>` por separado.
 
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 

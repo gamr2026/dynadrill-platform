@@ -42,7 +42,7 @@ export const PATH_REWRITE: Record<string, string> = {
   '^/api/v2/qhse': '/api/qhse',
 };
 
-/** Rutas que no exigen token en el gateway aunque vayan a un contenedor nuevo. */
+/** Rutas que no exigen token en el gateway aunque vayan a un contenedor. */
 export const PUBLIC_PATHS: readonly string[] = [
   '/api/auth/login',
   '/api/auth/refresh',

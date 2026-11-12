@@ -1,0 +1,863 @@
+# Restricciones que existen solo en SQL
+
+Prisma no puede expresar índices únicos parciales, CHECK, EXCLUDE, triggers, funciones ni parte de las claves foráneas entre schemas. El proyecto las mantiene en migraciones escritas a mano; el `schema.prisma` de cada módulo **no las conoce**.
+
+## Regla de trabajo
+
+- Las migraciones se escriben a mano. **Nunca** `prisma migrate dev`.
+- **Nunca** aplicar un diff generado por Prisma (`migrate diff --script`, `db push`) sin revisarlo contra esta lista: propone borrar claves foráneas entre schemas, índices parciales y de expresión (p. ej. `pg_trgm`) que son intencionales.
+- Prisma no introspecciona CHECK, EXCLUDE, triggers ni funciones: no los verá borrar, pero tampoco los protege. Solo existen mientras la migración que los creó siga en el historial.
+- Un módulo nuevo o un objeto nuevo solo en SQL se agrega a este documento y, si Prisma propondría borrarlo, a la lista de permitidos (`docs/restricciones-solo-sql.permitidas.json`).
+- Verificación: `npm run db:verificar` (solo lee) falla si el diff de algún módulo propone un DROP que no está en esa lista. Requiere una base migrada con `npm run db:migrate:todo`.
+- Orden de aplicación: hay claves foráneas entre módulos; usar `npm run db:migrate:todo`, no los `db:migrate:<modulo>` uno por uno en una base vacía.
+
+## Cómo se obtuvo
+
+Inventario extraído de los `migration.sql` en orden de timestamp (descontando lo que una migración posterior elimina o renombra) y contrastado con la base de pruebas: los conteos de CHECK, triggers, funciones, índices parciales y FKs entre schemas coinciden con `pg_catalog` (el EXCLUDE de qhse cuenta como índice parcial en pg_indexes). Las FKs marcadas con (P) son las que `prisma migrate diff` propone borrar hoy porque el datamodel no declara esa relación; las demás ya están en el datamodel. En las FKs de un CREATE TABLE sin nombre de constraint se muestra el destino.
+
+## Resumen
+
+| Módulo        | CHECK | Índices parciales / expr. / EXCLUDE | Trigger | Función | FK entre schemas | Total |
+| ------------- | ----: | ----------------------------------: | ------: | ------: | ---------------: | ----: |
+| archivos      |     6 |                                   0 |       0 |       0 |                2 |     8 |
+| auditoria     |     7 |                                   0 |       2 |       1 |                2 |    12 |
+| avisos        |     3 |                                   0 |       0 |       0 |                2 |     5 |
+| catalogos     |    14 |                                   1 |       0 |       0 |               28 |    43 |
+| comercial     |    74 |                                   5 |       2 |       1 |               49 |   131 |
+| encuestas     |    23 |                                   4 |       7 |       6 |               12 |    52 |
+| fcr           |    80 |                                   6 |      13 |      11 |               72 |   182 |
+| firmas        |     7 |                                   0 |       2 |       1 |                3 |    13 |
+| flota         |    31 |                                   4 |       4 |       4 |               40 |    83 |
+| identidad     |     7 |                                   0 |       0 |       0 |                0 |     7 |
+| integraciones |     6 |                                   1 |       0 |       0 |                3 |    10 |
+| inventario    |    25 |                                   2 |       1 |       1 |               33 |    62 |
+| mantenimiento |    17 |                                   6 |       1 |       1 |               19 |    44 |
+| pumping       |    66 |                                   4 |       5 |       4 |               46 |   125 |
+| qhse          |   185 |                                  36 |      65 |      48 |              211 |   545 |
+| **Total**     |   551 |                                  69 |     102 |      78 |              522 |  1322 |
+
+## archivos
+
+- **CHECK** en `archivo` (`20261015080000_init`): archivo_tamano_check, archivo_sha256_check, archivo_baja_check
+- **CHECK** en `modulo_archivo` (`20261015080000_init`): modulo_archivo_tamano_check
+- **CHECK** en `modulo_archivo` (`20261026134000_texto_no_vacio`): modulo_archivo_codigo_no_vacio_check, modulo_archivo_nombre_no_vacio_check
+- **FK entre schemas** en `archivo` (`20261017150000_auditoria_con_fk`): archivo_subido_por_fkey → identidad.usuario (P), archivo_eliminado_por_fkey → identidad.usuario (P)
+
+## auditoria
+
+- **CHECK** en `clave_dato` (`20261024120000_auditoria_init`): clave_dato_codigo_formato
+- **CHECK** en `evento_auditado` (`20261024120000_auditoria_init`): evento_auditado_version_positiva, evento_auditado_rol_requiere_actor
+- **CHECK** en `evento_auditado_dato` (`20261024120000_auditoria_init`): evento_auditado_dato_valor_largo
+- **CHECK** en `sujeto_tipo` (`20261024120000_auditoria_init`): sujeto_tipo_codigo_formato
+- **CHECK** en `tipo_evento` (`20261024120000_auditoria_init`): tipo_evento_codigo_formato
+- **CHECK** en `clave_dato` (`20261026134000_texto_no_vacio`): clave_dato_descripcion_no_vacio_check
+- **trigger** en `evento_auditado` (`20261024120000_auditoria_init`): evento_auditado_inmutable
+- **trigger** en `evento_auditado_dato` (`20261024120000_auditoria_init`): evento_auditado_dato_inmutable
+- **función** en `auditoria` (`20261024120100_limpieza_explicita`): auditoria.rechazar_cambio_de_historia
+- **FK entre schemas** en `evento_auditado` (`20261024120000_auditoria_init`): evento_auditado_actor_id_fkey → identidad.usuario (P), evento_auditado_actor_rol_id_fkey → identidad.rol (P)
+
+## avisos
+
+- **CHECK** en `correo_aviso` (`20261016150000_init`): correo_aviso_error_check
+- **CHECK** en `aviso` (`20261026134000_texto_no_vacio`): aviso_titulo_no_vacio_check
+- **CHECK** en `plantilla` (`20261026134000_texto_no_vacio`): plantilla_codigo_no_vacio_check
+- **FK entre schemas** en `aviso` (`20261017140000_normalizar_con_fk`): aviso_usuario_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `correo_aviso` (`20261017140000_normalizar_con_fk`): correo_aviso_usuario_id_fkey → identidad.usuario (P)
+
+## catalogos
+
+- **CHECK** en `vehiculo` (`20261015160000_transporte`): vehiculo_anio_check
+- **CHECK** en `vehiculo` (`20261015161000_corregir_placa_check`): vehiculo_placa_check
+- **CHECK** en `unidad_medida` (`20261024133000_unidad_medida`): unidad_medida_nombre_check, unidad_medida_simbolo_check
+- **CHECK** en `bloque` (`20261026134000_texto_no_vacio`): bloque_nombre_no_vacio_check
+- **CHECK** en `bodega` (`20261026134000_texto_no_vacio`): bodega_nombre_no_vacio_check
+- **CHECK** en `campo` (`20261026134000_texto_no_vacio`): campo_nombre_no_vacio_check
+- **CHECK** en `chofer` (`20261026134000_texto_no_vacio`): chofer_nombre_no_vacio_check
+- **CHECK** en `condicion_pago` (`20261026134000_texto_no_vacio`): condicion_pago_nombre_no_vacio_check
+- **CHECK** en `persona_contacto` (`20261026134000_texto_no_vacio`): persona_contacto_nombre_no_vacio_check
+- **CHECK** en `pozo` (`20261026134000_texto_no_vacio`): pozo_codigo_no_vacio_check
+- **CHECK** en `taladro` (`20261026134000_texto_no_vacio`): taladro_nombre_no_vacio_check
+- **CHECK** en `tipo_vehiculo` (`20261026134000_texto_no_vacio`): tipo_vehiculo_nombre_no_vacio_check
+- **CHECK** en `zona` (`20261026134000_texto_no_vacio`): zona_nombre_no_vacio_check
+- **índice único de expresión** en `unidad_medida` (`20261024133000_unidad_medida`): unidad_medida_nombre_minusculas_key
+- **FK entre schemas** en `bloque` (`20261017150000_auditoria_con_fk`): bloque_created_by_fkey → identidad.usuario (P), bloque_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `bodega` (`20261017150000_auditoria_con_fk`): bodega_created_by_fkey → identidad.usuario (P), bodega_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `campo` (`20261017150000_auditoria_con_fk`): campo_created_by_fkey → identidad.usuario (P), campo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `chofer` (`20261017150000_auditoria_con_fk`): chofer_created_by_fkey → identidad.usuario (P), chofer_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `cliente` (`20261017150000_auditoria_con_fk`): cliente_created_by_fkey → identidad.usuario (P), cliente_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `condicion_pago` (`20261017150000_auditoria_con_fk`): condicion_pago_created_by_fkey → identidad.usuario (P), condicion_pago_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `persona_contacto` (`20261017150000_auditoria_con_fk`): persona_contacto_created_by_fkey → identidad.usuario (P), persona_contacto_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pozo` (`20261017150000_auditoria_con_fk`): pozo_created_by_fkey → identidad.usuario (P), pozo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `taladro` (`20261017150000_auditoria_con_fk`): taladro_created_by_fkey → identidad.usuario (P), taladro_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_vehiculo` (`20261017150000_auditoria_con_fk`): tipo_vehiculo_created_by_fkey → identidad.usuario (P), tipo_vehiculo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `transportista` (`20261017150000_auditoria_con_fk`): transportista_created_by_fkey → identidad.usuario (P), transportista_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `vehiculo` (`20261017150000_auditoria_con_fk`): vehiculo_created_by_fkey → identidad.usuario (P), vehiculo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `zona` (`20261017150000_auditoria_con_fk`): zona_created_by_fkey → identidad.usuario (P), zona_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad_medida` (`20261024133000_unidad_medida`): unidad_medida_created_by_fkey → identidad.usuario (P), unidad_medida_updated_by_fkey → identidad.usuario (P)
+
+## comercial
+
+- **CHECK** en `documento` (`20261014181156_init`): documento_codigo_check
+- **CHECK** en `secuencia` (`20261014181156_init`): secuencia_rango_check, secuencia_numero_check
+- **CHECK** en `lista_precios_item` (`20261014184757_pedidos`): lista_precios_item_precio_check
+- **CHECK** en `pedido` (`20261014184757_pedidos`): pedido_proceso_check, pedido_version_check, pedido_rigless_check, pedido_fechas_check
+- **CHECK** en `pedido_item` (`20261014184757_pedidos`): pedido_item_cantidad_check, pedido_item_valor_check, pedido_item_descuento_check
+- **CHECK** en `proceso_estado` (`20261014184757_pedidos`): proceso_estado_codigo_check
+- **CHECK** en `proceso_transicion` (`20261014184757_pedidos`): proceso_transicion_distinta_check
+- **CHECK** en `pedido` (`20261015070000_tipo_ot_catalogo_medio_enum_bodega_condicion`): pedido_completo_check
+- **CHECK** en `pedido` (`20261015100000_valores_fijos_como_enum`): pedido_as2_origen_check
+- **CHECK** en `secuencia` (`20261015100000_valores_fijos_como_enum`): secuencia_anual_check
+- **CHECK** en `documento_operativo` (`20261015120000_documentos_operativos`): documento_operativo_fecha_check
+- **CHECK** en `documento_operativo_actividad` (`20261015120000_documentos_operativos`): documento_operativo_actividad_duracion_check
+- **CHECK** en `prefactura` (`20261015130000_prefactura`): prefactura_ticket_check, prefactura_version_check, prefactura_montos_check, prefactura_enviada_check, prefactura_firmada_check, prefactura_rechazada_check, prefactura_anulada_check
+- **CHECK** en `prefactura_item` (`20261015130000_prefactura`): prefactura_item_cantidad_check, prefactura_item_precio_check, prefactura_item_descuento_check
+- **CHECK** en `tasa_impuesto` (`20261015130000_prefactura`): tasa_impuesto_porcentaje_check
+- **CHECK** en `prefactura_firma` (`20261015150000_verificacion_firma_ocr`): prefactura_firma_confianza_check
+- **CHECK** en `guia_remision` (`20261015170000_guia_remision_y_despacho`): guia_remision_numero_check, guia_remision_anulada_check
+- **CHECK** en `guia_remision_item` (`20261015170000_guia_remision_y_despacho`): guia_remision_item_cantidad_check
+- **CHECK** en `guia_remision` (`20261016090000_guia_firma_electronica`): guia_remision_firma_electronica_check
+- **CHECK** en `orden_trabajo` (`20261016130000_orden_trabajo_y_cierre`): orden_trabajo_numero_check, orden_trabajo_firmada_check
+- **CHECK** en `pedido` (`20261016170000_pedido_ticket_numero`): pedido_ticket_numero_check
+- **CHECK** en `documento_operativo` (`20261019090000_documentos_operativos_tablas_y_correccion`): documento_operativo_corregido_check
+- **CHECK** en `documento_respaldo_firmado` (`20261022100000_firmas_reemplazables_y_documentos_firmados`): documento_respaldo_firmado_confianza_check, documento_respaldo_firmado_monitoreo_fecha_check
+- **CHECK** en `documento_operativo_herramienta` (`20261022150000_reporte_de_herramientas_por_item`): documento_operativo_herramienta_cantidad_check
+- **CHECK** en `documento_operativo_uso` (`20261024121000_cantidad_por_dia_del_reporte_de_herramientas`): documento_operativo_uso_cantidad_positiva
+- **CHECK** en `prefactura` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_rechazo_devuelto_a_usuario_check
+- **CHECK** en `prefactura_rechazo_item` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_rechazo_item_observacion_check
+- **CHECK** en `prefactura_seguimiento` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_seguimiento_nota_check
+- **CHECK** en `pedido_documento` (`20261026113000_descripcion_del_documento_del_pedido`): pedido_documento_descripcion_check
+- **CHECK** en `ciudad_ot` (`20261026134000_texto_no_vacio`): ciudad_ot_codigo_no_vacio_check, ciudad_ot_nombre_no_vacio_check
+- **CHECK** en `documento` (`20261026134000_texto_no_vacio`): documento_nombre_no_vacio_check
+- **CHECK** en `documento_operativo_herramienta` (`20261026134000_texto_no_vacio`): documento_operativo_herramienta_nombre_no_vacio_check
+- **CHECK** en `firmante_contratista` (`20261026134000_texto_no_vacio`): firmante_contratista_nombre_no_vacio_check
+- **CHECK** en `guia_remision` (`20261026134000_texto_no_vacio`): guia_remision_codigo_no_vacio_check
+- **CHECK** en `guia_remision_item` (`20261026134000_texto_no_vacio`): guia_remision_item_descripcion_no_vacio_check
+- **CHECK** en `lista_precios_item` (`20261026134000_texto_no_vacio`): lista_precios_item_codigo_no_vacio_check, lista_precios_item_descripcion_no_vacio_check
+- **CHECK** en `lugar_despacho` (`20261026134000_texto_no_vacio`): lugar_despacho_nombre_no_vacio_check
+- **CHECK** en `orden_trabajo` (`20261026134000_texto_no_vacio`): orden_trabajo_codigo_no_vacio_check
+- **CHECK** en `orden_trabajo_item` (`20261026134000_texto_no_vacio`): orden_trabajo_item_descripcion_no_vacio_check
+- **CHECK** en `pedido_item` (`20261026134000_texto_no_vacio`): pedido_item_codigo_no_vacio_check, pedido_item_descripcion_no_vacio_check
+- **CHECK** en `prefactura_firma` (`20261026134000_texto_no_vacio`): prefactura_firma_nombre_no_vacio_check
+- **CHECK** en `prefactura_item` (`20261026134000_texto_no_vacio`): prefactura_item_codigo_no_vacio_check, prefactura_item_descripcion_no_vacio_check
+- **CHECK** en `proceso_estado` (`20261026134000_texto_no_vacio`): proceso_estado_nombre_no_vacio_check
+- **CHECK** en `servicio_linea` (`20261026134000_texto_no_vacio`): servicio_linea_codigo_no_vacio_check, servicio_linea_nombre_no_vacio_check
+- **CHECK** en `servicio_subtipo` (`20261026134000_texto_no_vacio`): servicio_subtipo_nombre_no_vacio_check
+- **CHECK** en `servicio_tipo` (`20261026134000_texto_no_vacio`): servicio_tipo_codigo_no_vacio_check, servicio_tipo_nombre_no_vacio_check
+- **CHECK** en `tipo_ot` (`20261026134000_texto_no_vacio`): tipo_ot_codigo_no_vacio_check, tipo_ot_nombre_no_vacio_check
+- **CHECK** en `prefactura_firma` (`20261029120000_prefactura_firma_electronica`): prefactura_firma_firma_electronica_check
+- **CHECK** en `pedido_cambio_duracion` (`20261106120000_pedido_cambio_duracion`): pedido_cambio_duracion_accion_check, pedido_cambio_duracion_motivo_check
+- **índice único parcial** en `secuencia` (`20261014181156_init`): secuencia_una_activa_idx
+- **índice único parcial** en `prefactura` (`20261015130000_prefactura`): prefactura_una_vigente_idx, prefactura_ticket_numero_idx
+- **índice único parcial** en `firmante_contratista` (`20261016130000_orden_trabajo_y_cierre`): firmante_contratista_predeterminado_key
+- **índice único parcial** en `lista_precios` (`20261027101000_lista_de_precios_unica_por_contrato`): lista_precios_cliente_contrato_key
+- **trigger** en `prefactura_rechazo_item` (`20261026112000_rechazo_de_prefactura_completo`): exigir_prefactura_rechazada
+- **trigger** en `prefactura_seguimiento` (`20261026112000_rechazo_de_prefactura_completo`): exigir_prefactura_rechazada
+- **función** en `comercial` (`20261026112000_rechazo_de_prefactura_completo`): comercial.exigir_prefactura_rechazada
+- **FK entre schemas** en `documento_operativo` (`20261017120000_normalizar_con_fk`): documento_operativo_supervisor_id_fkey → identidad.usuario (P), documento_operativo_operador_id_fkey → identidad.usuario (P), documento_operativo_recibido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `guia_remision` (`20261017120000_normalizar_con_fk`): guia_remision_transportista_id_fkey → catalogos.transportista (P), guia_remision_vehiculo_id_fkey → catalogos.vehiculo (P), guia_remision_chofer_id_fkey → catalogos.chofer (P), guia_remision_emitida_por_fkey → identidad.usuario (P), guia_remision_anulada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `lista_precios` (`20261017120000_normalizar_con_fk`): lista_precios_cliente_id_fkey → catalogos.cliente (P)
+- **FK entre schemas** en `orden_trabajo` (`20261017120000_normalizar_con_fk`): orden_trabajo_generada_por_fkey → identidad.usuario (P), orden_trabajo_firmada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pedido` (`20261017120000_normalizar_con_fk`): pedido_cliente_id_fkey → catalogos.cliente (P), pedido_campo_id_fkey → catalogos.campo (P), pedido_bloque_id_fkey → catalogos.bloque (P), pedido_pozo_id_fkey → catalogos.pozo (P), pedido_taladro_id_fkey → catalogos.taladro (P), pedido_bodega_id_fkey → catalogos.bodega (P), pedido_condicion_pago_id_fkey → catalogos.condicion_pago (P), pedido_representante_campo_id_fkey → catalogos.persona_contacto (P), pedido_representante_quito_id_fkey → catalogos.persona_contacto (P), pedido_agente_comercial_id_fkey → identidad.usuario (P), pedido_tecnico_hse_id_fkey → identidad.usuario (P), pedido_analista_facturacion_id_fkey → identidad.usuario (P), pedido_analista_asignado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `prefactura` (`20261017120000_normalizar_con_fk`): prefactura_generada_por_fkey → identidad.usuario (P), prefactura_enviada_por_fkey → identidad.usuario (P), prefactura_rechazada_por_fkey → identidad.usuario (P), prefactura_anulada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `prefactura_firma` (`20261017120000_normalizar_con_fk`): prefactura_firma_persona_id_fkey → catalogos.persona_contacto (P), prefactura_firma_registrado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `proceso_historial` (`20261017120000_normalizar_con_fk`): proceso_historial_actor_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `secuencia_emision` (`20261017120000_normalizar_con_fk`): secuencia_emision_emitido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `guia_remision` (`20261017160000_auditoria_y_archivos_con_fk`): guia_remision_archivo_firmado_id_fkey → archivos.archivo (P)
+- **FK entre schemas** en `lista_precios` (`20261017160000_auditoria_y_archivos_con_fk`): lista_precios_created_by_fkey → identidad.usuario (P), lista_precios_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `orden_trabajo` (`20261017160000_auditoria_y_archivos_con_fk`): orden_trabajo_archivo_firmado_id_fkey → archivos.archivo (P)
+- **FK entre schemas** en `pedido` (`20261017160000_auditoria_y_archivos_con_fk`): pedido_created_by_fkey → identidad.usuario (P), pedido_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pedido_documento` (`20261017160000_auditoria_y_archivos_con_fk`): pedido_documento_archivo_id_fkey → archivos.archivo (P)
+- **FK entre schemas** en `prefactura_firma` (`20261017160000_auditoria_y_archivos_con_fk`): prefactura_firma_archivo_id_fkey → archivos.archivo (P)
+- **FK entre schemas** en `documento_operativo` (`20261019090000_documentos_operativos_tablas_y_correccion`): documento_operativo_corregido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `documento_respaldo_firmado` (`20261022100000_firmas_reemplazables_y_documentos_firmados`): documento_respaldo_firmado_archivo_id_fkey → archivos.archivo (P), documento_respaldo_firmado_registrado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `documento_operativo_herramienta` (`20261026101000_unidad_medida_por_fk`): documento_operativo_herramienta_unidad_medida_id_fkey → catalogos.unidad_medida (P)
+- **FK entre schemas** en `lista_precios_item` (`20261026101000_unidad_medida_por_fk`): lista_precios_item_unidad_medida_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `pedido_item` (`20261026101000_unidad_medida_por_fk`): pedido_item_unidad_medida_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `prefactura` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_rechazo_devuelto_a_usuario_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `prefactura_rechazo_item` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_rechazo_item_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `prefactura_seguimiento` (`20261026112000_rechazo_de_prefactura_completo`): prefactura_seguimiento_created_by_fkey → identidad.usuario (P)
+
+## encuestas
+
+- **CHECK** en `encuesta` (`20261024140000_init`): encuesta_codigo_check, encuesta_nombre_check
+- **CHECK** en `encuesta_version` (`20261024140000_init`): encuesta_version_numero_check, encuesta_version_titulo_check, encuesta_version_publicacion_check
+- **CHECK** en `escala_valor` (`20261024140000_init`): escala_valor_etiqueta_check
+- **CHECK** en `invitacion` (`20261024140000_init`): invitacion_token_check, invitacion_correo_check, invitacion_vigencia_check, invitacion_envio_check
+- **CHECK** en `modulo_encuesta` (`20261024140000_init`): modulo_encuesta_codigo_check
+- **CHECK** en `pregunta` (`20261024140000_init`): pregunta_orden_check, pregunta_texto_check, pregunta_escala_check
+- **CHECK** en `pregunta_opcion` (`20261024140000_init`): pregunta_opcion_tipo_check, pregunta_opcion_orden_check, pregunta_opcion_etiqueta_check
+- **CHECK** en `respuesta` (`20261024140000_init`): respuesta_un_valor_check, respuesta_texto_check
+- **CHECK** en `respuesta_encuesta` (`20261024140000_init`): respuesta_encuesta_nombre_check
+- **CHECK** en `escala` (`20261026134000_texto_no_vacio`): escala_codigo_no_vacio_check, escala_nombre_no_vacio_check
+- **CHECK** en `modulo_encuesta` (`20261026134000_texto_no_vacio`): modulo_encuesta_nombre_no_vacio_check
+- **índice único parcial** en `encuesta_version` (`20261024140000_init`): encuesta_version_un_borrador_key, encuesta_version_una_vigente_key
+- **índice único parcial** en `respuesta` (`20261024140000_init`): respuesta_unica_key, respuesta_opcion_key
+- **trigger** en `encuesta_version` (`20261024140000_init`): encuesta_version_recorrido
+- **trigger** en `invitacion` (`20261024140000_init`): invitacion_version_publicada
+- **trigger** en `pregunta` (`20261024140000_init`): pregunta_solo_borrador
+- **trigger** en `pregunta_opcion` (`20261024140000_init`): pregunta_opcion_solo_borrador
+- **trigger** en `respuesta` (`20261024140000_init`): respuesta_coherente
+- **trigger** en `respuesta_encuesta` (`20261024140000_init`): respuesta_encuesta_vigente, respuesta_encuesta_completa
+- **función** en `encuestas` (`20261024140000_init`): encuestas.controlar_version, encuestas.exigir_version_publicada, encuestas.exigir_enlace_vigente, encuestas.exigir_respuesta_coherente, encuestas.exigir_obligatorias
+- **función** en `encuestas` (`20261024140100_borrado_en_cascada_de_la_version`): encuestas.exigir_version_en_borrador
+- **FK entre schemas** en `encuesta` (`20261024140000_init`): encuesta_created_by_fkey → identidad.usuario (P), encuesta_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `encuesta_version` (`20261024140000_init`): encuesta_version_publicada_by_fkey → identidad.usuario (P), encuesta_version_created_by_fkey → identidad.usuario (P), encuesta_version_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `escala` (`20261024140000_init`): escala_created_by_fkey → identidad.usuario (P), escala_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `invitacion` (`20261024140000_init`): invitacion_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pregunta` (`20261024140000_init`): pregunta_created_by_fkey → identidad.usuario (P), pregunta_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pregunta_opcion` (`20261024140000_init`): pregunta_opcion_created_by_fkey → identidad.usuario (P), pregunta_opcion_updated_by_fkey → identidad.usuario (P)
+
+## fcr
+
+- **CHECK** en `paso` (`20261018150000_init`): paso_orden_check
+- **CHECK** en `ticket` (`20261018150000_init`): ticket_version_check, ticket_servicios_check, ticket_fechas_check
+- **CHECK** en `ticket_requisito` (`20261018150000_init`): ticket_requisito_cumplido_check, ticket_requisito_manual_check
+- **CHECK** en `transicion` (`20261018150000_init`): transicion_distinta_check
+- **CHECK** en `configuracion_codigo` (`20261018160000_herramientas`): configuracion_codigo_codigo_check
+- **CHECK** en `configuracion_codigo_kit` (`20261018160000_herramientas`): configuracion_codigo_kit_cantidad_check, configuracion_codigo_kit_clasificacion_check
+- **CHECK** en `ticket_aviso_precarga` (`20261018160000_herramientas`): ticket_aviso_precarga_articulo_check
+- **CHECK** en `ticket_herramienta` (`20261018160000_herramientas`): ticket_herramienta_origen_check, ticket_herramienta_solicitada_check, ticket_herramienta_preparada_check, ticket_herramienta_enviada_check, ticket_herramienta_recibida_check, ticket_herramienta_devuelta_check, ticket_herramienta_faltante_check, ticket_herramienta_orden_check, ticket_herramienta_novedad_check, ticket_herramienta_texto_check
+- **CHECK** en `ticket_herramienta_evento` (`20261018160000_herramientas`): ticket_herramienta_evento_detalle_check, ticket_herramienta_evento_novedad_check
+- **CHECK** en `ticket_linea` (`20261018160000_herramientas`): ticket_linea_cantidad_check
+- **CHECK** en `ticket_herramienta` (`20261018161000_herramienta_autor_de_la_precarga`): ticket_herramienta_autor_check
+- **CHECK** en `inspeccion_herramienta` (`20261018170000_inspeccion_de_herramientas`): inspeccion_herramienta_version_check, inspeccion_herramienta_enviada_check, inspeccion_herramienta_decidida_check, inspeccion_herramienta_estado_check, inspeccion_herramienta_rechazo_check, inspeccion_herramienta_texto_check, inspeccion_herramienta_fechas_check
+- **CHECK** en `inspeccion_parte` (`20261018170000_inspeccion_de_herramientas`): inspeccion_parte_orden_check, inspeccion_parte_cantidad_check, inspeccion_parte_manual_check, inspeccion_parte_codigo_check, inspeccion_parte_texto_check
+- **CHECK** en `bitacora_actividad` (`20261018180000_bitacora_y_uso_de_herramientas`): bitacora_actividad_orden_check, bitacora_actividad_horas_check, bitacora_actividad_detalle_check
+- **CHECK** en `bitacora_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): bitacora_dia_enviada_check
+- **CHECK** en `uso_herramienta_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): uso_herramienta_dia_tipo_check, uso_herramienta_dia_medidas_check, uso_herramienta_dia_observacion_check
+- **CHECK** en `ticket_herramienta` (`20261018190000_retorno_y_cierre`): ticket_herramienta_faltante_causa_check
+- **CHECK** en `reporte_item` (`20261022140000_reporte_de_herramientas_por_item`): reporte_item_codigo_check, reporte_item_serie_check
+- **CHECK** en `solicitud_cambio_item` (`20261022160000_cambio_de_items_y_lista_en_el_reporte`): solicitud_cambio_item_orden_check, solicitud_cambio_item_cantidad_check, solicitud_cambio_item_descuento_check
+- **CHECK** en `solicitud_cambio_items` (`20261022160000_cambio_de_items_y_lista_en_el_reporte`): solicitud_cambio_items_motivo_check, solicitud_cambio_items_revision_par_check, solicitud_cambio_items_revision_check, solicitud_cambio_items_rechazo_check, solicitud_cambio_items_aplicacion_check, solicitud_cambio_items_aplicacion_motivo_check, solicitud_cambio_items_aplicada_at_check
+- **CHECK** en `reporte_item_dia` (`20261023100000_reporte_por_dia_con_cantidad`): reporte_item_dia_cantidad_check
+- **CHECK** en `ticket_observacion` (`20261024130000_observaciones_del_ticket`): ticket_observacion_mensaje_check
+- **CHECK** en `bitacora_dia` (`20261026110000_bitacora_corregida_por`): bitacora_dia_corregida_check
+- **CHECK** en `paso` (`20261026134000_texto_no_vacio`): paso_nombre_no_vacio_check
+- **CHECK** en `requisito` (`20261026134000_texto_no_vacio`): requisito_nombre_no_vacio_check
+- **CHECK** en `solicitud_cambio_item` (`20261026134000_texto_no_vacio`): solicitud_cambio_item_codigo_no_vacio_check, solicitud_cambio_item_descripcion_no_vacio_check
+- **CHECK** en `ticket_linea` (`20261026134000_texto_no_vacio`): ticket_linea_codigo_no_vacio_check, ticket_linea_descripcion_no_vacio_check
+- **CHECK** en `tipo_completacion` (`20261026134000_texto_no_vacio`): tipo_completacion_codigo_no_vacio_check, tipo_completacion_nombre_no_vacio_check
+- **CHECK** en `tipo_operador` (`20261026134000_texto_no_vacio`): tipo_operador_codigo_no_vacio_check, tipo_operador_nombre_no_vacio_check
+- **CHECK** en `tipo_picker` (`20261026134000_texto_no_vacio`): tipo_picker_codigo_no_vacio_check, tipo_picker_nombre_no_vacio_check
+- **CHECK** en `tipo_trabajo` (`20261026134000_texto_no_vacio`): tipo_trabajo_codigo_no_vacio_check, tipo_trabajo_nombre_no_vacio_check
+- **CHECK** en `ticket_requisito` (`20261027121000_sin_cumplimiento_manual`): ticket_requisito_sin_manual_check
+- **CHECK** en `requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): requisito_plazo_horas_check
+- **CHECK** en `ticket_requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_exonerado_check
+- **CHECK** en `ticket_requisito_historial` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_historial_origen_check
+- **CHECK** en `ticket_responsable_historial` (`20261112113000_responsable_del_ticket`): ticket_responsable_historial_cambio_check, ticket_responsable_historial_motivo_check
+- **índice único parcial** en `ticket_persona` (`20261018150000_init`): ticket_persona_supervisor_key
+- **índice único parcial** en `inspeccion_herramienta` (`20261018170000_inspeccion_de_herramientas`): inspeccion_herramienta_vigente_key
+- **índice único parcial** en `solicitud_cambio_items` (`20261022160000_cambio_de_items_y_lista_en_el_reporte`): solicitud_cambio_items_pendiente_key
+- **índice parcial** en `ticket_herramienta` (`20261018160000_herramientas`): ticket_herramienta_pendiente_bodega_idx
+- **índice parcial** en `ticket_requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_por_vencer_idx
+- **índice único de expresión** en `reporte_item` (`20261022140000_reporte_de_herramientas_por_item`): reporte_item_codigo_serie_key
+- **trigger** en `configuracion_codigo_kit` (`20261018160000_herramientas`): configuracion_codigo_kit_herramienta
+- **trigger** en `ticket_herramienta` (`20261018160000_herramientas`): ticket_herramienta_articulo_valido
+- **trigger** en `inspeccion_firma` (`20261018170000_inspeccion_de_herramientas`): inspeccion_firma_valida
+- **trigger** en `inspeccion_herramienta` (`20261018170000_inspeccion_de_herramientas`): inspeccion_herramienta_servicios, inspeccion_herramienta_protegida
+- **trigger** en `inspeccion_parte` (`20261018170000_inspeccion_de_herramientas`): inspeccion_parte_protegida
+- **trigger** en `ticket` (`20261018170000_inspeccion_de_herramientas`): ticket_paso_valido
+- **trigger** en `ticket_documento` (`20261018170000_inspeccion_de_herramientas`): ticket_documento_archivo_valido
+- **trigger** en `bitacora_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): bitacora_dia_servicio
+- **trigger** en `uso_herramienta_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): uso_herramienta_dia_servicio
+- **trigger** en `ticket_requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_exonerado_protegido, ticket_requisito_historial_insert, ticket_requisito_historial_update
+- **función** en `fcr` (`20261018160000_herramientas`): fcr.exigir_articulo_herramienta
+- **función** en `fcr` (`20261018170000_inspeccion_de_herramientas`): fcr.exigir_transicion_valida, fcr.exigir_ticket_de_servicios, fcr.proteger_inspeccion_firmada, fcr.proteger_partes_de_inspeccion, fcr.exigir_firma_valida, fcr.exigir_archivo_del_modulo
+- **función** en `fcr` (`20261018180000_bitacora_y_uso_de_herramientas`): fcr.exigir_dia_del_servicio, fcr.exigir_uso_del_servicio
+- **función** en `fcr` (`20261112111000_requisito_plazo_exoneracion_e_historial`): fcr.proteger_requisito_exonerado
+- **función** en `fcr` (`20261112114000_historial_requisito_actor_de_la_sesion`): fcr.registrar_historial_requisito
+- **FK entre schemas** en `paso_rol` (`20261018150000_init`): paso_rol_rol_fkey → identidad.rol (P)
+- **FK entre schemas** en `ticket` (`20261018150000_init`): ticket_inspector_fkey → identidad.usuario (P), ticket_cliente_fkey → catalogos.cliente (P), ticket_campo_fkey → catalogos.campo (P), ticket_bloque_fkey → catalogos.bloque (P), ticket_pozo_fkey → catalogos.pozo (P), ticket_taladro_fkey → catalogos.taladro (P), ticket_created_by_fkey → identidad.usuario (P), ticket_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_historial` (`20261018150000_init`): ticket_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_persona` (`20261018150000_init`): ticket_persona_usuario_fkey → identidad.usuario (P), ticket_persona_asignado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_requisito` (`20261018150000_init`): ticket_requisito_usuario_fkey → identidad.usuario (P), ticket_requisito_cumplido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_completacion` (`20261018150000_init`): tipo_completacion_created_by_fkey → identidad.usuario (P), tipo_completacion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_operador` (`20261018150000_init`): tipo_operador_created_by_fkey → identidad.usuario (P), tipo_operador_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_picker` (`20261018150000_init`): tipo_picker_created_by_fkey → identidad.usuario (P), tipo_picker_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_trabajo` (`20261018150000_init`): tipo_trabajo_created_by_fkey → identidad.usuario (P), tipo_trabajo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `configuracion_codigo` (`20261018160000_herramientas`): configuracion_codigo_cliente_fkey → catalogos.cliente (P), configuracion_codigo_created_by_fkey → identidad.usuario (P), configuracion_codigo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `configuracion_codigo_kit` (`20261018160000_herramientas`): configuracion_codigo_kit_articulo_fkey → inventario.articulo (P), configuracion_codigo_kit_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_aviso_precarga` (`20261018160000_herramientas`): ticket_aviso_precarga_articulo_fkey → inventario.articulo (P)
+- **FK entre schemas** en `ticket_herramienta` (`20261018160000_herramientas`): ticket_herramienta_articulo_fkey → inventario.articulo (P), ticket_herramienta_solicitada_por_fkey → identidad.usuario (P), ticket_herramienta_preparada_por_fkey → identidad.usuario (P), ticket_herramienta_enviada_por_fkey → identidad.usuario (P), ticket_herramienta_recibida_por_fkey → identidad.usuario (P), ticket_herramienta_devuelta_por_fkey → identidad.usuario (P), ticket_herramienta_faltante_por_fkey → identidad.usuario (P), ticket_herramienta_created_by_fkey → identidad.usuario (P), ticket_herramienta_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_herramienta_evento` (`20261018160000_herramientas`): ticket_herramienta_evento_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `firma_rol_permitido` (`20261018170000_inspeccion_de_herramientas`): firma_rol_permitido_rol_fkey → identidad.rol (P)
+- **FK entre schemas** en `inspeccion_firma` (`20261018170000_inspeccion_de_herramientas`): inspeccion_firma_usuario_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_herramienta` (`20261018170000_inspeccion_de_herramientas`): inspeccion_herramienta_enviada_por_fkey → identidad.usuario (P), inspeccion_herramienta_decidida_por_fkey → identidad.usuario (P), inspeccion_herramienta_created_by_fkey → identidad.usuario (P), inspeccion_herramienta_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_parte` (`20261018170000_inspeccion_de_herramientas`): inspeccion_parte_articulo_parte_fkey → inventario.articulo_parte (P)
+- **FK entre schemas** en `ticket_documento` (`20261018170000_inspeccion_de_herramientas`): ticket_documento_archivo_fkey → archivos.archivo (P), ticket_documento_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `bitacora_actividad` (`20261018180000_bitacora_y_uso_de_herramientas`): bitacora_actividad_autor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `bitacora_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): bitacora_dia_enviada_por_fkey → identidad.usuario (P), bitacora_dia_created_by_fkey → identidad.usuario (P), bitacora_dia_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reunion_operativa` (`20261018180000_bitacora_y_uso_de_herramientas`): reunion_operativa_firmada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `uso_herramienta_dia` (`20261018180000_bitacora_y_uso_de_herramientas`): uso_herramienta_dia_created_by_fkey → identidad.usuario (P), uso_herramienta_dia_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_item` (`20261022140000_reporte_de_herramientas_por_item`): reporte_item_created_by_fkey → identidad.usuario (P), reporte_item_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_item_dia` (`20261022140000_reporte_de_herramientas_por_item`): reporte_item_dia_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `solicitud_cambio_items` (`20261022160000_cambio_de_items_y_lista_en_el_reporte`): solicitud_cambio_items_solicitado_por_fkey → identidad.usuario (P), solicitud_cambio_items_revisado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_observacion` (`20261024130000_observaciones_del_ticket`): ticket_observacion_autor_fkey → identidad.usuario (P), ticket_observacion_rol_fkey → identidad.rol (P)
+- **FK entre schemas** en `reporte_item` (`20261026102000_unidad_medida_por_fk`): reporte_item_unidad_medida_id_fkey → catalogos.unidad_medida (P)
+- **FK entre schemas** en `solicitud_cambio_item` (`20261026102000_unidad_medida_por_fk`): solicitud_cambio_item_unidad_medida_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `ticket_linea` (`20261026102000_unidad_medida_por_fk`): ticket_linea_unidad_medida_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `bitacora_dia` (`20261026110000_bitacora_corregida_por`): bitacora_dia_corregida_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): requisito_rol_responsable_fkey → identidad.rol (P)
+- **FK entre schemas** en `ticket_requisito` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_exonerado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_requisito_historial` (`20261112111000_requisito_plazo_exoneracion_e_historial`): ticket_requisito_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket` (`20261112113000_responsable_del_ticket`): ticket_responsable_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_responsable_historial` (`20261112113000_responsable_del_ticket`): ticket_responsable_historial_anterior_fkey → identidad.usuario (P), ticket_responsable_historial_nuevo_fkey → identidad.usuario (P), ticket_responsable_historial_actor_fkey → identidad.usuario (P)
+
+## firmas
+
+- **CHECK** en `documento_tipo` (`20261024123000_firmas_init`): documento_tipo_codigo_formato
+- **CHECK** en `firma` (`20261024123000_firmas_init`): firma_hash_formato, firma_metodo_coherente
+- **CHECK** en `firma_verificacion` (`20261024123000_firmas_init`): firma_verificacion_confianza_rango
+- **CHECK** en `rol_firmante` (`20261024123000_firmas_init`): rol_firmante_codigo_formato
+- **CHECK** en `documento_tipo` (`20261026134000_texto_no_vacio`): documento_tipo_descripcion_no_vacio_check
+- **CHECK** en `rol_firmante` (`20261026134000_texto_no_vacio`): rol_firmante_descripcion_no_vacio_check
+- **trigger** en `firma` (`20261024123000_firmas_init`): firma_inmutable
+- **trigger** en `firma_verificacion` (`20261024123000_firmas_init`): firma_verificacion_inmutable
+- **función** en `firmas` (`20261024123000_firmas_init`): firmas.rechazar_cambio_de_historia
+- **FK entre schemas** en `firma` (`20261024123000_firmas_init`): firma_firmante_id_fkey → identidad.usuario (P), firma_archivo_id_fkey → archivos.archivo (P)
+- **FK entre schemas** en `firma_verificacion` (`20261024123000_firmas_init`): firma_verificacion_solicitada_por_fkey → identidad.usuario (P)
+
+## flota
+
+- **CHECK** en `regla_preventiva` (`20261016170000_unidades_y_lecturas`): regla_preventiva_intervalo_check
+- **CHECK** en `unidad` (`20261016170000_unidades_y_lecturas`): unidad_categoria_peso_check
+- **CHECK** en `unidad_lectura` (`20261016170000_unidades_y_lecturas`): unidad_lectura_valor_check
+- **CHECK** en `unidad_preventivo` (`20261016170000_unidades_y_lecturas`): unidad_preventivo_tercero_check
+- **CHECK** en `unidad_lectura_anulacion` (`20261017100000_pulir_f1_integridad`): unidad_lectura_anulacion_motivo_check
+- **CHECK** en `unidad_preventivo` (`20261017100000_pulir_f1_integridad`): unidad_preventivo_responsable_check
+- **CHECK** en `unidad_preventivo_anulacion` (`20261017100000_pulir_f1_integridad`): unidad_preventivo_anulacion_motivo_check
+- **CHECK** en `conductor_permiso` (`20261018150000_conductores_y_permisos`): conductor_permiso_vigencia_check
+- **CHECK** en `conductor_permiso_anulacion` (`20261018150000_conductores_y_permisos`): conductor_permiso_anulacion_motivo_check
+- **CHECK** en `inspeccion_vehiculo` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_anulacion_check
+- **CHECK** en `inspeccion_vehiculo_revision` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_revision_motivo_check
+- **CHECK** en `unidad_lectura` (`20261018160000_inspeccion_vehiculo`): unidad_lectura_origen_check
+- **CHECK** en `gerenciamiento_viaje` (`20261018190000_gerenciamiento_viaje`): gerenciamiento_viaje_puntaje_check, gerenciamiento_viaje_telefonica_check, gerenciamiento_viaje_decision_check, gerenciamiento_viaje_decide_otro_check
+- **CHECK** en `opcion_riesgo_viaje` (`20261018190000_gerenciamiento_viaje`): opcion_riesgo_viaje_puntos_check
+- **CHECK** en `umbral_riesgo_viaje` (`20261018190000_gerenciamiento_viaje`): umbral_riesgo_viaje_desde_check
+- **CHECK** en `item_inspeccion_vehiculo` (`20261026134000_texto_no_vacio`): item_inspeccion_vehiculo_codigo_no_vacio_check
+- **CHECK** en `pregunta_riesgo_viaje` (`20261026134000_texto_no_vacio`): pregunta_riesgo_viaje_codigo_no_vacio_check
+- **CHECK** en `proveedor_mantenimiento` (`20261026134000_texto_no_vacio`): proveedor_mantenimiento_nombre_no_vacio_check
+- **CHECK** en `regla_preventiva` (`20261026134000_texto_no_vacio`): regla_preventiva_descripcion_no_vacio_check
+- **CHECK** en `tipo_permiso_conductor` (`20261026134000_texto_no_vacio`): tipo_permiso_conductor_codigo_no_vacio_check, tipo_permiso_conductor_nombre_no_vacio_check
+- **CHECK** en `umbral_riesgo_viaje` (`20261026134000_texto_no_vacio`): umbral_riesgo_viaje_descripcion_no_vacio_check
+- **CHECK** en `unidad` (`20261026134000_texto_no_vacio`): unidad_codigo_no_vacio_check, unidad_nombre_no_vacio_check
+- **CHECK** en `inspeccion_vehiculo` (`20261029131000_origen_destino_texto_libre`): inspeccion_vehiculo_punto_partida_check, inspeccion_vehiculo_destino_texto_check
+- **CHECK** en `gerenciamiento_viaje` (`20261029132000_origen_destino_viaje_texto_libre`): gerenciamiento_viaje_origen_check, gerenciamiento_viaje_destino_check
+- **índice único parcial** en `unidad_lectura` (`20261018160000_inspeccion_vehiculo`): unidad_lectura_inspeccion_id_key
+- **índice único parcial** en `inspeccion_vehiculo` (`20261105200000_inspeccion_dia_servicio`): inspeccion_vehiculo_caso_momento_dia_vigente_key
+- **índice único parcial** en `gerenciamiento_viaje` (`20261105202000_gerenciamiento_vigente_por_dia`): gerenciamiento_viaje_ticket_tipo_unidad_fecha_vigente_key
+- **índice parcial** en `gerenciamiento_viaje` (`20261018190000_gerenciamiento_viaje`): gerenciamiento_viaje_pendientes_idx
+- **trigger** en `inspeccion_vehiculo` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_anulacion_definitiva_trg
+- **trigger** en `inspeccion_vehiculo_revision` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_revision_reglas_trg
+- **trigger** en `gerenciamiento_viaje` (`20261018190000_gerenciamiento_viaje`): gerenciamiento_viaje_decision_definitiva_trg
+- **trigger** en `inspeccion_vehiculo` (`20261105201000_inspeccion_dia_servicio_por_omision`): inspeccion_vehiculo_dia_por_omision
+- **función** en `flota` (`20261018160000_inspeccion_vehiculo`): flota.inspeccion_vehiculo_anulacion_definitiva
+- **función** en `flota` (`20261018180000_trigger_revision_con_esquema`): flota.inspeccion_vehiculo_revision_reglas
+- **función** en `flota` (`20261018190000_gerenciamiento_viaje`): flota.gerenciamiento_viaje_decision_definitiva
+- **función** en `flota` (`20261105201000_inspeccion_dia_servicio_por_omision`): flota.inspeccion_vehiculo_dia_por_omision
+- **FK entre schemas** en `proveedor_mantenimiento` (`20261016170000_unidades_y_lecturas`): proveedor_mantenimiento_created_by_fkey → identidad.usuario (P), proveedor_mantenimiento_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad` (`20261016170000_unidades_y_lecturas`): unidad_vehiculo_id_fkey → catalogos.vehiculo (P), unidad_responsable_patrimonial_id_fkey → identidad.usuario (P), unidad_created_by_fkey → identidad.usuario (P), unidad_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad_lectura` (`20261016170000_unidades_y_lecturas`): unidad_lectura_registrada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad_preventivo` (`20261016170000_unidades_y_lecturas`): unidad_preventivo_responsable_id_fkey → identidad.usuario (P), unidad_preventivo_checklist_archivo_id_fkey → archivos.archivo (P), unidad_preventivo_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad_lectura_anulacion` (`20261017100000_pulir_f1_integridad`): unidad_lectura_anulacion_anulada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `unidad_preventivo_anulacion` (`20261017100000_pulir_f1_integridad`): unidad_preventivo_anulacion_anulada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `conductor_permiso` (`20261018150000_conductores_y_permisos`): conductor_permiso_usuario_id_fkey → identidad.usuario (P), conductor_permiso_archivo_id_fkey → archivos.archivo (P), conductor_permiso_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `conductor_permiso_anulacion` (`20261018150000_conductores_y_permisos`): conductor_permiso_anulacion_anulada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `tipo_permiso_conductor` (`20261018150000_conductores_y_permisos`): tipo_permiso_conductor_created_by_fkey → identidad.usuario (P), tipo_permiso_conductor_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_caso` (`20261018160000_inspeccion_vehiculo`): inspeccion_caso_ticket_id_fkey → pumping.ticket (P), inspeccion_caso_operador_id_fkey → identidad.usuario (P), inspeccion_caso_created_by_fkey → identidad.usuario (P), inspeccion_caso_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_vehiculo` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_conductor_id_fkey → identidad.usuario (P), inspeccion_vehiculo_anulada_por_fkey → identidad.usuario (P), inspeccion_vehiculo_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_vehiculo_revision` (`20261018160000_inspeccion_vehiculo`): inspeccion_vehiculo_revision_revisada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `item_inspeccion_vehiculo` (`20261018160000_inspeccion_vehiculo`): item_inspeccion_vehiculo_created_by_fkey → identidad.usuario (P), item_inspeccion_vehiculo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `gerenciamiento_viaje` (`20261018190000_gerenciamiento_viaje`): gerenciamiento_viaje_ticket_id_fkey → pumping.ticket (P), gerenciamiento_viaje_conductor_id_fkey → identidad.usuario (P), gerenciamiento_viaje_decidido_por_fkey → identidad.usuario (P), gerenciamiento_viaje_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `opcion_riesgo_viaje` (`20261018190000_gerenciamiento_viaje`): opcion_riesgo_viaje_created_by_fkey → identidad.usuario (P), opcion_riesgo_viaje_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `pregunta_riesgo_viaje` (`20261018190000_gerenciamiento_viaje`): pregunta_riesgo_viaje_created_by_fkey → identidad.usuario (P), pregunta_riesgo_viaje_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `umbral_riesgo_viaje` (`20261018190000_gerenciamiento_viaje`): umbral_riesgo_viaje_created_by_fkey → identidad.usuario (P), umbral_riesgo_viaje_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_caso` (`20261022110000_supervisor_del_caso_de_inspeccion`): inspeccion_caso_supervisor_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `umbral_riesgo_viaje` (`20261026111000_umbral_permiso_por_fk`): umbral_riesgo_viaje_permiso_autoriza_fkey → identidad.permiso (P)
+
+## identidad
+
+- **CHECK** en `usuario` (`20261013041442_init`): usuario_especialidad_check, usuario_intentos_fallidos_check
+- **CHECK** en `permiso` (`20261026134000_texto_no_vacio`): permiso_codigo_no_vacio_check, permiso_descripcion_no_vacio_check
+- **CHECK** en `rol` (`20261026134000_texto_no_vacio`): rol_codigo_no_vacio_check, rol_nombre_no_vacio_check
+- **CHECK** en `usuario` (`20261026134000_texto_no_vacio`): usuario_nombre_no_vacio_check
+
+## integraciones
+
+- **CHECK** en `operacion` (`20261013212430_init`): operacion_codigo_check, operacion_version_check
+- **CHECK** en `proveedor` (`20261013212430_init`): proveedor_timeout_check, proveedor_reintentos_check, proveedor_codigo_check
+- **CHECK** en `proveedor` (`20261026134000_texto_no_vacio`): proveedor_nombre_no_vacio_check
+- **índice único parcial** en `operacion` (`20261013212430_init`): operacion_una_activa_idx
+- **FK entre schemas** en `cambio` (`20261017150000_auditoria_con_fk`): cambio_realizado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `operacion` (`20261017150000_auditoria_con_fk`): operacion_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `proveedor` (`20261017150000_auditoria_con_fk`): proveedor_updated_by_fkey → identidad.usuario (P)
+
+## inventario
+
+- **CHECK** en `articulo` (`20261018120000_init`): articulo_costo_check, articulo_descuento_check
+- **CHECK** en `articulo_parte` (`20261018120000_init`): articulo_parte_cantidad_check, articulo_parte_orden_check
+- **CHECK** en `movimiento` (`20261018120000_init`): movimiento_cantidad_check, movimiento_saldo_check
+- **CHECK** en `consumo_ticket` (`20261019120000_pulir_revision_bd`): consumo_ticket_cantidad_check
+- **CHECK** en `movimiento` (`20261019120000_pulir_revision_bd`): movimiento_referencia_check
+- **CHECK** en `articulo` (`20261020090000_epp_entrega_personal_y_equivalencias`): articulo_tipo_talla_check
+- **CHECK** en `articulo_equivalencia` (`20261020090000_epp_entrega_personal_y_equivalencias`): articulo_equivalencia_codigo_check
+- **CHECK** en `motivo_movimiento` (`20261021091000_salida_por_mantenimiento`): motivo_movimiento_origen_tipo_check
+- **CHECK** en `stock_minimo` (`20261024132000_stock_minimo`): stock_minimo_minimo_check
+- **CHECK** en `despacho` (`20261026104100_despacho_completo_estructura`): despacho_textos_check, despacho_estado_check
+- **CHECK** en `despacho_item` (`20261026104100_despacho_completo_estructura`): despacho_item_cantidad_check, despacho_item_textos_check
+- **CHECK** en `articulo` (`20261026134000_texto_no_vacio`): articulo_codigo_no_vacio_check, articulo_nombre_no_vacio_check
+- **CHECK** en `articulo_codigo` (`20261026134000_texto_no_vacio`): articulo_codigo_codigo_no_vacio_check
+- **CHECK** en `articulo_parte` (`20261026134000_texto_no_vacio`): articulo_parte_descripcion_no_vacio_check
+- **CHECK** en `categoria_articulo` (`20261026134000_texto_no_vacio`): categoria_articulo_nombre_no_vacio_check
+- **CHECK** en `motivo_movimiento` (`20261026134000_texto_no_vacio`): motivo_movimiento_nombre_no_vacio_check
+- **CHECK** en `subcategoria_articulo` (`20261026134000_texto_no_vacio`): subcategoria_articulo_nombre_no_vacio_check
+- **CHECK** en `articulo_parte` (`20261026140000_codigo_de_parte_opcional`): articulo_parte_codigo_no_vacio_check
+- **CHECK** en `despacho` (`20261111120000_despacho_de_fcr`): despacho_origen_check
+- **índice único parcial** en `despacho` (`20261026104100_despacho_completo_estructura`): despacho_pedido_pendiente_key
+- **índice parcial** en `articulo` (`20261020090000_epp_entrega_personal_y_equivalencias`): articulo_entrega_personal_idx
+- **trigger** en `despacho` (`20261026104100_despacho_completo_estructura`): despacho_resuelto_inmutable
+- **función** en `inventario` (`20261026104100_despacho_completo_estructura`): inventario.despacho_resuelto_inmutable
+- **FK entre schemas** en `articulo` (`20261018120000_init`): articulo_created_by_fkey → identidad.usuario (P), articulo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `articulo_parte` (`20261018120000_init`): articulo_parte_created_by_fkey → identidad.usuario (P), articulo_parte_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `categoria_articulo` (`20261018120000_init`): categoria_articulo_created_by_fkey → identidad.usuario (P), categoria_articulo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `motivo_movimiento` (`20261018120000_init`): motivo_movimiento_created_by_fkey → identidad.usuario (P), motivo_movimiento_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `movimiento` (`20261018120000_init`): movimiento_bodega_id_fkey → catalogos.bodega, movimiento_responsable_id_fkey → identidad.usuario
+- **FK entre schemas** en `subcategoria_articulo` (`20261018120000_init`): subcategoria_articulo_created_by_fkey → identidad.usuario (P), subcategoria_articulo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `articulo_codigo` (`20261019120000_pulir_revision_bd`): articulo_codigo_created_by_fkey → identidad.usuario (P), articulo_codigo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `consumo_ticket` (`20261019120000_pulir_revision_bd`): consumo_ticket_ticket_pumping_id_fkey → pumping.ticket (P), consumo_ticket_responsable_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `despacho` (`20261019120000_pulir_revision_bd`): despacho_solicitado_por_fkey → identidad.usuario (P), despacho_realizado_por_fkey → identidad.usuario (P), despacho_archivo_respaldo_id_fkey → archivos.archivo (P), despacho_archivo_msds_id_fkey → archivos.archivo (P), despacho_created_by_fkey → identidad.usuario (P), despacho_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `movimiento` (`20261019120000_pulir_revision_bd`): movimiento_ticket_pumping_id_fkey → pumping.ticket (P)
+- **FK entre schemas** en `articulo_equivalencia` (`20261020090000_epp_entrega_personal_y_equivalencias`): articulo_equivalencia_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `stock_minimo` (`20261024132000_stock_minimo`): stock_minimo_bodega_fkey → catalogos.bodega (P), stock_minimo_created_by_fkey → identidad.usuario (P), stock_minimo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `articulo` (`20261024134000_unidad_medida_compartida`): articulo_unidad_stock_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `despacho` (`20261026104100_despacho_completo_estructura`): despacho_cliente_id_fkey → catalogos.cliente (P), despacho_bodega_id_fkey → catalogos.bodega (P), despacho_rechazado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `despacho_item` (`20261026104100_despacho_completo_estructura`): despacho_item_unidad_medida_id_fkey → catalogos.unidad_medida (P), despacho_item_created_by_fkey → identidad.usuario (P)
+
+## mantenimiento
+
+- **CHECK** en `contador` (`20261016200000_reportes_ordenes_y_subordenes`): contador_valor_check
+- **CHECK** en `orden` (`20261016200000_reportes_ordenes_y_subordenes`): orden_retorno_check
+- **CHECK** en `reporte_recibido` (`20261016200000_reportes_ordenes_y_subordenes`): reporte_recibido_origen_check, reporte_recibido_descarte_check
+- **CHECK** en `suborden` (`20261016200000_reportes_ordenes_y_subordenes`): suborden_horas_check, suborden_asignacion_check, suborden_cierre_check
+- **CHECK** en `suborden_repuesto` (`20261017100000_catalogos_con_id_auditoria_y_repuestos`): suborden_repuesto_cantidad_check, suborden_repuesto_parte_check
+- **CHECK** en `transicion_suborden` (`20261017100000_catalogos_con_id_auditoria_y_repuestos`): transicion_suborden_distinta_check
+- **CHECK** en `suborden_repuesto` (`20261021100000_repuestos_con_bodega_y_salida`): suborden_repuesto_origen_check, suborden_repuesto_movimiento_check
+- **CHECK** en `estado_suborden` (`20261026134000_texto_no_vacio`): estado_suborden_codigo_no_vacio_check, estado_suborden_nombre_no_vacio_check
+- **CHECK** en `reporte_recibido` (`20261026134000_texto_no_vacio`): reporte_recibido_codigo_no_vacio_check
+- **CHECK** en `tipo_suborden` (`20261026134000_texto_no_vacio`): tipo_suborden_codigo_no_vacio_check, tipo_suborden_nombre_no_vacio_check
+- **índice único parcial** en `reporte_recibido` (`20261016200000_reportes_ordenes_y_subordenes`): reporte_recibido_pumping_key, reporte_recibido_qhse_key
+- **índice único parcial** en `suborden_repuesto` (`20261021100000_repuestos_con_bodega_y_salida`): suborden_repuesto_articulo_key, suborden_repuesto_movimiento_key
+- **índice parcial** en `suborden_repuesto` (`20261017100000_catalogos_con_id_auditoria_y_repuestos`): suborden_repuesto_articulo_idx
+- **índice parcial** en `suborden_repuesto` (`20261021100000_repuestos_con_bodega_y_salida`): suborden_repuesto_bodega_idx
+- **trigger** en `suborden_repuesto` (`20261021100000_repuestos_con_bodega_y_salida`): suborden_repuesto_con_salida
+- **función** en `mantenimiento` (`20261021100000_repuestos_con_bodega_y_salida`): mantenimiento.proteger_repuesto_con_salida
+- **FK entre schemas** en `orden` (`20261016200000_reportes_ordenes_y_subordenes`): orden_retornada_por_fkey → identidad.usuario (P), orden_created_by_fkey → identidad.usuario (P), orden_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_recibido` (`20261016200000_reportes_ordenes_y_subordenes`): reporte_recibido_unidad_fkey → flota.unidad (P), reporte_recibido_pumping_fkey → pumping.reporte_unidad (P), reporte_recibido_recibido_por_fkey → identidad.usuario (P), reporte_recibido_descartado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `suborden` (`20261016200000_reportes_ordenes_y_subordenes`): suborden_asignada_a_fkey → identidad.usuario (P), suborden_asignada_por_fkey → identidad.usuario (P), suborden_cierre_aprobado_por_fkey → identidad.usuario (P), suborden_created_by_fkey → identidad.usuario (P), suborden_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_recibido` (`20261017100000_catalogos_con_id_auditoria_y_repuestos`): reporte_recibido_created_by_fkey → identidad.usuario (P), reporte_recibido_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `suborden_repuesto` (`20261017100000_catalogos_con_id_auditoria_y_repuestos`): suborden_repuesto_articulo_fkey → inventario.articulo (P), suborden_repuesto_created_by_fkey → identidad.usuario (P), suborden_repuesto_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `suborden_repuesto` (`20261021100000_repuestos_con_bodega_y_salida`): suborden_repuesto_bodega_fkey → catalogos.bodega (P), suborden_repuesto_movimiento_fkey → inventario.movimiento (P)
+
+## pumping
+
+- **CHECK** en `ticket` (`20261016140000_init`): ticket_version_check
+- **CHECK** en `transicion` (`20261016140000_init`): transicion_distinta_check
+- **CHECK** en `reporte_unidad` (`20261018090000_traslado_salida`): reporte_unidad_salida_firma_check, reporte_unidad_llegada_firma_check
+- **CHECK** en `reporte_unidad_hubodometro` (`20261018090000_traslado_salida`): reporte_unidad_hubodometro_eje_check
+- **CHECK** en `terminos_version` (`20261018090000_traslado_salida`): terminos_version_hash_check
+- **CHECK** en `ticket_ingreso` (`20261018090000_traslado_salida`): ticket_ingreso_confirmado_check
+- **CHECK** en `ticket_requisito` (`20261018090000_traslado_salida`): ticket_requisito_cumplido_check, ticket_requisito_manual_check
+- **CHECK** en `reporte_diario` (`20261021120000_reporte_diario`): reporte_diario_completado_check, reporte_diario_tiempos_check
+- **CHECK** en `reporte_diario_actividad` (`20261021120000_reporte_diario`): reporte_diario_actividad_orden_check, reporte_diario_actividad_horas_check, reporte_diario_actividad_detalle_check
+- **CHECK** en `solicitud_cambio_item` (`20261021130000_solicitud_cambio_items`): solicitud_cambio_item_orden_check, solicitud_cambio_item_cantidad_check, solicitud_cambio_item_descuento_check
+- **CHECK** en `solicitud_cambio_items` (`20261021130000_solicitud_cambio_items`): solicitud_cambio_items_motivo_check, solicitud_cambio_items_revision_par_check, solicitud_cambio_items_revision_check, solicitud_cambio_items_rechazo_check, solicitud_cambio_items_aplicacion_check, solicitud_cambio_items_aplicacion_motivo_check, solicitud_cambio_items_aplicada_at_check
+- **CHECK** en `ticket_documento` (`20261021141000_documento_monitoreo_por_dia`): ticket_documento_fecha_check
+- **CHECK** en `ticket` (`20261021151000_fecha_fin_servicio`): ticket_fechas_servicio_check
+- **CHECK** en `terminos_version` (`20261022120000_terminos_validados_por_qhse`): terminos_version_validado_check
+- **CHECK** en `ticket_requisito` (`20261024131000_pumping_a_unidades_de_flota`): ticket_requisito_ambito_check
+- **CHECK** en `reporte_item_dia` (`20261026110000_reporte_de_herramientas`): reporte_item_dia_cantidad_check
+- **CHECK** en `ticket` (`20261026110000_reporte_de_herramientas`): ticket_reporte_herramientas_completado_check
+- **CHECK** en `ticket_linea` (`20261026110000_reporte_de_herramientas`): ticket_linea_cantidad_check, ticket_linea_textos_check
+- **CHECK** en `reporte_diario` (`20261026112000_reporte_diario_corregido_por`): reporte_diario_corregido_check
+- **CHECK** en `gas_limite` (`20261026134000_texto_no_vacio`): gas_limite_nombre_no_vacio_check
+- **CHECK** en `paso` (`20261026134000_texto_no_vacio`): paso_nombre_no_vacio_check
+- **CHECK** en `requisito` (`20261026134000_texto_no_vacio`): requisito_nombre_no_vacio_check
+- **CHECK** en `solicitud_cambio_item` (`20261026134000_texto_no_vacio`): solicitud_cambio_item_codigo_no_vacio_check, solicitud_cambio_item_descripcion_no_vacio_check
+- **CHECK** en `terminos_version` (`20261026134000_texto_no_vacio`): terminos_version_titulo_no_vacio_check
+- **CHECK** en `ticket_requisito` (`20261027121000_sin_cumplimiento_manual`): ticket_requisito_sin_manual_check
+- **CHECK** en `reporte_unidad` (`20261029130000_origen_destino_texto_libre`): reporte_unidad_origen_texto_check, reporte_unidad_destino_texto_check
+- **CHECK** en `cat_motivo_sin_operacion` (`20261105120000_jornada_nucleo`): cat_motivo_sin_operacion_textos_check
+- **CHECK** en `ticket_jornada` (`20261105120000_jornada_nucleo`): ticket_jornada_numero_check, ticket_jornada_company_man_check, ticket_jornada_sin_operacion_todo_o_nada_check, ticket_jornada_sin_operacion_estado_check, ticket_jornada_sin_operacion_detalle_check, ticket_jornada_cierre_estado_check, ticket_jornada_abierta_check
+- **CHECK** en `ticket_jornada_historial` (`20261105120000_jornada_nucleo`): ticket_jornada_historial_motivo_check
+- **CHECK** en `requisito` (`20261105131000_jornada_requisitos_catalogo`): requisito_momento_check
+- **CHECK** en `ticket_hecho_qhse` (`20261105160000_jornada_hechos_qhse`): ticket_hecho_qhse_rango_check
+- **CHECK** en `ticket_duracion_cambio` (`20261105180000_jornada_duracion`): ticket_duracion_cambio_motivo_check, ticket_duracion_cambio_cambia_check, ticket_duracion_cambio_actor_check
+- **CHECK** en `ticket_aviso_avance` (`20261105190000_jornada_avance`): ticket_aviso_avance_rango_check
+- **CHECK** en `requisito` (`20261106100000_jornada_traslados`): requisito_por_unidad_check
+- **CHECK** en `reporte_llegada_revision` (`20261109180000_revision_reportes_llegada`): reporte_llegada_revision_motivo_check
+- **CHECK** en `ticket_jornada` (`20261110160000_jornada_cierre_automatico`): ticket_jornada_cierre_check
+- **CHECK** en `requisito` (`20261112120000_requisito_plazo_exoneracion_historial`): requisito_plazo_horas_check, requisito_rol_responsable_check
+- **CHECK** en `ticket_requisito` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_exonerado_check, ticket_requisito_exonerado_motivo_check, ticket_requisito_exonerado_por_check
+- **CHECK** en `ticket_requisito_historial` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_historial_origen_check
+- **índice único parcial** en `terminos_version` (`20261018090000_traslado_salida`): terminos_version_vigente_key
+- **índice único parcial** en `solicitud_cambio_items` (`20261021130000_solicitud_cambio_items`): solicitud_cambio_items_pendiente_key
+- **índice parcial** en `ticket_requisito` (`20261105130000_jornada_requisitos_estructura`): ticket_requisito_ticket_fecha_idx
+- **índice parcial** en `ticket_requisito` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_por_vencer_idx
+- **trigger** en `reporte_item_dia` (`20261026110000_reporte_de_herramientas`): validar_reporte_item_dia
+- **trigger** en `ticket_linea` (`20261026110000_reporte_de_herramientas`): validar_ticket_linea_cantidad
+- **trigger** en `reporte_diario` (`20261026111000_representante_del_reporte_diario`): validar_representante_reporte_diario
+- **trigger** en `ticket_requisito` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_historial_alta, ticket_requisito_historial_cambio
+- **función** en `pumping` (`20261026110000_reporte_de_herramientas`): pumping.validar_reporte_item_dia, pumping.validar_ticket_linea_cantidad
+- **función** en `pumping` (`20261026111000_representante_del_reporte_diario`): pumping.validar_representante_reporte_diario
+- **función** en `pumping` (`20261112120000_requisito_plazo_exoneracion_historial`): pumping.anotar_historial_requisito
+- **FK entre schemas** en `ticket` (`20261017130000_normalizar_con_fk`): ticket_cliente_id_fkey → catalogos.cliente (P), ticket_campo_id_fkey → catalogos.campo (P), ticket_bloque_id_fkey → catalogos.bloque (P), ticket_pozo_id_fkey → catalogos.pozo (P), ticket_taladro_id_fkey → catalogos.taladro (P)
+- **FK entre schemas** en `ticket_historial` (`20261017130000_normalizar_con_fk`): ticket_historial_actor_id_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_persona` (`20261017130000_normalizar_con_fk`): ticket_persona_usuario_id_fkey → identidad.usuario (P), ticket_persona_asignado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_unidad` (`20261017130000_normalizar_con_fk`): ticket_unidad_asignado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `aceptacion_terminos` (`20261018090000_traslado_salida`): aceptacion_terminos_usuario_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_unidad` (`20261018090000_traslado_salida`): reporte_unidad_salida_firmada_por_fkey → identidad.usuario (P), reporte_unidad_llegada_firmada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_ingreso` (`20261018090000_traslado_salida`): ticket_ingreso_confirmado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_ingreso_gas` (`20261018090000_traslado_salida`): ticket_ingreso_gas_medido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_ingreso_loto` (`20261018090000_traslado_salida`): ticket_ingreso_loto_marcado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_requisito` (`20261018090000_traslado_salida`): ticket_requisito_usuario_fkey → identidad.usuario (P), ticket_requisito_cumplido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_documento` (`20261021110000_documentos_del_ticket`): ticket_documento_archivo_fkey → archivos.archivo (P), ticket_documento_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_diario` (`20261021120000_reporte_diario`): reporte_diario_completado_por_fkey → identidad.usuario (P), reporte_diario_created_by_fkey → identidad.usuario (P), reporte_diario_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_diario_actividad` (`20261021120000_reporte_diario`): reporte_diario_actividad_autor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `solicitud_cambio_items` (`20261021130000_solicitud_cambio_items`): solicitud_cambio_items_solicitado_por_fkey → identidad.usuario (P), solicitud_cambio_items_revisado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket` (`20261021180000_representante_de_campo`): ticket_representante_campo_id_fkey → catalogos.persona_contacto (P)
+- **FK entre schemas** en `terminos_version` (`20261022120000_terminos_validados_por_qhse`): terminos_version_validado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_unidad` (`20261024131000_pumping_a_unidades_de_flota`): ticket_unidad_unidad_id_fkey → flota.unidad (P)
+- **FK entre schemas** en `solicitud_cambio_item` (`20261026103000_unidad_medida_por_fk`): solicitud_cambio_item_unidad_medida_id_fkey → catalogos.unidad_medida
+- **FK entre schemas** en `reporte_item_dia` (`20261026110000_reporte_de_herramientas`): reporte_item_dia_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket` (`20261026110000_reporte_de_herramientas`): ticket_reporte_herramientas_completado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_linea` (`20261026110000_reporte_de_herramientas`): ticket_linea_unidad_medida_id_fkey → catalogos.unidad_medida (P)
+- **FK entre schemas** en `reporte_diario` (`20261026111000_representante_del_reporte_diario`): reporte_diario_representante_id_fkey → catalogos.persona_contacto (P)
+- **FK entre schemas** en `reporte_diario` (`20261026112000_reporte_diario_corregido_por`): reporte_diario_corregido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `reporte_diario_adjunto` (`20261026115000_adjunto_del_reporte_diario`): reporte_diario_adjunto_archivo_fkey → archivos.archivo (P), reporte_diario_adjunto_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_jornada` (`20261105120000_jornada_nucleo`): ticket_jornada_company_man_acepto_por_fkey → identidad.usuario (P), ticket_jornada_sin_operacion_por_fkey → identidad.usuario (P), ticket_jornada_cerrada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_jornada_historial` (`20261105120000_jornada_nucleo`): ticket_jornada_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_duracion_cambio` (`20261105180000_jornada_duracion`): ticket_duracion_cambio_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_hecho_traslado` (`20261106100000_jornada_traslados`): ticket_hecho_traslado_unidad_fkey → flota.unidad (P)
+- **FK entre schemas** en `reporte_llegada_revision` (`20261109180000_revision_reportes_llegada`): reporte_llegada_revision_unidad_fkey → flota.unidad (P), reporte_llegada_revision_revisado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_requisito` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_exonerado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_requisito_historial` (`20261112120000_requisito_plazo_exoneracion_historial`): ticket_requisito_historial_actor_fkey → identidad.usuario (P)
+
+## qhse
+
+- **CHECK** en `epi_elemento` (`20261016190000_epi_y_referencia_de_tickets`): epi_elemento_nombre_check
+- **CHECK** en `epi_entrega` (`20261016190000_epi_y_referencia_de_tickets`): epi_entrega_firma_trabajador_check, epi_entrega_firma_th_check, epi_entrega_aprobado_check, epi_entrega_rechazado_check, epi_entrega_despachado_check, epi_entrega_estado_check
+- **CHECK** en `epi_entrega_item` (`20261016190000_epi_y_referencia_de_tickets`): epi_entrega_item_cantidad_check
+- **CHECK** en `epi_talla` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_talla_codigo_check
+- **CHECK** en `documento_pedido` (`20261018120000_documentos_por_pedido`): documento_pedido_acta_ticket_check, documento_pedido_art_check, documento_pedido_pt_check, documento_pedido_vigencia_check, documento_pedido_referencia_check, documento_pedido_anulacion_check
+- **CHECK** en `documento_pedido` (`20261018140000_ticket_supervisor_cliente_y_suplencia`): documento_pedido_suplencia_check
+- **CHECK** en `ptw` (`20261018141000_permiso_de_trabajo`): ptw_documentos_check, ptw_anulacion_check
+- **CHECK** en `swa` (`20261018160000_swa_stop_work_authority`): swa_descripcion_check, swa_estado_check, swa_heroe_check
+- **CHECK** en `iperc_actividad` (`20261018170000_iperc_matriz_maestra`): iperc_actividad_nombre_check
+- **CHECK** en `iperc_cobertura` (`20261018170000_iperc_matriz_maestra`): iperc_cobertura_codigo_check
+- **CHECK** en `iperc_control` (`20261018170000_iperc_matriz_maestra`): iperc_control_descripcion_check
+- **CHECK** en `iperc_matriz` (`20261018170000_iperc_matriz_maestra`): iperc_matriz_version_check, iperc_matriz_aprobacion_check, iperc_matriz_vigencia_check, iperc_matriz_rechazo_check, iperc_matriz_reemplazo_check
+- **CHECK** en `iperc_peligro` (`20261018170000_iperc_matriz_maestra`): iperc_peligro_descripcion_check, iperc_peligro_expuestos_check
+- **CHECK** en `iperc_tarea` (`20261018170000_iperc_matriz_maestra`): iperc_tarea_descripcion_check
+- **CHECK** en `ticket_servicio` (`20261018170000_iperc_matriz_maestra`): ticket_servicio_codigo_check
+- **CHECK** en `iperc_peligro` (`20261018173000_iperc_valoracion_completa_o_vacia`): iperc_peligro_inicial_check, iperc_peligro_residual_check
+- **CHECK** en `inspeccion` (`20261018180000_stop_e_inspecciones`): inspeccion_vigencia_check, inspeccion_unidad_check
+- **CHECK** en `inspeccion_tipo` (`20261018180000_stop_e_inspecciones`): inspeccion_tipo_frecuencia_check, inspeccion_tipo_caso_check
+- **CHECK** en `stop_tarjeta` (`20261018180000_stop_e_inspecciones`): stop_tarjeta_observado_check, stop_tarjeta_estado_check
+- **CHECK** en `epi_elemento` (`20261020100000_epi_elemento_replica_de_inventario`): epi_elemento_codigo_check
+- **CHECK** en `documento_pedido` (`20261022130000_lectura_de_firma_en_documentos`): documento_pedido_confianza_check
+- **CHECK** en `desecho` (`20261024100000_desechos_registro`): desecho_descripcion_check, desecho_limite_check
+- **CHECK** en `desecho_item` (`20261024100000_desechos_registro`): desecho_item_descripcion_check, desecho_item_codigo_check, desecho_item_cantidad_check, desecho_item_bultos_check, desecho_item_orden_check
+- **CHECK** en `desecho_manifiesto` (`20261024101000_desechos_manifiesto`): desecho_manifiesto_numero_check, desecho_manifiesto_gestor_check, desecho_manifiesto_horas_check
+- **CHECK** en `desecho_firma` (`20261024102000_desecho_firma_firmante_completo`): desecho_firma_firmante_check
+- **CHECK** en `desecho_documento` (`20261024103000_desechos_documentos_y_certificado`): desecho_documento_emision_check, desecho_documento_confianza_check
+- **CHECK** en `derrame` (`20261024110000_derrames_registro`): derrame_descripcion_check
+- **CHECK** en `derrame_banda_volumen` (`20261024110000_derrames_registro`): derrame_banda_volumen_rango_check
+- **CHECK** en `investigacion` (`20261024110000_investigacion_nucleo`): investigacion_texto_check
+- **CHECK** en `investigacion_resultado` (`20261024110000_investigacion_nucleo`): investigacion_resultado_plazos_check
+- **CHECK** en `derrame` (`20261024111000_derrames_contencion`): derrame_contencion_check
+- **CHECK** en `derrame_volumen_historial` (`20261024111000_derrames_contencion`): derrame_volumen_historial_volumen_check
+- **CHECK** en `investigacion_detalle` (`20261024111000_investigacion_formato_de_campo`): investigacion_detalle_muerte_check, investigacion_detalle_similares_check, investigacion_detalle_cifras_check
+- **CHECK** en `investigacion_entorno_factor` (`20261024111000_investigacion_formato_de_campo`): investigacion_entorno_factor_orden_check, investigacion_entorno_factor_texto_check
+- **CHECK** en `investigacion_equipo` (`20261024111000_investigacion_formato_de_campo`): investigacion_equipo_miembro_check
+- **CHECK** en `investigacion_testigo` (`20261024111000_investigacion_formato_de_campo`): investigacion_testigo_orden_check, investigacion_testigo_texto_check
+- **CHECK** en `investigacion_trabajador` (`20261024111000_investigacion_formato_de_campo`): investigacion_trabajador_identidad_check, investigacion_trabajador_experiencia_check
+- **CHECK** en `derrame` (`20261024112000_derrames_mae_y_cierre`): derrame_notificacion_mae_check, derrame_cierre_check
+- **CHECK** en `investigacion_causa` (`20261024114000_investigacion_causas`): investigacion_causa_orden_check, investigacion_causa_texto_check
+- **CHECK** en `investigacion_ishikawa_causa` (`20261024114000_investigacion_causas`): investigacion_ishikawa_causa_orden_check, investigacion_ishikawa_causa_texto_check
+- **CHECK** en `investigacion_porque` (`20261024114000_investigacion_causas`): investigacion_porque_orden_check, investigacion_porque_texto_check
+- **CHECK** en `emergencia` (`20261024114530_emergencias_registro`): emergencia_descripcion_check, emergencia_origen_check
+- **CHECK** en `emergencia_linea` (`20261024114530_emergencias_registro`): emergencia_linea_texto_check
+- **CHECK** en `investigacion_accion` (`20261024115000_investigacion_acciones`): investigacion_accion_orden_check, investigacion_accion_texto_check, investigacion_accion_estado_check
+- **CHECK** en `emergencia_conteo_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_conteo_historial_check
+- **CHECK** en `emergencia_nivel_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_nivel_historial_nivel_check
+- **CHECK** en `emergencia_paso_notificacion` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_paso_notificacion_texto_check, emergencia_paso_notificacion_plazo_check
+- **CHECK** en `investigacion` (`20261024116000_investigacion_cierre`): investigacion_notificacion_check, investigacion_estado_check
+- **CHECK** en `emergencia_hospital` (`20261024116530_emergencias_heridos_medevac`): emergencia_hospital_texto_check, emergencia_hospital_telefono_check
+- **CHECK** en `herido` (`20261024116530_emergencias_heridos_medevac`): herido_texto_check, herido_cedula_check, herido_medevac_check, herido_hospital_notificado_check, herido_transferido_check, herido_medevac_datos_check, herido_medevac_negro_check, herido_eta_check, herido_notificado_orden_check, herido_transferido_orden_check, herido_orden_fechas_check
+- **CHECK** en `herido_signos_vitales` (`20261024116530_emergencias_heridos_medevac`): herido_signos_vitales_alguno_check, herido_signos_vitales_pulso_check, herido_signos_vitales_respiracion_check
+- **CHECK** en `requisito_legal` (`20261024117000_requisitos_legales`): requisito_legal_revision_check, requisito_legal_vigencia_check, requisito_legal_estado_check
+- **CHECK** en `herido_signos_vitales` (`20261024117530_herido_presion_completa`): herido_signos_vitales_presion_check
+- **CHECK** en `objetivo_ambiental` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_texto_check, objetivo_ambiental_estado_check
+- **CHECK** en `objetivo_ambiental_accion` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_accion_orden_check, objetivo_ambiental_accion_texto_check
+- **CHECK** en `objetivo_ambiental_seguimiento` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_seguimiento_avance_check, objetivo_ambiental_seguimiento_texto_check
+- **CHECK** en `emergencia` (`20261024118530_emergencias_flash_y_cierre`): emergencia_cierre_check
+- **CHECK** en `emergencia_reporte_flash` (`20261024118530_emergencias_flash_y_cierre`): emergencia_reporte_flash_completo_check
+- **CHECK** en `aspecto_ambiental` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_texto_check, aspecto_ambiental_valoracion_check, aspecto_ambiental_presupuesto_check, aspecto_ambiental_baja_check
+- **CHECK** en `aspecto_ambiental_seguimiento` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_seguimiento_texto_check
+- **CHECK** en `derrame` (`20261024119530_revision_s1_correcciones`): derrame_volumen_check
+- **CHECK** en `emergencia` (`20261024119530_revision_s1_correcciones`): emergencia_nivel_check, emergencia_conteo_check
+- **CHECK** en `aviso_programado` (`20261024120000_avisos_programados`): aviso_programado_clave_check
+- **CHECK** en `equipo` (`20261026121000_equipo_de_inspeccion`): equipo_codigo_check, equipo_descripcion_check
+- **CHECK** en `kpi_indicador` (`20261026122000_kpi_indicador_y_meta`): kpi_indicador_textos_check, kpi_indicador_motivo_check
+- **CHECK** en `kpi_meta` (`20261026122000_kpi_indicador_y_meta`): kpi_meta_valor_check
+- **CHECK** en `aspecto_etapa_ciclo_vida` (`20261026134000_texto_no_vacio`): aspecto_etapa_ciclo_vida_codigo_no_vacio_check, aspecto_etapa_ciclo_vida_nombre_no_vacio_check
+- **CHECK** en `aspecto_factor_ambiental` (`20261026134000_texto_no_vacio`): aspecto_factor_ambiental_codigo_no_vacio_check, aspecto_factor_ambiental_nombre_no_vacio_check
+- **CHECK** en `derrame_banda_volumen` (`20261026134000_texto_no_vacio`): derrame_banda_volumen_codigo_no_vacio_check, derrame_banda_volumen_nombre_no_vacio_check
+- **CHECK** en `derrame_checklist_item` (`20261026134000_texto_no_vacio`): derrame_checklist_item_codigo_no_vacio_check, derrame_checklist_item_nombre_no_vacio_check
+- **CHECK** en `derrame_ubicacion` (`20261026134000_texto_no_vacio`): derrame_ubicacion_codigo_no_vacio_check, derrame_ubicacion_nombre_no_vacio_check
+- **CHECK** en `desecho_caracteristica` (`20261026134000_texto_no_vacio`): desecho_caracteristica_codigo_no_vacio_check, desecho_caracteristica_nombre_no_vacio_check
+- **CHECK** en `desecho_contenedor` (`20261026134000_texto_no_vacio`): desecho_contenedor_codigo_no_vacio_check, desecho_contenedor_nombre_no_vacio_check
+- **CHECK** en `desecho_estado` (`20261026134000_texto_no_vacio`): desecho_estado_codigo_no_vacio_check, desecho_estado_nombre_no_vacio_check
+- **CHECK** en `emergencia_tipo` (`20261026134000_texto_no_vacio`): emergencia_tipo_codigo_no_vacio_check, emergencia_tipo_nombre_no_vacio_check
+- **CHECK** en `frecuencia_seguimiento` (`20261026134000_texto_no_vacio`): frecuencia_seguimiento_codigo_no_vacio_check, frecuencia_seguimiento_nombre_no_vacio_check
+- **CHECK** en `inspeccion_criterio` (`20261026134000_texto_no_vacio`): inspeccion_criterio_nombre_no_vacio_check
+- **CHECK** en `inspeccion_tipo` (`20261026134000_texto_no_vacio`): inspeccion_tipo_codigo_no_vacio_check, inspeccion_tipo_nombre_no_vacio_check
+- **CHECK** en `investigacion_resultado` (`20261026134000_texto_no_vacio`): investigacion_resultado_codigo_no_vacio_check, investigacion_resultado_nombre_no_vacio_check
+- **CHECK** en `iperc_cargo` (`20261026134000_texto_no_vacio`): iperc_cargo_codigo_no_vacio_check, iperc_cargo_nombre_no_vacio_check
+- **CHECK** en `iperc_clasificacion_peligro` (`20261026134000_texto_no_vacio`): iperc_clasificacion_peligro_codigo_no_vacio_check, iperc_clasificacion_peligro_nombre_no_vacio_check
+- **CHECK** en `iperc_generado_en` (`20261026134000_texto_no_vacio`): iperc_generado_en_codigo_no_vacio_check, iperc_generado_en_nombre_no_vacio_check
+- **CHECK** en `iperc_proceso` (`20261026134000_texto_no_vacio`): iperc_proceso_codigo_no_vacio_check, iperc_proceso_nombre_no_vacio_check
+- **CHECK** en `iperc_zona` (`20261026134000_texto_no_vacio`): iperc_zona_codigo_no_vacio_check, iperc_zona_nombre_no_vacio_check
+- **CHECK** en `ishikawa_categoria` (`20261026134000_texto_no_vacio`): ishikawa_categoria_codigo_no_vacio_check, ishikawa_categoria_nombre_no_vacio_check
+- **CHECK** en `requisito_legal_tipo` (`20261026134000_texto_no_vacio`): requisito_legal_tipo_codigo_no_vacio_check, requisito_legal_tipo_nombre_no_vacio_check
+- **CHECK** en `stop_item` (`20261026134000_texto_no_vacio`): stop_item_nombre_no_vacio_check
+- **CHECK** en `stop_subcategoria` (`20261026134000_texto_no_vacio`): stop_subcategoria_codigo_no_vacio_check, stop_subcategoria_nombre_no_vacio_check
+- **CHECK** en `swa_criterio_reinicio` (`20261026134000_texto_no_vacio`): swa_criterio_reinicio_codigo_no_vacio_check, swa_criterio_reinicio_nombre_no_vacio_check
+- **CHECK** en `swa_tipo_peligro` (`20261026134000_texto_no_vacio`): swa_tipo_peligro_codigo_no_vacio_check, swa_tipo_peligro_nombre_no_vacio_check
+- **CHECK** en `documento_pedido` (`20261112110000_documento_pedido_revision`): documento_pedido_revision_check, documento_pedido_rechazo_anulado_check
+- **CHECK** en `documento_pedido_revision` (`20261112110000_documento_pedido_revision`): documento_pedido_revision_carga_check, documento_pedido_revision_motivo_check
+- **CHECK** en `ticket_ref` (`20261112120000_ticket_anulado`): ticket_ref_anulacion_check
+- **EXCLUDE** en `derrame_banda_volumen` (`20261024110000_derrames_registro`): derrame_banda_volumen_sin_solape
+- **índice único parcial** en `epi_entrega` (`20261016190000_epi_y_referencia_de_tickets`): epi_entrega_ticket_trabajador_key
+- **índice único parcial** en `documento_pedido` (`20261018120000_documentos_por_pedido`): documento_pedido_acta_vigente_key, documento_pedido_recepcion_vigente_key, documento_pedido_pt_dia_vigente_key
+- **índice único parcial** en `ptw` (`20261018141000_permiso_de_trabajo`): ptw_pedido_dia_vigente_key
+- **índice único parcial** en `iperc_matriz` (`20261018170000_iperc_matriz_maestra`): iperc_matriz_aprobada_key, iperc_matriz_en_trabajo_key
+- **índice único parcial** en `investigacion` (`20261024110000_investigacion_nucleo`): investigacion_origen_emergencia_key
+- **índice único parcial** en `investigacion_equipo` (`20261024111000_investigacion_formato_de_campo`): investigacion_equipo_usuario_key, investigacion_equipo_externo_key
+- **índice único parcial** en `emergencia` (`20261024114530_emergencias_registro`): emergencia_swa_key, emergencia_derrame_key
+- **índice único parcial** en `requisito_legal` (`20261024117000_requisitos_legales`): requisito_legal_vigente_key
+- **índice parcial** en `swa` (`20261018160000_swa_stop_work_authority`): swa_ticket_idx
+- **índice parcial** en `desecho` (`20261024100000_desechos_registro`): desecho_pozo_idx
+- **índice parcial** en `desecho_manifiesto` (`20261024101000_desechos_manifiesto`): desecho_manifiesto_cliente_idx
+- **índice parcial** en `derrame` (`20261024110000_derrames_registro`): derrame_ticket_idx
+- **índice parcial** en `emergencia` (`20261024114530_emergencias_registro`): emergencia_ticket_idx
+- **índice parcial** en `investigacion_accion` (`20261024115000_investigacion_acciones`): investigacion_accion_responsable_idx, investigacion_accion_plazo_idx
+- **índice parcial** en `herido` (`20261024116530_emergencias_heridos_medevac`): herido_hospital_idx
+- **índice parcial** en `requisito_legal` (`20261024117000_requisitos_legales`): requisito_legal_vence_idx
+- **índice parcial** en `objetivo_ambiental` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_plazo_idx
+- **índice parcial** en `aspecto_ambiental` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_clasificacion_idx, aspecto_ambiental_plazo_idx
+- **índice parcial** en `ticket_ref` (`20261112120000_ticket_anulado`): ticket_ref_anulado_idx
+- **índice único de expresión** en `iperc_actividad` (`20261018170000_iperc_matriz_maestra`): iperc_actividad_unica_key
+- **índice único de expresión** en `iperc_cargo` (`20261018170000_iperc_matriz_maestra`): iperc_cargo_nombre_key
+- **índice único de expresión** en `iperc_clasificacion_peligro` (`20261018170000_iperc_matriz_maestra`): iperc_clasificacion_nombre_key
+- **índice único de expresión** en `iperc_generado_en` (`20261018170000_iperc_matriz_maestra`): iperc_generado_en_nombre_key
+- **índice único de expresión** en `iperc_proceso` (`20261018170000_iperc_matriz_maestra`): iperc_proceso_nombre_key
+- **índice único de expresión** en `iperc_zona` (`20261018170000_iperc_matriz_maestra`): iperc_zona_nombre_key
+- **índice único de expresión** en `emergencia_hospital` (`20261024116530_emergencias_heridos_medevac`): emergencia_hospital_nombre_key
+- **índice único de expresión** en `equipo` (`20261026121000_equipo_de_inspeccion`): equipo_tipo_codigo_key
+- **índice único de expresión** en `inspeccion_criterio` (`20261026131000_criterio_unico_por_tipo`): inspeccion_criterio_tipo_nombre_key
+- **trigger** en `epi_entrega` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_entrega_congelar_trg
+- **trigger** en `epi_entrega_item` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_entrega_item_validar_trg
+- **trigger** en `documento_pedido` (`20261018120000_documentos_por_pedido`): documento_pedido_una_anulacion_trg
+- **trigger** en `documento_pedido` (`20261018140000_ticket_supervisor_cliente_y_suplencia`): documento_pedido_suplencia_trg
+- **trigger** en `documento_pedido` (`20261018141000_permiso_de_trabajo`): documento_pedido_en_uso_trg
+- **trigger** en `ptw` (`20261018141000_permiso_de_trabajo`): ptw_validar_trg
+- **trigger** en `ptw_firma` (`20261018141000_permiso_de_trabajo`): ptw_firma_validar_trg
+- **trigger** en `swa` (`20261018160000_swa_stop_work_authority`): swa_validar_trg
+- **trigger** en `swa_notificacion` (`20261018160000_swa_stop_work_authority`): swa_notificacion_validar_trg
+- **trigger** en `swa_reinicio` (`20261018160000_swa_stop_work_authority`): swa_reinicio_validar_trg
+- **trigger** en `iperc_control` (`20261018170000_iperc_matriz_maestra`): iperc_control_editable_trg
+- **trigger** en `iperc_matriz` (`20261018170000_iperc_matriz_maestra`): iperc_matriz_validar_trg
+- **trigger** en `iperc_matriz_evaluador` (`20261018170000_iperc_matriz_maestra`): iperc_evaluador_editable_trg
+- **trigger** en `iperc_peligro` (`20261018170000_iperc_matriz_maestra`): iperc_peligro_editable_trg
+- **trigger** en `iperc_tarea` (`20261018170000_iperc_matriz_maestra`): iperc_tarea_editable_trg
+- **trigger** en `iperc_tarea_cargo` (`20261018170000_iperc_matriz_maestra`): iperc_tarea_cargo_editable_trg
+- **trigger** en `ptw_matriz` (`20261018171000_ptw_exige_iperc`): ptw_matriz_validar_trg
+- **trigger** en `inspeccion` (`20261018180000_stop_e_inspecciones`): inspeccion_validar_trg, inspeccion_coherente_trg
+- **trigger** en `inspeccion_resultado` (`20261018180000_stop_e_inspecciones`): inspeccion_resultado_validar_trg
+- **trigger** en `stop_tarjeta` (`20261018180000_stop_e_inspecciones`): stop_tarjeta_validar_trg, stop_tarjeta_con_items_trg
+- **trigger** en `desecho` (`20261024100000_desechos_registro`): desecho_validar_trg, desecho_completo_trg
+- **trigger** en `desecho_caracteristica_asignada` (`20261024100000_desechos_registro`): desecho_caracteristica_validar_trg
+- **trigger** en `desecho_item` (`20261024100000_desechos_registro`): desecho_item_validar_trg
+- **trigger** en `desecho_firma` (`20261024101000_desechos_manifiesto`): desecho_firma_validar_trg
+- **trigger** en `desecho_manifiesto` (`20261024101000_desechos_manifiesto`): desecho_manifiesto_validar_trg
+- **trigger** en `desecho_documento` (`20261024103000_desechos_documentos_y_certificado`): desecho_documento_validar_trg
+- **trigger** en `derrame` (`20261024110000_derrames_registro`): derrame_validar_trg
+- **trigger** en `investigacion` (`20261024110000_investigacion_nucleo`): investigacion_validar_trg
+- **trigger** en `derrame_checklist_confirmacion` (`20261024111000_derrames_contencion`): derrame_confirmacion_validar_trg
+- **trigger** en `derrame_volumen_historial` (`20261024111000_derrames_contencion`): derrame_volumen_validar_trg
+- **trigger** en `investigacion_detalle` (`20261024111000_investigacion_formato_de_campo`): investigacion_detalle_editable_trg, investigacion_detalle_lesionado_trg
+- **trigger** en `investigacion_entorno_factor` (`20261024111000_investigacion_formato_de_campo`): investigacion_entorno_factor_editable_trg
+- **trigger** en `investigacion_equipo` (`20261024111000_investigacion_formato_de_campo`): investigacion_equipo_editable_trg
+- **trigger** en `investigacion_testigo` (`20261024111000_investigacion_formato_de_campo`): investigacion_testigo_editable_trg
+- **trigger** en `investigacion_trabajador` (`20261024111000_investigacion_formato_de_campo`): investigacion_trabajador_editable_trg, investigacion_trabajador_lesionado_trg
+- **trigger** en `desecho` (`20261024113000_derrames_desecho_generado`): desecho_origen_validar_trg
+- **trigger** en `investigacion_causa` (`20261024114000_investigacion_causas`): investigacion_causa_editable_trg
+- **trigger** en `investigacion_ishikawa_causa` (`20261024114000_investigacion_causas`): investigacion_ishikawa_causa_editable_trg
+- **trigger** en `investigacion_porque` (`20261024114000_investigacion_causas`): investigacion_porque_editable_trg
+- **trigger** en `emergencia` (`20261024114530_emergencias_registro`): emergencia_validar_trg
+- **trigger** en `investigacion_accion` (`20261024115000_investigacion_acciones`): investigacion_accion_validar_trg
+- **trigger** en `investigacion_accion_control` (`20261024115000_investigacion_acciones`): investigacion_accion_control_editable_trg
+- **trigger** en `emergencia_conteo_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_conteo_historial_validar_trg
+- **trigger** en `emergencia_nivel_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_nivel_historial_validar_trg
+- **trigger** en `emergencia_notificacion` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_notificacion_validar_trg
+- **trigger** en `herido` (`20261024116530_emergencias_heridos_medevac`): herido_validar_trg, herido_inmutable_validar_trg
+- **trigger** en `herido_signos_vitales` (`20261024116530_emergencias_heridos_medevac`): herido_signos_vitales_validar_trg
+- **trigger** en `herido_triage_historial` (`20261024116530_emergencias_heridos_medevac`): herido_triage_historial_validar_trg
+- **trigger** en `requisito_legal` (`20261024117000_requisitos_legales`): requisito_legal_validar_trg
+- **trigger** en `objetivo_ambiental` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_validar_trg
+- **trigger** en `objetivo_ambiental_accion` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_accion_editable_trg
+- **trigger** en `objetivo_ambiental_seguimiento` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_seguimiento_editable_trg
+- **trigger** en `emergencia_reporte_flash` (`20261024118530_emergencias_flash_y_cierre`): emergencia_reporte_flash_validar_trg
+- **trigger** en `aspecto_ambiental` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_validar_trg
+- **trigger** en `aspecto_ambiental_seguimiento` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_seguimiento_editable_trg
+- **trigger** en `desecho_caracteristica_asignada` (`20261024119530_revision_s1_correcciones`): desecho_caracteristica_clasificacion_trg
+- **trigger** en `emergencia_linea` (`20261024119530_revision_s1_correcciones`): emergencia_linea_validar_trg
+- **trigger** en `documento_pedido` (`20261112110000_documento_pedido_revision`): documento_pedido_revision_validar_trg
+- **trigger** en `ticket_ref` (`20261112120000_ticket_anulado`): ticket_ref_anulacion_firme_trg
+- **función** en `qhse` (`20261017100000_epi_catalogos_integridad_y_auditoria`): qhse.epi_entrega_item_validar, qhse.epi_entrega_congelar
+- **función** en `qhse` (`20261018120000_documentos_por_pedido`): qhse.documento_pedido_una_anulacion
+- **función** en `qhse` (`20261018140000_ticket_supervisor_cliente_y_suplencia`): qhse.documento_pedido_suplencia
+- **función** en `qhse` (`20261018141000_permiso_de_trabajo`): qhse.ptw_firma_validar, qhse.documento_pedido_en_uso
+- **función** en `qhse` (`20261018160000_swa_stop_work_authority`): qhse.swa_validar, qhse.swa_notificacion_validar, qhse.swa_reinicio_validar
+- **función** en `qhse` (`20261018170000_iperc_matriz_maestra`): qhse.iperc_matriz_validar
+- **función** en `qhse` (`20261018171000_ptw_exige_iperc`): qhse.ptw_matriz_validar
+- **función** en `qhse` (`20261018172000_iperc_contenido_editable_por_tabla`): qhse.iperc_contenido_editable
+- **función** en `qhse` (`20261018180000_stop_e_inspecciones`): qhse.stop_tarjeta_validar, qhse.stop_tarjeta_con_items, qhse.inspeccion_validar, qhse.inspeccion_resultado_validar, qhse.inspeccion_coherente
+- **función** en `qhse` (`20261024100000_desechos_registro`): qhse.desecho_completo, qhse.desecho_hijo_validar
+- **función** en `qhse` (`20261024101000_desechos_manifiesto`): qhse.desecho_manifiesto_validar, qhse.desecho_firma_validar
+- **función** en `qhse` (`20261024103000_desechos_documentos_y_certificado`): qhse.desecho_validar, qhse.desecho_documento_validar
+- **función** en `qhse` (`20261024111000_derrames_contencion`): qhse.derrame_confirmacion_validar, qhse.derrame_volumen_validar
+- **función** en `qhse` (`20261024111000_investigacion_formato_de_campo`): qhse.investigacion_lesionado_validar
+- **función** en `qhse` (`20261024112000_derrames_mae_y_cierre`): qhse.derrame_requiere_mae
+- **función** en `qhse` (`20261024112000_investigacion_editable_en_delete`): qhse.investigacion_hijo_editable
+- **función** en `qhse` (`20261024113000_derrames_desecho_generado`): qhse.desecho_origen_validar
+- **función** en `qhse` (`20261024114530_emergencias_registro`): qhse.derrame_escala_a_emergencia
+- **función** en `qhse` (`20261024115000_investigacion_acciones`): qhse.investigacion_accion_validar, qhse.investigacion_accion_control_editable
+- **función** en `qhse` (`20261024115530_emergencias_nivel_conteo_cascada`): qhse.emergencia_hija_validar
+- **función** en `qhse` (`20261024116000_investigacion_cierre`): qhse.investigacion_validar
+- **función** en `qhse` (`20261024116530_emergencias_heridos_medevac`): qhse.herido_hijo_validar
+- **función** en `qhse` (`20261024117000_requisitos_legales`): qhse.requisito_legal_validar
+- **función** en `qhse` (`20261024118000_objetivos_ambientales`): qhse.objetivo_ambiental_validar, qhse.objetivo_ambiental_hijo_editable
+- **función** en `qhse` (`20261024119000_aspectos_ambientales`): qhse.aspecto_ambiental_validar, qhse.aspecto_ambiental_seguimiento_editable
+- **función** en `qhse` (`20261024119530_revision_s1_correcciones`): qhse.derrame_validar, qhse.emergencia_validar, qhse.herido_inmutable_validar, qhse.emergencia_linea_validar, qhse.desecho_caracteristica_validar
+- **función** en `qhse` (`20261109140000_ptw_reintegro`): qhse.ptw_validar
+- **función** en `qhse` (`20261112110000_documento_pedido_revision`): qhse.documento_pedido_revision_validar
+- **función** en `qhse` (`20261112120000_ticket_anulado`): qhse.ticket_ref_anulacion_firme
+- **FK entre schemas** en `epi_entrega` (`20261016190000_epi_y_referencia_de_tickets`): epi_entrega_trabajador_fkey → identidad.usuario (P), epi_entrega_firma_trabajador_por_fkey → identidad.usuario (P), epi_entrega_firma_th_por_fkey → identidad.usuario (P), epi_entrega_aprobado_por_fkey → identidad.usuario (P), epi_entrega_rechazado_por_fkey → identidad.usuario (P), epi_entrega_despachado_por_fkey → identidad.usuario (P), epi_entrega_created_by_fkey → identidad.usuario (P), epi_entrega_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `epi_entrega_historial` (`20261016190000_epi_y_referencia_de_tickets`): epi_entrega_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `epi_elemento` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_elemento_created_by_fkey → identidad.usuario (P), epi_elemento_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `epi_entrega` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_entrega_lugar_bodega_fkey → catalogos.bodega (P)
+- **FK entre schemas** en `epi_entrega_item` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_entrega_item_created_by_fkey → identidad.usuario (P), epi_entrega_item_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `epi_talla` (`20261017100000_epi_catalogos_integridad_y_auditoria`): epi_talla_created_by_fkey → identidad.usuario (P), epi_talla_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `documento_pedido` (`20261018120000_documentos_por_pedido`): documento_pedido_archivo_fkey → archivos.archivo (P), documento_pedido_anulado_por_fkey → identidad.usuario (P), documento_pedido_created_by_fkey → identidad.usuario (P), documento_pedido_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_ref` (`20261018140000_ticket_supervisor_cliente_y_suplencia`): ticket_ref_supervisor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ptw` (`20261018141000_permiso_de_trabajo`): ptw_anulado_por_fkey → identidad.usuario (P), ptw_created_by_fkey → identidad.usuario (P), ptw_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ptw_firma` (`20261018141000_permiso_de_trabajo`): ptw_firma_usuario_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ptw_historial` (`20261018141000_permiso_de_trabajo`): ptw_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa` (`20261018160000_swa_stop_work_authority`): swa_activado_por_fkey → identidad.usuario (P), swa_evaluado_por_fkey → identidad.usuario (P), swa_reanudado_por_fkey → identidad.usuario (P), swa_created_by_fkey → identidad.usuario (P), swa_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_criterio_reinicio` (`20261018160000_swa_stop_work_authority`): swa_criterio_reinicio_created_by_fkey → identidad.usuario (P), swa_criterio_reinicio_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_historial` (`20261018160000_swa_stop_work_authority`): swa_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_notificacion` (`20261018160000_swa_stop_work_authority`): swa_notificacion_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_reinicio` (`20261018160000_swa_stop_work_authority`): swa_reinicio_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_rol_cadena` (`20261018160000_swa_stop_work_authority`): swa_rol_cadena_rol_fkey → identidad.rol (P), swa_rol_cadena_created_by_fkey → identidad.usuario (P), swa_rol_cadena_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `swa_tipo_peligro` (`20261018160000_swa_stop_work_authority`): swa_tipo_peligro_created_by_fkey → identidad.usuario (P), swa_tipo_peligro_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_actividad` (`20261018170000_iperc_matriz_maestra`): iperc_actividad_created_by_fkey → identidad.usuario (P), iperc_actividad_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_cargo` (`20261018170000_iperc_matriz_maestra`): iperc_cargo_created_by_fkey → identidad.usuario (P), iperc_cargo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_clasificacion_peligro` (`20261018170000_iperc_matriz_maestra`): iperc_clasificacion_created_by_fkey → identidad.usuario (P), iperc_clasificacion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_cobertura` (`20261018170000_iperc_matriz_maestra`): iperc_cobertura_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_generado_en` (`20261018170000_iperc_matriz_maestra`): iperc_generado_en_created_by_fkey → identidad.usuario (P), iperc_generado_en_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_historial` (`20261018170000_iperc_matriz_maestra`): iperc_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_matriz` (`20261018170000_iperc_matriz_maestra`): iperc_matriz_procedimiento_fkey → archivos.archivo (P), iperc_matriz_ats_fkey → archivos.archivo (P), iperc_matriz_aprobada_por_fkey → identidad.usuario (P), iperc_matriz_rechazada_por_fkey → identidad.usuario (P), iperc_matriz_created_by_fkey → identidad.usuario (P), iperc_matriz_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_matriz_evaluador` (`20261018170000_iperc_matriz_maestra`): iperc_matriz_evaluador_usuario_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_proceso` (`20261018170000_iperc_matriz_maestra`): iperc_proceso_created_by_fkey → identidad.usuario (P), iperc_proceso_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `iperc_zona` (`20261018170000_iperc_matriz_maestra`): iperc_zona_created_by_fkey → identidad.usuario (P), iperc_zona_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion` (`20261018180000_stop_e_inspecciones`): inspeccion_inspector_fkey → identidad.usuario (P), inspeccion_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_criterio` (`20261018180000_stop_e_inspecciones`): inspeccion_criterio_created_by_fkey → identidad.usuario (P), inspeccion_criterio_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `inspeccion_tipo` (`20261018180000_stop_e_inspecciones`): inspeccion_tipo_created_by_fkey → identidad.usuario (P), inspeccion_tipo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `stop_historial` (`20261018180000_stop_e_inspecciones`): stop_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `stop_item` (`20261018180000_stop_e_inspecciones`): stop_item_created_by_fkey → identidad.usuario (P), stop_item_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `stop_subcategoria` (`20261018180000_stop_e_inspecciones`): stop_subcategoria_created_by_fkey → identidad.usuario (P), stop_subcategoria_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `stop_tarjeta` (`20261018180000_stop_e_inspecciones`): stop_tarjeta_observador_fkey → identidad.usuario (P), stop_tarjeta_observado_fkey → identidad.usuario (P), stop_tarjeta_campo_fkey → catalogos.campo (P), stop_tarjeta_operadora_fkey → catalogos.cliente (P), stop_tarjeta_foto_fkey → archivos.archivo (P), stop_tarjeta_atendido_por_fkey → identidad.usuario (P), stop_tarjeta_cerrado_por_fkey → identidad.usuario (P), stop_tarjeta_created_by_fkey → identidad.usuario (P), stop_tarjeta_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ticket_operador` (`20261020110000_ticket_operadores`): ticket_operador_usuario_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho` (`20261024100000_desechos_registro`): desecho_pozo_fkey → catalogos.pozo (P), desecho_created_by_fkey → identidad.usuario (P), desecho_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_caracteristica` (`20261024100000_desechos_registro`): desecho_caracteristica_created_by_fkey → identidad.usuario (P), desecho_caracteristica_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_contenedor` (`20261024100000_desechos_registro`): desecho_contenedor_created_by_fkey → identidad.usuario (P), desecho_contenedor_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_estado` (`20261024100000_desechos_registro`): desecho_estado_created_by_fkey → identidad.usuario (P), desecho_estado_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_historial` (`20261024100000_desechos_registro`): desecho_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_item` (`20261024100000_desechos_registro`): desecho_item_created_by_fkey → identidad.usuario (P), desecho_item_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_firma` (`20261024101000_desechos_manifiesto`): desecho_firma_registrado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_manifiesto` (`20261024101000_desechos_manifiesto`): desecho_manifiesto_cliente_fkey → catalogos.cliente (P), desecho_manifiesto_created_by_fkey → identidad.usuario (P), desecho_manifiesto_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_documento` (`20261024103000_desechos_documentos_y_certificado`): desecho_documento_archivo_fkey → archivos.archivo (P), desecho_documento_created_by_fkey → identidad.usuario (P), desecho_documento_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `desecho_aviso` (`20261024105000_desechos_avisos`): desecho_aviso_emitido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame` (`20261024110000_derrames_registro`): derrame_activado_por_fkey → identidad.usuario (P), derrame_created_by_fkey → identidad.usuario (P), derrame_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_banda_volumen` (`20261024110000_derrames_registro`): derrame_banda_volumen_created_by_fkey → identidad.usuario (P), derrame_banda_volumen_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_historial` (`20261024110000_derrames_registro`): derrame_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_ubicacion` (`20261024110000_derrames_registro`): derrame_ubicacion_created_by_fkey → identidad.usuario (P), derrame_ubicacion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion` (`20261024110000_investigacion_nucleo`): investigacion_lider_fkey → identidad.usuario (P), investigacion_created_by_fkey → identidad.usuario (P), investigacion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_historial` (`20261024110000_investigacion_nucleo`): investigacion_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_resultado` (`20261024110000_investigacion_nucleo`): investigacion_resultado_created_by_fkey → identidad.usuario (P), investigacion_resultado_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame` (`20261024111000_derrames_contencion`): derrame_contenido_por_fkey → identidad.usuario (P), derrame_volumen_confirmado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_checklist_confirmacion` (`20261024111000_derrames_contencion`): derrame_checklist_confirmacion_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_checklist_item` (`20261024111000_derrames_contencion`): derrame_checklist_item_created_by_fkey → identidad.usuario (P), derrame_checklist_item_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame_volumen_historial` (`20261024111000_derrames_contencion`): derrame_volumen_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_detalle` (`20261024111000_investigacion_formato_de_campo`): investigacion_detalle_created_by_fkey → identidad.usuario (P), investigacion_detalle_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_entorno_factor` (`20261024111000_investigacion_formato_de_campo`): investigacion_entorno_factor_created_by_fkey → identidad.usuario (P), investigacion_entorno_factor_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_equipo` (`20261024111000_investigacion_formato_de_campo`): investigacion_equipo_usuario_fkey → identidad.usuario (P), investigacion_equipo_created_by_fkey → identidad.usuario (P), investigacion_equipo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_testigo` (`20261024111000_investigacion_formato_de_campo`): investigacion_testigo_created_by_fkey → identidad.usuario (P), investigacion_testigo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_trabajador` (`20261024111000_investigacion_formato_de_campo`): investigacion_trabajador_usuario_fkey → identidad.usuario (P), investigacion_trabajador_created_by_fkey → identidad.usuario (P), investigacion_trabajador_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `derrame` (`20261024112000_derrames_mae_y_cierre`): derrame_notificado_mae_por_fkey → identidad.usuario (P), derrame_cerrado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_causa` (`20261024114000_investigacion_causas`): investigacion_causa_created_by_fkey → identidad.usuario (P), investigacion_causa_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_ishikawa_causa` (`20261024114000_investigacion_causas`): investigacion_ishikawa_causa_created_by_fkey → identidad.usuario (P), investigacion_ishikawa_causa_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_porque` (`20261024114000_investigacion_causas`): investigacion_porque_created_by_fkey → identidad.usuario (P), investigacion_porque_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `ishikawa_categoria` (`20261024114000_investigacion_causas`): ishikawa_categoria_created_by_fkey → identidad.usuario (P), ishikawa_categoria_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia` (`20261024114530_emergencias_registro`): emergencia_activado_por_fkey → identidad.usuario (P), emergencia_created_by_fkey → identidad.usuario (P), emergencia_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_historial` (`20261024114530_emergencias_registro`): emergencia_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_linea` (`20261024114530_emergencias_registro`): emergencia_linea_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_tipo` (`20261024114530_emergencias_registro`): emergencia_tipo_created_by_fkey → identidad.usuario (P), emergencia_tipo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_accion` (`20261024115000_investigacion_acciones`): investigacion_accion_responsable_fkey → identidad.usuario (P), investigacion_accion_implementada_por_fkey → identidad.usuario (P), investigacion_accion_verificada_por_fkey → identidad.usuario (P), investigacion_accion_cancelada_por_fkey → identidad.usuario (P), investigacion_accion_created_by_fkey → identidad.usuario (P), investigacion_accion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_accion_control` (`20261024115000_investigacion_acciones`): investigacion_accion_control_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion_accion_historial` (`20261024115000_investigacion_acciones`): investigacion_accion_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_nivel_declarado_por_fkey → identidad.usuario (P), emergencia_conteo_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_conteo_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_conteo_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_nivel_historial` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_nivel_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_notificacion` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_notificacion_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_paso_notificacion` (`20261024115530_emergencias_nivel_conteo_cascada`): emergencia_paso_notificacion_created_by_fkey → identidad.usuario (P), emergencia_paso_notificacion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `investigacion` (`20261024116000_investigacion_cierre`): investigacion_revision_enviada_por_fkey → identidad.usuario (P), investigacion_cerrada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_hospital` (`20261024116530_emergencias_heridos_medevac`): emergencia_hospital_created_by_fkey → identidad.usuario (P), emergencia_hospital_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `herido` (`20261024116530_emergencias_heridos_medevac`): herido_medevac_por_fkey → identidad.usuario (P), herido_hospital_notificado_por_fkey → identidad.usuario (P), herido_transferido_por_fkey → identidad.usuario (P), herido_created_by_fkey → identidad.usuario (P), herido_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `herido_signos_vitales` (`20261024116530_emergencias_heridos_medevac`): herido_signos_vitales_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `herido_triage_historial` (`20261024116530_emergencias_heridos_medevac`): herido_triage_historial_actor_fkey → identidad.usuario (P)
+- **FK entre schemas** en `requisito_legal` (`20261024117000_requisitos_legales`): requisito_legal_archivo_fkey → archivos.archivo (P), requisito_legal_reemplazado_por_fkey → identidad.usuario (P), requisito_legal_created_by_fkey → identidad.usuario (P), requisito_legal_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `requisito_legal_tipo` (`20261024117000_requisitos_legales`): requisito_legal_tipo_created_by_fkey → identidad.usuario (P), requisito_legal_tipo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `frecuencia_seguimiento` (`20261024118000_objetivos_ambientales`): frecuencia_seguimiento_created_by_fkey → identidad.usuario (P), frecuencia_seguimiento_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `objetivo_ambiental` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_cerrado_por_fkey → identidad.usuario (P), objetivo_ambiental_created_by_fkey → identidad.usuario (P), objetivo_ambiental_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `objetivo_ambiental_accion` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_accion_responsable_fkey → identidad.usuario (P), objetivo_ambiental_accion_created_by_fkey → identidad.usuario (P), objetivo_ambiental_accion_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `objetivo_ambiental_seguimiento` (`20261024118000_objetivos_ambientales`): objetivo_ambiental_seguimiento_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia` (`20261024118530_emergencias_flash_y_cierre`): emergencia_controlada_por_fkey → identidad.usuario (P), emergencia_cerrada_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `emergencia_reporte_flash` (`20261024118530_emergencias_flash_y_cierre`): emergencia_reporte_flash_emitido_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `aspecto_ambiental` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_responsable_fkey → identidad.usuario (P), aspecto_ambiental_seg_responsable_fkey → identidad.usuario (P), aspecto_ambiental_baja_por_fkey → identidad.usuario (P), aspecto_ambiental_created_by_fkey → identidad.usuario (P), aspecto_ambiental_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `aspecto_ambiental_seguimiento` (`20261024119000_aspectos_ambientales`): aspecto_ambiental_seguimiento_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `aspecto_etapa_ciclo_vida` (`20261024119000_aspectos_ambientales`): aspecto_etapa_ciclo_vida_created_by_fkey → identidad.usuario (P), aspecto_etapa_ciclo_vida_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `aspecto_factor_ambiental` (`20261024119000_aspectos_ambientales`): aspecto_factor_ambiental_created_by_fkey → identidad.usuario (P), aspecto_factor_ambiental_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `equipo` (`20261026121000_equipo_de_inspeccion`): equipo_created_by_fkey → identidad.usuario (P), equipo_updated_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `kpi_meta` (`20261026122000_kpi_indicador_y_meta`): kpi_meta_created_by_fkey → identidad.usuario (P)
+- **FK entre schemas** en `documento_pedido` (`20261112110000_documento_pedido_revision`): documento_pedido_revisado_por_fkey → identidad.usuario (P)
+- **FK entre schemas** en `documento_pedido_revision` (`20261112110000_documento_pedido_revision`): documento_pedido_revision_actor_fkey → identidad.usuario (P)
+
+## Notas
+
+- Los CHECK sin nombre explícito aparecen como `(sin nombre N)`; PostgreSQL les asigna `<tabla>_<columna>_check`.
+- (P) en un índice: Prisma propone borrarlo (índices parciales o de expresión, p. ej. `*_trgm_idx`).
+- Las funciones son las de los triggers y validaciones; los triggers están en la misma migración que su función salvo que se indique otra.
+- Límites: el análisis es textual sobre los `migration.sql`; no ve objetos creados dentro de bloques `DO` ni por SQL dinámico.

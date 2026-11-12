@@ -7,7 +7,7 @@ adaptados según `documentacion/database/PROPUESTA-DESARROLLO-F0-F1.md` del repo
 ## Estructura
 
 ```
-apps/      gateway · plataforma  (comercial, operaciones y qhse se agregan en sus fases)
+apps/      gateway · plataforma · comercial · operaciones · qhse (NestJS)  y  firmas-ocr (Python, fuera de Nx)
 libs/      shared/* y <contenedor>/<modulo>/ (controllers, services, dto, repositories, prisma, index.ts)
 infra/     docker-compose y SQL de inicialización (schemas, usuarios, privilegios)
 ```
@@ -44,21 +44,43 @@ con `dyn_migrator` directo contra Postgres.
 npm install
 cp infra/.env.example infra/.env && npm run infra:up
 npm run dev:setup          # llaves JWT RS256 de desarrollo + apps/*/.env (no se versionan)
-npm run db:migrate:identidad   # aplica las migraciones del módulo (como dyn_migrator, schema identidad)
+npm run db:migrate:todo        # aplica las migraciones de TODOS los módulos en orden global (ver «Migraciones»)
 npm run db:seed:identidad      # 17 roles + superadmin (SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD de apps/plataforma/.env)
-npm run db:migrate-demo:identidad   # TRANSICIÓN: trae los usuarios de la demo (SQLite) con su id viejo como legacy_id
 npx nx serve plataforma    # :3101  (DIAGNOSTICO_ENABLED=true expone /api/plataforma/diagnostico/*)
-npx nx serve gateway       # :3100  (descomente PLATAFORMA_URL en apps/gateway/.env para enrutar a la plataforma)
+npx nx serve gateway       # :3100  (descomente las URL de los contenedores en apps/gateway/.env para enrutar)
 npm run dev:token -- superadmin   # token de prueba para curl / Postman
 ```
 
-El gateway manda a `demo-legacy` (`LEGACY_URL`, el backend actual) todo lo que ningún contenedor nuevo
-atienda; un contenedor sin URL en `apps/gateway/.env` no recibe tráfico. Cada módulo se conmuta
-agregando su URL cuando supera su criterio de salida.
+El gateway enruta por prefijo a cada contenedor (`PLATAFORMA_URL`, `COMERCIAL_URL`, `OPERACIONES_URL`, `QHSE_URL`);
+una ruta que ningún contenedor atiende, o cuyo contenedor no tiene URL en `apps/gateway/.env`, responde 404.
+La demo anterior se retiró el 27/10/2026: ya no hay backend detrás del gateway.
 
 Trazas: Jaeger en http://localhost:16686 (`gateway` y `plataforma`; el span del consumidor de un evento
 cuelga de la traza HTTP que lo originó). Pruebas de integración (necesitan `infra:up`):
 `npm run test:integration`.
+
+## Migraciones
+
+Cada módulo tiene su schema de PostgreSQL, su `schema.prisma` y su historial independiente en
+`libs/<contenedor>/<modulo>/prisma/migrations`. Hay claves foráneas entre schemas (aceptadas a propósito; ver
+`infra/db/init/02-schemas.sql`), por eso **una base nueva no se arma módulo por módulo**: hay que aplicar todo en un único orden
+global por timestamp.
+
+```bash
+npm run db:migrate:plan     # plan ordenado y migraciones pendientes; no cambia nada (--dry-run)
+npm run db:migrate:todo     # aplica las pendientes en orden global (scripts/migrar-todo.mjs --aplicar)
+npm run db:migrate:<modulo> # prisma migrate deploy de un solo módulo (base que ya tiene el resto al día)
+npm run db:verificar        # falla si Prisma propondría borrar algo que vive solo en SQL
+```
+
+`db:migrate:todo` ejecuta el SQL de cada migración y la registra en `<schema>._prisma_migrations` igual que Prisma, así que
+`prisma migrate status` de cada módulo sigue siendo válido. Rechaza bases cuyo nombre no termine en `_test` salvo con
+`--confirmar-desarrollo`; `--url` o `DATABASE_URL_MIGRATOR` eligen el destino (por defecto, la base de desarrollo de `infra/.env`).
+
+Las migraciones se escriben a mano. **Nunca `prisma migrate dev`** ni aplicar un diff generado sin revisar
+[`docs/restricciones-solo-sql.md`](docs/restricciones-solo-sql.md): índices únicos parciales, CHECK, triggers y varias FK entre
+schemas existen solo en SQL y Prisma los borraría. `npm run db:verificar` (solo lee; necesita una base migrada) lo comprueba contra
+`docs/restricciones-solo-sql.permitidas.json`.
 
 ## Comandos
 
