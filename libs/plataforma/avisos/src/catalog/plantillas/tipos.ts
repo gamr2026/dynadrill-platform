@@ -14,7 +14,15 @@ export interface PlantillaDef {
   /** A quién se envía: evento y rol. */
   evento: string;
   rol: string;
+  /**
+   * Si se indica, el rol de quien recibe sale del campo `data.<rolDesdeCampo>` del evento (y `rol` es `ROL_DEL_EVENTO`); si el evento
+   * trae `asignados`, el aviso es para esas cuentas.
+   */
+  rolDesdeCampo?: string;
 }
+
+/** Marca de `rol` en las reglas cuyo rol sale de un campo del evento. */
+export const ROL_DEL_EVENTO = '(del evento)';
 
 export const FILA = (etiqueta: string, valor: string) =>
   `<tr><td style="padding:4px 12px 4px 0;color:#5c5870">${etiqueta}</td><td style="padding:4px 0"><strong>{{${valor}}}</strong></td></tr>`;

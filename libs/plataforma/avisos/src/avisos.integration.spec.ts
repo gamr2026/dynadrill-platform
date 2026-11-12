@@ -21,6 +21,7 @@ import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { avisosEnvSchema } from './avisos.config';
 import { AvisosModule } from './avisos.module';
+import { sembrarPlantillas } from './catalog/sembrar-plantillas';
 import { EventosConAvisoConsumer } from './consumers/eventos-con-aviso.consumer';
 import { CorreoSeguroService } from './mail/correo-seguro.service';
 import { AvisosService } from './services/avisos.service';
@@ -82,19 +83,35 @@ const OTRO_OPERADOR: Destinatario = {
   cargo: 'Operador',
   rolNombre: 'Operador',
 };
+const HSE_UNO: Destinatario = {
+  id: uuidv7(),
+  nombre: 'Hugo Gerente HSE',
+  email: 'hugo@dynadrill.test',
+  cargo: 'Gerente HSE',
+  rolNombre: 'Gerente HSE',
+};
+const HSE_DOS: Destinatario = {
+  id: uuidv7(),
+  nombre: 'Helena Gerente HSE',
+  email: 'helena@dynadrill.test',
+  cargo: 'Gerente HSE',
+  rolNombre: 'Gerente HSE',
+};
 const personas: {
   jefe_base: Destinatario[];
   supervisor: Destinatario[];
   operador: Destinatario[];
+  gerente_hse: Destinatario[];
 } = {
   jefe_base: [CESAR, OTRO],
   supervisor: [SUPERVISORA],
   operador: [OPERADOR, OTRO_OPERADOR],
+  gerente_hse: [HSE_UNO, HSE_DOS],
 };
 
 /** Cuentas reales: el aviso y la bitácora de correos apuntan a la cuenta con FK a identidad. */
 const MAESTROS: MaestrosDePrueba = {
-  usuarios: [CESAR, OTRO, SUPERVISORA, OPERADOR, OTRO_OPERADOR].map((d) => ({
+  usuarios: [CESAR, OTRO, SUPERVISORA, OPERADOR, OTRO_OPERADOR, HSE_UNO, HSE_DOS].map((d) => ({
     id: d.id,
     nombre: d.nombre,
     rol:
@@ -102,7 +119,9 @@ const MAESTROS: MaestrosDePrueba = {
         ? 'supervisor'
         : d === OPERADOR || d === OTRO_OPERADOR
           ? 'operador'
-          : 'jefe_base',
+          : d === HSE_UNO || d === HSE_DOS
+            ? 'gerente_hse'
+            : 'jefe_base',
   })),
 };
 
@@ -176,6 +195,7 @@ run('avisos: campanita y correo (base de datos real)', () => {
     personas.jefe_base = [CESAR, OTRO];
     personas.supervisor = [SUPERVISORA];
     personas.operador = [OPERADOR, OTRO_OPERADOR];
+    personas.gerente_hse = [HSE_UNO, HSE_DOS];
   });
 
   beforeAll(async () => {
@@ -223,6 +243,8 @@ run('avisos: campanita y correo (base de datos real)', () => {
     await app.init();
     prisma = app.get(PrismaService);
     consumer = app.get(EventosConAvisoConsumer);
+    // las reglas nuevas llegan a una base ya sembrada con el seed idempotente
+    await sembrarPlantillas(prisma);
   });
 
   afterAll(async () => {
@@ -363,6 +385,152 @@ run('avisos: campanita y correo (base de datos real)', () => {
     expect(salida.enviados[0].html).toContain('Oscar Operador');
     expect(salida.enviados[0].html).toContain('Revisión de reportes de salida');
     await admin.query('DELETE FROM avisos.aviso WHERE usuario_id = $1', [SUPERVISORA.id]);
+  });
+
+  const requisitoVencido = (extra: Record<string, unknown>) =>
+    ticketCreado(
+      {
+        requisito: 'Permiso de trabajo vigente',
+        requisitoCodigo: 'permiso_trabajo',
+        para: 'GSI6538',
+        dia: '12/11/2026',
+        numero: 3,
+        ...extra,
+      },
+      'operaciones.pumping.requisito_vencido',
+    );
+  const limpiarAvisos = (ids: string[]) =>
+    admin.query('DELETE FROM avisos.aviso WHERE usuario_id = ANY($1::uuid[])', [ids]);
+
+  it('requisito vencido de un rol ajeno al equipo (asignados vacío): avisa a todas las cuentas con ese rol y a nadie más', async () => {
+    const e = requisitoVencido({ rolResponsable: 'gerente_hse', asignados: [] });
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId).sort()).toEqual([HSE_UNO.id, HSE_DOS.id].sort());
+    expect(avisos[0].titulo).toBe('Requisito vencido: Permiso de trabajo vigente');
+    expect(avisos[0].detalle).toContain('día 12/11/2026');
+    expect(avisos[0].enlace).toBe('/modulos/operativo/pumping/pedidos/tk-123');
+    expect(salida.enviados).toHaveLength(2);
+    expect(salida.enviados.every((c) => c.html.includes('vencido'))).toBe(true);
+    expect(salida.enviados.some((c) => c.html.includes('Hugo Gerente HSE'))).toBe(true);
+    expect(salida.enviados.some((c) => c.html.includes('Cesar Vinicio'))).toBe(false);
+    await limpiarAvisos([HSE_UNO.id, HSE_DOS.id]);
+  });
+
+  it('requisito vencido con equipo en asignados: avisa exactamente a esas cuentas, aunque el evento nombre un rol', async () => {
+    const e = requisitoVencido({
+      rolResponsable: 'supervisor',
+      asignados: [
+        { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
+        { usuarioId: OPERADOR.id, rolCodigo: 'operador' },
+      ],
+    });
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId).sort()).toEqual([SUPERVISORA.id, OPERADOR.id].sort());
+    expect(salida.enviados).toHaveLength(2);
+    await limpiarAvisos([SUPERVISORA.id, OPERADOR.id]);
+  });
+
+  it('requisito vencido sin asignados ni rol: se descarta sin avisos, sin correos y sin error', async () => {
+    const e = requisitoVencido({ rolResponsable: null, asignados: [] });
+    await expect(consumer.consumir(e)).resolves.toBeUndefined();
+    expect(await prisma.aviso.count({ where: { eventoId: e.id } })).toBe(0);
+    expect(await prisma.correoAviso.count({ where: { eventoId: e.id } })).toBe(0);
+    expect(salida.enviados).toHaveLength(0);
+  });
+
+  it('ticket anulado avisa solo al equipo de asignados, cada cuenta con la plantilla de su rol y el motivo', async () => {
+    const e = ticketCreado(
+      {
+        motivo: 'Cliente canceló el servicio',
+        asignados: [
+          { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
+          { usuarioId: OPERADOR.id, rolCodigo: 'operador' },
+        ],
+      },
+      'operaciones.pumping.ticket_anulado',
+    );
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId).sort()).toEqual([SUPERVISORA.id, OPERADOR.id].sort());
+    expect(avisos[0]).toMatchObject({
+      titulo: 'Ticket anulado: 4531',
+      detalle: 'EP PETROECUADOR · Pozo ESTACION NORTE 2 — Cliente canceló el servicio',
+      tono: 'error',
+    });
+    expect(salida.enviados).toHaveLength(2);
+    expect(salida.enviados.every((c) => c.html.includes('Cliente canceló el servicio'))).toBe(true);
+    expect(salida.enviados.some((c) => c.html.includes('Olga No Elegida'))).toBe(false);
+    await limpiarAvisos([SUPERVISORA.id, OPERADOR.id]);
+  });
+
+  it('responsable asignado de FCR avisa solo a la cuenta del nuevo responsable, con la plantilla de su rol', async () => {
+    const e = ticketCreado(
+      {
+        accion: 'asignar',
+        motivo: 'Sara sale de turno',
+        asignadoPor: 'Sergio Supervisor',
+        asignados: [{ usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' }],
+        desasignados: [{ usuarioId: OPERADOR.id, rolCodigo: 'operador' }],
+      },
+      'operaciones.fcr.responsable_asignado',
+    );
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId)).toEqual([SUPERVISORA.id]);
+    expect(avisos[0]).toMatchObject({
+      titulo: 'Es responsable del ticket 4531',
+      enlace: '/modulos/operativo/fcr/pedidos/tk-123',
+      tono: 'info',
+    });
+    expect(avisos[0].detalle).toContain('asignado por Sergio Supervisor');
+    expect(salida.enviados).toHaveLength(1);
+    await limpiarAvisos([SUPERVISORA.id]);
+  });
+
+  it('responsable asignado de FCR sin asignados (lo hizo el propio actor o se liberó) no genera avisos', async () => {
+    const e = ticketCreado(
+      { accion: 'liberar', asignados: [], desasignados: [] },
+      'operaciones.fcr.responsable_asignado',
+    );
+    await consumer.consumir(e);
+    expect(await prisma.aviso.count({ where: { eventoId: e.id } })).toBe(0);
+    expect(salida.enviados).toHaveLength(0);
+  });
+
+  it('documento de pedido rechazado por QHSE avisa a las cuentas de asignados (quien lo subió y el supervisor), con el motivo', async () => {
+    const e = ticketCreado(
+      {
+        tipoDocumento: 'pt',
+        tipoDocumentoNombre: 'Permiso de Trabajo (PT)',
+        motivo: 'Documento ilegible',
+        asignados: [
+          { usuarioId: HSE_UNO.id, rolCodigo: 'gerente_hse' },
+          { usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' },
+        ],
+      },
+      'qhse.documento_pedido.rechazado',
+    );
+    await consumer.consumir(e);
+    const avisos = await prisma.aviso.findMany({ where: { eventoId: e.id } });
+    expect(avisos.map((a) => a.usuarioId).sort()).toEqual([HSE_UNO.id, SUPERVISORA.id].sort());
+    expect(avisos[0]).toMatchObject({
+      titulo: 'Documento rechazado: Permiso de Trabajo (PT)',
+      enlace: '/dashboard/qhse/documentos',
+      tono: 'error',
+    });
+    expect(avisos[0].detalle).toContain('Documento ilegible');
+    expect(salida.enviados).toHaveLength(2);
+    expect(salida.enviados.every((c) => c.html.includes('documento de reemplazo'))).toBe(true);
+    await limpiarAvisos([HSE_UNO.id, SUPERVISORA.id]);
+  });
+
+  it('documento rechazado sin asignados (solo lo subió y lo rechazó la misma persona) no genera avisos', async () => {
+    const e = ticketCreado({ motivo: 'Mal', asignados: [] }, 'qhse.documento_pedido.rechazado');
+    await consumer.consumir(e);
+    expect(await prisma.aviso.count({ where: { eventoId: e.id } })).toBe(0);
+    expect(salida.enviados).toHaveLength(0);
   });
 
   it('GARANTÍA: todo correo sale únicamente a la dirección de redirección; la de la persona nunca es destinataria', async () => {

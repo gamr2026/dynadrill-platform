@@ -2,7 +2,7 @@ import { PLANTILLAS_QHSE_DERRAMES } from './qhse-derrames';
 import { PLANTILLAS_QHSE_DESECHOS } from './qhse-desechos';
 import { PLANTILLAS_QHSE_EMERGENCIAS } from './qhse-emergencias';
 import { PLANTILLAS_QHSE_VENCIMIENTOS } from './qhse-vencimientos';
-import { FILA, type PlantillaDef } from './tipos';
+import { FILA, ROL_DEL_EVENTO, type PlantillaDef } from './tipos';
 
 const DATOS =
   '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
@@ -140,6 +140,31 @@ const inspeccionRechazada = (rol: 'tecnico_hse' | 'gerente_hse'): PlantillaDef =
 });
 
 /**
+ * QHSE rechazó un documento del pedido: se avisa a quien lo subió y al supervisor del ticket. Una sola regla sirve a ambos (y a cualquier
+ * rol que suba o supervise): el aviso es para las cuentas de `asignados`; si el evento viene sin ellas se descarta.
+ */
+const documentoRechazado: PlantillaDef = {
+  codigo: 'qhse_documento_pedido_rechazado',
+  descripcion:
+    'QHSE rechazó un documento de seguridad de un pedido: se avisa a las cuentas de `asignados` (quien lo subió y el supervisor del ticket).',
+  asunto: 'Documento rechazado: {{tipoDocumentoNombre}} — pedido {{pedidoCodigo}}',
+  cuerpoHtml:
+    '<p>Hola {{nombre}},</p>' +
+    '<p>QHSE <strong>rechazó</strong> el documento <strong>{{tipoDocumentoNombre}}</strong> del pedido <strong>{{pedidoCodigo}}</strong> (ticket {{ticketNumero}}).</p>' +
+    '<p><strong>Motivo:</strong> {{motivo}}</p>' +
+    '<p>Debe subir un documento de reemplazo para que el pedido lo tenga como cargado.</p>',
+  cuerpoTexto:
+    'Hola {{nombre}},\n\nQHSE rechazó el documento {{tipoDocumentoNombre}} del pedido {{pedidoCodigo}} (ticket {{ticketNumero}}).\n\nMotivo: {{motivo}}\n\nDebe subir un documento de reemplazo para que el pedido lo tenga como cargado.',
+  tituloAviso: 'Documento rechazado: {{tipoDocumentoNombre}}',
+  detalleAviso: 'Pedido {{pedidoCodigo}} — {{motivo}}. Suba uno de reemplazo.',
+  enlaceAviso: '/dashboard/qhse/documentos',
+  tono: 'error',
+  evento: 'qhse.documento_pedido.rechazado',
+  rol: ROL_DEL_EVENTO,
+  rolDesdeCampo: 'rolDestino',
+};
+
+/**
  * Plantillas del módulo QHSE. Cada regla liga un evento y un rol con el texto que ese cargo debe leer; los demás subdominios de QHSE
  * agregan aquí las suyas (SWA, PTW, documentos por vencer...).
  */
@@ -148,6 +173,7 @@ export const PLANTILLAS_QHSE: PlantillaDef[] = [
   solicitudesDeEpi('gerente_hse'),
   ptwAprobadoSupervisor,
   swaActivada('supervisor'),
+  documentoRechazado,
   swaActivada('tecnico_hse'),
   swaActivada('gerente_hse'),
   stopConHallazgos,

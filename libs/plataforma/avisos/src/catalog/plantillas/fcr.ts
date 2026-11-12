@@ -1,4 +1,4 @@
-import { FILA, type PlantillaDef } from './tipos';
+import { FILA, ROL_DEL_EVENTO, type PlantillaDef } from './tipos';
 
 const DATOS_ASIGNACION =
   '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
@@ -166,4 +166,71 @@ export const PLANTILLAS_FCR: PlantillaDef[] = [
     evento: 'operaciones.fcr.inspeccion_rechazada',
     rol: 'operador',
   },
+  {
+    codigo: 'fcr_requisito_vencido',
+    descripcion:
+      'Un requisito de un ticket de FCR venció sin cumplirse: se avisa a las cuentas de `asignados` o, si viene vacío (p. ej. QHSE), a todas las cuentas activas con el rol responsable del requisito.',
+    asunto: 'Requisito vencido: {{requisitoNombre}} — Ticket {{ticketNumero}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>El requisito <strong>{{requisitoNombre}}</strong> del siguiente ticket de FCR está <strong>vencido</strong> y sigue sin cumplirse:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Requisito', 'requisitoNombre') +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Para', 'para') +
+      FILA('Días que faltan', 'diasFaltantes') +
+      '</table>' +
+      '<p>Cúmplalo cuanto antes desde el ticket: mientras esté vencido puede impedir que el servicio avance.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nEl requisito {{requisitoNombre}} del siguiente ticket de FCR está vencido y sigue sin cumplirse:\n\n' +
+      'Requisito: {{requisitoNombre}}\nTicket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nPara: {{para}}\nDías que faltan: {{diasFaltantes}}\n\n' +
+      'Cúmplalo cuanto antes desde el ticket: mientras esté vencido puede impedir que el servicio avance.',
+    tituloAviso: 'Requisito vencido: {{requisitoNombre}}',
+    detalleAviso:
+      'Ticket {{ticketNumero}} · {{cliente}} · Pozo {{pozo}} — faltan: {{diasFaltantes}}',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'error',
+    evento: 'operaciones.fcr.requisito_vencido',
+    rol: ROL_DEL_EVENTO,
+    rolDesdeCampo: 'rolResponsable',
+  },
+  ...(['supervisor', 'operador'] as const).map((rol): PlantillaDef => ({
+    codigo: `fcr_ticket_anulado_${rol}`,
+    descripcion: `Un ticket de FCR fue anulado: se avisa a quien estaba asignado como ${rol} (solo a su cuenta).`,
+    asunto: 'Ticket anulado: {{ticketNumero}} — {{pedidoCodigo}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>El ticket <strong>{{ticketNumero}}</strong> (pedido {{pedidoCodigo}}) fue <strong>anulado</strong>. Queda libre de este servicio.</p>' +
+      '<p><strong>Motivo:</strong> {{motivo}}</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nEl ticket {{ticketNumero}} (pedido {{pedidoCodigo}}) fue anulado. Queda libre de este servicio.\n\nMotivo: {{motivo}}',
+    tituloAviso: 'Ticket anulado: {{ticketNumero}}',
+    detalleAviso: 'Pedido {{pedidoCodigo}} — {{motivo}}',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'error',
+    evento: 'operaciones.fcr.ticket_anulado',
+    rol,
+  })),
+  ...(['supervisor', 'supervisor_operaciones_fcr'] as const).map((rol): PlantillaDef => ({
+    codigo: `fcr_responsable_asignado_${rol}`,
+    descripcion: `Se asignó a un ${rol} como responsable de un ticket de FCR (solo a la cuenta del nuevo responsable, si no se lo asignó él mismo).`,
+    asunto: 'Es el responsable del ticket {{ticketNumero}} — {{pedidoCodigo}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{asignadoPor}} lo asignó como <strong>responsable</strong> del ticket <strong>{{ticketNumero}}</strong> (pedido {{pedidoCodigo}}).</p>' +
+      '<p><strong>Motivo:</strong> {{motivo}}</p>' +
+      '<p>El ticket aparece ahora en su bandeja.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{asignadoPor}} lo asignó como responsable del ticket {{ticketNumero}} (pedido {{pedidoCodigo}}).\n\n' +
+      'Motivo: {{motivo}}\n\nEl ticket aparece ahora en su bandeja.',
+    tituloAviso: 'Es responsable del ticket {{ticketNumero}}',
+    detalleAviso: 'Pedido {{pedidoCodigo}} — asignado por {{asignadoPor}}',
+    enlaceAviso: '/modulos/operativo/fcr/pedidos/{{ticketId}}',
+    tono: 'info',
+    evento: 'operaciones.fcr.responsable_asignado',
+    rol,
+  })),
 ];

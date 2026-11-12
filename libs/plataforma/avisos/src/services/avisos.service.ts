@@ -14,6 +14,8 @@ const MAX_AVISOS = 50;
  * trae las cuentas elegidas, a esas cuentas) le crea el
  * aviso de la campanita y le manda el correo (que en pruebas llega solo a la dirección de redirección). El texto sale de la
  * plantilla de la regla, con los datos del evento y los de la persona (nombre y cargo).
+ * Una regla con `rolDesdeCampo` no tiene un rol fijo: el aviso es para las cuentas de `asignados` si el evento las trae y, si no, para las
+ * cuentas activas con el rol que dice `data.<rolDesdeCampo>`; sin ninguna de las dos, el evento se descarta con una línea de log.
  */
 @Injectable()
 export class AvisosService {
@@ -47,7 +49,23 @@ export class AvisosService {
 
     for (const regla of reglas) {
       let personas: Destinatario[];
-      if (asignados) {
+      let rolDeLaRegla = regla.rolCodigo;
+      if (regla.rolDesdeCampo) {
+        const ids = (asignados ?? []).filter((a) => a.usuarioId).map((a) => a.usuarioId as string);
+        const valor = (event.data as Record<string, unknown> | null)?.[regla.rolDesdeCampo];
+        const rol = typeof valor === 'string' ? valor.trim() : '';
+        if (ids.length) {
+          personas = await this.destinatarios.activosPorIds(ids);
+        } else if (rol) {
+          rolDeLaRegla = rol;
+          personas = await this.destinatarios.activosPorRol(rol);
+        } else {
+          this.logger.warn(
+            `${event.type}: sin asignados ni "${regla.rolDesdeCampo}" en el evento ${event.id}; no hay a quién avisar`,
+          );
+          continue;
+        }
+      } else if (asignados) {
         const ids = asignados
           .filter((a) => a.rolCodigo === regla.rolCodigo && a.usuarioId)
           .map((a) => a.usuarioId as string);
@@ -63,8 +81,8 @@ export class AvisosService {
         const vars: Variables = {
           ...base,
           nombre: p?.nombre ?? '(sin destinatario)',
-          cargo: p?.cargo ?? regla.rolCodigo,
-          rol: p?.rolNombre ?? regla.rolCodigo,
+          cargo: p?.cargo ?? rolDeLaRegla,
+          rol: p?.rolNombre ?? rolDeLaRegla,
         };
         const pl = regla.plantilla;
         const enlace = pl.enlaceAviso ? renderizar(pl.enlaceAviso, vars) : null;

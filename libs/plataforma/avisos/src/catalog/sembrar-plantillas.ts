@@ -37,7 +37,13 @@ export async function sembrarPlantillas(
     });
     if (!regla) {
       await db.reglaAviso.create({
-        data: { id: uuidv7(), eventoTipo: p.evento, rolCodigo: p.rol, plantillaId: pl.id },
+        data: {
+          id: uuidv7(),
+          eventoTipo: p.evento,
+          rolCodigo: p.rol,
+          rolDesdeCampo: p.rolDesdeCampo ?? null,
+          plantillaId: pl.id,
+        },
       });
       reglas++;
     }

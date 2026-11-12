@@ -66,6 +66,8 @@ model ReglaAviso {
   id         String    @id @db.Uuid
   eventoTipo String    @map("evento_tipo")
   rolCodigo  String    @map("rol_codigo")
+  /// Si no es nulo, el rol de quien recibe sale del campo `data.<rolDesdeCampo>` del evento (`rolCodigo` queda como marca).
+  rolDesdeCampo String? @map("rol_desde_campo")
   plantillaId String   @map("plantilla_id") @db.Uuid
   plantilla  Plantilla @relation(fields: [plantillaId], references: [id])
   activa     Boolean   @default(true)

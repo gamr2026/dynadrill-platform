@@ -1,4 +1,4 @@
-import { FILA, type PlantillaDef } from './tipos';
+import { FILA, ROL_DEL_EVENTO, type PlantillaDef } from './tipos';
 
 const DATOS_ASIGNACION =
   '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
@@ -259,5 +259,73 @@ export const PLANTILLAS_PUMPING: PlantillaDef[] = [
     tono: 'warning',
     evento: 'operaciones.pumping.jornada_sin_cerrar',
     rol: 'operador',
+  },
+  {
+    codigo: 'pumping_requisito_vencido',
+    descripcion:
+      'Un requisito de un ticket de Pumping venció sin cumplirse: se avisa a las cuentas de `asignados` o, si viene vacío (p. ej. QHSE), a todas las cuentas activas con el rol responsable del requisito.',
+    asunto: 'Requisito vencido: {{requisito}} — Ticket {{ticketNumero}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>El requisito <strong>{{requisito}}</strong> del siguiente ticket de Pumping está <strong>vencido</strong> y sigue sin cumplirse:</p>' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" style="font-size:14px;margin:8px 0 16px">' +
+      FILA('Requisito', 'requisito') +
+      FILA('Ticket', 'ticketNumero') +
+      FILA('Pedido', 'pedidoCodigo') +
+      FILA('Cliente', 'cliente') +
+      FILA('Pozo', 'pozo') +
+      FILA('Para', 'para') +
+      FILA('Día', 'dia') +
+      FILA('Día del servicio', 'numero') +
+      '</table>' +
+      '<p>Cúmplalo cuanto antes desde el ticket: mientras esté vencido puede impedir que el servicio avance.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nEl requisito {{requisito}} del siguiente ticket de Pumping está vencido y sigue sin cumplirse:\n\n' +
+      'Requisito: {{requisito}}\nTicket: {{ticketNumero}}\nPedido: {{pedidoCodigo}}\nCliente: {{cliente}}\nPozo: {{pozo}}\nPara: {{para}}\nDía: {{dia}}\nDía del servicio: {{numero}}\n\n' +
+      'Cúmplalo cuanto antes desde el ticket: mientras esté vencido puede impedir que el servicio avance.',
+    tituloAviso: 'Requisito vencido: {{requisito}}',
+    detalleAviso: 'Ticket {{ticketNumero}} · {{cliente}} · Pozo {{pozo}} — día {{dia}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'error',
+    evento: 'operaciones.pumping.requisito_vencido',
+    rol: ROL_DEL_EVENTO,
+    rolDesdeCampo: 'rolResponsable',
+  },
+  ...(['supervisor', 'operador', 'conductor'] as const).map((rol): PlantillaDef => ({
+    codigo: `pumping_ticket_anulado_${rol}`,
+    descripcion: `Un ticket de Pumping fue anulado: se avisa a quien estaba asignado como ${rol} (solo a su cuenta).`,
+    asunto: 'Ticket anulado: {{ticketNumero}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>El ticket <strong>{{ticketNumero}}</strong> (pedido {{pedidoCodigo}}, {{cliente}}, pozo {{pozo}}) fue <strong>anulado</strong>. Queda libre de este servicio.</p>' +
+      '<p><strong>Motivo:</strong> {{motivo}}</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\nEl ticket {{ticketNumero}} (pedido {{pedidoCodigo}}, {{cliente}}, pozo {{pozo}}) fue anulado. Queda libre de este servicio.\n\nMotivo: {{motivo}}',
+    tituloAviso: 'Ticket anulado: {{ticketNumero}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} — {{motivo}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'error',
+    evento: 'operaciones.pumping.ticket_anulado',
+    rol,
+  })),
+  {
+    codigo: 'pumping_responsable_asignado_jefe_base',
+    descripcion:
+      'Se asignó a un Jefe de Base como responsable de un ticket de Pumping (solo a la cuenta del nuevo responsable).',
+    asunto: 'Es el responsable del ticket {{ticketNumero}} — {{cliente}}',
+    cuerpoHtml:
+      '<p>Hola {{nombre}},</p>' +
+      '<p>{{asignadoPor}} lo asignó como <strong>responsable</strong> del ticket <strong>{{ticketNumero}}</strong> (pedido {{pedidoCodigo}}, {{cliente}}, pozo {{pozo}}).</p>' +
+      '<p><strong>Motivo:</strong> {{motivo}}</p>' +
+      '<p>El ticket aparece ahora en su bandeja.</p>',
+    cuerpoTexto:
+      'Hola {{nombre}},\n\n{{asignadoPor}} lo asignó como responsable del ticket {{ticketNumero}} (pedido {{pedidoCodigo}}, {{cliente}}, pozo {{pozo}}).\n\n' +
+      'Motivo: {{motivo}}\n\nEl ticket aparece ahora en su bandeja.',
+    tituloAviso: 'Es responsable del ticket {{ticketNumero}}',
+    detalleAviso: '{{cliente}} · Pozo {{pozo}} — asignado por {{asignadoPor}}',
+    enlaceAviso: '/modulos/operativo/pumping/pedidos/{{ticketId}}',
+    tono: 'info',
+    evento: 'operaciones.pumping.responsable_asignado',
+    rol: 'jefe_base',
   },
 ];
