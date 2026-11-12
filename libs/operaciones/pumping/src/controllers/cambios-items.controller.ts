@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -18,6 +18,7 @@ import {
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { CambiosItemsService } from '../services/cambios-items.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 const TIPOS_LINEA = ['servicio', 'material', 'herramienta', 'movilizacion'] as const;
@@ -59,6 +60,7 @@ export class RechazarCambioDto {
 }
 
 /** Cambio de ítems del pedido: lo propone el Operador del equipo y lo aprueba o rechaza el Supervisor del ticket. */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping')
 export class CambiosItemsController {
   constructor(private readonly cambios: CambiosItemsService) {}

@@ -9,6 +9,7 @@ import { currentTraceparent, type AuthUser } from '@dyn/common';
 import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import type { Prisma, TipoLineaItem } from '../generated/client';
+import { PASO_ANULADO, ticketAnulado } from '../guards/ticket-no-anulado.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { nombreDe } from './tickets.service';
 
@@ -250,11 +251,17 @@ export class CambiosItemsService {
           include: { unidadMedida: { select: { nombre: true } } },
         },
         ticket: {
-          select: { pedidoId: true, personas: { select: { usuarioId: true, rol: true } } },
+          select: {
+            pedidoId: true,
+            pasoCodigo: true,
+            personas: { select: { usuarioId: true, rol: true } },
+          },
         },
       },
     });
     if (!s) throw new NotFoundException('La solicitud no existe');
+    // esta ruta usa el id de la solicitud, no el del ticket: la guardia de los tickets anulados no la ve
+    if (s.ticket.pasoCodigo === PASO_ANULADO) throw ticketAnulado();
     if (s.estado !== 'pendiente') {
       throw new ConflictException({
         message: 'Esta solicitud ya fue revisada',

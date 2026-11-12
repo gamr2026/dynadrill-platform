@@ -14,7 +14,7 @@ interface PasoDef {
 const SUPERVISORES = ['supervisor', 'supervisor_pumping'];
 
 /**
- * Los 10 pasos del servicio de Pumping (el mantenimiento salió del flujo: ahora es una tarjeta aparte y no bloquea) y quién actúa en cada uno (de `PUMPING_STEP_ROLE` y `PUMPING_STEP_MACRO` de la
+ * Los 10 pasos del servicio de Pumping, más el terminal `anulado` (el mantenimiento salió del flujo: ahora es una tarjeta aparte y no bloquea) y quién actúa en cada uno (de `PUMPING_STEP_ROLE` y `PUMPING_STEP_MACRO` de la
  * demo). La asignación completa (supervisor, operadores, unidades y químicos) es del Jefe de Base.
  */
 export const PASOS: PasoDef[] = [
@@ -68,6 +68,9 @@ export const PASOS: PasoDef[] = [
     roles: SUPERVISORES,
   },
   { codigo: 'cierre', nombre: 'Cierre', macro: 'aprobado', roles: SUPERVISORES, terminal: true },
+  // Fuera del flujo: a él llega el ticket cuando Comercial anula su pedido, desde cualquier paso que no sea terminal. No tiene transiciones
+  // (la anulación la hace el sistema, no una persona) ni roles (nadie lo atiende).
+  { codigo: 'anulado', nombre: 'Anulado', macro: 'anulado', roles: [], terminal: true },
 ];
 
 /**

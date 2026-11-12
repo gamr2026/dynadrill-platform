@@ -12,10 +12,16 @@ import { TrasladoSalidaController } from './controllers/traslado-salida.controll
 import { PedidosAbiertosConsumer } from './consumers/pedidos-abiertos.consumer';
 import { RequisitosExternosConsumer } from './consumers/requisitos-externos.consumer';
 import { PrismaService } from './prisma/prisma.service';
+import { ResponsableService } from './services/responsable.service';
+import { DisponibilidadService } from './services/disponibilidad.service';
+import { AnulacionService } from './services/anulacion.service';
+import { TicketNoAnuladoGuard } from './guards/ticket-no-anulado.guard';
 import { AsignacionService } from './services/asignacion.service';
 import { IngresoService } from './services/ingreso.service';
 import { AvanceService } from './services/avance.service';
 import { JornadasAvisosService } from './services/jornadas-avisos.service';
+import { RequisitosVencidosService } from './services/requisitos-vencidos.service';
+import { RequisitosController } from './controllers/requisitos.controller';
 import { TareasHoyService } from './services/tareas-hoy.service';
 import { DuracionService } from './services/duracion.service';
 import { JornadasService } from './services/jornadas.service';
@@ -48,11 +54,16 @@ import { TicketsService } from './services/tickets.service';
     DocumentosTicketController,
     ReporteHerramientasController,
     JornadasController,
+    RequisitosController,
   ],
   providers: [
     PrismaService,
     TicketsService,
     AsignacionService,
+    AnulacionService,
+    DisponibilidadService,
+    ResponsableService,
+    TicketNoAnuladoGuard,
     RequisitosService,
     TerminosService,
     IngresoService,
@@ -64,6 +75,7 @@ import { TicketsService } from './services/tickets.service';
     JornadasService,
     AvanceService,
     JornadasAvisosService,
+    RequisitosVencidosService,
     TareasHoyService,
     DuracionService,
     DuracionResultadoConsumer,

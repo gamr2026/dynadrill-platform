@@ -30,8 +30,12 @@ import { RequisitosExternosConsumer } from './consumers/requisitos-externos.cons
 import { hashTexto } from './catalog/sembrar-traslado-salida';
 import { PumpingModule } from './pumping.module';
 import { AsignacionService } from './services/asignacion.service';
+import { DisponibilidadService } from './services/disponibilidad.service';
 import { JornadasAvisosService } from './services/jornadas-avisos.service';
 import { JornadasService } from './services/jornadas.service';
+import { QuimicosService } from './services/quimicos.service';
+import { RequisitosService } from './services/requisitos.service';
+import { RequisitosVencidosService } from './services/requisitos-vencidos.service';
 import { PrismaService } from './prisma/prisma.service';
 import { idsDeUnidades } from './testing/unidades';
 import { quitarMaestros, sembrarMaestros, type MaestrosDePrueba } from './testing/maestros';
@@ -56,6 +60,7 @@ const P = Permission;
 
 /** Cuentas reales de prueba: el ticket guarda quién actuó y a quién se asignó (FK a identidad). */
 const JEFE = uuidv7();
+const JEFE_2 = { id: uuidv7(), nombre: 'Julia Jefa de Base' };
 const OPERADOR_QUE_ACTUA = uuidv7();
 const SUPERVISORA = { id: uuidv7(), nombre: 'Sara Supervisora' };
 const OPERADORES = [
@@ -99,6 +104,7 @@ const BODEGA = { id: uuidv7(), nombre: `BODEGA-PU ${n}` };
 const MAESTROS: MaestrosDePrueba = {
   usuarios: [
     { id: JEFE, nombre: 'Jaime Jefe de Base', rol: 'jefe_base' },
+    { id: JEFE_2.id, nombre: JEFE_2.nombre, rol: 'jefe_base' },
     { id: OPERADOR_QUE_ACTUA, nombre: 'Oscar Operador', rol: 'operador' },
     { id: SUPERVISORA.id, nombre: SUPERVISORA.nombre, rol: 'supervisor' },
     { id: SUPERVISOR_PUMPING.id, nombre: SUPERVISOR_PUMPING.nombre, rol: 'supervisor_pumping' },
@@ -2128,7 +2134,9 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
           usada: 0,
           devuelta: 0,
           pendiente: 10,
-          bodegas: [{ bodegaId: BODEGA.id, bodega: BODEGA.nombre }],
+          bodegas: [
+            { bodegaId: BODEGA.id, bodega: BODEGA.nombre, salida: 10, devuelta: 0, enPoder: 10 },
+          ],
         }),
       ]);
       expect(q.body.documentos).toEqual([
@@ -2290,6 +2298,70 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         )
       ).rows.map((x) => x.dia);
       expect(dias).toEqual(['2026-11-05', '2026-11-06', '2026-11-05']);
+    });
+
+    it('al anularse el pedido, lo que seguía a cargo del ticket vuelve a bodega y el evento dice lo despachado, usado y devuelto', async () => {
+      await preparar();
+      const t = await ticketEnAsignacion();
+      const antes = await stock();
+      await asignar(t, { quimicos: [linea(10)], documentoMezclaId: MEZCLA }).expect(201);
+      await admin.query(
+        'UPDATE pumping.ticket SET paso_codigo = $2, fecha_inicio_servicio = $3, fecha_fin_servicio = $3 WHERE id = $1',
+        [t.id, 'ejecucion_operativa', '2026-11-05'],
+      );
+      await http()
+        .post(`${t.url}/quimicos/consumo`)
+        .set(op1())
+        .send({ articuloId: QUIMICO.id, cantidad: 6 })
+        .expect(201);
+      expect(await stock()).toBe(antes - 10);
+
+      const id = uuidv7();
+      eventos.push(id);
+      const e = {
+        id,
+        type: 'comercial.pedido.anulado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: t.pedidoId },
+        data: { pedidoId: t.pedidoId, codigo: `PED-IT${n}`, motivo: 'Pedido duplicado' },
+        actor: { userId: JEFE, role: 'jefe_base' },
+      } as EventEnvelope;
+      await consumer.consumir(e);
+      await consumer.consumir(e); // repetido: el inbox lo ignora y no devuelve dos veces
+
+      // lo usado se queda usado; lo que sobraba (4) vuelve a la bodega de la que salió
+      expect(await stock()).toBe(antes - 6);
+      const q = await app.get(QuimicosService).detalle(t.id);
+      expect(q.quimicos[0]).toMatchObject({ asignada: 10, usada: 6, devuelta: 4, pendiente: 0 });
+      const evento = (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.ticket_anulado' AND datos->'data'->>'ticketId' = $1",
+          [t.id],
+        )
+      ).rows.map((x) => x.d);
+      expect(evento).toHaveLength(1);
+      expect(evento[0].devolucionPendiente).toBe(false);
+      expect(evento[0].quimicos).toEqual([
+        expect.objectContaining({
+          articuloId: QUIMICO.id,
+          codigo: QUIMICO.codigo,
+          asignada: 10,
+          usada: 6,
+          devuelta: 0,
+          pendiente: 4,
+          devueltaPorAnulacion: 4,
+          devolucionPendiente: 0,
+          bodegas: [
+            expect.objectContaining({
+              bodegaId: BODEGA.id,
+              devueltaPorAnulacion: 4,
+              devolucionPendiente: 0,
+            }),
+          ],
+        }),
+      ]);
     });
   });
 
@@ -5004,6 +5076,339 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       });
     });
 
+    describe('requisitos con plazo: vencimiento, exoneración e historia', () => {
+      const urlReq = (t: { url: string }, id: string) => `${t.url}/requisitos/${id}`;
+      const idDe = async (ticketId: string, codigo: string, fecha: string | null = null) =>
+        (
+          await admin.query(
+            `SELECT id FROM pumping.ticket_requisito WHERE ticket_id = $1 AND requisito_codigo = $2 AND fecha IS NOT DISTINCT FROM $3::date`,
+            [ticketId, codigo, fecha],
+          )
+        ).rows[0].id as string;
+      const fila = async (id: string) =>
+        (
+          await admin.query(
+            `SELECT estado, vence_at, vencido_at, exonerado_at, exonerado_por, motivo FROM pumping.ticket_requisito WHERE id = $1`,
+            [id],
+          )
+        ).rows[0] as {
+          estado: string;
+          vence_at: Date | null;
+          vencido_at: Date | null;
+          exonerado_at: Date | null;
+          exonerado_por: string | null;
+          motivo: string | null;
+        };
+      const historia = async (id: string) =>
+        (
+          await admin.query(
+            `SELECT estado_anterior AS ant, estado_nuevo AS nuevo, vencido, origen, actor_id AS actor, motivo
+               FROM pumping.ticket_requisito_historial WHERE ticket_requisito_id = $1 ORDER BY created_at, ctid`,
+            [id],
+          )
+        ).rows as Array<{
+          ant: string | null;
+          nuevo: string;
+          vencido: boolean;
+          origen: string;
+          actor: string | null;
+          motivo: string | null;
+        }>;
+      const avisosVencido = async (ticketId: string) =>
+        (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.requisito_vencido' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+            [ticketId],
+          )
+        ).rows.map((x) => x.d);
+      const detectar = (ahora: string, t: { id: string }) =>
+        app.get(RequisitosVencidosService).emitir(new Date(ahora), [t.id]);
+
+      it('cada requisito de un día vence al terminar ese día en Ecuador; los del ticket no tienen plazo', async () => {
+        const t = await enEjecucion();
+        const r = await ver(t).expect(200);
+        const dia1 = r.body.jornadas[0].requisitos as Array<Record<string, unknown>>;
+        expect(dia1.length).toBeGreaterThan(0);
+        // el día 05/11 termina a las 00:00 del 06/11 en Ecuador (UTC-5)
+        for (const q of dia1) expect(q['venceAt']).toBe('2026-11-06T05:00:00.000Z');
+        const cm = dia1.find((q) => q['codigo'] === 'company_man_acepto_dia');
+        expect(cm).toMatchObject({
+          estado: 'pendiente',
+          vencido: true, // el día ya pasó en el calendario real
+          vencidoAt: null,
+          rolResponsable: 'supervisor',
+          exonerado: false,
+        });
+        // la documentación de QHSE la responde el Gerente HSE
+        expect(dia1.find((q) => q['codigo'] === 'ptw_dia_aprobado')?.['rolResponsable']).toBe(
+          'gerente_hse',
+        );
+        const delTicket = await admin.query(
+          'SELECT count(*)::int AS n FROM pumping.ticket_requisito WHERE ticket_id = $1 AND fecha IS NULL AND vence_at IS NOT NULL',
+          [t.id],
+        );
+        expect(delTicket.rows[0].n).toBe(0);
+        // el detalle del ticket también trae los campos de plazo de los requisitos del ticket
+        const detalle = await http().get(t.url).set(op1()).expect(200);
+        const terminos = (detalle.body.requisitos as Array<Record<string, unknown>>).find(
+          (q) => q['codigo'] === 'terminos_aceptados',
+        );
+        expect(terminos).toMatchObject({ venceAt: null, vencido: false, exonerado: false });
+        expect(terminos).toHaveProperty('rolResponsable', 'operador');
+      });
+
+      it('al ampliar el servicio, los días nuevos reciben su vencimiento', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        await admin.query(
+          "UPDATE pumping.ticket SET fecha_fin_servicio = '2026-11-08' WHERE id = $1",
+          [t.id],
+        );
+        await ver(t).expect(200);
+        const nuevo = await admin.query(
+          "SELECT DISTINCT vence_at FROM pumping.ticket_requisito WHERE ticket_id = $1 AND fecha = '2026-11-08'",
+          [t.id],
+        );
+        expect(nuevo.rows.map((x) => (x.vence_at as Date).toISOString())).toEqual([
+          '2026-11-09T05:00:00.000Z',
+        ]);
+      });
+
+      it('la revisión marca y avisa una sola vez cada requisito vencido, y lo cumplido tarde conserva la marca', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        const pendientesDia1 = (
+          await admin.query(
+            `SELECT count(*)::int AS n FROM pumping.ticket_requisito WHERE ticket_id = $1 AND fecha = '2026-11-05' AND estado = 'pendiente'`,
+            [t.id],
+          )
+        ).rows[0].n as number;
+        // antes de terminar el día 1 no vence nada
+        expect(await detectar('2026-11-06T04:59:00Z', t)).toEqual({ vencidos: 0 });
+        expect(await detectar('2026-11-06T05:01:00Z', t)).toEqual({ vencidos: pendientesDia1 });
+        expect(await detectar('2026-11-06T05:02:00Z', t)).toEqual({ vencidos: 0 }); // una sola vez
+        const avisos = await avisosVencido(t.id);
+        expect(avisos).toHaveLength(pendientesDia1);
+        const cm = avisos.find((a) => a.requisitoCodigo === 'company_man_acepto_dia');
+        expect(cm).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          requisito: 'El Company Man aceptó trabajar hoy',
+          fecha: DIAS[0],
+          dia: '05/11/2026',
+          numero: 1,
+          venceAt: '2026-11-06T05:00:00.000Z',
+          rolResponsable: 'supervisor',
+          asignados: [{ usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' }],
+        });
+        // el de QHSE viaja con su rol (Gerente HSE) para que Avisos lo enrute por rol: no es del equipo del ticket, `asignados` va vacío
+        const ptw = avisos.find((a) => a.requisitoCodigo === 'ptw_dia_aprobado');
+        expect(ptw.rolResponsable).toBe('gerente_hse');
+        expect(ptw.asignados).toEqual([]);
+        // sin responsable en el catálogo (gerenciamiento de viaje) sigue avisando al equipo del ticket
+        for (const sinRol of avisos.filter((a) => a.rolResponsable === null)) {
+          expect(sinRol.asignados).toEqual(
+            expect.arrayContaining([{ usuarioId: SUPERVISORA.id, rolCodigo: 'supervisor' }]),
+          );
+        }
+        const id = await idDe(t.id, 'company_man_acepto_dia', DIAS[0]);
+        expect((await fila(id)).vencido_at).not.toBeNull();
+        // se cumple tarde: la marca de vencido se conserva y no se vuelve a avisar
+        hoy = DIAS[0]; // la aceptación se marca el mismo día de la jornada
+        await aceptar(t, DIAS[0]).expect(201);
+        expect((await fila(id)).estado).toBe('cumplido');
+        expect((await fila(id)).vencido_at).not.toBeNull();
+        await detectar('2026-11-07T00:00:00Z', t);
+        const delCm = (await avisosVencido(t.id)).filter(
+          (a) => a.requisitoCodigo === 'company_man_acepto_dia',
+        );
+        expect(delCm).toHaveLength(1);
+        // la historia: nació pendiente, venció y se cumplió
+        const h = await historia(id);
+        expect(h.map((x) => [x.ant, x.nuevo, x.vencido, x.origen])).toEqual([
+          [null, 'pendiente', false, 'creacion'],
+          ['pendiente', 'pendiente', true, 'vencimiento'],
+          ['pendiente', 'cumplido', true, 'sistema'],
+        ]);
+        const api = await http()
+          .get(`${urlReq(t, id)}/historial`)
+          .set(op1())
+          .expect(200);
+        expect(api.body).toHaveLength(3);
+        expect(api.body[2]).toMatchObject({ estadoNuevo: 'cumplido', origen: 'sistema' });
+      });
+
+      it('no avisa lo vencido de un día sin operación', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        await sinOp(t, DIAS[0], {
+          motivoId: await motivo(),
+          detalle: 'Lluvia en el primer día',
+        }).expect(201);
+        await detectar('2026-11-06T05:01:00Z', t);
+        expect((await avisosVencido(t.id)).filter((a) => a.fecha === DIAS[0])).toEqual([]);
+      });
+
+      it('se exonera con motivo, no bloquea, no lo recalcula la sincronización y se revierte con su historia', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        const id = await idDe(t.id, 'ptw_dia_aprobado', DIAS[1]);
+        const exonerar = (h: Record<string, string>, cuerpo: object) =>
+          http()
+            .post(`${urlReq(t, id)}/exonerar`)
+            .set(h)
+            .send(cuerpo);
+        const revertir = (h: Record<string, string>, cuerpo: object) =>
+          http()
+            .post(`${urlReq(t, id)}/revertir-exoneracion`)
+            .set(h)
+            .send(cuerpo);
+        // el motivo es obligatorio y solo lo hacen quienes supervisan el ticket
+        await exonerar(jefeBase(), {}).expect(400);
+        await exonerar(jefeBase(), { motivo: ' ' }).expect(400);
+        await exonerar(op1(), { motivo: 'No hace falta' }).expect(403);
+        const ok = await exonerar(jefeBase(), {
+          motivo: 'El cliente no exige PTW este día',
+        }).expect(201);
+        expect(ok.body).toMatchObject({
+          estado: 'exonerado',
+          exonerado: true,
+          motivoExoneracion: 'El cliente no exige PTW este día',
+          exoneradoPor: JEFE,
+          vencido: false,
+        });
+        await exonerar(jefeBase(), { motivo: 'Otra vez' }).expect(409);
+        // la lectura lo muestra exonerado y ya no lo cuenta como pendiente
+        const dia2 = (await ver(t).expect(200)).body.jornadas[1];
+        const q = dia2.requisitos.find((x: { codigo: string }) => x.codigo === 'ptw_dia_aprobado');
+        expect(q).toMatchObject({ estado: 'exonerado', exonerado: true, id });
+        expect(dia2.bloqueos.map((b: { codigo: string }) => b.codigo)).not.toContain(
+          'ptw_dia_aprobado',
+        );
+        // un hecho tardío de QHSE (el PTW del día se aprueba después) no pisa lo exonerado
+        await admin.query(
+          `INSERT INTO pumping.ticket_hecho_qhse (id, ticket_id, tipo, origen_id, desde, hasta, vigente) VALUES ($1, $2, 'ptw_aprobado', $3, $4::date, $4::date, true)`,
+          [uuidv7(), t.id, uuidv7(), DIAS[1]],
+        );
+        await ver(t).expect(200);
+        expect((await fila(id)).estado).toBe('exonerado');
+        await admin.query('DELETE FROM pumping.ticket_hecho_qhse WHERE ticket_id = $1', [t.id]);
+        // la base no admite un estado exonerado sin su marca ni sin motivo
+        const otroDia = await idDe(t.id, 'ptw_dia_aprobado', DIAS[2]);
+        await expect(
+          admin.query(`UPDATE pumping.ticket_requisito SET estado = 'exonerado' WHERE id = $1`, [
+            otroDia,
+          ]),
+        ).rejects.toThrow(/ticket_requisito_exonerado_check/);
+        await expect(
+          admin.query(
+            `UPDATE pumping.ticket_requisito SET estado = 'exonerado', exonerado_at = now() WHERE id = $1`,
+            [otroDia],
+          ),
+        ).rejects.toThrow(/ticket_requisito_exonerado_motivo_check/);
+        // revertir
+        await revertir(op1(), {}).expect(403);
+        const rev = await revertir(jefeBase(), { motivo: 'Sí hace falta' }).expect(201);
+        expect(rev.body).toMatchObject({
+          estado: 'pendiente',
+          exonerado: false,
+          exoneradoPor: null,
+        });
+        await revertir(jefeBase(), {}).expect(409);
+        const h = await historia(id);
+        expect(h.map((x) => [x.ant, x.nuevo, x.origen, x.actor, x.motivo])).toEqual([
+          [null, 'pendiente', 'creacion', null, null],
+          ['pendiente', 'exonerado', 'exoneracion', JEFE, 'El cliente no exige PTW este día'],
+          ['exonerado', 'pendiente', 'reversion_exoneracion', JEFE, 'Sí hace falta'],
+        ]);
+        const api = await http()
+          .get(`${urlReq(t, id)}/historial`)
+          .set(jefeBase())
+          .expect(200);
+        expect(api.body.map((x: { estadoNuevo: string }) => x.estadoNuevo)).toEqual([
+          'pendiente',
+          'exonerado',
+          'pendiente',
+        ]);
+        expect(api.body[1].actorNombre).toBe('Jaime Jefe de Base');
+        // la historia es de ese ticket
+        const otro = await enEjecucion();
+        await http()
+          .get(`${urlReq(otro, id)}/historial`)
+          .set(jefeBase())
+          .expect(404);
+      });
+
+      it('un requisito cumplido no se exonera, y lo exonerado cuenta para abrir el día', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        await aceptar(t, DIAS[1]).expect(201);
+        const cumplido = await idDe(t.id, 'company_man_acepto_dia', DIAS[1]);
+        const r = await http()
+          .post(`${urlReq(t, cumplido)}/exonerar`)
+          .set(jefeBase())
+          .send({ motivo: 'Por si acaso' })
+          .expect(409);
+        expect(JSON.stringify(r.body)).toContain('cumplido');
+        expect((await fila(cumplido)).estado).toBe('cumplido');
+        // se exoneran los requisitos de apertura que faltan: la jornada se abre
+        const pend = await admin.query(
+          `SELECT r.id FROM pumping.ticket_requisito r JOIN pumping.requisito q ON q.codigo = r.requisito_codigo
+            WHERE r.ticket_id = $1 AND r.fecha = $2 AND r.estado = 'pendiente' AND q.momento = 'apertura'`,
+          [t.id, DIAS[1]],
+        );
+        expect(pend.rows.length).toBeGreaterThan(0);
+        for (const { id } of pend.rows) {
+          await http()
+            .post(`${urlReq(t, id)}/exonerar`)
+            .set(jefeBase())
+            .send({ motivo: 'Día de prueba' })
+            .expect(201);
+        }
+        const dia2 = (await ver(t).expect(200)).body.jornadas[1];
+        expect(dia2.estado).toBe('abierta');
+        expect(dia2.pendientes.apertura).toBe(0);
+      });
+
+      it('un aviso tardío no pisa un requisito del ticket exonerado y la historia sigue al borrar los requisitos', async () => {
+        const t = await ticketEnTraslado();
+        const id = await idDe(t.id, 'ptw_primer_dia_abierto');
+        await http()
+          .post(`${urlReq(t, id)}/exonerar`)
+          .set(jefeBase())
+          .send({ motivo: 'Sin PTW para este servicio' })
+          .expect(201);
+        const svc = app.get(RequisitosService);
+        await svc.fijar(prisma, t.id, 'ptw_primer_dia_abierto', 'cumplido', 'evento');
+        await svc.fijar(prisma, t.id, 'ptw_primer_dia_abierto', 'pendiente', 'evento');
+        expect((await fila(id)).estado).toBe('exonerado');
+        const clave = { ticketId: t.id, codigo: 'ptw_primer_dia_abierto' };
+        expect(await svc.marcar(prisma, clave, 'evento')).toBe(0);
+        expect(await svc.reabrir(prisma, clave)).toBe(0);
+        expect((await historia(id)).map((x) => x.nuevo)).toEqual(['pendiente', 'exonerado']);
+        // salir del paso ya no lo exige
+        const pendientes = await svc.pendientes(prisma, t.id, 'traslado_salida');
+        expect(pendientes.map((x) => x.codigo)).not.toContain('ptw_primer_dia_abierto');
+        // borrar los requisitos del ticket (como hace la limpieza) arrastra su historia
+        await admin.query('DELETE FROM pumping.ticket_requisito WHERE ticket_id = $1', [t.id]);
+        const quedan = await admin.query(
+          'SELECT count(*)::int AS n FROM pumping.ticket_requisito_historial WHERE ticket_id = $1',
+          [t.id],
+        );
+        expect(quedan.rows[0].n).toBe(0);
+      });
+
+      it('la aplicación solo puede leer y agregar a la historia', async () => {
+        const r = await admin.query(
+          `SELECT has_table_privilege('app_operaciones', 'pumping.ticket_requisito_historial', 'SELECT') AS s,
+                  has_table_privilege('app_operaciones', 'pumping.ticket_requisito_historial', 'INSERT') AS i,
+                  has_table_privilege('app_operaciones', 'pumping.ticket_requisito_historial', 'UPDATE') AS u,
+                  has_table_privilege('app_operaciones', 'pumping.ticket_requisito_historial', 'DELETE') AS d`,
+        );
+        expect(r.rows[0]).toEqual({ s: true, i: true, u: false, d: false });
+      });
+    });
+
     describe('duración del servicio: el Jefe de Base acorta o amplía', () => {
       const jefeDuracion = () =>
         como('jefe_base', JEFE, 'Jaime Jefe de Base', [
@@ -5420,6 +5825,535 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         );
         expect((await salida(DIAS[1])).status).toBe(409);
       });
+    });
+
+    describe('anulación del ticket cuando se anula su pedido', () => {
+      const anulacion = (
+        pedidoId: string,
+        extra: { motivo?: string; sinActor?: boolean } = {},
+      ): EventEnvelope => {
+        const id = uuidv7();
+        eventos.push(id);
+        return {
+          id,
+          type: 'comercial.pedido.anulado',
+          version: 1,
+          occurredAt: new Date().toISOString(),
+          source: 'comercial',
+          subject: { type: 'pedido', id: pedidoId },
+          data: { pedidoId, codigo: `PED-IT${n}`, motivo: extra.motivo ?? 'El cliente canceló' },
+          ...(extra.sinActor ? {} : { actor: { userId: JEFE, role: 'jefe_base' } }),
+        } as EventEnvelope;
+      };
+      const salidas = async (ticketId: string) =>
+        (
+          await admin.query(
+            "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.ticket_anulado' AND datos->'data'->>'ticketId' = $1",
+            [ticketId],
+          )
+        ).rows.map((x) => x.d);
+
+      it('pasa el ticket a «anulado» con la historia, publica el evento una sola vez y libera a las personas', async () => {
+        const t = await enEjecucion();
+        await ver(t).expect(200);
+        // otro ticket que se cruza en fechas: mientras este siga vivo, su personal figura como ocupado
+        const otro = await ticketEnAsignacion();
+        await admin.query(
+          'UPDATE pumping.ticket SET fecha_inicio_servicio = $2, fecha_fin_servicio = $3 WHERE id = $1',
+          [otro.id, DIAS[0], DIAS[2]],
+        );
+        const ocupadosPor = async () =>
+          (
+            await app
+              .get(AsignacionService)
+              .ocupadasPor(prisma, otro.id, [OP1.id, SUPERVISORA.id, CO1.id])
+          ).filter((o) => o.ticketId === t.id);
+        expect(await ocupadosPor()).toHaveLength(3);
+
+        const e = anulacion(t.pedidoId);
+        await consumer.consumir(e);
+
+        const ticket = await prisma.ticket.findUniqueOrThrow({
+          where: { id: t.id },
+          include: { historial: { orderBy: { createdAt: 'asc' } }, paso: true },
+        });
+        expect(ticket.pasoCodigo).toBe('anulado');
+        expect(ticket.paso).toMatchObject({ macro: 'anulado', terminal: true });
+        const h = ticket.historial[ticket.historial.length - 1];
+        expect(h).toMatchObject({
+          pasoAnterior: 'ejecucion_operativa',
+          pasoNuevo: 'anulado',
+          motivo: 'El cliente canceló',
+          actorId: JEFE,
+          actorRol: 'jefe_base',
+          origen: 'sistema',
+        });
+        const publicados = await salidas(t.id);
+        expect(publicados).toHaveLength(1);
+        expect(publicados[0]).toMatchObject({
+          ticketId: t.id,
+          pedidoId: t.pedidoId,
+          pasoAnterior: 'ejecucion_operativa',
+          motivo: 'El cliente canceló',
+          anuladoPor: JEFE,
+          quimicos: [],
+          devolucionPendiente: false,
+        });
+        expect(publicados[0].asignados).toHaveLength(5);
+        expect(publicados[0].asignados).toContainEqual({
+          usuarioId: SUPERVISORA.id,
+          rolCodigo: 'supervisor',
+        });
+        expect([...publicados[0].unidadesIds].sort()).toEqual(
+          [VEHICULO.unidadId, VEHICULO_2.unidadId].sort(),
+        );
+        // el mismo evento otra vez (inbox) y otro evento del mismo pedido (ya anulado): nada se repite
+        await consumer.consumir(e);
+        await consumer.consumir(anulacion(t.pedidoId, { motivo: 'Otra vez' }));
+        expect(await salidas(t.id)).toHaveLength(1);
+        expect(await prisma.ticketHistorial.count({ where: { ticketId: t.id } })).toBe(
+          ticket.historial.length,
+        );
+        // ya no ocupa a nadie
+        expect(await ocupadosPor()).toEqual([]);
+        // se puede consultar, pero ya no se atiende
+        const d = await http().get(t.url).set(jefe()).expect(200);
+        expect(d.body.paso).toMatchObject({ codigo: 'anulado', macro: 'anulado' });
+        expect(d.body.siguientes).toEqual([]);
+      });
+
+      it('sin motivo ni actor en el evento queda «Pedido anulado en Comercial» y sin persona; un pedido sin ticket o ya cerrado se ignora', async () => {
+        const t = await enEjecucion();
+        const e = anulacion(t.pedidoId, { sinActor: true });
+        delete e.data['motivo'];
+        await consumer.consumir(e);
+        const h = await prisma.ticketHistorial.findFirstOrThrow({
+          where: { ticketId: t.id, pasoNuevo: 'anulado' },
+        });
+        expect(h).toMatchObject({
+          motivo: 'Pedido anulado en Comercial',
+          actorId: null,
+          origen: 'sistema',
+        });
+        // un pedido que no tiene ticket de Pumping no hace nada
+        await consumer.consumir(anulacion(uuidv7()));
+        // un ticket ya cerrado no se anula
+        const cerrado = await enEjecucion();
+        await admin.query("UPDATE pumping.ticket SET paso_codigo = 'cierre' WHERE id = $1", [
+          cerrado.id,
+        ]);
+        await consumer.consumir(anulacion(cerrado.pedidoId));
+        expect(
+          (await prisma.ticket.findUniqueOrThrow({ where: { id: cerrado.id } })).pasoCodigo,
+        ).toBe('cierre');
+        expect(await salidas(cerrado.id)).toEqual([]);
+      });
+
+      it('rechaza con 409 TICKET_ANULADO toda acción de escritura, venga por la ruta del ticket o de su solicitud de cambio', async () => {
+        const t = await enEjecucion();
+        const solicitud = uuidv7();
+        await admin.query(
+          `INSERT INTO pumping.solicitud_cambio_items (id, ticket_id, estado, motivo, solicitado_por)
+           VALUES ($1, $2, 'pendiente', 'Más material', $3)`,
+          [solicitud, t.id, OP1.id],
+        );
+        await consumer.consumir(anulacion(t.pedidoId));
+        const rechazada = (r: { status: number; body: { code?: string } }) => {
+          expect(r.status).toBe(409);
+          expect(r.body.code).toBe('TICKET_ANULADO');
+        };
+        rechazada(await http().post(`${t.url}/avanzar`).set(jefe()).send({ hacia: 'asignacion' }));
+        rechazada(await http().post(`${t.url}/asignar`).set(jefe()).send(cuerpoAsignacion));
+        rechazada(await cerrar(t, DIAS[0]));
+        rechazada(await http().post(`${t.url}/quimicos/consumo`).set(op1()).send({}));
+        rechazada(
+          await http()
+            .post(`${t.url}/cambios-items`)
+            .set(como('operador', OP1.id, OP1.nombre, [P.PUMPING_CAMBIOS_SOLICITAR]))
+            .send({}),
+        );
+        rechazada(await http().post(`${t.url}/reporte-herramientas/completar`).set(op1()));
+        rechazada(
+          await http()
+            .put(`${t.url}/reportes-unidad/${VEHICULO.unidadId}/${DIAS[0]}/salida`)
+            .set(op1())
+            .send({}),
+        );
+        rechazada(
+          await http()
+            .post(`${base}/cambios-items/${solicitud}/aprobar`)
+            .set(como('jefe_base', JEFE, 'Jaime Jefe de Base', [P.PUMPING_CAMBIOS_APROBAR])),
+        );
+        // las lecturas siguen abiertas
+        await http().get(`${t.url}/quimicos`).set(jefe()).expect(200);
+        await ver(t).expect(200);
+      });
+
+      it('las revisiones de jornadas sin cerrar y de requisitos vencidos y «mis tareas de hoy» saltan el ticket anulado', async () => {
+        const vivo = await enEjecucion();
+        const anulado = await enEjecucion();
+        await ver(vivo).expect(200);
+        await ver(anulado).expect(200); // crea las jornadas y los requisitos de cada día
+        await consumer.consumir(anulacion(anulado.pedidoId));
+
+        // los días 1 y 2 ya pasaron sin cerrarse: al vivo se le avisa; al anulado, no
+        expect(await app.get(JornadasAvisosService).emitir(DIAS[2], [vivo.id])).toEqual({
+          avisados: 2,
+        });
+        expect(await app.get(JornadasAvisosService).emitir(DIAS[2], [anulado.id])).toEqual({
+          avisados: 0,
+        });
+        // lo pendiente venció hace tiempo: al vivo se le marca; al anulado, no
+        const despues = new Date('2026-12-01T00:00:00Z');
+        expect(
+          (await app.get(RequisitosVencidosService).emitir(despues, [vivo.id])).vencidos,
+        ).toBeGreaterThan(0);
+        expect(await app.get(RequisitosVencidosService).emitir(despues, [anulado.id])).toEqual({
+          vencidos: 0,
+        });
+        expect(
+          await prisma.ticketRequisito.count({
+            where: { ticketId: anulado.id, vencidoAt: { not: null } },
+          }),
+        ).toBe(0);
+
+        // un cambio de ítems pendiente del anulado no le pide nada al Jefe de Base
+        await admin.query(
+          `INSERT INTO pumping.solicitud_cambio_items (id, ticket_id, estado, motivo, solicitado_por)
+           VALUES ($1, $2, 'pendiente', 'Más material', $3)`,
+          [uuidv7(), anulado.id, OP1.id],
+        );
+        hoy = DIAS[1];
+        type Bloque = {
+          ticketId: string | null;
+          rol: string;
+          tareas: Array<{ ticketId?: string }>;
+        };
+        const bloques = async (h: ReturnType<typeof op1>) =>
+          (await http().get(`${base}/mis-tareas-hoy`).set(h).expect(200)).body.bloques as Bloque[];
+        const delOperador = await bloques(op1());
+        expect(delOperador.some((b) => b.ticketId === vivo.id)).toBe(true);
+        expect(delOperador.some((b) => b.ticketId === anulado.id)).toBe(false);
+        const delJefe = await bloques(
+          como('jefe_base', JEFE, 'Jaime Jefe de Base', [
+            P.PUMPING_OPERAR,
+            P.PUMPING_JORNADA_CAMBIAR_DURACION,
+          ]),
+        );
+        expect(delJefe.some((b) => b.tareas.some((x) => x.ticketId === anulado.id))).toBe(false);
+      });
+    });
+  });
+
+  describe('Jefe de Base responsable del ticket', () => {
+    const jefe2 = () =>
+      token('jefe_base', JEFE_2.nombre, [P.PUMPING_OPERAR, P.PUMPING_VER], JEFE_2.id);
+    const admin2 = () => token('superadmin', 'Sofía Superadmin', [P.PUMPING_OPERAR], JEFE);
+    const nuevo = async () => {
+      const e = evento();
+      await consumer.consumir(e);
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { pedidoId: e.subject.id } });
+      return { id: t.id, url: `${base}/tickets/${t.id}` };
+    };
+    const bandeja = async (b: string, h: ReturnType<typeof jefe>) =>
+      (
+        (await http().get(`${base}/tickets`).query({ bandeja: b }).set(h).expect(200))
+          .body as Array<{ id: string }>
+      ).map((x) => x.id);
+    const historia = async (ticketId: string) =>
+      prisma.ticketResponsableHistorial.findMany({
+        where: { ticketId },
+        orderBy: { createdAt: 'asc' },
+      });
+    const avisos = async (ticketId: string) =>
+      (
+        await admin.query(
+          "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.responsable_asignado' AND datos->'data'->>'ticketId' = $1 ORDER BY id",
+          [ticketId],
+        )
+      ).rows.map((x) => x.d);
+
+    it('un ticket nuevo no tiene responsable; la bandeja se filtra y por omisión no cambia nada', async () => {
+      const t = await nuevo();
+      const d = await http().get(t.url).set(jefe()).expect(200);
+      expect(d.body).toMatchObject({ responsableId: null, responsable: null });
+      expect(await bandeja('sin_asignar', jefe())).toContain(t.id);
+      expect(await bandeja('mias', jefe())).not.toContain(t.id);
+      expect(await bandeja('todas', jefe())).toContain(t.id);
+      const sinFiltro = (await http().get(`${base}/tickets`).set(jefe()).expect(200)).body;
+      expect(sinFiltro.map((x: { id: string }) => x.id)).toContain(t.id);
+      expect(sinFiltro.find((x: { id: string }) => x.id === t.id)).toMatchObject({
+        responsableId: null,
+        responsable: null,
+      });
+      await http().get(`${base}/tickets`).query({ bandeja: 'otra' }).set(jefe()).expect(400);
+    });
+
+    it('la primera acción del Jefe de Base en la revisión inicial lo hace responsable, con motivo de sistema; no quita la visibilidad a los demás', async () => {
+      const t = await nuevo();
+      await http().post(`${t.url}/avanzar`).set(jefe()).send({ hacia: 'asignacion' }).expect(201);
+      const [h] = await historia(t.id);
+      expect(h).toMatchObject({
+        anteriorId: null,
+        nuevoId: JEFE,
+        actorId: JEFE,
+        motivo: 'Asumido automáticamente al iniciar la revisión inicial',
+      });
+      const d = await http().get(t.url).set(jefe()).expect(200);
+      expect(d.body).toMatchObject({
+        responsableId: JEFE,
+        responsable: { id: JEFE, nombre: 'Jaime Jefe de Base' },
+      });
+      expect(d.body.responsableHistorial).toHaveLength(1);
+      expect(await bandeja('mias', jefe())).toContain(t.id);
+      expect(await bandeja('sin_asignar', jefe())).not.toContain(t.id);
+      // el otro Jefe de Base no lo tiene como suyo, pero lo ve y lo abre
+      expect(await bandeja('mias', jefe2())).not.toContain(t.id);
+      expect(await bandeja('todas', jefe2())).toContain(t.id);
+      await http().get(t.url).set(jefe2()).expect(200);
+      const [a] = await avisos(t.id);
+      expect(a).toMatchObject({
+        ticketId: t.id,
+        anterior: null,
+        nuevo: { usuarioId: JEFE, nombre: 'Jaime Jefe de Base' },
+        automatico: true,
+        asignados: [],
+      });
+      // si ya tenía responsable, avanzar no lo cambia
+      const t2 = await nuevo();
+      await http().post(`${t2.url}/responsable/tomar`).set(jefe2()).expect(201);
+      await http().post(`${t2.url}/avanzar`).set(jefe()).send({ hacia: 'asignacion' }).expect(201);
+      expect((await historia(t2.id)).map((x) => x.nuevoId)).toEqual([JEFE_2.id]);
+    });
+
+    it('tomar: solo si nadie lo tiene (409 si ya es de otro) y solo un Jefe de Base', async () => {
+      const t = await nuevo();
+      expect((await http().post(`${t.url}/responsable/tomar`).set(operador())).status).toBe(403);
+      const ok = await http().post(`${t.url}/responsable/tomar`).set(jefe2()).expect(201);
+      expect(ok.body.responsable).toEqual({ id: JEFE_2.id, nombre: JEFE_2.nombre });
+      const choque = await http().post(`${t.url}/responsable/tomar`).set(jefe());
+      expect(choque.status).toBe(409);
+      expect(choque.body.code).toBe('RESPONSABLE_YA_ASIGNADO');
+      expect((await http().post(`${t.url}/responsable/tomar`).set(jefe2())).status).toBe(409);
+      expect(await historia(t.id)).toHaveLength(1);
+      const [a] = await avisos(t.id);
+      expect(a).toMatchObject({ automatico: false, motivo: 'Tomado por el Jefe de Base' });
+      // sin permiso o sin el ticket
+      expect((await http().post(`${t.url}/responsable/tomar`).set(sinPermiso())).status).toBe(403);
+      expect(
+        (await http().post(`${base}/tickets/${uuidv7()}/responsable/tomar`).set(jefe())).status,
+      ).toBe(404);
+    });
+
+    it('asignar y reasignar: a un Jefe de Base activo, con motivo si había otro; avisa al nuevo y al anterior', async () => {
+      const t = await nuevo();
+      const asignar = (cuerpo: object, h = jefe()) =>
+        http().post(`${t.url}/responsable`).set(h).send(cuerpo);
+      expect((await asignar({ usuarioId: SUPERVISORA.id })).status).toBe(400); // no es Jefe de Base
+      expect((await asignar({ usuarioId: uuidv7() })).status).toBe(400); // no existe
+      expect((await asignar({ usuarioId: JEFE_2.id }, operador())).status).toBe(403);
+      // sin responsable previo no hace falta motivo
+      const primero = await asignar({ usuarioId: JEFE_2.id });
+      expect(primero.status).toBe(201);
+      expect(primero.body.responsable.id).toBe(JEFE_2.id);
+      expect((await asignar({ usuarioId: JEFE_2.id, motivo: 'otra vez' })).status).toBe(409);
+      // reemplazar exige motivo
+      expect((await asignar({ usuarioId: JEFE })).status).toBe(400);
+      const cambio = await asignar(
+        { usuarioId: JEFE, motivo: 'Cubre a Jorge esta semana' },
+        admin2(),
+      );
+      expect(cambio.status).toBe(201);
+      expect(cambio.body.responsable.id).toBe(JEFE);
+      const h = await historia(t.id);
+      expect(h.map((x) => [x.anteriorId, x.nuevoId])).toEqual([
+        [null, JEFE_2.id],
+        [JEFE_2.id, JEFE],
+      ]);
+      expect(h[1]).toMatchObject({ motivo: 'Cubre a Jorge esta semana', actorId: JEFE });
+      const av = await avisos(t.id);
+      expect(av[1]).toMatchObject({
+        anterior: { usuarioId: JEFE_2.id, nombre: JEFE_2.nombre },
+        nuevo: { usuarioId: JEFE, nombre: 'Jaime Jefe de Base' },
+        motivo: 'Cubre a Jorge esta semana',
+        automatico: false,
+        asignados: [],
+        desasignados: [{ usuarioId: JEFE_2.id, rolCodigo: 'jefe_base' }],
+      });
+      expect(av[0].asignados).toEqual([{ usuarioId: JEFE_2.id, rolCodigo: 'jefe_base' }]);
+    });
+
+    it('liberar: deja el ticket sin responsable; el motivo es obligatorio si era de otro; la historia no se cambia ni se borra', async () => {
+      const t = await nuevo();
+      expect((await http().post(`${t.url}/responsable/liberar`).set(jefe()).send({})).status).toBe(
+        409,
+      ); // no tenía
+      await http().post(`${t.url}/responsable/tomar`).set(jefe2()).expect(201);
+      expect((await http().post(`${t.url}/responsable/liberar`).set(jefe()).send({})).status).toBe(
+        400,
+      ); // era de otro: falta motivo
+      const r = await http()
+        .post(`${t.url}/responsable/liberar`)
+        .set(jefe())
+        .send({ motivo: 'Está de vacaciones' });
+      expect(r.status).toBe(201);
+      expect(r.body).toMatchObject({ responsableId: null, responsable: null });
+      expect(await bandeja('sin_asignar', jefe())).toContain(t.id);
+      // quien lo tiene lo libera sin motivo
+      await http().post(`${t.url}/responsable/tomar`).set(jefe()).expect(201);
+      await http().post(`${t.url}/responsable/liberar`).set(jefe()).send({}).expect(201);
+      const h = await historia(t.id);
+      expect(h.map((x) => [x.anteriorId, x.nuevoId])).toEqual([
+        [null, JEFE_2.id],
+        [JEFE_2.id, null],
+        [null, JEFE],
+        [JEFE, null],
+      ]);
+      expect((await avisos(t.id))[1].nuevo).toBeNull();
+      const app2 = new Pool({ connectionString: APP_DB.replace('?pgbouncer=true', ''), max: 1 });
+      try {
+        await expect(
+          app2.query('UPDATE pumping.ticket_responsable_historial SET motivo = $1', ['x']),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          app2.query('DELETE FROM pumping.ticket_responsable_historial'),
+        ).rejects.toThrow(/permission denied/);
+      } finally {
+        await app2.end();
+      }
+    });
+
+    it('un ticket anulado o cerrado no cambia de responsable', async () => {
+      const t = await nuevo();
+      await http().post(`${t.url}/responsable/tomar`).set(jefe()).expect(201);
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'cierre' WHERE id = $1", [t.id]);
+      expect((await http().post(`${t.url}/responsable/liberar`).set(jefe()).send({})).status).toBe(
+        409,
+      );
+      await admin.query("UPDATE pumping.ticket SET paso_codigo = 'anulado' WHERE id = $1", [t.id]);
+      const r = await http().post(`${t.url}/responsable/liberar`).set(jefe()).send({});
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('TICKET_ANULADO');
+    });
+  });
+
+  describe('disponibilidad del personal para asignar', () => {
+    const disp = () => app.get(DisponibilidadService);
+    beforeAll(() => {
+      jest.spyOn(disp(), 'hoy').mockReturnValue('2026-11-05');
+    });
+    type Fila = {
+      usuarioId: string;
+      disponible: boolean;
+      detalle: string;
+      ocupaciones: Array<Record<string, unknown>>;
+    };
+    const lista = async (t: { url: string }, query: object = {}, h = jefe()) =>
+      http().get(`${t.url}/personal-disponible`).query(query).set(h);
+    const fila = (cuerpo: Record<string, Fila[]>, grupo: string, id: string) =>
+      cuerpo[grupo].find((f) => f.usuarioId === id) as Fila;
+
+    it('marca ocupados a los del equipo de otro ticket abierto que se cruza, con el ticket que los ocupa; los demás, disponibles', async () => {
+      const a = await ticketEnTraslado(); // asignado: OP1, OP2, CO1, CO2 y la supervisora
+      const b = await ticketEnAsignacion();
+      const ta = await prisma.ticket.findUniqueOrThrow({
+        where: { id: a.id },
+        include: { cliente: true },
+      });
+      await admin.query(
+        'UPDATE pumping.ticket SET fecha_inicio_servicio = $2, fecha_fin_servicio = $3 WHERE id = $1',
+        [
+          b.id,
+          ta.fechaInicioServicio?.toISOString().slice(0, 10),
+          ta.fechaFinServicio?.toISOString().slice(0, 10),
+        ],
+      );
+      const r = await lista(b);
+      expect(r.status).toBe(200);
+      const dia = ta.fechaInicioServicio?.toISOString().slice(0, 10);
+      expect(r.body).toMatchObject({ desde: dia, hasta: dia });
+      const ocupacion = {
+        ticketId: a.id,
+        ticketNumero: ta.ticketNumero,
+        pedidoCodigo: ta.pedidoCodigo,
+        cliente: CLIENTE.nombre,
+        desde: dia,
+        hasta: dia,
+      };
+      for (const [grupo, id] of [
+        ['operadores', OP1.id],
+        ['operadores', OP2.id],
+        ['conductores', CO1.id],
+        ['supervisores', SUPERVISORA.id],
+      ] as const) {
+        const f = fila(r.body, grupo, id);
+        expect(f.disponible).toBe(false);
+        expect(f.detalle).toContain('Ocupado todo el rango');
+        expect(f.ocupaciones).toEqual([ocupacion]);
+      }
+      // no se mezclan los papeles: quien tiene otro rol no sale en el grupo
+      expect(r.body.operadores.map((f: Fila) => f.usuarioId)).not.toContain(CO1.id);
+      expect(r.body.supervisores.map((f: Fila) => f.usuarioId)).not.toContain(OP1.id);
+      // Otra persona del mismo rol, sin ticket, está disponible
+      const libre = fila(r.body, 'supervisores', SUPERVISOR_PUMPING.id);
+      expect(libre).toMatchObject({ disponible: true, ocupaciones: [] });
+      expect(libre.detalle).toBe('Disponible todo el rango');
+
+      // un rango explícito que no toca el servicio los deja libres; con el rango del servicio, no
+      const fuera = await lista(b, { desde: '2030-01-01', hasta: '2030-01-03' });
+      expect(fuera.body).toMatchObject({ desde: '2030-01-01', hasta: '2030-01-03' });
+      expect(fila(fuera.body, 'operadores', OP1.id).disponible).toBe(true);
+      const dentro = await lista(b, { desde: dia });
+      expect(fila(dentro.body, 'operadores', OP1.id).disponible).toBe(false);
+      // sin ticket: solo con rango
+      const sinTicket = await http()
+        .get(`${base}/personal-disponible`)
+        .query({ desde: dia })
+        .set(jefe());
+      expect(sinTicket.status).toBe(200);
+      expect(fila(sinTicket.body, 'operadores', OP1.id).ocupaciones[0]).toMatchObject({
+        ticketId: a.id,
+      });
+      expect((await http().get(`${base}/personal-disponible`).set(jefe())).status).toBe(400);
+
+      // la lista y la validación aplican la misma regla: lo que la lista marca ocupado, la asignación lo rechaza
+      const rechazada = await http().post(`${b.url}/asignar`).set(jefe()).send(cuerpoAsignacion);
+      expect(rechazada.status).toBe(409);
+      expect(rechazada.body.code).toBe('PERSONAL_OCUPADO');
+      for (const p of [OP1, OP2, CO1, CO2, SUPERVISORA])
+        expect(rechazada.body.message).toContain(p.nombre);
+
+      // al anularse el ticket que los ocupaba, la lista los muestra libres y la asignación pasa
+      await consumer.consumir({
+        id: uuidv7(),
+        type: 'comercial.pedido.anulado',
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'comercial',
+        subject: { type: 'pedido', id: a.pedidoId },
+        data: { pedidoId: a.pedidoId, codigo: `PED-IT${n}`, motivo: 'Anulado' },
+        actor: { userId: JEFE, role: 'jefe_base' },
+      } as EventEnvelope);
+      const despues = await lista(b);
+      for (const [grupo, id] of [
+        ['operadores', OP1.id],
+        ['conductores', CO1.id],
+        ['supervisores', SUPERVISORA.id],
+      ] as const)
+        expect(fila(despues.body, grupo, id)).toMatchObject({ disponible: true, ocupaciones: [] });
+      await http().post(`${b.url}/asignar`).set(jefe()).send(cuerpoAsignacion).expect(201);
+    });
+
+    it('lo ven quienes pueden asignar; el equipo y quien no tiene permiso, no; fechas mal escritas y tickets que no existen', async () => {
+      const t = await ticketEnAsignacion();
+      expect((await lista(t, {}, op1())).status).toBe(403);
+      expect((await lista(t, {}, sinPermiso())).status).toBe(403);
+      expect((await lista(t, {}, token('superadmin', 'Sofía', [P.PUMPING_OPERAR]))).status).toBe(
+        200,
+      );
+      expect((await lista(t, { desde: 'ayer' })).status).toBe(400);
+      expect((await lista(t, { desde: '2026-11-05', hasta: '2026-11-01' })).status).toBe(400);
+      expect((await lista({ url: `${base}/tickets/${uuidv7()}` })).status).toBe(404);
     });
   });
 });

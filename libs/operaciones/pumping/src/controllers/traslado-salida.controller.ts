@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
@@ -35,6 +36,7 @@ import { IngresoService } from '../services/ingreso.service';
 import { RequisitosService } from '../services/requisitos.service';
 import { ReporteUnidadService } from '../services/reporte-unidad.service';
 import { TerminosService } from '../services/terminos.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 const GASES = ['h2s', 'lel', 'o2', 'co'] as const;
@@ -152,6 +154,7 @@ const diaValido = (f: string): string => {
   return f;
 };
 
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping')
 export class TrasladoSalidaController {
   constructor(

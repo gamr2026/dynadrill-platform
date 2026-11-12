@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -17,6 +17,7 @@ import {
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { ReportesDiariosService } from '../services/reportes-diarios.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -69,6 +70,7 @@ export class FirmarReporteDto {
 }
 
 /** Reporte Diario de Actividades (DYN-SGI-RE-047, el «Reporte Job») de un ticket. */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping/tickets/:id/reportes-diarios')
 export class ReportesDiariosController {
   constructor(private readonly reportes: ReportesDiariosService) {}

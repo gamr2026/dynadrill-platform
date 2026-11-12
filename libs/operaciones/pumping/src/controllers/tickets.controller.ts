@@ -1,9 +1,20 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -18,8 +29,11 @@ import {
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { AsignacionService } from '../services/asignacion.service';
+import { ResponsableService } from '../services/responsable.service';
+import { DisponibilidadService } from '../services/disponibilidad.service';
 import { QuimicosService } from '../services/quimicos.service';
-import { TicketsService } from '../services/tickets.service';
+import { ROLES_COORDINA, TicketsService, type Bandeja } from '../services/tickets.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 
@@ -33,6 +47,27 @@ export class ListarTicketsDto {
   /** `mios=true`: solo los tickets cuyo paso atiende el rol de quien consulta. */
   @IsOptional() @IsString() mios?: string;
   @IsOptional() @IsString() @MaxLength(100) q?: string;
+  /** Por responsable: `mias`, `sin_asignar` o `todas` (por omisión: no cambia lo que se ve). */
+  @IsOptional() @IsIn(['mias', 'sin_asignar', 'todas']) bandeja?: Bandeja;
+}
+
+export class DisponibilidadQueryDto {
+  /** Inicio del rango (AAAA-MM-DD). Sin él se usa el servicio del ticket. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) desde?: string;
+  /** Fin del rango (AAAA-MM-DD). Con solo `desde`, el rango es de ese día. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) hasta?: string;
+}
+
+export class AsignarResponsableDto {
+  /** Cuenta del Jefe de Base que queda como responsable. */
+  @IsUUID() usuarioId!: string;
+  /** Obligatorio al reemplazar a quien ya era responsable. */
+  @IsOptional() @IsString() @MaxLength(500) motivo?: string;
+}
+
+export class LiberarResponsableDto {
+  /** Obligatorio al liberar un ticket que es de otro. */
+  @IsOptional() @IsString() @MaxLength(500) motivo?: string;
 }
 
 export class OperadorUnidadDto {
@@ -94,12 +129,15 @@ export class AsignarTicketDto {
 }
 
 /** Tickets de servicio de Pumping: la bandeja del Jefe de Base, el Supervisor y el Operador. */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping')
 export class TicketsController {
   constructor(
     private readonly tickets: TicketsService,
     private readonly asignacion: AsignacionService,
     private readonly quimicos: QuimicosService,
+    private readonly responsable: ResponsableService,
+    private readonly disponibilidad: DisponibilidadService,
   ) {}
 
   @RequirePermission(P.PUMPING_OPERAR)
@@ -108,6 +146,8 @@ export class TicketsController {
     return this.tickets.listar({
       paso: q.paso,
       q: q.q,
+      bandeja: q.bandeja,
+      consultaId: actor.id,
       ...(q.mios === 'true' ? { rol: actor.roleCode, usuarioId: actor.id } : {}),
     });
   }
@@ -146,11 +186,72 @@ export class TicketsController {
     return this.asignacion.asignar(id, dto, actor);
   }
 
+  /** El Jefe de Base se queda con el ticket si nadie lo tiene (409 si ya tiene responsable). */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/responsable/tomar')
+  async tomar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthUser) {
+    await this.responsable.tomar(id, actor);
+    return this.tickets.detalle(id, actor);
+  }
+
+  /** Asigna o reasigna el ticket a un Jefe de Base (motivo obligatorio si ya había responsable). */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/responsable')
+  async asignarResponsable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AsignarResponsableDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    await this.responsable.asignar(id, dto.usuarioId, dto.motivo, actor);
+    return this.tickets.detalle(id, actor);
+  }
+
+  /** Deja el ticket sin responsable. */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Post('tickets/:id/responsable/liberar')
+  async liberarResponsable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LiberarResponsableDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    await this.responsable.liberar(id, dto.motivo, actor);
+    return this.tickets.detalle(id, actor);
+  }
+
   /** Quién ya está en otro ticket sin cerrar (con fechas que se cruzan): la asignación los muestra como no disponibles. */
   @RequirePermission(P.PUMPING_OPERAR)
   @Get('tickets/:id/personal-ocupado')
   personalOcupado(@Param('id', ParseUUIDPipe) id: string) {
     return this.asignacion.personalOcupado(id);
+  }
+
+  /** Quien ve la disponibilidad es quien puede asignar: el Jefe de Base y Superadmin. */
+  private exigirCoordina(actor: AuthUser) {
+    if (!ROLES_COORDINA.includes(actor.roleCode))
+      throw new ForbiddenException('Solo el Jefe de Base puede ver la disponibilidad del personal');
+  }
+
+  /**
+   * Cada supervisor, operador y conductor activo con `disponible` frente al rango (por omisión, el servicio del ticket) y, si no lo está, los
+   * tickets que lo ocupan (número, pedido, cliente y fechas). Es la lista de la pantalla de asignación; la asignación aplica la misma regla.
+   */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('tickets/:id/personal-disponible')
+  personalDisponible(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() q: DisponibilidadQueryDto,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    this.exigirCoordina(actor);
+    return this.disponibilidad.personal(id, q.desde, q.hasta);
+  }
+
+  /** Lo mismo para un rango explícito, sin ticket (`desde` obligatorio; `hasta` por omisión, el mismo día). */
+  @RequirePermission(P.PUMPING_OPERAR)
+  @Get('personal-disponible')
+  personalDisponibleEnRango(@Query() q: DisponibilidadQueryDto, @CurrentUser() actor: AuthUser) {
+    this.exigirCoordina(actor);
+    return this.disponibilidad.personal(null, q.desde, q.hasta);
   }
 
   /** Químicos del ticket (asignado, usado, devuelto y pendiente) y su documento de mezcla. */

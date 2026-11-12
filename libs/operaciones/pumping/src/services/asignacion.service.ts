@@ -12,6 +12,14 @@ import { EventBus } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PrismaService } from '../prisma/prisma.service';
 import { hoyEnGuayaquil } from './jornadas.service';
+import { DisponibilidadService } from './disponibilidad.service';
+import {
+  rangoDeServicio,
+  ROLES_CONDUCTOR,
+  ROLES_OPERADOR,
+  ROLES_SUPERVISOR,
+  seCruza,
+} from './disponibilidad';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 import { nombreDe, puedeActuar, TicketsService } from './tickets.service';
@@ -33,10 +41,6 @@ export interface AsignacionEntrada {
 /** Paso en el que el Jefe de Base asigna, y paso al que pasa el ticket cuando la asignación queda completa. */
 const PASO_ASIGNACION = 'asignacion';
 const PASO_SIGUIENTE = 'traslado_salida';
-/** Roles de cuenta que pueden ser supervisor / operador de un servicio. */
-const ROLES_SUPERVISOR = ['supervisor', 'supervisor_pumping'];
-const ROLES_OPERADOR = ['operador'];
-const ROLES_CONDUCTOR = ['conductor'];
 
 /** Quien ya está en otro ticket sin cerrar cuyas fechas se cruzan con las de este. */
 export interface PersonaOcupada {
@@ -47,8 +51,6 @@ export interface PersonaOcupada {
   /** Fin del servicio del otro ticket (día en que se libera); nulo si no hay fecha o el servicio ya pasó su fecha sin cerrarse. */
   liberaEl: string | null;
 }
-
-const dia = (d: Date) => d.toISOString().slice(0, 10);
 
 /**
  * Asignación del Jefe de Base: supervisor y operadores, cada uno con su unidad. Al completarla el ticket pasa a "Traslado de salida",
@@ -65,6 +67,7 @@ export class AsignacionService {
     private readonly tickets: TicketsService,
     private readonly requisitos: RequisitosService,
     private readonly inventario: MovimientosService,
+    private readonly disponibilidad: DisponibilidadService,
   ) {}
 
   /** Hoy en Ecuador, para saber cuándo se libera el personal. Aparte (y público) para que las pruebas fijen el día. */
@@ -381,9 +384,8 @@ export class AsignacionService {
   }
 
   /**
-   * Personas (de las indicadas, o todas las asignadas en tickets abiertos) que están en otro ticket sin cerrar cuyas fechas se cruzan con
-   * las de este. Un ticket libera a su personal el día de fin del servicio (el del pedido); si ese día pasó y el ticket sigue abierto, hasta
-   * que se cierre. Sin fechas se asume lo más estricto: ocupado hasta el cierre.
+   * Personas (de las indicadas, o todas las asignadas en tickets abiertos) que están en otro ticket sin cerrar ni anular cuyas fechas se
+   * cruzan con las de este. La regla (cuándo se libera, qué se cruza) es la de `disponibilidad.ts`, la misma de la lista de disponibilidad.
    * Con `desde` solo se miran los días a partir de esa fecha (al ampliar un servicio, los anteriores ya estaban asignados).
    */
   async ocupadasPor(
@@ -398,48 +400,19 @@ export class AsignacionService {
     });
     if (!mio) throw new NotFoundException('El ticket no existe');
     const hoy = this.hoy();
-    const miInicio = desde
-      ? dia(desde)
-      : mio.fechaInicioServicio
-        ? dia(mio.fechaInicioServicio)
-        : hoy;
-    const miFin = mio.fechaFinServicio ? dia(mio.fechaFinServicio) : miInicio;
-    const filas = await db.ticketPersona.findMany({
-      where: {
-        ticketId: { not: ticketId },
-        ...(usuarioIds ? { usuarioId: { in: usuarioIds } } : {}),
-        ticket: { paso: { terminal: false } },
-      },
-      select: {
-        usuarioId: true,
-        ticket: {
-          select: {
-            id: true,
-            ticketNumero: true,
-            pedidoCodigo: true,
-            fechaInicioServicio: true,
-            fechaFinServicio: true,
-          },
-        },
-      },
-    });
+    const rango = rangoDeServicio(mio, hoy, desde);
+    const porPersona = await this.disponibilidad.ocupaciones(db, ticketId, usuarioIds, hoy);
     const ocupadas: PersonaOcupada[] = [];
-    for (const f of filas) {
-      const o = f.ticket;
-      const oInicio = o.fechaInicioServicio ? dia(o.fechaInicioServicio) : null;
-      const oFin = o.fechaFinServicio ? dia(o.fechaFinServicio) : null;
-      // si su servicio ya pasó su fecha de fin y sigue abierto, la persona sigue ocupada hasta que se cierre
-      const liberaEl = oFin && oFin >= hoy ? oFin : null;
-      const seCruza =
-        (oInicio === null || oInicio <= miFin) && (liberaEl === null || liberaEl >= miInicio);
-      if (!seCruza) continue;
-      ocupadas.push({
-        usuarioId: f.usuarioId,
-        ticketId: o.id,
-        ticketNumero: o.ticketNumero,
-        pedidoCodigo: o.pedidoCodigo,
-        liberaEl,
-      });
+    for (const [usuarioId, lista] of porPersona) {
+      for (const o of lista.filter((x) => seCruza(rango, x))) {
+        ocupadas.push({
+          usuarioId,
+          ticketId: o.ticketId,
+          ticketNumero: o.ticketNumero,
+          pedidoCodigo: o.pedidoCodigo,
+          liberaEl: o.hasta,
+        });
+      }
     }
     return ocupadas;
   }

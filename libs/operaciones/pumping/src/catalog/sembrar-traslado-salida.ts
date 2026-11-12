@@ -42,6 +42,8 @@ interface RequisitoDef {
   modulo: ModuloDueno;
   /** Paso del que se SALE cuando se cumple. */
   paso: string;
+  /** Rol de identidad al que le corresponde cumplirlo (sin valor: no es unívoco). */
+  rolResponsable?: string;
 }
 
 export const REQUISITOS: RequisitoDef[] = [
@@ -61,6 +63,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'operador',
     modulo: 'qhse',
     paso: 'traslado_salida',
+    rolResponsable: 'gerente_hse',
   },
   {
     codigo: REQ.terminos,
@@ -97,6 +100,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'qhse',
     paso: 'traslado_salida',
+    rolResponsable: 'gerente_hse',
   },
   {
     codigo: REQ.ptwPrimerDia,
@@ -106,6 +110,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'qhse',
     paso: 'traslado_salida',
+    rolResponsable: 'gerente_hse',
   },
   {
     codigo: REQ.actaEntregaLocacion,
@@ -115,6 +120,7 @@ export const REQUISITOS: RequisitoDef[] = [
     ambito: 'ticket',
     modulo: 'qhse',
     paso: 'revision_final',
+    rolResponsable: 'gerente_hse',
   },
 ];
 
@@ -245,6 +251,7 @@ export async function sembrarTrasladoSalida(
           descripcion: r.descripcion,
           ambito: r.ambito,
           modulo: r.modulo,
+          rolResponsable: r.rolResponsable ?? null,
         },
       });
       requisitos++;

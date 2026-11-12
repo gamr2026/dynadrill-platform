@@ -12,6 +12,7 @@ import type { Prisma } from '../generated/client';
 import type { LineaPedido } from './reporte-herramientas.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { JornadasService } from './jornadas.service';
+import { ResponsableService } from './responsable.service';
 import { RequisitosService } from './requisitos.service';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
@@ -50,7 +51,7 @@ const textoServicio = (codigo: string) => {
 const aDia = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 const ROL_SUPERADMIN = 'superadmin';
 /** Roles que coordinan el servicio: ven y actúan sin estar en el equipo asignado. */
-const ROLES_COORDINA = [ROL_SUPERADMIN, 'jefe_base'];
+export const ROLES_COORDINA = [ROL_SUPERADMIN, 'jefe_base'];
 /** Hasta la asignación el ticket es del Jefe de Base; de ahí en adelante, del equipo que él asignó. */
 const PASOS_DE_COORDINACION = ['revision_inicial', 'asignacion'];
 
@@ -102,6 +103,7 @@ const NOMBRES = {
   pozo: true,
   taladro: true,
   representanteCampo: true,
+  responsable: true,
 } as const;
 const INCLUDE_LISTA = {
   ...NOMBRES,
@@ -115,6 +117,10 @@ const INCLUDE_DETALLE = {
   },
   tiposServicio: true,
   historial: { include: { actor: true }, orderBy: { createdAt: 'asc' } },
+  responsableHistorial: {
+    include: { anterior: true, nuevo: true, actor: true },
+    orderBy: { createdAt: 'asc' },
+  },
   personas: {
     include: { usuario: true, unidad: UNIDAD_CON_PLACA },
     orderBy: { usuario: { nombre: 'asc' } },
@@ -126,6 +132,9 @@ const INCLUDE_DETALLE = {
 } as const;
 type TicketLista = Prisma.TicketGetPayload<{ include: typeof INCLUDE_LISTA }>;
 type TicketDetalle = Prisma.TicketGetPayload<{ include: typeof INCLUDE_DETALLE }>;
+
+/** Qué tickets muestra la bandeja según su responsable: los míos, los que nadie tomó o todos (por omisión). */
+export type Bandeja = 'mias' | 'sin_asignar' | 'todas';
 
 export const puedeActuar = (roles: { rolCodigo: string }[], rol: string) =>
   rol === ROL_SUPERADMIN || roles.some((r) => r.rolCodigo === rol);
@@ -173,6 +182,9 @@ const resumen = (t: TicketLista) => ({
   fechaInicioServicio: aDia(t.fechaInicioServicio),
   fechaFinServicio: aDia(t.fechaFinServicio),
   cicloHasta: aDia(t.cicloHasta),
+  /** Jefe de Base responsable (vacío mientras nadie tome el ticket). */
+  responsableId: t.responsableId,
+  responsable: t.responsable ? { id: t.responsable.id, nombre: t.responsable.nombre } : null,
   createdAt: t.createdAt,
 });
 
@@ -187,6 +199,7 @@ export class TicketsService {
     private readonly bus: EventBus,
     private readonly requisitos: RequisitosService,
     private readonly jornadas: JornadasService,
+    private readonly responsable: ResponsableService,
   ) {}
 
   /** Crea el ticket de un pedido de Pumping abierto. `null` si el pedido no es de Pumping o ya tiene su ticket. */
@@ -269,11 +282,22 @@ export class TicketsService {
   }
 
   /** Bandeja: todos los tickets, o los que esperan a un rol (`rol`), o de un paso. Se busca por número de ticket, pedido, cliente o pozo. */
-  async listar(f: { paso?: string; rol?: string; usuarioId?: string; q?: string }) {
+  async listar(f: {
+    paso?: string;
+    rol?: string;
+    usuarioId?: string;
+    q?: string;
+    bandeja?: Bandeja;
+    /** Quien consulta (para `bandeja=mias`). */
+    consultaId?: string;
+  }) {
     const q = f.q?.trim();
     const filas = await this.prisma.ticket.findMany({
       where: {
         ...(f.paso ? { pasoCodigo: f.paso } : {}),
+        // la bandeja del Jefe de Base: los suyos o los que nadie tomó (por omisión, todos: no restringe quién ve qué)
+        ...(f.bandeja === 'mias' ? { responsableId: f.consultaId ?? null } : {}),
+        ...(f.bandeja === 'sin_asignar' ? { responsableId: null } : {}),
         ...(f.rol ? { paso: { roles: { some: { rolCodigo: f.rol } } } } : {}),
         // el equipo (supervisor, operador) ve solo los tickets a los que fue asignado; quien coordina, todos los de su paso
         ...(f.rol && f.usuarioId && !ROLES_COORDINA.includes(f.rol)
@@ -420,6 +444,8 @@ export class TicketsService {
         if (t.pasoCodigo === 'revision_reportes_llegada')
           await this.jornadas.exigirRevisionDeLlegada(tx, id);
       }
+      // la primera acción de un Jefe de Base sobre un ticket sin dueño en la revisión inicial lo hace responsable
+      if (t.pasoCodigo === 'revision_inicial') await this.responsable.asumirSiVacio(tx, id, actor);
       const r = await tx.ticket.updateMany({
         where: { id, pasoCodigo: t.pasoCodigo },
         data: { pasoCodigo: hacia, version: { increment: 1 } },
@@ -512,6 +538,13 @@ export class TicketsService {
         ? { id: t.representanteCampo.id, nombre: t.representanteCampo.nombre }
         : null,
       version: t.version,
+      responsableHistorial: t.responsableHistorial.map((h) => ({
+        anterior: h.anterior ? { id: h.anterior.id, nombre: h.anterior.nombre } : null,
+        nuevo: h.nuevo ? { id: h.nuevo.id, nombre: h.nuevo.nombre } : null,
+        motivo: h.motivo,
+        actor: { id: h.actor.id, nombre: h.actor.nombre },
+        at: h.createdAt,
+      })),
       /** ¿Esta persona es de un rol que atiende el paso actual? */
       puedeActuar: actua,
       /** Pasos a los que puede pasar el ticket desde aquí (solo si el rol de la persona atiende el paso). */

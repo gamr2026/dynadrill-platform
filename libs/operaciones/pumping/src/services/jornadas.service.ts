@@ -12,6 +12,7 @@ import type { AccionJornada, EstadoJornada, Prisma } from '../generated/client';
 import { JREQ } from '../catalog/requisitos-jornada';
 import { REQ } from '../catalog/sembrar-traslado-salida';
 import { PrismaService } from '../prisma/prisma.service';
+import { plazoDeRequisito } from './requisitos-plazo';
 import { etiquetaDeUnidad, UNIDAD_CON_PLACA } from './unidad-etiqueta';
 
 const PASO = 'ejecucion_operativa';
@@ -22,6 +23,33 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 /** Fecha de hoy (AAAA-MM-DD) en la zona horaria de las bases (Ecuador), no en la del servidor. */
 export const hoyEnGuayaquil = (ahora: Date = new Date()): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Guayaquil' }).format(ahora);
+
+/** Instante en que empieza un día (AAAA-MM-DD) en Ecuador. El desfase sale de la zona horaria (Intl), no de un valor escrito a mano. */
+export function inicioDelDiaEnGuayaquil(fecha: string): Date {
+  const utc = Date.parse(`${fecha}T00:00:00Z`);
+  const partes = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Guayaquil',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(utc));
+  const v = (tipo: string) => Number(partes.find((p) => p.type === tipo)?.value);
+  const local = Date.UTC(v('year'), v('month') - 1, v('day'), v('hour'), v('minute'), v('second'));
+  return new Date(utc - (local - utc));
+}
+
+/** Cuándo vence un requisito de un día de servicio: el fin de ese día en Ecuador más el plazo (horas) del catálogo; sin plazo, nunca vence. */
+export function venceDelDia(fecha: string, plazoHoras: number | null): Date | null {
+  if (plazoHoras === null) return null;
+  const siguiente = new Date(Date.parse(`${fecha}T00:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return new Date(inicioDelDiaEnGuayaquil(siguiente).getTime() + plazoHoras * 3_600_000);
+}
 
 /** Todas las fechas (AAAA-MM-DD) entre dos fechas, inclusive. */
 export function diasEntre(inicio: string, fin: string): string[] {
@@ -211,7 +239,14 @@ export class JornadasService {
     if (jornadas.length === 0) return;
     const definiciones = await tx.requisito.findMany({
       where: { ambito: 'jornada', activo: true },
-      select: { codigo: true, momento: true, modulo: true, nombre: true, porUnidad: true },
+      select: {
+        codigo: true,
+        momento: true,
+        modulo: true,
+        nombre: true,
+        porUnidad: true,
+        plazoHoras: true,
+      },
     });
     const filas = await tx.ticketRequisito.findMany({
       where: { ticketId, fecha: { not: null } },
@@ -248,7 +283,8 @@ export class JornadasService {
       },
       select: { estado: true },
     });
-    const sinSwa = !swa || swa.estado === 'cumplido';
+    // una SWA exonerada (la dispensó una persona) tampoco bloquea
+    const sinSwa = !swa || swa.estado !== 'pendiente';
     const conJobLog = new Set(
       (
         await tx.reporteDiario.findMany({
@@ -306,6 +342,8 @@ export class JornadasService {
       return undefined;
     };
 
+    /** Cumplido o exonerado: en los dos casos ya no bloquea el día. */
+    const resuelto = (estado?: string) => estado === 'cumplido' || estado === 'exonerado';
     const clave = (codigo: string, fecha: string, unidadId: string | null = null) =>
       `${codigo}|${fecha}|${unidadId ?? ''}`;
     const estadoDe = new Map(
@@ -347,11 +385,17 @@ export class JornadasService {
               requisitoCodigo: d.codigo,
               fecha: j.fecha,
               unidadId,
+              venceAt: venceDelDia(fecha, d.plazoHoras),
               ...(v
                 ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) }
                 : { estado: 'pendiente' }),
             });
-          } else if (v !== undefined && (fila.estado === 'cumplido') !== v) {
+          } else if (
+            // un requisito exonerado no se recalcula: lo dispensó una persona
+            fila.estado !== 'exonerado' &&
+            v !== undefined &&
+            (fila.estado === 'cumplido') !== v
+          ) {
             await tx.ticketRequisito.update({
               where: { id: fila.id },
               data: v ? { ...cumplido(d.modulo), cumplidoPor: quien(d.codigo, j) } : pendiente,
@@ -383,7 +427,7 @@ export class JornadasService {
       if ((j.estado !== 'pendiente' && j.estado !== 'abierta') || deApertura.length === 0) continue;
       const fecha = aFecha(j.fecha);
       const faltan = deApertura.filter((d) =>
-        destinos(d).some((u) => estadoDe.get(clave(d.codigo, fecha, u))?.estado !== 'cumplido'),
+        destinos(d).some((u) => !resuelto(estadoDe.get(clave(d.codigo, fecha, u))?.estado)),
       );
       if (j.estado === 'pendiente' && faltan.length === 0) {
         await tx.ticketJornada.update({ where: { id: j.id }, data: { estado: 'abierta' } });
@@ -413,7 +457,7 @@ export class JornadasService {
       const fecha = aFecha(a.fecha);
       if (fecha > hoy) continue;
       const falta = deCierre.some((d) =>
-        destinos(d).some((u) => estadoDe.get(clave(d.codigo, fecha, u))?.estado !== 'cumplido'),
+        destinos(d).some((u) => !resuelto(estadoDe.get(clave(d.codigo, fecha, u))?.estado)),
       );
       if (falta) continue;
       const ultima = await tx.ticketJornadaHistorial.findFirst({
@@ -907,6 +951,7 @@ export class JornadasService {
       await this.prisma.$transaction((tx) => this.generar(tx, ticketId));
     }
     const hoy = this.hoy();
+    const ahora = new Date();
     const filas = await this.prisma.ticketJornada.findMany({
       where: { ticketId },
       orderBy: { fecha: 'asc' },
@@ -915,7 +960,15 @@ export class JornadasService {
     const requisitos = await this.prisma.ticketRequisito.findMany({
       where: { ticketId, fecha: { not: null } },
       include: {
-        requisito: { select: { nombre: true, descripcion: true, modulo: true, momento: true } },
+        requisito: {
+          select: {
+            nombre: true,
+            descripcion: true,
+            modulo: true,
+            momento: true,
+            rolResponsable: true,
+          },
+        },
         unidad: UNIDAD_CON_PLACA,
       },
       orderBy: [{ requisitoCodigo: 'asc' }, { createdAt: 'asc' }],
@@ -932,6 +985,7 @@ export class JornadasService {
       const exige = j.estado !== 'no_aplica' && j.estado !== 'sin_operacion';
       const reqs = (exige ? (deFecha.get(fecha) ?? []) : [])
         .map((r) => ({
+          id: r.id,
           codigo: r.requisitoCodigo,
           nombre: r.requisito.nombre,
           /** La unidad a la que corresponde (los traslados del día son por unidad); `null` si es del servicio. */
@@ -943,6 +997,7 @@ export class JornadasService {
           modulo: r.requisito.modulo,
           estado: r.estado,
           cumplidoAt: r.cumplidoAt,
+          ...plazoDeRequisito(r, r.requisito.rolResponsable, ahora),
         }))
         .sort((a, b) => (a.momento === b.momento ? 0 : a.momento === 'apertura' ? -1 : 1));
       const faltan = reqs.filter((r) => r.estado === 'pendiente');

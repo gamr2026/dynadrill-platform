@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
 import { IsUUID, Matches } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import { DocumentosTicketService } from '../services/documentos-ticket.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 
@@ -13,6 +14,7 @@ export class AdjuntarMonitoreoDto {
 }
 
 /** Documentos de un ticket de Pumping (mezcla de químicos y monitoreo por día). */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping/tickets/:id/documentos')
 export class DocumentosTicketController {
   constructor(private readonly documentos: DocumentosTicketService) {}

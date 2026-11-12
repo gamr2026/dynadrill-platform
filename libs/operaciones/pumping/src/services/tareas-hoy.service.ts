@@ -4,6 +4,7 @@ import type { AuthUser } from '@dyn/common';
 import { MovimientosService } from '@dyn/inventario';
 import { JREQ } from '../catalog/requisitos-jornada';
 import { PrismaService } from '../prisma/prisma.service';
+import { plazoDeRequisito } from './requisitos-plazo';
 import { AvanceService } from './avance.service';
 import { JornadasService } from './jornadas.service';
 import { nombreDe } from './tickets.service';
@@ -21,6 +22,8 @@ export interface Tarea {
   ticketId: string | null;
   /** Ruta del portal donde se resuelve (el detalle del ticket). */
   enlace: string | null;
+  /** Solo en las tareas que son un requisito del día: su plazo, a quién le toca y si se exoneró (ver `plazoDeRequisito`). */
+  requisito?: ReturnType<typeof plazoDeRequisito> & { id: string };
 }
 
 export interface BloqueDeTareas {
@@ -38,6 +41,17 @@ export interface BloqueDeTareas {
 type Jornadas = Awaited<ReturnType<JornadasService['listar']>>;
 type JornadaDeLista = Jornadas['jornadas'][number];
 
+/** De una fila de requisito de la jornada, solo los campos de plazo y exoneración (los mismos que devuelve `plazoDeRequisito`). */
+const pedazoDePlazo = (r: JornadaDeLista['requisitos'][number]) => ({
+  venceAt: r.venceAt,
+  vencidoAt: r.vencidoAt,
+  vencido: r.vencido,
+  rolResponsable: r.rolResponsable,
+  exonerado: r.exonerado,
+  exoneradoAt: r.exoneradoAt,
+  exoneradoPor: r.exoneradoPor,
+  motivoExoneracion: r.motivoExoneracion,
+});
 const dia = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
 const enlaceDe = (ticketId: string) => `/modulos/operativo/pumping/pedidos/${ticketId}`;
 
@@ -125,15 +139,17 @@ export class TareasHoyService {
     ): Tarea | null => {
       const r = de(codigo);
       if (!r) return null;
-      const hecha = r.estado === 'cumplido';
+      // un requisito exonerado ya no es una tarea por hacer
+      const hecha = r.estado === 'cumplido' || r.estado === 'exonerado';
       return {
         clave,
         titulo,
         detalle: hecha ? null : detallePendiente,
         estado: hecha ? 'hecha' : 'pendiente',
-        tono: hecha ? 'ok' : 'warn',
+        tono: hecha ? 'ok' : r.vencido ? 'danger' : 'warn',
         ticketId,
         enlace: enlaceDe(ticketId),
+        requisito: { id: r.id, ...pedazoDePlazo(r) },
       };
     };
     const tareas = [
@@ -202,14 +218,17 @@ export class TareasHoyService {
   ): Promise<Tarea[]> {
     const tareas: Tarea[] = [];
     if (hoyJ && hoyJ.estado !== 'sin_operacion') {
+      const cm = hoyJ.requisitos.find((r) => r.codigo === JREQ.companyMan);
+      const hechaCm = hoyJ.companyManAcepto || cm?.estado === 'exonerado';
       tareas.push({
         clave: 'aceptar_company_man',
         titulo: 'Aceptación del Company Man de hoy',
-        detalle: hoyJ.companyManAcepto ? null : 'Márquela cuando el Company Man acepte trabajar',
-        estado: hoyJ.companyManAcepto ? 'hecha' : 'pendiente',
-        tono: hoyJ.companyManAcepto ? 'ok' : 'warn',
+        detalle: hechaCm ? null : 'Márquela cuando el Company Man acepte trabajar',
+        estado: hechaCm ? 'hecha' : 'pendiente',
+        tono: hechaCm ? 'ok' : cm?.vencido ? 'danger' : 'warn',
         ticketId,
         enlace: enlaceDe(ticketId),
+        ...(cm ? { requisito: { id: cm.id, ...pedazoDePlazo(cm) } } : {}),
       });
       if (hoyJ.estado === 'cerrada') {
         tareas.push({
@@ -314,7 +333,7 @@ export class TareasHoyService {
     }
     // el Jefe de Base decide los cambios de ítems igual que el Supervisor del ticket
     const cambios = await this.prisma.solicitudCambioItems.findMany({
-      where: { estado: 'pendiente', ticket: { pasoCodigo: { not: 'cierre' } } },
+      where: { estado: 'pendiente', ticket: { paso: { terminal: false } } },
       select: {
         motivo: true,
         ticket: { select: { id: true, ticketNumero: true, pedidoCodigo: true } },

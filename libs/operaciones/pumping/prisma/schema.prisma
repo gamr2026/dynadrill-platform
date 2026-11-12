@@ -22,6 +22,8 @@ enum MacroEstado {
   esperando_aprobacion
   aprobado
   rechazado
+  /// Ticket cuyo pedido se anuló en Comercial (paso terminal `anulado`).
+  anulado
 
   @@map("macro_estado")
   @@schema("pumping")
@@ -38,6 +40,8 @@ enum OrigenCambio {
 enum EstadoRequisito {
   pendiente
   cumplido
+  /// Un pendiente que una persona autorizada dispensó (con motivo): ya no bloquea ni lo recalcula la sincronización.
+  exonerado
 
   @@map("estado_requisito")
   @@schema("pumping")
@@ -199,17 +203,17 @@ model Transicion {
 /// el "ticket" de Dynadrill es la prefactura, así que lleva el número que `comercial` le reservó al pedido del secuencial de la prefactura
 /// (la prefactura, cuando exista, tendrá ese mismo número).
 model Ticket {
-  id           String  @id @db.Uuid
-  pedidoId     String  @unique @map("pedido_id") @db.Uuid
-  pedidoCodigo String  @map("pedido_codigo")
+  id           String    @id @db.Uuid
+  pedidoId     String    @unique @map("pedido_id") @db.Uuid
+  pedidoCodigo String    @map("pedido_codigo")
   /// Número de ticket = el de la prefactura que vendrá. Nulo solo en pedidos abiertos antes de que existiera esta regla.
-  ticketNumero Int?    @unique @map("ticket_numero")
-  pasoCodigo   String  @map("paso_codigo")
+  ticketNumero Int?      @unique @map("ticket_numero")
+  pasoCodigo   String    @map("paso_codigo")
   /// Último día del servicio cuyo ciclo (hasta la revisión final) ya se completó.
   cicloHasta   DateTime? @map("ciclo_hasta") @db.Date
-  paso         Paso    @relation(fields: [pasoCodigo], references: [codigo])
-  version      Int     @default(1)
-  tipoOt       TipoOt? @map("tipo_ot")
+  paso         Paso      @relation(fields: [pasoCodigo], references: [codigo])
+  version      Int       @default(1)
+  tipoOt       TipoOt?   @map("tipo_ot")
 
   // --- datos del pedido tal como se abrió: FK a los catálogos (el nombre sale del JOIN)
   clienteId            String?             @map("cliente_id") @db.Uuid
@@ -231,6 +235,9 @@ model Ticket {
   fechaInicioServicio  DateTime?           @map("fecha_inicio_servicio") @db.Date
   /// Fin del servicio según el pedido: de aquí sale cuándo se libera el personal asignado (hasta el cierre del ticket si el servicio se alarga).
   fechaFinServicio     DateTime?           @map("fecha_fin_servicio") @db.Date
+  /// Jefe de Base responsable del ticket; vacío mientras nadie lo tome. No limita quién ve el ticket.
+  responsableId        String?             @map("responsable_id") @db.Uuid
+  responsable          IdUsuario?          @relation("ticketResponsable", fields: [responsableId], references: [id])
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -240,6 +247,7 @@ model Ticket {
   personas               TicketPersona[]
   unidades               TicketUnidad[]
   requisitos             TicketRequisito[]
+  requisitosHistorial    TicketRequisitoHistorial[]
   aceptaciones           AceptacionTerminos[]
   ingresos               TicketIngreso[]
   reportesUnidad         ReporteUnidad[]
@@ -254,6 +262,7 @@ model Ticket {
   cambiosDuracion        TicketDuracionCambio[]
   avisoAvance            TicketAvisoAvance?
   avisosJornada          TicketAvisoJornada[]
+  responsableHistorial   TicketResponsableHistorial[]
 
   /// Cuándo se precargó el Reporte de Herramientas con las líneas cotizadas (una sola vez).
   reportePrecargadoAt              DateTime?  @map("reporte_precargado_at") @db.Timestamptz(6)
@@ -266,6 +275,7 @@ model Ticket {
   @@index([clienteId])
   @@index([pozoId])
   @@index([campoId])
+  @@index([responsableId])
   @@map("ticket")
   @@schema("pumping")
 }
@@ -592,6 +602,25 @@ model TicketHistorial {
   @@schema("pumping")
 }
 
+/// Cambios del Jefe de Base responsable del ticket (toma, asignación, reasignación, liberación). Solo se agrega.
+model TicketResponsableHistorial {
+  id         String     @id @db.Uuid
+  ticketId   String     @map("ticket_id") @db.Uuid
+  ticket     Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  anteriorId String?    @map("anterior_id") @db.Uuid
+  anterior   IdUsuario? @relation("responsableAnterior", fields: [anteriorId], references: [id])
+  nuevoId    String?    @map("nuevo_id") @db.Uuid
+  nuevo      IdUsuario? @relation("responsableNuevo", fields: [nuevoId], references: [id])
+  motivo     String
+  actorId    String     @map("actor_id") @db.Uuid
+  actor      IdUsuario  @relation("responsableActor", fields: [actorId], references: [id])
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_responsable_historial")
+  @@schema("pumping")
+}
+
 /// Personas que el Jefe de Base asignó al ticket: un supervisor y uno o más operadores (id de la cuenta + nombre; sin FK entre schemas).
 model TicketPersona {
   ticketId    String       @map("ticket_id") @db.Uuid
@@ -635,16 +664,20 @@ model TicketUnidad {
 
 /// Condiciones que el proceso exige (catálogo): de qué ámbito son y qué módulo es dueño del dato que las cumple.
 model Requisito {
-  codigo      String            @id
-  nombre      String
-  descripcion String?
-  ambito      AmbitoRequisito
-  modulo      ModuloDueno
-  activo      Boolean           @default(true)
+  codigo         String            @id
+  nombre         String
+  descripcion    String?
+  ambito         AmbitoRequisito
+  modulo         ModuloDueno
+  activo         Boolean           @default(true)
   /// Solo en los requisitos de ámbito `jornada`.
-  momento     MomentoRequisito?
+  momento        MomentoRequisito?
   /// Solo en los de ámbito `jornada`: hay una fila por cada unidad del ticket en cada día.
-  porUnidad   Boolean           @default(false) @map("por_unidad")
+  porUnidad      Boolean           @default(false) @map("por_unidad")
+  /// Horas de tolerancia después del fin del día de servicio (requisitos de jornada); vacío: sin plazo, nunca vence.
+  plazoHoras     Int?              @map("plazo_horas")
+  /// Código del rol de identidad de quien debe cumplirlo; vacío cuando no es unívoco.
+  rolResponsable String?           @map("rol_responsable")
 
   pasos   PasoRequisito[]
   tickets TicketRequisito[]
@@ -686,13 +719,48 @@ model TicketRequisito {
   motivo          String?
   /// Día de la jornada a la que pertenece (solo requisitos de ámbito `jornada`); FK compuesta a `ticket_jornada` en la base de datos.
   fecha           DateTime?           @db.Date
+  /// Fin del día de servicio (hora de Ecuador) más el plazo del catálogo; vacío: sin plazo.
+  venceAt         DateTime?           @map("vence_at") @db.Timestamptz(6)
+  /// Cuándo se detectó que seguía pendiente pasado su plazo. Se conserva al cumplirse («cumplido tarde»).
+  vencidoAt       DateTime?           @map("vencido_at") @db.Timestamptz(6)
+  /// Estado `exonerado` si y solo si tiene hora de exoneración (siempre con `motivo`).
+  exoneradoAt     DateTime?           @map("exonerado_at") @db.Timestamptz(6)
+  /// FK a `identidad.usuario` (solo en la base de datos).
+  exoneradoPor    String?             @map("exonerado_por") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  historial TicketRequisitoHistorial[]
 
   @@index([ticketId, estado])
   @@index([requisitoCodigo])
   @@index([usuarioId])
   @@map("ticket_requisito")
+  @@schema("pumping")
+}
+
+/// Cambios de estado y de vencimiento de cada requisito del ticket. La llena un disparador de la base de datos (la aplicación solo lee).
+model TicketRequisitoHistorial {
+  id                String           @id @db.Uuid
+  ticketRequisitoId String           @map("ticket_requisito_id") @db.Uuid
+  ticketRequisito   TicketRequisito  @relation(fields: [ticketRequisitoId], references: [id], onDelete: Cascade)
+  ticketId          String           @map("ticket_id") @db.Uuid
+  ticket            Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Vacío en la primera fila (el requisito nace).
+  estadoAnterior    EstadoRequisito? @map("estado_anterior")
+  estadoNuevo       EstadoRequisito  @map("estado_nuevo")
+  /// Ya estaba vencido (pasado su plazo y detectado) cuando se anotó este cambio.
+  vencido           Boolean          @default(false)
+  /// creacion, sistema, evento, manual_temporal, reapertura, vencimiento, exoneracion, reversion_exoneracion o migracion.
+  origen            String
+  /// FK a `identidad.usuario` (solo en la base de datos); vacío cuando lo hizo el sistema.
+  actorId           String?          @map("actor_id") @db.Uuid
+  motivo            String?
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([ticketRequisitoId, createdAt])
+  @@index([ticketId])
+  @@map("ticket_requisito_historial")
   @@schema("pumping")
 }
 
@@ -1175,18 +1243,22 @@ model IdUsuario {
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
 
-  asignaciones        TicketPersona[]          @relation("personaAsignada")
-  historial           TicketHistorial[]        @relation("historialActor")
-  requisitos          TicketRequisito[]        @relation("requisitoOperador")
-  aceptaciones        AceptacionTerminos[]     @relation("aceptacionTerminos")
-  terminosValidados   TerminosVersion[]        @relation("terminosValidados")
-  actividadesDiarias  ReporteDiarioActividad[] @relation("actividadAutor")
-  cambiosSolicitados  SolicitudCambioItems[]   @relation("solicitanteCambio")
-  cambiosRevisados    SolicitudCambioItems[]   @relation("revisorCambio")
-  reportesCompletados Ticket[]                 @relation("completadorReporteHerramientas")
-  celdasReporte       ReporteItemDia[]         @relation("autorCeldaReporte")
-  reportesCorregidos  ReporteDiario[]          @relation("reporteCorrector")
-  adjuntosReporte     ReporteDiarioAdjunto[]   @relation("autorAdjuntoReporte")
+  asignaciones        TicketPersona[]              @relation("personaAsignada")
+  historial           TicketHistorial[]            @relation("historialActor")
+  requisitos          TicketRequisito[]            @relation("requisitoOperador")
+  aceptaciones        AceptacionTerminos[]         @relation("aceptacionTerminos")
+  terminosValidados   TerminosVersion[]            @relation("terminosValidados")
+  actividadesDiarias  ReporteDiarioActividad[]     @relation("actividadAutor")
+  cambiosSolicitados  SolicitudCambioItems[]       @relation("solicitanteCambio")
+  cambiosRevisados    SolicitudCambioItems[]       @relation("revisorCambio")
+  reportesCompletados Ticket[]                     @relation("completadorReporteHerramientas")
+  ticketsResponsable  Ticket[]                     @relation("ticketResponsable")
+  responsableAnterior TicketResponsableHistorial[] @relation("responsableAnterior")
+  responsableNuevo    TicketResponsableHistorial[] @relation("responsableNuevo")
+  responsableActor    TicketResponsableHistorial[] @relation("responsableActor")
+  celdasReporte       ReporteItemDia[]             @relation("autorCeldaReporte")
+  reportesCorregidos  ReporteDiario[]              @relation("reporteCorrector")
+  adjuntosReporte     ReporteDiarioAdjunto[]       @relation("autorAdjuntoReporte")
 
   @@map("usuario")
   @@schema("identidad")

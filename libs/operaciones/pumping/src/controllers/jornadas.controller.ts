@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { IsIn, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { Permission } from '@dyn/authz';
@@ -14,6 +15,7 @@ import { AvanceService } from '../services/avance.service';
 import { DuracionService } from '../services/duracion.service';
 import { JornadasService } from '../services/jornadas.service';
 import { TareasHoyService } from '../services/tareas-hoy.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 
@@ -40,6 +42,7 @@ export class ReabrirJornadaDto {
 }
 
 /** Jornadas (un día de operación) de un ticket de Pumping. La fecha va como AAAA-MM-DD. */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping')
 export class JornadasController {
   constructor(

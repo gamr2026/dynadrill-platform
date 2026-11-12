@@ -1,9 +1,20 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { IsIn, IsNumber, Max, Min, ValidateIf } from 'class-validator';
 import { Permission } from '@dyn/authz';
 import { AuthUser, CurrentUser, RequirePermission } from '@dyn/common';
 import type { EstadoItemReporte } from '../generated/client';
 import { ReporteHerramientasService } from '../services/reporte-herramientas.service';
+import { TicketNoAnuladoGuard } from '../guards/ticket-no-anulado.guard';
 
 const P = Permission;
 const ESTADOS: EstadoItemReporte[] = ['operacion', 'daily_charge', 'venta'];
@@ -19,6 +30,7 @@ export class MarcarDiaDto {
 }
 
 /** Reporte de Herramientas de un ticket de Pumping: las líneas cotizadas del pedido repartidas por día. */
+@UseGuards(TicketNoAnuladoGuard)
 @Controller('operaciones/pumping/tickets/:id/reporte-herramientas')
 export class ReporteHerramientasController {
   constructor(private readonly reporte: ReporteHerramientasService) {}

@@ -3,11 +3,12 @@ import { runInEventSpan } from '@dyn/common';
 import { EventBus, type EventEnvelope } from '@dyn/messaging';
 import type { Prisma } from '../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnulacionService } from '../services/anulacion.service';
 import { ReporteHerramientasService } from '../services/reporte-herramientas.service';
 import { PedidoAbiertoData, TicketsService } from '../services/tickets.service';
 
 /**
- * Recibe los pedidos que Ventas abre en `comercial`. Si son de la línea Pumping, crea su ticket. El inbox evita crearlo
+ * Recibe los pedidos que Ventas abre en `comercial`. Si son de la línea Pumping, crea su ticket; si el pedido se anula, anula el ticket. El inbox evita crearlo
  * dos veces si el evento se entrega repetido, y todo ocurre en una sola transacción.
  */
 @Injectable()
@@ -19,12 +20,17 @@ export class PedidosAbiertosConsumer implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly tickets: TicketsService,
     private readonly reporte: ReporteHerramientasService,
+    private readonly anulacion: AnulacionService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.bus.subscribe({
       source: 'comercial',
-      patterns: ['comercial.pedido.abierto', 'comercial.pedido.actualizado'],
+      patterns: [
+        'comercial.pedido.abierto',
+        'comercial.pedido.actualizado',
+        'comercial.pedido.anulado',
+      ],
       handler: (event) => this.consumir(event),
     });
   }
@@ -35,6 +41,11 @@ export class PedidosAbiertosConsumer implements OnApplicationBootstrap {
       await this.prisma.$transaction(async (tx) => {
         const procesado = await this.bus.handleOnce(tx, event, async () => {
           if (event.type === 'comercial.pedido.actualizado') return this.actualizar(tx, event);
+          if (event.type === 'comercial.pedido.anulado') {
+            if (await this.anulacion.anularDesdePedido(tx, event))
+              this.logger.log(`Pedido ${String(event.data['codigo'])}: ticket anulado`);
+            return;
+          }
           const r = await this.tickets.crearDesdePedido(
             tx,
             event as unknown as EventEnvelope<PedidoAbiertoData>,
