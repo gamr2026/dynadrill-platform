@@ -3,12 +3,14 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { AuthUser } from '@dyn/common';
 import { uuidv7 } from '@dyn/utils';
 import { DirectorioPort } from '../directorio/directorio.port';
 import { OperacionesPort } from '../directorio/operaciones.port';
 import { CargarDocumentoFirmadoDto } from '../dto/prefacturas.dto';
+import { ExpedienteService } from '../expediente/expediente.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const resultado = {
@@ -18,11 +20,14 @@ const resultado = {
 } as const;
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+/** Documentos que Pumping guarda en el ticket: se validan contra él (el resto, contra el índice del expediente). */
+const DE_PUMPING = new Set<string>(['monitoreo', 'mezcla_quimica']);
 
 /**
- * Versión firmada del monitoreo de un día o de la mezcla química de un ticket, que carga Facturación. Solo se guarda el archivo y el
- * resultado de la lectura automática de la firma (una ayuda: el indicador dice si se detectó una firma, no certifica nada). La versión
- * anterior se conserva como historia; vale la última.
+ * Versión firmada de cualquier documento del expediente del pedido (monitoreo, mezcla, reportes, prefactura, guía, OT, QHSE, FCR,
+ * inspecciones, viajes, mantenimiento, adjuntos), que carga Facturación. Solo se guarda el archivo y el resultado de la lectura
+ * automática de la firma (una ayuda: el indicador dice si se detectó una firma, no certifica nada). La versión anterior del mismo
+ * documento (mismo tipo e id de origen) se conserva como historia; vale la última.
  */
 @Injectable()
 export class DocumentosFirmadosService {
@@ -30,6 +35,7 @@ export class DocumentosFirmadosService {
     private readonly prisma: PrismaService,
     private readonly directorio: DirectorioPort,
     private readonly operaciones: OperacionesPort,
+    private readonly expediente: ExpedienteService,
   ) {}
 
   async listar(pedidoId: string) {
@@ -67,17 +73,10 @@ export class DocumentosFirmadosService {
     if (pedido.estado === 'borrador' || pedido.estado === 'anulado') {
       throw new ConflictException('Este pedido no admite documentos firmados');
     }
-    if (!pedido.ticketOperativo || pedido.ticketOperativo.origen !== 'pumping') {
-      throw new ConflictException('El pedido no tiene un ticket de Pumping con estos documentos');
-    }
-    if (dto.tipo === 'monitoreo') {
-      if (!dto.fecha || !FECHA.test(dto.fecha)) {
-        throw new BadRequestException('Indique el día del monitoreo (yyyy-MM-dd)');
-      }
-    } else if (dto.fecha) {
-      throw new BadRequestException('La mezcla química no lleva fecha');
-    }
-    await this.exigirDocumentoDelTicket(pedido.ticketOperativo.ticketId, dto, token);
+    // el monitoreo y la mezcla se validan contra el ticket de Pumping (mensajes propios); el resto, contra el índice del expediente
+    const fecha = DE_PUMPING.has(dto.tipo)
+      ? await this.validarDePumping(pedido.ticketOperativo, dto, token)
+      : await this.validarContraExpediente(pedidoId, dto, token);
     const archivo = await this.directorio.archivo(dto.archivoId, token);
     if (!archivo) throw new BadRequestException('El archivo indicado no existe');
     if (archivo.modulo !== 'documento_respaldo_firmado') {
@@ -89,7 +88,12 @@ export class DocumentosFirmadosService {
     const id = uuidv7();
     await this.prisma.$transaction(async (tx) => {
       const vigente = await tx.documentoRespaldoFirmado.findFirst({
-        where: { pedidoId, documentoTicketId: dto.documentoTicketId, reemplazadoPorId: null },
+        where: {
+          pedidoId,
+          tipo: dto.tipo,
+          documentoTicketId: dto.documentoTicketId,
+          reemplazadoPorId: null,
+        },
         select: { id: true },
       });
       await tx.documentoRespaldoFirmado.create({
@@ -98,7 +102,7 @@ export class DocumentosFirmadosService {
           pedidoId,
           tipo: dto.tipo,
           documentoTicketId: dto.documentoTicketId,
-          fecha: dto.fecha ? new Date(`${dto.fecha}T00:00:00.000Z`) : null,
+          fecha: fecha ? new Date(`${fecha}T00:00:00.000Z`) : null,
           archivoId: archivo.id,
           registradoPor: actor.id,
         },
@@ -113,6 +117,59 @@ export class DocumentosFirmadosService {
     // la lectura de la firma tarda unos segundos: no retrasa ni condiciona la carga
     void this.verificar(id, archivo.id, token);
     return this.listar(pedidoId);
+  }
+
+  /** Monitoreo y mezcla química: documentos del ticket de Pumping del pedido. Devuelve el día que se guarda. */
+  private async validarDePumping(
+    ticketOperativo: { origen: string; ticketId: string } | null,
+    dto: CargarDocumentoFirmadoDto,
+    token: string,
+  ): Promise<string | null> {
+    if (!ticketOperativo || ticketOperativo.origen !== 'pumping') {
+      throw new ConflictException('El pedido no tiene un ticket de Pumping con estos documentos');
+    }
+    if (dto.tipo === 'monitoreo') {
+      if (!dto.fecha || !FECHA.test(dto.fecha)) {
+        throw new BadRequestException('Indique el día del monitoreo (yyyy-MM-dd)');
+      }
+    } else if (dto.fecha) {
+      throw new BadRequestException('La mezcla química no lleva fecha');
+    }
+    await this.exigirDocumentoDelTicket(ticketOperativo.ticketId, dto, token);
+    return dto.fecha ?? null;
+  }
+
+  /**
+   * Cualquier otro documento: el `documentoTicketId` debe ser el `refId` de un documento VIGENTE del índice del expediente de este
+   * pedido, con el mismo tipo. Si algún módulo no respondió, no se puede comprobar y no se acepta nada a ciegas. Devuelve el día del
+   * documento (el que se guarda).
+   */
+  private async validarContraExpediente(
+    pedidoId: string,
+    dto: CargarDocumentoFirmadoDto,
+    token: string,
+  ): Promise<string | null> {
+    const indice = await this.expediente.construir(pedidoId, token);
+    const doc = indice.grupos
+      .flatMap((g) => g.documentos)
+      .find((d) => d.clave === `${dto.tipo}:${dto.documentoTicketId}`);
+    if (!doc) {
+      const caidos = indice.grupos.filter((g) => !g.disponible).map((g) => g.etiqueta);
+      if (caidos.length) {
+        throw new ServiceUnavailableException(
+          `No se pudo comprobar el documento porque no respondió: ${caidos.join(', ')}. Intente de nuevo en unos minutos.`,
+        );
+      }
+      throw new BadRequestException(
+        'El documento indicado no pertenece al expediente de este pedido (o ya no está vigente)',
+      );
+    }
+    if (dto.fecha && dto.fecha.slice(0, 10) !== doc.fecha) {
+      throw new BadRequestException(
+        `El documento indicado es del día ${doc.fecha ?? 'sin fecha'}, no del ${dto.fecha.slice(0, 10)}`,
+      );
+    }
+    return doc.fecha;
   }
 
   /**

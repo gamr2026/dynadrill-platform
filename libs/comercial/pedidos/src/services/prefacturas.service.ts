@@ -29,6 +29,7 @@ import { DocumentosOperativosService } from './documentos-operativos.service';
 import { nombreCliente } from './pedido-mapper';
 import { PedidoEstadoService } from './pedido-estado.service';
 import { SecuenciasService } from './secuencias.service';
+import { estadoDeEnvio, type EstadoEnvio } from './servicio-cumplido';
 
 export interface ContextoPrefactura {
   actor: AuthUser;
@@ -66,12 +67,14 @@ type PrefacturaCompleta = Prisma.PrefacturaGetPayload<{ include: typeof INCLUDE 
 /** Nombres de las personas que aparecen en el rechazo (a quien se devuelve y quien anota el seguimiento). */
 type Nombres = Map<string, string>;
 
-const aDto = (p: PrefacturaCompleta, nombres: Nombres = new Map()) => ({
+const aDto = (p: PrefacturaCompleta, nombres: Nombres = new Map(), envio?: EstadoEnvio) => ({
   id: p.id,
   pedidoId: p.pedidoId,
   version: p.version,
   estado: p.estado,
   ticketNumero: p.ticketNumero,
+  /** Si se puede enviar al cliente hoy y, si no, por qué (solo la prefactura que se está mirando; en las demás, `null`). */
+  envio: envio ?? null,
   totales: {
     subtotalServicios: num(p.subtotalServicios),
     subtotalMateriales: num(p.subtotalMateriales),
@@ -240,12 +243,24 @@ export class PrefacturasService {
       include: INCLUDE,
       orderBy: { version: 'desc' },
     });
-    return filas.map((f) => aDto(f));
+    const envio = await this.envioDe(filas[0]);
+    return filas.map((f) => aDto(f, new Map(), f.id === filas[0].id ? envio : undefined));
   }
 
   async detalle(id: string) {
     const p = await this.cargar(id);
-    return aDto(p, await this.nombresDe(p));
+    return aDto(p, await this.nombresDe(p), await this.envioDe(p));
+  }
+
+  /** Si la prefactura se puede enviar al cliente hoy y, si no, por qué (la regla de «servicio cumplido» y el estado). */
+  private async envioDe(
+    p: Pick<PrefacturaCompleta, 'pedidoId' | 'estado'> | undefined,
+  ): Promise<EstadoEnvio | undefined> {
+    if (!p) return undefined;
+    if (p.estado !== 'generada') {
+      return { permitido: false, motivo: 'Solo se envía una prefactura recién generada' };
+    }
+    return estadoDeEnvio(this.prisma, p.pedidoId);
   }
 
   private async nombresDe(p: PrefacturaCompleta): Promise<Nombres> {
@@ -369,7 +384,7 @@ export class PrefacturasService {
     if (vigente)
       return {
         preliminar: false,
-        prefactura: aDto(vigente, await this.nombresDe(vigente)),
+        prefactura: aDto(vigente, await this.nombresDe(vigente), await this.envioDe(vigente)),
         avance,
       };
     const calculo = await this.prisma.$transaction(async (tx) => {
@@ -547,6 +562,14 @@ export class PrefacturasService {
     const p = await this.cargar(id);
     if (p.estado !== 'generada')
       throw new ConflictException('Solo se envía una prefactura recién generada');
+    // el servicio debe haber llegado a su último día y cada día debe tener su Reporte Job o estar justificado como sin operación
+    const envio = await estadoDeEnvio(this.prisma, p.pedidoId);
+    if (!envio.permitido) {
+      throw new UnprocessableEntityException({
+        message: envio.motivo,
+        code: 'SERVICIO_NO_CUMPLIDO',
+      });
+    }
     // la guía de remisión del pedido debe estar emitida antes de mandar la prefactura a firmas
     const guias = await this.prisma.guiaRemision.count({
       where: { pedidoId: p.pedidoId, estado: 'emitida' },

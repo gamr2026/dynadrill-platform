@@ -480,7 +480,12 @@ run('pedidos (base de datos real)', () => {
     // el pedido tiene FK a la emisión de su ticket: primero el pedido y después sus números
     await admin.query(
       `DELETE FROM comercial.secuencia_emision WHERE documento_ref_id = ANY($1::uuid[]) OR id = ANY($2::uuid[])`,
-      [ids, pedidosBorrados.rows.map((r: { ticket_emision_id: string | null }) => r.ticket_emision_id).filter(Boolean)],
+      [
+        ids,
+        pedidosBorrados.rows
+          .map((r: { ticket_emision_id: string | null }) => r.ticket_emision_id)
+          .filter(Boolean),
+      ],
     );
     await admin.query(
       `DELETE FROM comercial.lista_precios_item WHERE lista_precios_id IN (SELECT id FROM comercial.lista_precios WHERE cliente_id = ANY($1::uuid[]))`,
@@ -1079,29 +1084,18 @@ run('pedidos (base de datos real)', () => {
         .expect(409); // ya está abierto
     });
 
-    it('mientras Operaciones no esté migrada, "documentos_completos" se da a mano y avisa a Facturación', async () => {
+    it('"documentos_completos" ya no es un paso manual: no se ofrece y se rechaza a mano', async () => {
       const b = (await crear(completo({ abrir: true }))).body;
       const disp = (
         await http().get(`/api/comercial/pedidos/${b.id}`).set(facturacion())
       ).body.siguientes.map((s: { estado: string }) => s.estado);
-      expect(disp).toEqual(
-        expect.arrayContaining([
-          'documentos_completos',
-          'en_operacion',
-          'en_correccion',
-          'anulado',
-        ]),
-      );
-      const r = await http()
+      expect(disp).toEqual(expect.arrayContaining(['en_operacion', 'en_correccion', 'anulado']));
+      expect(disp).not.toContain('documentos_completos');
+      await http()
         .post(`/api/comercial/pedidos/${b.id}/transiciones`)
         .set(facturacion())
         .send({ estado: 'documentos_completos' })
-        .expect(201);
-      expect(r.body).toMatchObject({
-        estado: 'documentos_completos',
-        rolResponsable: 'facturacion',
-      });
-      expect(await eventosDe(b.id)).toContain('comercial.pedido.listo_para_facturacion');
+        .expect(403);
       // un lector no tiene pasos disponibles
       expect(
         (await http().get(`/api/comercial/pedidos/${b.id}`).set(soloLectura())).body.siguientes,
@@ -1392,11 +1386,31 @@ run('pedidos (base de datos real)', () => {
         Authorization: `Bearer ${token(U.admin, 'Admin Root', 'superadmin', [...comunes, P.FACTURACION_GESTIONAR])}`,
       });
       const sufijo = Date.now() % 100000;
-      const cuerpo = { clienteId: OTRO_CLIENTE.id, numeroContrato: `CT-NUEVO-${sufijo}`, vigenteDesde: '2026-11-01' };
-      await http().post('/api/comercial/listas-precios').set(soloLectura()).send(cuerpo).expect(403);
-      await http().post('/api/comercial/listas-precios').set(admin()).send({ ...cuerpo, clienteId: id() }).expect(400);
-      await http().post('/api/comercial/listas-precios').set(admin()).send({ ...cuerpo, vigenteDesde: 'mañana' }).expect(400);
-      const ok = await http().post('/api/comercial/listas-precios').set(admin()).send(cuerpo).expect(201);
+      const cuerpo = {
+        clienteId: OTRO_CLIENTE.id,
+        numeroContrato: `CT-NUEVO-${sufijo}`,
+        vigenteDesde: '2026-11-01',
+      };
+      await http()
+        .post('/api/comercial/listas-precios')
+        .set(soloLectura())
+        .send(cuerpo)
+        .expect(403);
+      await http()
+        .post('/api/comercial/listas-precios')
+        .set(admin())
+        .send({ ...cuerpo, clienteId: id() })
+        .expect(400);
+      await http()
+        .post('/api/comercial/listas-precios')
+        .set(admin())
+        .send({ ...cuerpo, vigenteDesde: 'mañana' })
+        .expect(400);
+      const ok = await http()
+        .post('/api/comercial/listas-precios')
+        .set(admin())
+        .send(cuerpo)
+        .expect(201);
       expect(ok.body).toMatchObject({
         clienteId: OTRO_CLIENTE.id,
         numeroContrato: `CT-NUEVO-${sufijo}`,

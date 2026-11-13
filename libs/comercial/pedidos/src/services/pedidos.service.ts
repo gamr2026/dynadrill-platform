@@ -877,6 +877,8 @@ export class PedidosService {
         bloqueId: p.bloqueId,
         pozoId: p.pozoId,
         taladroId: p.taladroId,
+        // bodega del pedido: Operaciones y QHSE la proponen por defecto (despachos, entrega de EPI)
+        bodegaId: p.bodegaId,
         rigless: p.rigless,
         numeroContrato: p.numeroContrato,
         // el Company Man: Pumping lo muestra en el reporte diario (solo el id; el nombre sale del catálogo)
@@ -1387,7 +1389,7 @@ export class PedidosService {
   ) {
     const p = await tx.pedido.findUniqueOrThrow({
       where: { id: pedidoId },
-      select: { fechaInicioServicio: true, fechaFinServicio: true },
+      select: { fechaInicioServicio: true, fechaFinServicio: true, bodegaId: true },
     });
     const items = conLineas
       ? await tx.pedidoItem.findMany({
@@ -1399,6 +1401,7 @@ export class PedidosService {
     return {
       fechaInicioServicio: p.fechaInicioServicio?.toISOString().slice(0, 10) ?? null,
       fechaFinServicio: p.fechaFinServicio?.toISOString().slice(0, 10) ?? null,
+      bodegaId: p.bodegaId,
       ...(items
         ? {
             lineas: items.map((it) => ({

@@ -1,6 +1,7 @@
 import { CambioItemsConsumer } from '../consumers/cambio-items.consumer';
 import { DespachoResultadoConsumer } from '../consumers/despacho-resultado.consumer';
 import { DuracionServicioConsumer } from '../consumers/duracion-servicio.consumer';
+import { JornadaSinOperacionConsumer } from '../consumers/jornada-sin-operacion.consumer';
 import { ReporteDiarioConsumer } from '../consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from '../consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from '../consumers/ticket-operativo.consumer';
@@ -25,5 +26,8 @@ export function sinSuscripciones(): void {
     .mockResolvedValue(undefined);
   jest
     .spyOn(DespachoResultadoConsumer.prototype, 'onApplicationBootstrap')
+    .mockResolvedValue(undefined);
+  jest
+    .spyOn(JornadaSinOperacionConsumer.prototype, 'onApplicationBootstrap')
     .mockResolvedValue(undefined);
 }

@@ -109,8 +109,9 @@ const ANULABLES = [
 
 /**
  * Pasos válidos. Con `permiso`, alguien los puede dar a mano. Con `automatica`, además los produce un hecho (evento o
- * sincronización). Sin permiso, solo el sistema o un forzado (Superadmin con motivo). Mientras Operaciones no esté en el
- * portal, los pasos `en_operacion` y `documentos_completos` también se dan a mano con `comercial.pedidos.editar`.
+ * sincronización). Sin permiso, solo el sistema o un forzado (Superadmin con motivo). `documentos_completos` es solo del
+ * sistema (la documentación completa); mientras Operaciones no esté en el portal, `en_operacion` también se da a mano con
+ * `comercial.pedidos.editar`.
  */
 const PASOS: PasoDef[] = [
   { de: 'borrador', a: 'abierto', permiso: P.crear, regla: 'pedido_completo' },
@@ -147,7 +148,6 @@ const PASOS: PasoDef[] = [
   {
     de: ['abierto', 'en_operacion', 'en_elaboracion_operativa'],
     a: 'documentos_completos',
-    permiso: P.editar,
     automatica: true,
     evento: 'operaciones.ticket.cerrado',
   },

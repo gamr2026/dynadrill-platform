@@ -305,6 +305,7 @@ model Pedido {
   guias            GuiaRemision[]
   ordenTrabajo     OrdenTrabajo?
   cambiosDuracion  PedidoCambioDuracion[]
+  jornadasSinOperacion PedidoJornadaSinOperacion[]
 
   @@index([estado])
   @@index([clienteId])
@@ -387,6 +388,23 @@ model PedidoCambioDuracion {
 
   @@index([pedidoId, createdAt])
   @@map("pedido_cambio_duracion")
+  @@schema("comercial")
+}
+
+/// Día del servicio que Operaciones registró como «sin operación» (evento `operaciones.pumping.jornada_sin_operacion`).
+model PedidoJornadaSinOperacion {
+  id           String   @id @db.Uuid
+  pedidoId     String   @map("pedido_id") @db.Uuid
+  pedido       Pedido   @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  fecha        DateTime @db.Date
+  motivo       String
+  detalle      String?
+  /// Ticket de Pumping que lo registró (solo para mostrarlo).
+  ticketNumero Int?     @map("ticket_numero")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([pedidoId, fecha])
+  @@map("pedido_jornada_sin_operacion")
   @@schema("comercial")
 }
 
@@ -1068,13 +1086,36 @@ model PrefacturaFirmaDigital {
 enum TipoDocumentoRespaldo {
   monitoreo
   mezcla_quimica
+  reporte_job
+  reporte_herramientas
+  reporte_unidad
+  prefactura
+  guia_remision
+  orden_trabajo
+  qhse_formato_recepcion
+  qhse_art
+  qhse_pt
+  qhse_sfi
+  qhse_formato_entrega
+  fcr_formulario_inspeccion_externo
+  fcr_formato_dimensionamiento_servicio
+  fcr_formato_dureza_servicio
+  fcr_documento_inspeccion
+  fcr_registro_dureza
+  fcr_registro_qaqc
+  inspeccion_vehiculo
+  gerenciamiento_viaje
+  orden_mantenimiento_general
+  orden_mantenimiento_operativa
+  informe_mantenimiento
+  adjunto
 
   @@map("tipo_documento_respaldo")
   @@schema("comercial")
 }
 
-/// Versión firmada de un documento de respaldo del ticket (monitoreo de un día o mezcla química), con la lectura automática de la firma.
-/// `documentoTicketId` es el documento de Pumping al que corresponde (referencia por id: son contenedores distintos).
+/// Versión firmada de un documento del expediente del pedido, con la lectura automática de la firma.
+/// `documentoTicketId` es el id del documento de origen (el `refId` del índice del expediente; sin FK: puede estar en otro contenedor).
 model DocumentoRespaldoFirmado {
   id                   String                   @id @db.Uuid
   pedidoId             String                   @map("pedido_id") @db.Uuid
@@ -1094,7 +1135,7 @@ model DocumentoRespaldoFirmado {
   reemplaza            DocumentoRespaldoFirmado? @relation("reemplazoDocumento")
 
   @@unique([pedidoId, archivoId])
-  @@index([pedidoId, documentoTicketId])
+  @@index([pedidoId, tipo, documentoTicketId])
   @@map("documento_respaldo_firmado")
   @@schema("comercial")
 }

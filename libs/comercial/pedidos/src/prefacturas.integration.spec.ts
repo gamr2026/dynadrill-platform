@@ -18,14 +18,19 @@ import {
   jwtVerifyEnvSchema,
 } from '@dyn/config';
 import { CommonModule, configureApp } from '@dyn/common';
-import { MessagingModule } from '@dyn/messaging';
+import { MessagingModule, type EventEnvelope } from '@dyn/messaging';
 import { uuidv7 } from '@dyn/utils';
 import { PedidosModule } from './index';
+import {
+  EVENTO_JORNADA_SIN_OPERACION,
+  JornadaSinOperacionConsumer,
+} from './consumers/jornada-sin-operacion.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
 import { DirectorioPort } from './directorio/directorio.port';
 import { OperacionesPort, type DocumentoTicketPumpingRef } from './directorio/operaciones.port';
 import { PrismaService } from './prisma/prisma.service';
+import { hoyEnEcuador } from './services/servicio-cumplido';
 import { idsDeUnidades } from './testing/unidades';
 import {
   emitirGuiaDePrueba,
@@ -99,6 +104,7 @@ run('prefactura (base de datos real)', () => {
   const soloVer = () => bearer([P.PREFACTURAS_VER]);
   const pedidos: string[] = [];
   let cerrado: TicketCerradoConsumer;
+  let sinOperacion: JornadaSinOperacionConsumer;
   let ticketOperativo: TicketOperativoConsumer;
   const eventosCierre: string[] = [];
   let listaId = '';
@@ -364,6 +370,7 @@ run('prefactura (base de datos real)', () => {
     prisma = app.get(PrismaService);
     U = await idsDeUnidades(prisma);
     cerrado = app.get(TicketCerradoConsumer);
+    sinOperacion = app.get(JornadaSinOperacionConsumer);
     ticketOperativo = app.get(TicketOperativoConsumer);
 
     const esp = await admin.query(
@@ -1351,6 +1358,97 @@ run('prefactura (base de datos real)', () => {
         .set(soloVer())
         .send(firma)
         .expect(403);
+    });
+  });
+
+  describe('regla de envío: el servicio cumplido', () => {
+    const hoy = () => hoyEnEcuador();
+    const sumarDias = (dia: string, d: number) =>
+      new Date(new Date(`${dia}T00:00:00Z`).getTime() + d * 86_400_000).toISOString().slice(0, 10);
+    const enviar = (id: string) =>
+      http().post(`/api/comercial/prefacturas/${id}/enviar`).set(fact()).send({ medio: 'email' });
+    /** Pedido de los días 1 y 2 de noviembre con la prefactura generada a partir de los días indicados. */
+    const generadaConDias = async (dias: number[]) => {
+      const id = await pedido();
+      for (const d of dias) await doc(job(d), id).expect(201);
+      return { pedidoId: id, prefactura: (await generar(id).expect(201)).body };
+    };
+    const diaSinOperacion = async (pedidoId: string, fecha: string, activa = true) => {
+      const id = uuidv7();
+      eventosCierre.push(id);
+      await sinOperacion.consumir({
+        id,
+        type: EVENTO_JORNADA_SIN_OPERACION,
+        version: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'operaciones',
+        subject: { type: 'pumping_ticket', id: uuidv7() },
+        actor: { userId: ACTOR, role: 'supervisor' },
+        data: {
+          pedidoId,
+          fecha,
+          activa,
+          motivo: 'Lluvia',
+          detalle: 'Pozo inundado',
+          ticketNumero: 4600,
+        },
+      } as EventEnvelope);
+    };
+    const rechazo = async (id: string) => {
+      const r = await enviar(id).expect(422);
+      expect(r.body.code).toBe('SERVICIO_NO_CUMPLIDO');
+      return String(r.body.detail ?? r.body.message);
+    };
+
+    it('antes de la fecha de fin no se envía, y el detalle lo dice en `envio`', async () => {
+      const { pedidoId, prefactura } = await generadaConDias([1, 2]);
+      const manana = sumarDias(hoy(), 1);
+      await prisma.pedido.update({
+        where: { id: pedidoId },
+        data: { fechaFinServicio: new Date(`${manana}T00:00:00Z`) },
+      });
+      const msg = await rechazo(prefactura.id);
+      expect(msg).toContain(`${manana.slice(8, 10)}/${manana.slice(5, 7)}/${manana.slice(0, 4)}`);
+      const d = (await http().get(`/api/comercial/prefacturas/${prefactura.id}`).set(fact())).body;
+      expect(d.envio).toEqual({ permitido: false, motivo: expect.stringContaining('termina el') });
+      // con el fin en hoy ya se cumplió la fecha, pero faltan los reportes de los días entre el 3 de noviembre y hoy
+      await prisma.pedido.update({
+        where: { id: pedidoId },
+        data: { fechaFinServicio: new Date(`${hoy()}T00:00:00Z`) },
+      });
+      expect(await rechazo(prefactura.id)).toContain('Falta el Reporte Job');
+    });
+
+    it('un día sin Reporte Job bloquea el envío y dice cuál falta', async () => {
+      const { prefactura } = await generadaConDias([1]);
+      const msg = await rechazo(prefactura.id);
+      expect(msg).toContain('Falta el Reporte Job del día 02/11/2026');
+      const d = (await http().get(`/api/comercial/prefacturas/${prefactura.id}`).set(fact())).body;
+      expect(d.envio.permitido).toBe(false);
+      expect(await estadoDe(prefactura.pedidoId)).toBe('prefactura_generada');
+    });
+
+    it('un último día justificado como sin operación no bloquea; reabrirlo vuelve a bloquear', async () => {
+      const { pedidoId, prefactura } = await generadaConDias([1]);
+      await rechazo(prefactura.id);
+      await diaSinOperacion(pedidoId, '2026-11-02');
+      const d = (await http().get(`/api/comercial/prefacturas/${prefactura.id}`).set(fact())).body;
+      expect(d.envio).toEqual({ permitido: true, motivo: null });
+      await diaSinOperacion(pedidoId, '2026-11-02', false);
+      await rechazo(prefactura.id);
+      await diaSinOperacion(pedidoId, '2026-11-02');
+      const r = await enviar(prefactura.id).expect(201);
+      expect(r.body.estado).toBe('enviada_para_firmas');
+    });
+
+    it('si el servicio se acortó solo cuentan los días hasta la nueva fecha de fin', async () => {
+      const { pedidoId, prefactura } = await generadaConDias([1]);
+      await rechazo(prefactura.id);
+      await prisma.pedido.update({
+        where: { id: pedidoId },
+        data: { fechaFinServicio: new Date('2026-11-01T00:00:00Z') },
+      });
+      await enviar(prefactura.id).expect(201);
     });
   });
 

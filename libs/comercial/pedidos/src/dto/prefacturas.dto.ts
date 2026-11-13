@@ -14,6 +14,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { TipoDocumentoRespaldo } from '../generated/client';
 
 export const MEDIOS_ENVIO = ['email', 'portal'] as const;
 export const TIPOS_FIRMANTE = ['company_man', 'cliente', 'dynadrill'] as const;
@@ -72,7 +73,10 @@ export class FirmarPrefacturaDto {
 /** Un ítem de la prefactura que el cliente observó. */
 export class ItemObservadoDto {
   @IsUUID() itemId!: string;
-  @IsString() @Matches(/\S/, { message: 'La observación no puede estar vacía' }) @MaxLength(1000) observacion!: string;
+  @IsString()
+  @Matches(/\S/, { message: 'La observación no puede estar vacía' })
+  @MaxLength(1000)
+  observacion!: string;
 }
 
 export class RechazarPrefacturaDto {
@@ -91,7 +95,10 @@ export class RechazarPrefacturaDto {
 
 /** Un avance de la corrección de una prefactura rechazada. */
 export class SeguimientoPrefacturaDto {
-  @IsString() @Matches(/\S/, { message: 'La nota no puede estar vacía' }) @MaxLength(2000) nota!: string;
+  @IsString()
+  @Matches(/\S/, { message: 'La nota no puede estar vacía' })
+  @MaxLength(2000)
+  nota!: string;
 }
 
 export class ReemplazarFirmaDto {
@@ -99,13 +106,14 @@ export class ReemplazarFirmaDto {
   @IsUUID() archivoId!: string;
 }
 
-export const TIPOS_DOCUMENTO_RESPALDO = ['monitoreo', 'mezcla_quimica'] as const;
+/** Los `tipo` del índice del expediente: todos admiten una versión firmada. */
+export const TIPOS_DOCUMENTO_RESPALDO = Object.values(TipoDocumentoRespaldo);
 
 export class CargarDocumentoFirmadoDto {
-  @IsIn(TIPOS_DOCUMENTO_RESPALDO) tipo!: (typeof TIPOS_DOCUMENTO_RESPALDO)[number];
-  /** El documento del ticket de Pumping al que corresponde (su id en `GET tickets/:id/documentos`). */
+  @IsIn(TIPOS_DOCUMENTO_RESPALDO) tipo!: TipoDocumentoRespaldo;
+  /** Id del documento de origen: el `refId` de su clave en `GET comercial/pedidos/:id/expediente` (`${tipo}:${refId}`). */
   @IsUUID() documentoTicketId!: string;
-  /** Solo el monitoreo: el día de operación. */
+  /** El monitoreo la exige (día de operación); en los demás documentos de un día, si se indica debe coincidir con la del documento. */
   @IsOptional() @IsDateString() fecha?: string;
   /** Archivo subido a `archivos` con módulo `documento_respaldo_firmado`. */
   @IsUUID() archivoId!: string;

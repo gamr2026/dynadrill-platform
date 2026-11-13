@@ -4,6 +4,7 @@ import { OrdenesTrabajoController } from './controllers/ordenes-trabajo.controll
 import { CambioItemsConsumer } from './consumers/cambio-items.consumer';
 import { DuracionServicioConsumer } from './consumers/duracion-servicio.consumer';
 import { DespachoResultadoConsumer } from './consumers/despacho-resultado.consumer';
+import { JornadaSinOperacionConsumer } from './consumers/jornada-sin-operacion.consumer';
 import { ReporteDiarioConsumer } from './consumers/reporte-diario.consumer';
 import { TicketCerradoConsumer } from './consumers/ticket-cerrado.consumer';
 import { TicketOperativoConsumer } from './consumers/ticket-operativo.consumer';
@@ -22,6 +23,10 @@ import { DirectorioHttpAdapter } from './directorio/directorio-http.adapter';
 import { DirectorioPort } from './directorio/directorio.port';
 import { OperacionesHttpAdapter } from './directorio/operaciones-http.adapter';
 import { OperacionesPort } from './directorio/operaciones.port';
+import { QhseHttpAdapter } from './directorio/qhse-http.adapter';
+import { QhsePort } from './directorio/qhse.port';
+import { ExpedienteController } from './controllers/expediente.controller';
+import { ExpedienteService } from './expediente/expediente.service';
 import { PrismaService } from './prisma/prisma.service';
 import { ListasPreciosService } from './services/listas-precios.service';
 import { DocumentosOperativosService } from './services/documentos-operativos.service';
@@ -49,6 +54,7 @@ import { WorkflowService } from './workflow/workflow.service';
     PrefacturasController,
     ReporteriaController,
     DocumentosFirmadosController,
+    ExpedienteController,
     GuiasController,
     OrdenesTrabajoController,
     ListasPreciosController,
@@ -60,6 +66,8 @@ import { WorkflowService } from './workflow/workflow.service';
     WorkflowService,
     { provide: DirectorioPort, useClass: DirectorioHttpAdapter },
     { provide: OperacionesPort, useClass: OperacionesHttpAdapter },
+    { provide: QhsePort, useClass: QhseHttpAdapter },
+    ExpedienteService,
     PedidosService,
     ListasPreciosService,
     DocumentosOperativosService,
@@ -75,6 +83,7 @@ import { WorkflowService } from './workflow/workflow.service';
     CambioItemsService,
     CambioItemsConsumer,
     DuracionServicioConsumer,
+    JornadaSinOperacionConsumer,
     DespachoResultadoConsumer,
   ],
   exports: [SecuenciasService, WorkflowService, PedidosService],
