@@ -134,6 +134,12 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
             (await tx.idUsuario.count({ where: { id: supervisor } }))
               ? { supervisorId: supervisor }
               : {};
+          // la bodega del pedido (catalogos.bodega): solo se pisa si el evento la trae y existe en el catálogo
+          const bodega = d['bodegaId'];
+          const bodegaId =
+            esUuid(bodega) && (await tx.catBodega.count({ where: { id: bodega } }))
+              ? { bodegaId: bodega }
+              : {};
           const datos = {
             ticketNumero: Number.isInteger(numero) ? numero : null,
             pedidoId,
@@ -141,6 +147,7 @@ export class PumpingEventosConsumer implements OnApplicationBootstrap {
             ...opcional('cliente'),
             ...opcional('campo'),
             ...opcional('pozo'),
+            ...bodegaId,
             ...supervisorId,
           };
           await tx.ticketRef.upsert({

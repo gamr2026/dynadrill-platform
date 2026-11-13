@@ -519,6 +519,30 @@ run('Flota F4: gerenciamiento de viaje (base de datos real)', () => {
       expect(detalle.body.id).toBe(todas[0].id);
       await http().post(`${base}/${todas[0].id}/autorizar`).set(lector).expect(403);
     });
+
+    it('el permiso del expediente (Facturación) lee en solo lectura los viajes de un ticket, no los demás', async () => {
+      const exp = token('facturacion', 'Fabiola Facturación', [P.EXPEDIENTE_VER], uuidv7());
+      const conTicket = (
+        await admin.query(
+          'SELECT id, ticket_id FROM flota.gerenciamiento_viaje WHERE ticket_id IS NOT NULL LIMIT 1',
+        )
+      ).rows[0];
+      const sinTicket = (
+        await admin.query(
+          'SELECT id FROM flota.gerenciamiento_viaje WHERE ticket_id IS NULL LIMIT 1',
+        )
+      ).rows[0];
+      const delTicket = (
+        await http().get(`${base}?ticketId=${conTicket.ticket_id}`).set(exp).expect(200)
+      ).body as Array<{ id: string; ticketId: string }>;
+      expect(delTicket.map((x) => x.id)).toContain(conTicket.id);
+      expect(delTicket.every((x) => x.ticketId === conTicket.ticket_id)).toBe(true);
+      // sin indicar el ticket no ve filas de otros
+      expect((await http().get(base).set(exp).expect(200)).body).toEqual([]);
+      await http().get(`${base}/${conTicket.id}`).set(exp).expect(200);
+      await http().get(`${base}/${sinTicket.id}`).set(exp).expect(404);
+      await http().post(`${base}/${conTicket.id}/autorizar`).set(exp).expect(403);
+    });
   });
 
   describe('reglas que garantiza la base', () => {

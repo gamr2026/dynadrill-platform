@@ -13,14 +13,14 @@ export interface FiltroEntregas {
 
 const INCLUDE_LISTA = {
   trabajador: { include: { perfil: true } },
-  ticket: true,
+  ticket: { include: { bodega: true } },
   lugar: true,
   _count: { select: { items: true } },
 } satisfies Prisma.EpiEntregaInclude;
 
 const INCLUDE_DETALLE = {
   trabajador: { include: { perfil: true, rol: true } },
-  ticket: true,
+  ticket: { include: { bodega: true } },
   lugar: true,
   items: { include: { elemento: true, talla: true }, orderBy: { elemento: { nombre: 'asc' } } },
   firmaTrabajador: true,
@@ -59,20 +59,28 @@ export class EpiConsultaService {
    * Los operadores asignados a un ticket y la solicitud de EPI más reciente de cada uno (sin los datos de la entrega: solo estado y número).
    */
   async deTicket(ticketId: string) {
-    const [operadores, entregas] = await Promise.all([
+    const [operadores, entregas, ticket] = await Promise.all([
       this.prisma.ticketOperador.findMany({
         where: { ticketId },
         include: { usuario: { include: { perfil: true } } },
         orderBy: { usuario: { nombre: 'asc' } },
       }),
       this.prisma.epiEntrega.findMany({ where: { ticketId }, orderBy: { createdAt: 'asc' } }),
+      this.prisma.ticketRef.findUnique({
+        where: { ticketId },
+        select: { bodega: { select: { id: true, nombre: true } } },
+      }),
     ]);
+    // la bodega del pedido (la misma para todo el ticket): la pantalla la usa para prellenar el lugar de la entrega
+    const bodega = ticket?.bodega ?? null;
     return operadores.map((o) => {
       const e = [...entregas].reverse().find((x) => x.trabajadorId === o.usuarioId);
       return {
         usuarioId: o.usuarioId,
         nombre: o.usuario.nombre,
         cargo: o.usuario.perfil?.cargo ?? null,
+        bodegaId: bodega?.id ?? null,
+        bodega,
         entrega: e
           ? {
               id: e.id,
@@ -147,6 +155,9 @@ export class EpiConsultaService {
           numero: t.ticketNumero,
           pedidoId: t.pedidoId,
           pedidoCodigo: t.pedidoCodigo,
+          // la bodega del pedido: prellena el lugar de la entrega
+          bodegaId: t.bodegaId,
+          bodega: t.bodega ? { id: t.bodega.id, nombre: t.bodega.nombre } : null,
         }
       : null;
   }

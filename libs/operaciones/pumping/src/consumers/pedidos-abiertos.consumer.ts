@@ -79,7 +79,9 @@ export class PedidosAbiertosConsumer implements OnApplicationBootstrap {
         : {}),
       ...(d.fechaFinServicio !== undefined ? { fechaFinServicio: deDia(d.fechaFinServicio) } : {}),
     };
-    if (Object.keys(fechas).length) await tx.ticket.update({ where: { id: t.id }, data: fechas });
+    const bodega = d.bodegaId !== undefined ? { bodegaId: d.bodegaId } : {};
+    const cambios = { ...fechas, ...bodega };
+    if (Object.keys(cambios).length) await tx.ticket.update({ where: { id: t.id }, data: cambios });
     if (Array.isArray(d.lineas)) await this.reporte.guardarLineas(tx, t.id, d.lineas);
   }
 }

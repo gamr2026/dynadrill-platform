@@ -78,13 +78,24 @@ export class InspeccionesService {
 
       // el equipo es del catálogo: se busca por tipo y código sin mayúsculas ni espacios y, si no existe, se da de alta aquí mismo
       const normalizado = codigoEquipo.replace(/\s+/g, '').toLowerCase();
-      const existentes = await tx.equipo.findMany({ where: { tipoId: tipo.id }, select: { id: true, codigo: true, activo: true } });
-      let equipo = existentes.find((q) => q.codigo.replace(/\s+/g, '').toLowerCase() === normalizado);
+      const existentes = await tx.equipo.findMany({
+        where: { tipoId: tipo.id },
+        select: { id: true, codigo: true, activo: true },
+      });
+      let equipo = existentes.find(
+        (q) => q.codigo.replace(/\s+/g, '').toLowerCase() === normalizado,
+      );
       if (equipo && !equipo.activo)
         throw new BadRequestException('Ese equipo está dado de baja: no se puede inspeccionar');
       if (!equipo) {
         equipo = await tx.equipo.create({
-          data: { id: uuidv7(), tipoId: tipo.id, codigo: codigoEquipo, createdBy: actor.id, updatedBy: actor.id },
+          data: {
+            id: uuidv7(),
+            tipoId: tipo.id,
+            codigo: codigoEquipo,
+            createdBy: actor.id,
+            updatedBy: actor.id,
+          },
           select: { id: true, codigo: true, activo: true },
         });
       }

@@ -1258,9 +1258,7 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
         });
         expect(hoja.body.subordenes[0].repuestos).toHaveLength(2);
         expect(hoja.body.subordenes[0].diagnostico).toBe('Filtro saturado');
-        expect(
-          (await http().get(`${base}/ordenes/${uuidv7()}/hoja`).set(jefe())).status,
-        ).toBe(404);
+        expect((await http().get(`${base}/ordenes/${uuidv7()}/hoja`).set(jefe())).status).toBe(404);
       } finally {
         await admin.query(
           'DELETE FROM flota.unidad_lectura_anulacion WHERE lectura_id = ANY($1::uuid[])',
@@ -1345,6 +1343,48 @@ run('Mantenimiento: reportes recibidos y clasificación (base de datos real)', (
       ).toEqual([]);
       expect(
         (await http().get(`${base}/tickets/${ticketId}/ordenes`).set(sinPermiso())).status,
+      ).toBe(403);
+    });
+
+    it('las órdenes del servicio son solo las nacidas de reportes de ese ticket, y el expediente las lee sin más permisos', async () => {
+      const { reporteId, ticketId } = await reportePumping();
+      await consumer.consumir(
+        evento(reporteId, { ticketId, unidadId: UNIDAD.id, vehiculoId: VEHICULO.id }),
+      );
+      const reporte = await prisma.reporteRecibido.findUniqueOrThrow({
+        where: { pumpingReporteUnidadId: reporteId },
+      });
+      const o = await http()
+        .post(`${base}/reportes/${reporte.id}/clasificar`)
+        .set(jefe())
+        .send({ asignaciones: [{ tipo: 'mecanico', usuarioId: MECANICO.id }] })
+        .expect(201);
+      const expediente = token('facturacion', 'Facturación', [P.EXPEDIENTE_VER]);
+
+      const r = await http().get(`${base}/tickets/${ticketId}/ordenes-del-servicio`).set(jefe());
+      expect(r.status).toBe(200);
+      expect(r.body.map((x: { id: string }) => x.id)).toEqual([o.body.id]);
+      expect(r.body[0]).toMatchObject({ ticket: { id: ticketId }, subordenes: expect.any(Array) });
+
+      // otro ticket con la MISMA unidad: `ordenes` sí la trae, `ordenes-del-servicio` no
+      const otro = await reportePumping();
+      expect(
+        (await http().get(`${base}/tickets/${otro.ticketId}/ordenes-del-servicio`).set(jefe()))
+          .body,
+      ).toEqual([]);
+
+      // Facturación (solo EXPEDIENTE_VER) lee la lista y la hoja, pero no el resto del módulo
+      expect(
+        (await http().get(`${base}/tickets/${ticketId}/ordenes-del-servicio`).set(expediente))
+          .status,
+      ).toBe(200);
+      expect((await http().get(`${base}/ordenes/${o.body.id}/hoja`).set(expediente)).status).toBe(
+        200,
+      );
+      expect((await http().get(`${base}/ordenes/${o.body.id}`).set(expediente)).status).toBe(403);
+      expect(
+        (await http().get(`${base}/tickets/${ticketId}/ordenes-del-servicio`).set(sinPermiso()))
+          .status,
       ).toBe(403);
     });
 

@@ -259,6 +259,23 @@ export class TrasladoSalidaController {
   }
 
   // ---- reporte de unidad (uno por unidad y día del servicio; las rutas sin día usan el reporte más reciente)
+  /** Expediente del pedido: los reportes de unidad del ticket como filas de documento (solo lectura). */
+  @RequirePermission(P.PUMPING_OPERAR, P.EXPEDIENTE_VER)
+  @Get('tickets/:id/expediente/reportes-unidad')
+  reportesParaExpediente(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reportes.listarParaExpediente(id);
+  }
+
+  /** Expediente del pedido: los datos de la hoja `reporte-unidad-hoja` de un reporte de unidad. */
+  @RequirePermission(P.PUMPING_OPERAR, P.EXPEDIENTE_VER)
+  @Get('tickets/:id/expediente/reportes-unidad/:reporteId')
+  reporteParaExpediente(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('reporteId', ParseUUIDPipe) reporteId: string,
+  ) {
+    return this.reportes.obtenerParaExpediente(id, reporteId);
+  }
+
   @RequirePermission(P.PUMPING_OPERAR)
   @Get('tickets/:id/reportes-unidad')
   reportesDelTicket(@Param('id', ParseUUIDPipe) id: string, @Query('fecha') fecha?: string) {

@@ -1134,7 +1134,7 @@ export class JornadasService {
         }
         const motivo = await tx.motivoSinOperacion.findFirst({
           where: { id: motivoId, activo: true },
-          select: { id: true },
+          select: { id: true, codigo: true, nombre: true },
         });
         if (!motivo) throw new BadRequestException('El motivo no existe o está inactivo');
         await tx.ticketJornada.update({
@@ -1150,6 +1150,7 @@ export class JornadasService {
         await this.anotar(tx, j.id, 'sin_operacion', texto, actor.id);
         await this.sincronizar(tx, ticketId, actor.id);
         await this.publicarDias(tx, ticketId); // un día sin operación ya no necesita PTW
+        await this.publicarSinOperacion(tx, ticketId, j, motivo, texto, actor);
         return { ok: true };
       },
     );
@@ -1214,8 +1215,66 @@ export class JornadasService {
       await this.anotar(tx, j.id, 'reabierta', texto, actor.id);
       await this.sincronizar(tx, ticketId, actor.id); // el día vuelve a exigir sus requisitos
       await this.publicarDias(tx, ticketId);
+      if (j.estado === 'sin_operacion') {
+        const motivoPrevio = j.sinOperacionMotivoId
+          ? await tx.motivoSinOperacion.findUnique({
+              where: { id: j.sinOperacionMotivoId },
+              select: { codigo: true, nombre: true },
+            })
+          : null;
+        await this.publicarSinOperacion(
+          tx,
+          ticketId,
+          j,
+          motivoPrevio ?? { codigo: '', nombre: 'Reabierta' },
+          j.sinOperacionDetalle,
+          actor,
+          false,
+        );
+      }
       return { ok: true };
     });
+  }
+
+  /**
+   * `operaciones.pumping.jornada_sin_operacion`: `activa: true` cuando un día del servicio queda justificado como «sin operación», `false` cuando
+   * se reabre. Comercial lo usa para saber que ese día no lleva Reporte Job (regla de envío). Va en la misma transacción que el cambio de estado.
+   */
+  private async publicarSinOperacion(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    jornada: { fecha: Date; numero: number },
+    motivo: { codigo: string; nombre: string },
+    detalle: string | null,
+    actor: AuthUser,
+    activa = true,
+  ): Promise<void> {
+    const t = await tx.ticket.findUniqueOrThrow({
+      where: { id: ticketId },
+      select: { pedidoId: true, pedidoCodigo: true, ticketNumero: true },
+    });
+    await this.bus.publish(
+      tx,
+      this.bus.create({
+        type: 'operaciones.pumping.jornada_sin_operacion',
+        subject: { type: 'pumping_ticket', id: ticketId },
+        data: {
+          ticketId,
+          pedidoId: t.pedidoId,
+          pedidoCodigo: t.pedidoCodigo,
+          ticketNumero: t.ticketNumero,
+          fecha: aFecha(jornada.fecha),
+          numero: jornada.numero,
+          activa,
+          motivo: motivo.nombre,
+          motivoCodigo: motivo.codigo,
+          motivoNombre: motivo.nombre,
+          detalle,
+          registradoPor: actor.id,
+        },
+        traceparent: currentTraceparent(),
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------------------------------------------

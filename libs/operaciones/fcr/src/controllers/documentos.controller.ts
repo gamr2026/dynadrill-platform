@@ -26,7 +26,7 @@ export class AdjuntarDocumentoDto {
 export class DocumentosController {
   constructor(private readonly documentos: DocumentosService) {}
 
-  @RequirePermission(P.FCR_OPERAR)
+  @RequirePermission(P.FCR_OPERAR, P.EXPEDIENTE_VER)
   @Get()
   listar(@Param('id', ParseUUIDPipe) id: string) {
     return this.documentos.listar(id);

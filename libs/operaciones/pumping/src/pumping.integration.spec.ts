@@ -1888,6 +1888,45 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         [VEHICULO_2.unidadId, VEHICULO_2.id],
       ].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     );
+    // expediente del pedido: Facturación (solo EXPEDIENTE_VER) lista los reportes de unidad del ticket y lee la hoja de uno
+    const facturacionExp = como('facturacion', uuidv7(), 'Fabiola Facturación', [P.EXPEDIENTE_VER]);
+    const filasExp = (
+      await http().get(`${t.url}/expediente/reportes-unidad`).set(facturacionExp).expect(200)
+    ).body;
+    expect(filasExp).toHaveLength(2);
+    expect(filasExp[0]).toMatchObject({
+      ticketId: t.id,
+      salida: { firmada: true },
+      llegada: { firmada: true },
+    });
+    expect(filasExp.map((f: { unidadId: string }) => f.unidadId).sort()).toEqual(
+      [VEHICULO.unidadId, VEHICULO_2.unidadId].sort(),
+    );
+    const hojaExp = (
+      await http()
+        .get(`${t.url}/expediente/reportes-unidad/${filasExp[0].id}`)
+        .set(facturacionExp)
+        .expect(200)
+    ).body;
+    expect(hojaExp).toMatchObject({
+      id: filasExp[0].id,
+      unidadId: filasExp[0].unidadId,
+      encabezado: { ticketNumero: expect.anything(), pedidoCodigo: expect.any(String) },
+    });
+    expect(hojaExp.salida.firmadaPor).toEqual(expect.any(String));
+    expect(hojaExp.llegada.firmadaPor).toEqual(expect.any(String));
+    expect(Array.isArray(hojaExp.inspecciones)).toBe(true);
+    await http()
+      .get(`${t.url}/expediente/reportes-unidad/${uuidv7()}`)
+      .set(facturacionExp)
+      .expect(404);
+    await http().get(`${t.url}/expediente/reportes-unidad`).set(sinPermiso()).expect(403);
+    // solo lectura: el permiso del expediente no abre la escritura
+    await http()
+      .put(urlLlegada(VEHICULO.unidadId))
+      .set(facturacionExp)
+      .send(conNovedad)
+      .expect(403);
     await http()
       .post(`${t.url}/avanzar`)
       .set(op1())
@@ -3867,6 +3906,26 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
       expect((await sinOp(t, DIAS[1], { detalle: 'Detalle válido' })).status).toBe(400);
       expect((await sinOp(t, DIAS[2], cuerpo)).status).toBe(409); // todavía no llega
       await sinOp(t, DIAS[1], cuerpo).expect(201);
+      // el hecho sale en la misma transacción: Comercial lo usa para la regla de envío
+      const evSin = await admin.query(
+        "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.jornada_sin_operacion' AND datos->'data'->>'ticketId' = $1",
+        [t.id],
+      );
+      expect(evSin.rows).toHaveLength(1);
+      expect(evSin.rows[0].d).toMatchObject({
+        ticketId: t.id,
+        pedidoId: expect.any(String),
+        pedidoCodigo: expect.any(String),
+        fecha: DIAS[1],
+        numero: 2,
+        activa: true,
+        motivo: expect.any(String),
+        ticketNumero: expect.anything(),
+        motivoCodigo: 'clima',
+        motivoNombre: expect.any(String),
+        detalle: cuerpo.detalle,
+        registradoPor: OP1.id,
+      });
       const r = await ver(t);
       expect(r.body).toMatchObject({ sinOperacion: 1 });
       expect(r.body.jornadas[1]).toMatchObject({
@@ -3968,6 +4027,19 @@ run('Pumping: tickets de los pedidos abiertos (base de datos real)', () => {
         detalle: 'Falló el compresor',
       }).expect(201);
       await reabrir(t, DIAS[0], { motivo: 'Sí hubo operación ese día' }).expect(201);
+      const revertida = await admin.query(
+        "SELECT datos->'data' AS d FROM msg_operaciones.outbox WHERE tipo = 'operaciones.pumping.jornada_sin_operacion' AND datos->'data'->>'ticketId' = $1 AND datos->'data'->>'activa' = 'false'",
+        [t.id],
+      );
+      // solo el día «sin operación» revierte; la reapertura de un día cerrado no publica nada
+      expect(revertida.rows).toHaveLength(1);
+      expect(revertida.rows[0].d).toMatchObject({
+        ticketId: t.id,
+        pedidoId: expect.any(String),
+        fecha: DIAS[0],
+        activa: false,
+        motivo: expect.any(String),
+      });
       expect((await ver(t)).body.jornadas[0]).toMatchObject({
         estado: 'pendiente',
         sinOperacion: null,

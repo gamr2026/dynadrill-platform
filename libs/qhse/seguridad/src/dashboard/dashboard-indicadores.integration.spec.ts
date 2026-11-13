@@ -18,8 +18,10 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
   jest.setTimeout(120000);
   let t: AppDePrueba;
   const ruta = '/api/qhse/dashboard/indicadores';
-  const tecnico = () => t.token('tecnico_hse', TECNICO.nombre, [Permission.QHSE_GESTIONAR], TECNICO.id);
-  const operador = () => t.token('operador', OPERADOR.nombre, [Permission.QHSE_REPORTAR], OPERADOR.id);
+  const tecnico = () =>
+    t.token('tecnico_hse', TECNICO.nombre, [Permission.QHSE_GESTIONAR], TECNICO.id);
+  const operador = () =>
+    t.token('operador', OPERADOR.nombre, [Permission.QHSE_REPORTAR], OPERADOR.id);
 
   beforeAll(async () => {
     t = await levantarAppDePrueba('3182');
@@ -46,7 +48,9 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
       (await n("SELECT count(*)::int AS n FROM qhse.derrame WHERE estado = 'activo'"));
     expect(r.incidentesAbiertos).toBe(abiertos);
     expect(r.ipercSinAprobar).toBe(
-      await n("SELECT count(*)::int AS n FROM qhse.iperc_matriz WHERE estado IN ('borrador','en_evaluacion','en_revision')"),
+      await n(
+        "SELECT count(*)::int AS n FROM qhse.iperc_matriz WHERE estado IN ('borrador','en_evaluacion','en_revision')",
+      ),
     );
     expect(r.inspeccionesPendientes).toBe(
       await n(
@@ -74,15 +78,20 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
         'swa_eventos',
       ].sort(),
     );
-    const catalogo = (await t.admin.query('SELECT codigo FROM qhse.kpi_indicador WHERE disponible')).rows.map(
-      (f: { codigo: string }) => f.codigo,
-    );
+    const catalogo = (
+      await t.admin.query('SELECT codigo FROM qhse.kpi_indicador WHERE disponible')
+    ).rows.map((f: { codigo: string }) => f.codigo);
     expect(Object.keys(r.valores).sort()).toEqual(catalogo.sort()); // el catálogo y el cálculo dicen lo mismo
     const swa = (await t.admin.query('SELECT count(*)::int AS n FROM qhse.swa')).rows[0].n;
     expect(r.valores.swa_eventos).toBe(swa);
-    const stop = (await t.admin.query('SELECT count(*)::int AS n FROM qhse.stop_tarjeta')).rows[0].n;
-    const activos = (await t.admin.query('SELECT count(*)::int AS n FROM identidad.usuario WHERE activo')).rows[0].n;
-    expect(r.valores.stop_per_capita).toBe(activos ? Math.round((stop / activos) * 100) / 100 : null);
+    const stop = (await t.admin.query('SELECT count(*)::int AS n FROM qhse.stop_tarjeta')).rows[0]
+      .n;
+    const activos = (
+      await t.admin.query('SELECT count(*)::int AS n FROM identidad.usuario WHERE activo')
+    ).rows[0].n;
+    expect(r.valores.stop_per_capita).toBe(
+      activos ? Math.round((stop / activos) * 100) / 100 : null,
+    );
 
     expect(r.epi.porEstado.map((e: { estado: string }) => e.estado)).toEqual([
       'solicitado',
@@ -90,9 +99,13 @@ run('QHSE: indicadores del tablero HSE (base de datos real)', () => {
       'despachado',
       'rechazado',
     ]);
-    expect(r.epi.total).toBe(r.epi.porEstado.reduce((a: number, e: { cantidad: number }) => a + e.cantidad, 0));
+    expect(r.epi.total).toBe(
+      r.epi.porEstado.reduce((a: number, e: { cantidad: number }) => a + e.cantidad, 0),
+    );
     expect(r.ptw.porFase.map((f: { fase: string }) => f.fase)).toEqual(['gabinete', 'aprobacion']);
-    expect(r.ptw.abiertos).toBe(r.ptw.porFase.reduce((a: number, f: { cantidad: number }) => a + f.cantidad, 0));
+    expect(r.ptw.abiertos).toBe(
+      r.ptw.porFase.reduce((a: number, f: { cantidad: number }) => a + f.cantidad, 0),
+    );
     expect(Array.isArray(r.incumplimientoLegal)).toBe(true);
   });
 });

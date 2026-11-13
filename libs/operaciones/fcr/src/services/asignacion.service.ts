@@ -132,6 +132,7 @@ export class AsignacionService {
             campo: n.campo?.nombre ?? null,
             pozo: n.pozo?.nombreCompleto ?? null,
             taladro: n.rigless ? 'RIGLESS' : (n.taladro?.nombre ?? null),
+            bodegaId: n.bodegaId,
             fechaInicioServicio: n.fechaInicioServicio
               ? n.fechaInicioServicio.toISOString().slice(0, 10)
               : null,

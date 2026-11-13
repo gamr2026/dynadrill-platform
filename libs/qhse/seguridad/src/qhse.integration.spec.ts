@@ -502,6 +502,40 @@ run('QHSE Q1: entrega de EPI y eventos de Pumping (base de datos real)', () => {
       await http().get(`/api/qhse/epi/ticket/${ticketId}`).set(supervisor()).expect(403);
     });
 
+    it('la bodega del pedido llega por evento y se devuelve para prellenar la entrega (solo si existe en el catálogo)', async () => {
+      const conBodega = uuidv7();
+      await consumer.consumir(eventoAsignacion(conBodega, [OP1.id], { bodegaId: BODEGA.id }));
+      expect(
+        (await prisma.ticketRef.findUniqueOrThrow({ where: { ticketId: conBodega } })).bodegaId,
+      ).toBe(BODEGA.id);
+      const r = await http().get(`/api/qhse/epi/ticket/${conBodega}`).set(operativo()).expect(200);
+      expect(r.body[0]).toMatchObject({
+        bodegaId: BODEGA.id,
+        bodega: { id: BODEGA.id, nombre: BODEGA.nombre },
+      });
+      const e = await http()
+        .post(`/api/qhse/epi/ticket/${conBodega}`)
+        .set(operativo())
+        .send({ trabajadorId: OP1.id, renglones: [renglon(false)] })
+        .expect(201);
+      expect(e.body.ticket).toMatchObject({
+        bodegaId: BODEGA.id,
+        bodega: { id: BODEGA.id, nombre: BODEGA.nombre },
+      });
+      // un evento sin bodega no la borra; con una que no existe en el catálogo, tampoco
+      await consumer.consumir(eventoAsignacion(conBodega, [OP1.id], { bodegaId: undefined }));
+      await consumer.consumir(eventoAsignacion(conBodega, [OP1.id], { bodegaId: uuidv7() }));
+      expect(
+        (await prisma.ticketRef.findUniqueOrThrow({ where: { ticketId: conBodega } })).bodegaId,
+      ).toBe(BODEGA.id);
+      // un ticket sin bodega devuelve nulos
+      const sinBodega = await http()
+        .get(`/api/qhse/epi/ticket/${ticketId}`)
+        .set(operativo())
+        .expect(200);
+      expect(sinBodega.body[0]).toMatchObject({ bodegaId: null, bodega: null });
+    });
+
     it('pide el EPI de un operador del ticket con sus elementos: queda solicitado y avisa a QHSE', async () => {
       const r = await http()
         .post(`/api/qhse/epi/ticket/${ticketId}`)

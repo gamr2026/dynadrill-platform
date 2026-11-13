@@ -37,18 +37,21 @@ export class DashboardIndicadoresService {
    */
   async resumen() {
     const hoy = hoyEcuador();
-    const [investigaciones, emergencias, swa, derrames, ultimas, ipercSinAprobar] = await Promise.all([
-      this.prisma.investigacion.count({ where: { estado: 'abierta' } }),
-      this.prisma.emergencia.count({ where: { estado: 'activa' } }),
-      this.prisma.swa.count({ where: { estado: 'activo' } }),
-      this.prisma.derrame.count({ where: { estado: 'activo' } }),
-      this.prisma.inspeccion.findMany({
-        distinct: ['equipoId'],
-        orderBy: [{ equipoId: 'asc' }, { fecha: 'desc' }, { numero: 'desc' }],
-        select: { vigenteHasta: true },
-      }),
-      this.prisma.ipercMatriz.count({ where: { estado: { in: ['borrador', 'en_evaluacion', 'en_revision'] } } }),
-    ]);
+    const [investigaciones, emergencias, swa, derrames, ultimas, ipercSinAprobar] =
+      await Promise.all([
+        this.prisma.investigacion.count({ where: { estado: 'abierta' } }),
+        this.prisma.emergencia.count({ where: { estado: 'activa' } }),
+        this.prisma.swa.count({ where: { estado: 'activo' } }),
+        this.prisma.derrame.count({ where: { estado: 'activo' } }),
+        this.prisma.inspeccion.findMany({
+          distinct: ['equipoId'],
+          orderBy: [{ equipoId: 'asc' }, { fecha: 'desc' }, { numero: 'desc' }],
+          select: { vigenteHasta: true },
+        }),
+        this.prisma.ipercMatriz.count({
+          where: { estado: { in: ['borrador', 'en_evaluacion', 'en_revision'] } },
+        }),
+      ]);
     return {
       incidentesAbiertos: investigaciones + emergencias + swa + derrames,
       inspeccionesPendientes: ultimas.filter((i) => aDia(i.vigenteHasta) < hoy).length,
@@ -82,7 +85,9 @@ export class DashboardIndicadoresService {
     const invs = await this.prisma.investigacion.findMany({
       select: { fechaIncidente: true, resultado: { select: { codigo: true } } },
     });
-    const conTiempoPerdido = invs.filter((i) => ['fatal', 'grave', 'leve'].includes(i.resultado.codigo));
+    const conTiempoPerdido = invs.filter((i) =>
+      ['fatal', 'grave', 'leve'].includes(i.resultado.codigo),
+    );
     const ultimo = conTiempoPerdido.reduce<Date | null>(
       (max, i) => (!max || i.fechaIncidente > max ? i.fechaIncidente : max),
       null,
@@ -102,12 +107,21 @@ export class DashboardIndicadoresService {
       select: {
         fase: true,
         createdAt: true,
-        historial: { where: { accion: 'aprobado' }, select: { createdAt: true }, take: 1, orderBy: { createdAt: 'desc' } },
+        historial: {
+          where: { accion: 'aprobado' },
+          select: { createdAt: true },
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
     const aprobados = ptws.filter((p) => p.fase === 'aprobado');
     const dias = aprobados
-      .map((p) => (p.historial[0] ? (p.historial[0].createdAt.getTime() - p.createdAt.getTime()) / DIA_MS : null))
+      .map((p) =>
+        p.historial[0]
+          ? (p.historial[0].createdAt.getTime() - p.createdAt.getTime()) / DIA_MS
+          : null,
+      )
       .filter((d): d is number => d !== null);
     const ultimas = await this.prisma.inspeccion.findMany({
       distinct: ['equipoId'],
@@ -116,9 +130,13 @@ export class DashboardIndicadoresService {
     });
     return {
       ptw_cerrados_pct: ptws.length ? Math.round((aprobados.length / ptws.length) * 100) : null,
-      ptw_tiempo_prom_dias: dias.length ? redondear(dias.reduce((a, d) => a + d, 0) / dias.length, 1) : null,
+      ptw_tiempo_prom_dias: dias.length
+        ? redondear(dias.reduce((a, d) => a + d, 0) / dias.length, 1)
+        : null,
       inspecciones_vigentes_pct: ultimas.length
-        ? Math.round((ultimas.filter((i) => aDia(i.vigenteHasta) >= hoy).length / ultimas.length) * 100)
+        ? Math.round(
+            (ultimas.filter((i) => aDia(i.vigenteHasta) >= hoy).length / ultimas.length) * 100,
+          )
         : null,
     };
   }
@@ -128,14 +146,24 @@ export class DashboardIndicadoresService {
     const items = await this.prisma.desechoItem.findMany({
       select: {
         cantidadGalones: true,
-        desecho: { select: { clasificacion: true, registradoEl: true, contenedor: { select: { codigo: true } } } },
+        desecho: {
+          select: {
+            clasificacion: true,
+            registradoEl: true,
+            contenedor: { select: { codigo: true } },
+          },
+        },
       },
     });
     const galones = (i: (typeof items)[number]) => Number(i.cantidadGalones);
     const total = items.reduce((a, i) => a + galones(i), 0);
-    const azul = items.filter((i) => i.desecho.contenedor.codigo === 'azul').reduce((a, i) => a + galones(i), 0);
+    const azul = items
+      .filter((i) => i.desecho.contenedor.codigo === 'azul')
+      .reduce((a, i) => a + galones(i), 0);
     const peligrososDelMes = items
-      .filter((i) => i.desecho.clasificacion === 'peligroso' && mismoMes(i.desecho.registradoEl, ahora))
+      .filter(
+        (i) => i.desecho.clasificacion === 'peligroso' && mismoMes(i.desecho.registradoEl, ahora),
+      )
       .reduce((a, i) => a + galones(i), 0);
 
     const hace90Dias = new Date(ahora.getTime() - 90 * DIA_MS);
@@ -173,7 +201,11 @@ export class DashboardIndicadoresService {
   private async incumplimientosLegales(ahora: Date): Promise<string[]> {
     const [derrames, investigaciones] = await Promise.all([
       this.prisma.derrame.findMany({
-        where: { estado: { not: 'cerrado' }, notificadoMaeAt: null, banda: { exigeNotificacionMae: true } },
+        where: {
+          estado: { not: 'cerrado' },
+          notificadoMaeAt: null,
+          banda: { exigeNotificacionMae: true },
+        },
         orderBy: { numero: 'asc' },
         select: { numero: true },
       }),
@@ -192,7 +224,8 @@ export class DashboardIndicadoresService {
     return [
       ...derrames.map((d) => `Derrame ${codigoDerrame(d.numero)}: notificación al MAE pendiente.`),
       ...investigaciones.map(
-        (i) => `Investigación ${codigoInvestigacion(i.numero)}: notificación a Ministerio del Trabajo / IESS vencida (24h).`,
+        (i) =>
+          `Investigación ${codigoInvestigacion(i.numero)}: notificación a Ministerio del Trabajo / IESS vencida (24h).`,
       ),
     ];
   }
@@ -246,7 +279,10 @@ export class DashboardIndicadoresService {
       .sort((a, b) => b.dias - a.dias);
     return {
       abiertos: abiertos.length,
-      porFase: FASES_PTW.map((fase) => ({ fase, cantidad: abiertos.filter((p) => p.fase === fase).length })),
+      porFase: FASES_PTW.map((fase) => ({
+        fase,
+        cantidad: abiertos.filter((p) => p.fase === fase).length,
+      })),
       estancados: estancados.map(({ p, dias }) => ({
         id: p.id,
         codigo: codigoPtw(p.numero),

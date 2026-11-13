@@ -120,7 +120,9 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
     await sql('DELETE FROM qhse.inspeccion WHERE inspector_id = ANY($1::uuid[])', [
       [OPERADOR.id, TECNICO.id],
     ]);
-    await sql('DELETE FROM qhse.equipo WHERE created_by = ANY($1::uuid[])', [[OPERADOR.id, TECNICO.id]]);
+    await sql('DELETE FROM qhse.equipo WHERE created_by = ANY($1::uuid[])', [
+      [OPERADOR.id, TECNICO.id],
+    ]);
     await sql(
       "DELETE FROM msg_qhse.outbox WHERE datos->'data'->>'equipoCodigo' LIKE $1 OR datos->'data'->>'observador' = $2 OR datos->'data'->>'lugar' LIKE $3",
       [`EQ-${n}-%`, OPERADOR.nombre, 'Locación 4%'],
@@ -485,7 +487,12 @@ run('QHSE: tarjeta STOP e inspecciones de campo (base de datos real)', () => {
           'INSERT INTO qhse.equipo (id, tipo_id, codigo, created_by, updated_by) SELECT $1, $2, $3, $4, $4 WHERE NOT EXISTS (SELECT 1 FROM qhse.equipo WHERE tipo_id = $2 AND codigo = $3)',
           [uuidv7(), tipoId, codigo, OPERADOR.id],
         );
-        return (await sql('SELECT id FROM qhse.equipo WHERE tipo_id = $1 AND codigo = $2', [tipoId, codigo])).rows[0].id as string;
+        return (
+          await sql('SELECT id FROM qhse.equipo WHERE tipo_id = $1 AND codigo = $2', [
+            tipoId,
+            codigo,
+          ])
+        ).rows[0].id as string;
       };
       const cab = async (
         id: string,

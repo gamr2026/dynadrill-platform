@@ -146,13 +146,14 @@ export class MantenimientoController {
   }
 
   /** Datos de las hojas imprimibles de la orden (General, Operativa e Informe DYN-MNT-RE-008). */
-  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER, P.EXPEDIENTE_VER)
   @Get('ordenes/:id/hoja')
   hojaDeOrden(@Param('id', ParseUUIDPipe) id: string) {
     return this.ordenes.hoja(id);
   }
 
-  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER)
+  // solo lectura: el expediente del pedido en Facturación dibuja las hojas de la orden con este detalle
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER, P.EXPEDIENTE_VER)
   @Get('ordenes/:id')
   obtenerOrden(@Param('id', ParseUUIDPipe) id: string) {
     return this.ordenes.obtener(id);
@@ -226,6 +227,13 @@ export class MantenimientoController {
   @Get('tickets/:ticketId/ordenes')
   ordenesDeTicket(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
     return this.ordenes.ordenesDeTicket(ticketId);
+  }
+
+  /** Las órdenes nacidas de los reportes de unidad de ese ticket (no las de todas sus unidades): documentos del expediente del pedido. */
+  @RequirePermission(P.MANTENIMIENTO_VER, P.MANTENIMIENTO_OPERACIONES_VER, P.EXPEDIENTE_VER)
+  @Get('tickets/:ticketId/ordenes-del-servicio')
+  ordenesDelServicio(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
+    return this.ordenes.ordenesDelServicio(ticketId);
   }
 
   /**

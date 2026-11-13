@@ -363,7 +363,9 @@ export class ViajesService {
     const [filas, umbrales] = await Promise.all([
       this.prisma.gerenciamientoViaje.findMany({
         where: {
-          ...(veTodo ? {} : { conductorId: actor.id }),
+          ...(veTodo || this.puedeVerExpediente(actor, f.ticketId)
+            ? {}
+            : { conductorId: actor.id }),
           ...(f.ticketId ? { ticketId: f.ticketId } : {}),
           ...(f.tipo ? { tipo: f.tipo } : {}),
           ...(f.estado === 'pendiente'
@@ -430,7 +432,12 @@ export class ViajesService {
         comunicaciones: { orderBy: { orden: 'asc' } },
       },
     });
-    if (!v || (v.conductorId !== actor.id && !this.puedeVerTodo(actor))) {
+    if (
+      !v ||
+      (v.conductorId !== actor.id &&
+        !this.puedeVerTodo(actor) &&
+        !this.puedeVerExpediente(actor, v.ticketId))
+    ) {
       throw new NotFoundException('El gerenciamiento de viaje no existe');
     }
     const umbrales = await this.umbrales();
@@ -502,6 +509,14 @@ export class ViajesService {
       actor.permissions.includes(P.VIAJES_AUTORIZAR_MAYOR) ||
       actor.permissions.includes(P.VIAJES_VER)
     );
+  }
+
+  /**
+   * Facturación (expediente del pedido) ve solo lectura los viajes de un ticket: con el ticket pedido en la lista, y
+   * los que pertenecen a un ticket en el detalle. Los viajes sin ticket siguen siendo del conductor y de quien aprueba.
+   */
+  private puedeVerExpediente(actor: ActorViaje, ticketId: string | null | undefined): boolean {
+    return !!ticketId && actor.permissions.includes(P.EXPEDIENTE_VER);
   }
 
   /** Puede decidir quien tiene el permiso que el umbral de ese nivel exige, y nunca sobre su propia solicitud. */

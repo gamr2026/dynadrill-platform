@@ -103,7 +103,8 @@ export class RechazarViajeDto {
 export class ViajesController {
   constructor(private readonly viajes: ViajesService) {}
 
-  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR)
+  // el cuestionario es un catálogo: Facturación lo necesita para dibujar la hoja del gerenciamiento en el expediente del pedido
+  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR, P.EXPEDIENTE_VER)
   @Get('preguntas')
   preguntas() {
     return this.viajes.preguntas();
@@ -121,13 +122,25 @@ export class ViajesController {
     return this.viajes.unidades();
   }
 
-  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR, P.VIAJES_VER)
+  @RequirePermission(
+    P.VIAJES_SOLICITAR,
+    P.VIAJES_APROBAR,
+    P.VIAJES_AUTORIZAR_MAYOR,
+    P.VIAJES_VER,
+    P.EXPEDIENTE_VER,
+  )
   @Get()
   listar(@Query() q: ListarViajesDto, @CurrentUser() u: AuthUser) {
     return this.viajes.listar(q, actorDe(u));
   }
 
-  @RequirePermission(P.VIAJES_SOLICITAR, P.VIAJES_APROBAR, P.VIAJES_AUTORIZAR_MAYOR, P.VIAJES_VER)
+  @RequirePermission(
+    P.VIAJES_SOLICITAR,
+    P.VIAJES_APROBAR,
+    P.VIAJES_AUTORIZAR_MAYOR,
+    P.VIAJES_VER,
+    P.EXPEDIENTE_VER,
+  )
   @Get(':id')
   obtener(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() u: AuthUser) {
     return this.viajes.obtener(id, actorDe(u));

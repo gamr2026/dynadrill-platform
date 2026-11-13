@@ -86,7 +86,7 @@ export class DocumentosController {
     return this.estado.deTicket(ticketId);
   }
 
-  @RequirePermission(P.DOCUMENTOS_VER)
+  @RequirePermission(P.DOCUMENTOS_VER, P.EXPEDIENTE_VER)
   @Get('documentos')
   listar(@Query() q: ListarDocumentosDto) {
     return this.documentos.listar(q);
@@ -148,7 +148,7 @@ export class DocumentosController {
   }
 
   /** El Acta vigente del ticket (y las anuladas) y el supervisor asignado. */
-  @RequirePermission(P.ACTA_ENTREGA_VER)
+  @RequirePermission(P.ACTA_ENTREGA_VER, P.EXPEDIENTE_VER)
   @Get('tickets/:ticketId/acta-entrega')
   acta(@Param('ticketId', ParseUUIDPipe) ticketId: string) {
     return this.documentos.actaDelTicket(ticketId);

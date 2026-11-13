@@ -186,22 +186,25 @@ enum TipoTalla {
 
 /// Ticket (de otro contenedor) que origina casos de QHSE. Se llena por evento; no hay FK al schema ajeno (decisión D1).
 model TicketRef {
-  ticketId     String     @id @map("ticket_id") @db.Uuid
-  ticketNumero Int?       @map("ticket_numero")
-  pedidoId     String     @map("pedido_id") @db.Uuid
-  pedidoCodigo String     @map("pedido_codigo")
+  ticketId      String     @id @map("ticket_id") @db.Uuid
+  ticketNumero  Int?       @map("ticket_numero")
+  pedidoId      String     @map("pedido_id") @db.Uuid
+  pedidoCodigo  String     @map("pedido_codigo")
   /// Supervisor asignado al ticket (identidad.usuario).
-  supervisorId String?    @map("supervisor_id") @db.Uuid
-  supervisor   IdUsuario? @relation("ticketSupervisor", fields: [supervisorId], references: [id])
+  supervisorId  String?    @map("supervisor_id") @db.Uuid
+  supervisor    IdUsuario? @relation("ticketSupervisor", fields: [supervisorId], references: [id])
   /// Copias justificadas (ver COMMENT en la base): cliente, campo y pozo del pedido, mantenidas por evento.
-  cliente      String?
-  campo        String?
-  pozo         String?
+  cliente       String?
+  campo         String?
+  pozo          String?
+  /// Bodega del pedido (catalogos.bodega), mantenida por evento: prellena la bodega de la entrega de EPI.
+  bodegaId      String?    @map("bodega_id") @db.Uuid
+  bodega        CatBodega? @relation(fields: [bodegaId], references: [id])
   /// Pedido anulado en comercial (comercial.pedido.anulado): no se abren documentos, PTW ni demás registros nuevos.
-  anuladoAt     DateTime? @map("anulado_at") @db.Timestamptz(6)
-  anuladoMotivo String?   @map("anulado_motivo")
-  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  anuladoAt     DateTime?  @map("anulado_at") @db.Timestamptz(6)
+  anuladoMotivo String?    @map("anulado_motivo")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   entregasEpi    EpiEntrega[]
   documentos     DocumentoPedido[]
@@ -353,44 +356,44 @@ model EpiEntregaHistorial {
 
 /// Documento de seguridad de un pedido (contrato 4.11). Solo se anula; nunca se edita ni se borra (privilegios por columna).
 model DocumentoPedido {
-  id              String              @id @db.Uuid
+  id                    String                  @id @db.Uuid
   /// Pedido de comercial (otro contenedor, D1: sin FK).
-  pedidoId        String              @map("pedido_id") @db.Uuid
-  ticketId        String?             @map("ticket_id") @db.Uuid
-  ticket          TicketRef?          @relation(fields: [ticketId, pedidoId], references: [ticketId, pedidoId])
-  tipo            TipoDocumentoPedido
-  archivoId       String              @map("archivo_id") @db.Uuid
-  archivo         ArchivoRef          @relation(fields: [archivoId], references: [id])
-  referencia      String?
+  pedidoId              String                  @map("pedido_id") @db.Uuid
+  ticketId              String?                 @map("ticket_id") @db.Uuid
+  ticket                TicketRef?              @relation(fields: [ticketId, pedidoId], references: [ticketId, pedidoId])
+  tipo                  TipoDocumentoPedido
+  archivoId             String                  @map("archivo_id") @db.Uuid
+  archivo               ArchivoRef              @relation(fields: [archivoId], references: [id])
+  referencia            String?
   /// Solo el Acta: por qué la subió otra persona y no el supervisor asignado.
-  motivoSuplencia String?             @map("motivo_suplencia")
-  fecha           DateTime?           @db.Date
-  vigenteHasta    DateTime?           @map("vigente_hasta") @db.Date
-  anuladoAt       DateTime?           @map("anulado_at") @db.Timestamptz(6)
-  anuladoPor      String?             @map("anulado_por") @db.Uuid
-  anulador        IdUsuario?          @relation("documentoAnulador", fields: [anuladoPor], references: [id])
-  motivoAnulacion String?             @map("motivo_anulacion")
+  motivoSuplencia       String?                 @map("motivo_suplencia")
+  fecha                 DateTime?               @db.Date
+  vigenteHasta          DateTime?               @map("vigente_hasta") @db.Date
+  anuladoAt             DateTime?               @map("anulado_at") @db.Timestamptz(6)
+  anuladoPor            String?                 @map("anulado_por") @db.Uuid
+  anulador              IdUsuario?              @relation("documentoAnulador", fields: [anuladoPor], references: [id])
+  motivoAnulacion       String?                 @map("motivo_anulacion")
   /// Revisión de QHSE: cargado (sin revisar), aprobado o rechazado. Un rechazado también está anulado.
-  revisionEstado  EstadoRevisionDocumento @default(cargado) @map("revision_estado")
-  revisadoAt      DateTime?           @map("revisado_at") @db.Timestamptz(6)
-  revisadoPor     String?             @map("revisado_por") @db.Uuid
-  revisor         IdUsuario?          @relation("documentoRevisor", fields: [revisadoPor], references: [id])
-  motivoRechazo   String?             @map("motivo_rechazo")
+  revisionEstado        EstadoRevisionDocumento @default(cargado) @map("revision_estado")
+  revisadoAt            DateTime?               @map("revisado_at") @db.Timestamptz(6)
+  revisadoPor           String?                 @map("revisado_por") @db.Uuid
+  revisor               IdUsuario?              @relation("documentoRevisor", fields: [revisadoPor], references: [id])
+  motivoRechazo         String?                 @map("motivo_rechazo")
   /// Lectura automática de la firma del documento cargado: solo un indicador (con `verificacion_at` y `no_verificada`, el servicio no respondió).
-  verificacion          VerificacionFirma @default(no_verificada)
-  verificacionConfianza Decimal?          @map("verificacion_confianza") @db.Decimal(4, 3)
-  verificacionAt        DateTime?         @map("verificacion_at") @db.Timestamptz(6)
-  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy       String              @map("created_by") @db.Uuid
-  creador         IdUsuario           @relation("documentoCreador", fields: [createdBy], references: [id])
-  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy       String?             @map("updated_by") @db.Uuid
-  editor          IdUsuario?          @relation("documentoEditor", fields: [updatedBy], references: [id])
+  verificacion          VerificacionFirma       @default(no_verificada)
+  verificacionConfianza Decimal?                @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt        DateTime?               @map("verificacion_at") @db.Timestamptz(6)
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String                  @map("created_by") @db.Uuid
+  creador               IdUsuario               @relation("documentoCreador", fields: [createdBy], references: [id])
+  updatedAt             DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?                 @map("updated_by") @db.Uuid
+  editor                IdUsuario?              @relation("documentoEditor", fields: [updatedBy], references: [id])
 
-  ptwRecepcion Ptw[] @relation("ptwRecepcion")
-  ptwArt       Ptw[] @relation("ptwArt")
-  ptwPt        Ptw[] @relation("ptwPt")
-  ptwSfi       Ptw[] @relation("ptwSfi")
+  ptwRecepcion Ptw[]                     @relation("ptwRecepcion")
+  ptwArt       Ptw[]                     @relation("ptwArt")
+  ptwPt        Ptw[]                     @relation("ptwPt")
+  ptwSfi       Ptw[]                     @relation("ptwSfi")
   revisiones   DocumentoPedidoRevision[]
 
   @@index([pedidoId, tipo])
@@ -1283,44 +1286,44 @@ model IdUsuario {
 
   perfil IdUsuarioPerfil?
 
-  entregasComoTrabajador   EpiEntrega[]           @relation("epiTrabajador")
-  firmasComoTrabajador     EpiEntrega[]           @relation("epiFirmaTrabajador")
-  firmasTh                 EpiEntrega[]           @relation("epiFirmaTh")
-  aprobaciones             EpiEntrega[]           @relation("epiAprobador")
-  rechazos                 EpiEntrega[]           @relation("epiRechazador")
-  despachos                EpiEntrega[]           @relation("epiDespachador")
-  entregasCreadas          EpiEntrega[]           @relation("epiCreador")
-  entregasEditadas         EpiEntrega[]           @relation("epiEditor")
-  historialEpi             EpiEntregaHistorial[]  @relation("epiHistorialActor")
-  documentosCreados        DocumentoPedido[]      @relation("documentoCreador")
-  documentosEditados       DocumentoPedido[]      @relation("documentoEditor")
-  documentosAnulados       DocumentoPedido[]      @relation("documentoAnulador")
-  documentosRevisados      DocumentoPedido[]      @relation("documentoRevisor")
+  entregasComoTrabajador   EpiEntrega[]              @relation("epiTrabajador")
+  firmasComoTrabajador     EpiEntrega[]              @relation("epiFirmaTrabajador")
+  firmasTh                 EpiEntrega[]              @relation("epiFirmaTh")
+  aprobaciones             EpiEntrega[]              @relation("epiAprobador")
+  rechazos                 EpiEntrega[]              @relation("epiRechazador")
+  despachos                EpiEntrega[]              @relation("epiDespachador")
+  entregasCreadas          EpiEntrega[]              @relation("epiCreador")
+  entregasEditadas         EpiEntrega[]              @relation("epiEditor")
+  historialEpi             EpiEntregaHistorial[]     @relation("epiHistorialActor")
+  documentosCreados        DocumentoPedido[]         @relation("documentoCreador")
+  documentosEditados       DocumentoPedido[]         @relation("documentoEditor")
+  documentosAnulados       DocumentoPedido[]         @relation("documentoAnulador")
+  documentosRevisados      DocumentoPedido[]         @relation("documentoRevisor")
   documentoRevisiones      DocumentoPedidoRevision[] @relation("documentoRevisionActor")
-  ticketsSupervisados      TicketRef[]            @relation("ticketSupervisor")
-  ticketsComoOperador      TicketOperador[]       @relation("ticketOperador")
-  ptwCreados               Ptw[]                  @relation("ptwCreador")
-  ptwEditados              Ptw[]                  @relation("ptwEditor")
-  ptwAnulados              Ptw[]                  @relation("ptwAnulador")
-  ptwFirmas                PtwFirma[]             @relation("ptwFirmante")
-  ptwHistorial             PtwHistorial[]         @relation("ptwHistorialActor")
-  swaActivadas             Swa[]                  @relation("swaActivador")
-  swaEvaluadas             Swa[]                  @relation("swaEvaluador")
-  swaReanudadas            Swa[]                  @relation("swaReanudador")
-  swaCreadas               Swa[]                  @relation("swaCreador")
-  swaEditadas              Swa[]                  @relation("swaEditor")
-  swaNotificaciones        SwaNotificacion[]      @relation("swaNotificador")
-  swaConfirmaciones        SwaReinicio[]          @relation("swaConfirmador")
-  swaHistorial             SwaHistorial[]         @relation("swaHistorialActor")
-  ipercActividadesCreadas  IpercActividad[]       @relation("ipercActividadCreador")
-  ipercActividadesEditadas IpercActividad[]       @relation("ipercActividadEditor")
-  ipercMatricesCreadas     IpercMatriz[]          @relation("ipercMatrizCreador")
-  ipercMatricesEditadas    IpercMatriz[]          @relation("ipercMatrizEditor")
-  ipercMatricesAprobadas   IpercMatriz[]          @relation("ipercAprobador")
-  ipercMatricesRechazadas  IpercMatriz[]          @relation("ipercRechazador")
-  ipercEvaluaciones        IpercMatrizEvaluador[] @relation("ipercEvaluador")
-  ipercCoberturas          IpercCobertura[]       @relation("ipercCoberturaCreador")
-  ipercHistorial           IpercHistorial[]       @relation("ipercHistorialActor")
+  ticketsSupervisados      TicketRef[]               @relation("ticketSupervisor")
+  ticketsComoOperador      TicketOperador[]          @relation("ticketOperador")
+  ptwCreados               Ptw[]                     @relation("ptwCreador")
+  ptwEditados              Ptw[]                     @relation("ptwEditor")
+  ptwAnulados              Ptw[]                     @relation("ptwAnulador")
+  ptwFirmas                PtwFirma[]                @relation("ptwFirmante")
+  ptwHistorial             PtwHistorial[]            @relation("ptwHistorialActor")
+  swaActivadas             Swa[]                     @relation("swaActivador")
+  swaEvaluadas             Swa[]                     @relation("swaEvaluador")
+  swaReanudadas            Swa[]                     @relation("swaReanudador")
+  swaCreadas               Swa[]                     @relation("swaCreador")
+  swaEditadas              Swa[]                     @relation("swaEditor")
+  swaNotificaciones        SwaNotificacion[]         @relation("swaNotificador")
+  swaConfirmaciones        SwaReinicio[]             @relation("swaConfirmador")
+  swaHistorial             SwaHistorial[]            @relation("swaHistorialActor")
+  ipercActividadesCreadas  IpercActividad[]          @relation("ipercActividadCreador")
+  ipercActividadesEditadas IpercActividad[]          @relation("ipercActividadEditor")
+  ipercMatricesCreadas     IpercMatriz[]             @relation("ipercMatrizCreador")
+  ipercMatricesEditadas    IpercMatriz[]             @relation("ipercMatrizEditor")
+  ipercMatricesAprobadas   IpercMatriz[]             @relation("ipercAprobador")
+  ipercMatricesRechazadas  IpercMatriz[]             @relation("ipercRechazador")
+  ipercEvaluaciones        IpercMatrizEvaluador[]    @relation("ipercEvaluador")
+  ipercCoberturas          IpercCobertura[]          @relation("ipercCoberturaCreador")
+  ipercHistorial           IpercHistorial[]          @relation("ipercHistorialActor")
 
   stopsObservador     StopTarjeta[]   @relation("stopObservador")
   stopsObservado      StopTarjeta[]   @relation("stopObservado")
@@ -1333,10 +1336,10 @@ model IdUsuario {
   inspeccionesCreadas Inspeccion[]    @relation("inspeccionCreador")
 
   // investigación de incidentes (S2)
-  investigacionesLideradas Investigacion[]          @relation("investigacionLider")
-  investigacionesCreadas   Investigacion[]          @relation("investigacionCreador")
-  investigacionesEditadas  Investigacion[]          @relation("investigacionEditor")
-  investigacionHistorial   InvestigacionHistorial[] @relation("investigacionHistorialActor")
+  investigacionesLideradas  Investigacion[]           @relation("investigacionLider")
+  investigacionesCreadas    Investigacion[]           @relation("investigacionCreador")
+  investigacionesEditadas   Investigacion[]           @relation("investigacionEditor")
+  investigacionHistorial    InvestigacionHistorial[]  @relation("investigacionHistorialActor")
   investigacionesTrabajador InvestigacionTrabajador[] @relation("investigacionTrabajadorUsuario")
   investigacionesEquipo     InvestigacionEquipo[]     @relation("investigacionEquipoUsuario")
   investigacionAcciones     InvestigacionAccion[]     @relation("investigacionAccionResponsable")
@@ -1365,6 +1368,7 @@ model CatBodega {
   nombre     String
   habilitado Boolean
   entregas   EpiEntrega[]
+  tickets    TicketRef[]
 
   @@map("bodega")
   @@schema("catalogos")
@@ -1595,26 +1599,26 @@ enum RolFirmaDesecho {
 
 /// Manifiesto único / guía de remisión (DYN-SGI-RE-063): uno por desecho. El cliente se lee de `catalogos.cliente` por `clienteId` (sin relación de Prisma).
 model DesechoManifiesto {
-  id                    String     @id @db.Uuid
-  desechoId             String     @unique @map("desecho_id") @db.Uuid
-  desecho               Desecho    @relation(fields: [desechoId], references: [id], onDelete: Cascade)
-  numero                String     @unique
-  fecha                 DateTime   @db.Date
-  gestorNombre          String     @map("gestor_nombre")
-  gestorLicenciaSuia    String     @map("gestor_licencia_suia")
-  clienteId             String?    @map("cliente_id") @db.Uuid
-  solicitadoPor         String?    @map("solicitado_por")
-  transportistaCompania String?    @map("transportista_compania")
-  conductorNombre       String?    @map("conductor_nombre")
-  conductorCedula       String?    @map("conductor_cedula")
+  id                    String    @id @db.Uuid
+  desechoId             String    @unique @map("desecho_id") @db.Uuid
+  desecho               Desecho   @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  numero                String    @unique
+  fecha                 DateTime  @db.Date
+  gestorNombre          String    @map("gestor_nombre")
+  gestorLicenciaSuia    String    @map("gestor_licencia_suia")
+  clienteId             String?   @map("cliente_id") @db.Uuid
+  solicitadoPor         String?   @map("solicitado_por")
+  transportistaCompania String?   @map("transportista_compania")
+  conductorNombre       String?   @map("conductor_nombre")
+  conductorCedula       String?   @map("conductor_cedula")
   vehiculo              String?
   placas                String?
-  horaSalida            DateTime?  @map("hora_salida") @db.Timestamptz(6)
-  horaLlegada           DateTime?  @map("hora_llegada") @db.Timestamptz(6)
-  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy             String     @map("created_by") @db.Uuid
-  updatedAt             DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy             String?    @map("updated_by") @db.Uuid
+  horaSalida            DateTime? @map("hora_salida") @db.Timestamptz(6)
+  horaLlegada           DateTime? @map("hora_llegada") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String    @map("created_by") @db.Uuid
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?   @map("updated_by") @db.Uuid
 
   firmas DesechoFirma[]
 
@@ -1648,20 +1652,20 @@ enum TipoDocumentoDesecho {
 
 /// Manifiesto firmado y certificado de disposición final. `archivoId` es FK real a `archivos.archivo` (sin relación de Prisma: no se toca ArchivoRef).
 model DesechoDocumento {
-  id                   String               @id @db.Uuid
-  desechoId            String               @map("desecho_id") @db.Uuid
-  desecho              Desecho              @relation(fields: [desechoId], references: [id], onDelete: Cascade)
-  tipo                 TipoDocumentoDesecho
-  archivoId            String               @unique @map("archivo_id") @db.Uuid
-  emitidoEl            DateTime?            @map("emitido_el") @db.Date
-  referencia           String?
-  verificacion         VerificacionFirma    @default(no_verificada)
-  verificacionConfianza Decimal?            @map("verificacion_confianza") @db.Decimal(4, 3)
-  verificacionAt       DateTime?            @map("verificacion_at") @db.Timestamptz(6)
-  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy            String               @map("created_by") @db.Uuid
-  updatedAt            DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy            String?              @map("updated_by") @db.Uuid
+  id                    String               @id @db.Uuid
+  desechoId             String               @map("desecho_id") @db.Uuid
+  desecho               Desecho              @relation(fields: [desechoId], references: [id], onDelete: Cascade)
+  tipo                  TipoDocumentoDesecho
+  archivoId             String               @unique @map("archivo_id") @db.Uuid
+  emitidoEl             DateTime?            @map("emitido_el") @db.Date
+  referencia            String?
+  verificacion          VerificacionFirma    @default(no_verificada)
+  verificacionConfianza Decimal?             @map("verificacion_confianza") @db.Decimal(4, 3)
+  verificacionAt        DateTime?            @map("verificacion_at") @db.Timestamptz(6)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String               @map("created_by") @db.Uuid
+  updatedAt             DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             String?              @map("updated_by") @db.Uuid
 
   @@unique([desechoId, tipo])
   @@map("desecho_documento")
@@ -1749,18 +1753,18 @@ model DerrameBandaVolumen {
 
 /// Derrame. Lo activa cualquier trabajador; las transiciones las garantiza el trigger `derrame_validar`.
 model Derrame {
-  id              String              @id @db.Uuid
-  numero          Int                 @unique @default(autoincrement())
-  estado          EstadoDerrame       @default(activo)
-  ubicacionId     String              @map("ubicacion_id") @db.Uuid
-  ubicacion       DerrameUbicacion    @relation(fields: [ubicacionId], references: [id])
-  bandaId         String              @map("banda_id") @db.Uuid
-  banda           DerrameBandaVolumen @relation(fields: [bandaId], references: [id])
-  descripcion     String
-  ubicacionFisica String?             @map("ubicacion_fisica")
-  ticketId        String?             @map("ticket_id") @db.Uuid
-  activadoPor     String              @map("activado_por") @db.Uuid
-  activadoAt      DateTime            @default(now()) @map("activado_at") @db.Timestamptz(6)
+  id                   String              @id @db.Uuid
+  numero               Int                 @unique @default(autoincrement())
+  estado               EstadoDerrame       @default(activo)
+  ubicacionId          String              @map("ubicacion_id") @db.Uuid
+  ubicacion            DerrameUbicacion    @relation(fields: [ubicacionId], references: [id])
+  bandaId              String              @map("banda_id") @db.Uuid
+  banda                DerrameBandaVolumen @relation(fields: [bandaId], references: [id])
+  descripcion          String
+  ubicacionFisica      String?             @map("ubicacion_fisica")
+  ticketId             String?             @map("ticket_id") @db.Uuid
+  activadoPor          String              @map("activado_por") @db.Uuid
+  activadoAt           DateTime            @default(now()) @map("activado_at") @db.Timestamptz(6)
   contenidoAt          DateTime?           @map("contenido_at") @db.Timestamptz(6)
   contenidoPor         String?             @map("contenido_por") @db.Uuid
   volumenRealBarriles  Decimal?            @map("volumen_real_barriles") @db.Decimal(10, 3)
@@ -1771,10 +1775,10 @@ model Derrame {
   maeReferencia        String?             @map("mae_referencia")
   cerradoAt            DateTime?           @map("cerrado_at") @db.Timestamptz(6)
   cerradoPor           String?             @map("cerrado_por") @db.Uuid
-  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy       String              @map("created_by") @db.Uuid
-  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy       String?             @map("updated_by") @db.Uuid
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy            String              @map("created_by") @db.Uuid
+  updatedAt            DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy            String?             @map("updated_by") @db.Uuid
 
   historial DerrameHistorial[]
   desecho   Desecho?
@@ -1881,36 +1885,36 @@ model EmergenciaTipo {
 
 /// Emergencia / MEDEVAC. Las transiciones las garantiza el trigger `emergencia_validar`.
 model Emergencia {
-  id          String           @id @db.Uuid
-  numero      Int              @unique @default(autoincrement())
-  estado      EstadoEmergencia @default(activa)
-  tipoId      String           @map("tipo_id") @db.Uuid
-  tipo        EmergenciaTipo   @relation(fields: [tipoId], references: [id])
-  descripcion String
-  ubicacion   String?
-  ticketId    String?          @map("ticket_id") @db.Uuid
-  swaId       String?          @map("swa_id") @db.Uuid
-  derrameId   String?          @map("derrame_id") @db.Uuid
-  activadoPor String           @map("activado_por") @db.Uuid
-  activadoAt  DateTime         @default(now()) @map("activado_at") @db.Timestamptz(6)
-  nivel              Int?             @db.SmallInt
-  nivelDeclaradoPor  String?          @map("nivel_declarado_por") @db.Uuid
-  nivelDeclaradoAt   DateTime?        @map("nivel_declarado_at") @db.Timestamptz(6)
-  totalEnLocacion    Int?             @map("total_en_locacion")
-  evacuados          Int?
-  conteoPor          String?          @map("conteo_por") @db.Uuid
-  conteoAt           DateTime?        @map("conteo_at") @db.Timestamptz(6)
-  controladaAt       DateTime?        @map("controlada_at") @db.Timestamptz(6)
-  controladaPor      String?          @map("controlada_por") @db.Uuid
-  cerradaAt          DateTime?        @map("cerrada_at") @db.Timestamptz(6)
-  cerradaPor         String?          @map("cerrada_por") @db.Uuid
-  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy   String           @map("created_by") @db.Uuid
-  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy   String?          @map("updated_by") @db.Uuid
+  id                String           @id @db.Uuid
+  numero            Int              @unique @default(autoincrement())
+  estado            EstadoEmergencia @default(activa)
+  tipoId            String           @map("tipo_id") @db.Uuid
+  tipo              EmergenciaTipo   @relation(fields: [tipoId], references: [id])
+  descripcion       String
+  ubicacion         String?
+  ticketId          String?          @map("ticket_id") @db.Uuid
+  swaId             String?          @map("swa_id") @db.Uuid
+  derrameId         String?          @map("derrame_id") @db.Uuid
+  activadoPor       String           @map("activado_por") @db.Uuid
+  activadoAt        DateTime         @default(now()) @map("activado_at") @db.Timestamptz(6)
+  nivel             Int?             @db.SmallInt
+  nivelDeclaradoPor String?          @map("nivel_declarado_por") @db.Uuid
+  nivelDeclaradoAt  DateTime?        @map("nivel_declarado_at") @db.Timestamptz(6)
+  totalEnLocacion   Int?             @map("total_en_locacion")
+  evacuados         Int?
+  conteoPor         String?          @map("conteo_por") @db.Uuid
+  conteoAt          DateTime?        @map("conteo_at") @db.Timestamptz(6)
+  controladaAt      DateTime?        @map("controlada_at") @db.Timestamptz(6)
+  controladaPor     String?          @map("controlada_por") @db.Uuid
+  cerradaAt         DateTime?        @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor        String?          @map("cerrada_por") @db.Uuid
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String           @map("created_by") @db.Uuid
+  updatedAt         DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String?          @map("updated_by") @db.Uuid
 
-  lineas    EmergenciaLinea[]
-  historial EmergenciaHistorial[]
+  lineas         EmergenciaLinea[]
+  historial      EmergenciaHistorial[]
   notificaciones EmergenciaNotificacion[]
   niveles        EmergenciaNivelHistorial[]
   conteos        EmergenciaConteoHistorial[]
@@ -2089,8 +2093,8 @@ model Herido {
   updatedAt             DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedBy             String?                 @map("updated_by") @db.Uuid
 
-  signos   HeridoSignosVitales[]
-  triajes  HeridoTriageHistorial[]
+  signos  HeridoSignosVitales[]
+  triajes HeridoTriageHistorial[]
 
   @@index([emergenciaId])
   @@map("herido")
@@ -2185,36 +2189,36 @@ model InvestigacionResultado {
 
 /// Investigación de incidente o accidente. Los plazos se calculan con el catálogo de resultados.
 model Investigacion {
-  id                 String                 @id @db.Uuid
-  numero             Int                    @unique @default(autoincrement())
-  resultadoId        String                 @map("resultado_id") @db.Uuid
-  resultado          InvestigacionResultado @relation(fields: [resultadoId], references: [id])
-  descripcionEvento  String                 @map("descripcion_evento")
-  fechaIncidente     DateTime               @map("fecha_incidente") @db.Timestamptz(6)
-  ubicacion          String
-  origenEmergenciaId String?                @unique @map("origen_emergencia_id") @db.Uuid
-  estado             EstadoInvestigacion    @default(abierta)
-  liderId            String?                @map("lider_id") @db.Uuid
-  lider              IdUsuario?             @relation("investigacionLider", fields: [liderId], references: [id])
-  escenaAseguradaAt  DateTime?              @map("escena_asegurada_at") @db.Timestamptz(6)
-  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy          String                 @map("created_by") @db.Uuid
-  creador            IdUsuario              @relation("investigacionCreador", fields: [createdBy], references: [id])
-  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy          String?                @map("updated_by") @db.Uuid
-  editor             IdUsuario?             @relation("investigacionEditor", fields: [updatedBy], references: [id])
-  evidenciasRecopiladas String? @map("evidencias_recopiladas")
-  testimoniosResumen    String? @map("testimonios_resumen")
-  conclusion                   ConclusionInvestigacion? @map("conclusion")
-  leccionesAprendidas          String?                  @map("lecciones_aprendidas")
-  ipercActividadId             String?                  @map("iperc_actividad_id") @db.Uuid
-  notificacionLegalRequerida   Boolean                  @default(false) @map("notificacion_legal_requerida")
-  ministerioTrabajoNotificadoAt DateTime?               @map("ministerio_trabajo_notificado_at") @db.Timestamptz(6)
-  iessNotificadoAt             DateTime?                @map("iess_notificado_at") @db.Timestamptz(6)
-  revisionEnviadaAt            DateTime?                @map("revision_enviada_at") @db.Timestamptz(6)
-  revisionEnviadaPor           String?                  @map("revision_enviada_por") @db.Uuid
-  cerradaAt                    DateTime?                @map("cerrada_at") @db.Timestamptz(6)
-  cerradaPor                   String?                  @map("cerrada_por") @db.Uuid
+  id                            String                   @id @db.Uuid
+  numero                        Int                      @unique @default(autoincrement())
+  resultadoId                   String                   @map("resultado_id") @db.Uuid
+  resultado                     InvestigacionResultado   @relation(fields: [resultadoId], references: [id])
+  descripcionEvento             String                   @map("descripcion_evento")
+  fechaIncidente                DateTime                 @map("fecha_incidente") @db.Timestamptz(6)
+  ubicacion                     String
+  origenEmergenciaId            String?                  @unique @map("origen_emergencia_id") @db.Uuid
+  estado                        EstadoInvestigacion      @default(abierta)
+  liderId                       String?                  @map("lider_id") @db.Uuid
+  lider                         IdUsuario?               @relation("investigacionLider", fields: [liderId], references: [id])
+  escenaAseguradaAt             DateTime?                @map("escena_asegurada_at") @db.Timestamptz(6)
+  createdAt                     DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                     String                   @map("created_by") @db.Uuid
+  creador                       IdUsuario                @relation("investigacionCreador", fields: [createdBy], references: [id])
+  updatedAt                     DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                     String?                  @map("updated_by") @db.Uuid
+  editor                        IdUsuario?               @relation("investigacionEditor", fields: [updatedBy], references: [id])
+  evidenciasRecopiladas         String?                  @map("evidencias_recopiladas")
+  testimoniosResumen            String?                  @map("testimonios_resumen")
+  conclusion                    ConclusionInvestigacion? @map("conclusion")
+  leccionesAprendidas           String?                  @map("lecciones_aprendidas")
+  ipercActividadId              String?                  @map("iperc_actividad_id") @db.Uuid
+  notificacionLegalRequerida    Boolean                  @default(false) @map("notificacion_legal_requerida")
+  ministerioTrabajoNotificadoAt DateTime?                @map("ministerio_trabajo_notificado_at") @db.Timestamptz(6)
+  iessNotificadoAt              DateTime?                @map("iess_notificado_at") @db.Timestamptz(6)
+  revisionEnviadaAt             DateTime?                @map("revision_enviada_at") @db.Timestamptz(6)
+  revisionEnviadaPor            String?                  @map("revision_enviada_por") @db.Uuid
+  cerradaAt                     DateTime?                @map("cerrada_at") @db.Timestamptz(6)
+  cerradaPor                    String?                  @map("cerrada_por") @db.Uuid
 
   historial  InvestigacionHistorial[]
   trabajador InvestigacionTrabajador?
@@ -2465,16 +2469,16 @@ model InvestigacionIshikawaCausa {
 
 /// Una causa del formato (acto inseguro, condición insegura, factor personal, factor de trabajo, fuente de gestión).
 model InvestigacionCausa {
-  id              String                  @id @db.Uuid
-  investigacionId String                  @map("investigacion_id") @db.Uuid
-  investigacion   Investigacion           @relation(fields: [investigacionId], references: [id])
+  id              String                 @id @db.Uuid
+  investigacionId String                 @map("investigacion_id") @db.Uuid
+  investigacion   Investigacion          @relation(fields: [investigacionId], references: [id])
   tipo            TipoCausaInvestigacion
   orden           Int
   descripcion     String
-  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy       String                  @map("created_by") @db.Uuid
-  updatedAt       DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy       String?                 @map("updated_by") @db.Uuid
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       String                 @map("created_by") @db.Uuid
+  updatedAt       DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       String?                @map("updated_by") @db.Uuid
 
   @@unique([investigacionId, tipo, orden])
   @@map("investigacion_causa")
@@ -2695,20 +2699,20 @@ model ObjetivoAmbiental {
 
 /// Acción específica del plan de acción de un objetivo.
 model ObjetivoAmbientalAccion {
-  id                String                @id @db.Uuid
-  objetivoId        String                @map("objetivo_id") @db.Uuid
-  objetivo          ObjetivoAmbiental     @relation(fields: [objetivoId], references: [id])
+  id                String                 @id @db.Uuid
+  objetivoId        String                 @map("objetivo_id") @db.Uuid
+  objetivo          ObjetivoAmbiental      @relation(fields: [objetivoId], references: [id])
   orden             Int
-  accionEspecifica  String                @map("accion_especifica")
-  responsableId     String?               @map("responsable_id") @db.Uuid
+  accionEspecifica  String                 @map("accion_especifica")
+  responsableId     String?                @map("responsable_id") @db.Uuid
   indicador         String?
-  evidenciaEsperada String?               @map("evidencia_esperada")
-  frecuenciaId      String?               @map("frecuencia_id") @db.Uuid
+  evidenciaEsperada String?                @map("evidencia_esperada")
+  frecuenciaId      String?                @map("frecuencia_id") @db.Uuid
   frecuencia        FrecuenciaSeguimiento? @relation(fields: [frecuenciaId], references: [id])
-  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy         String                @map("created_by") @db.Uuid
-  updatedAt         DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedBy         String?               @map("updated_by") @db.Uuid
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String                 @map("created_by") @db.Uuid
+  updatedAt         DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy         String?                @map("updated_by") @db.Uuid
 
   @@unique([objetivoId, orden])
   @@map("objetivo_ambiental_accion")

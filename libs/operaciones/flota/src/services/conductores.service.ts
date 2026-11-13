@@ -25,6 +25,17 @@ export interface DocumentoConductor {
   permisoId: string | null;
 }
 
+/**
+ * Datos personales del conductor (protegidos por la LOPDP) que salen SOLO en la lista y el detalle de conductores. Vienen del perfil del
+ * usuario; es `null` si la cuenta no tiene perfil. No existe número de licencia en el perfil: la licencia es un documento (ver `documentos`).
+ */
+export interface PerfilConductor {
+  nombres: string | null;
+  apellidos: string | null;
+  tipoIdentificacion: string | null;
+  cedula: string | null;
+}
+
 export interface ActorConductores {
   id: string;
   roleCode: string;
@@ -84,6 +95,13 @@ export class ConductoresService {
     return resumen;
   }
 
+  /** Lo que devuelve `GET conductores/:usuarioId`: el estado de los documentos más los datos personales del perfil. */
+  async detalle(usuarioId: string) {
+    const resumen = await this.estado(usuarioId);
+    const perfiles = await this.perfilesDe([usuarioId]);
+    return { ...resumen, perfil: perfiles.get(usuarioId) ?? null };
+  }
+
   /** Cuentas con rol de conductor o con algún documento registrado, con su estado. */
   async listar(q?: string) {
     const texto = q?.trim();
@@ -100,7 +118,37 @@ export class ConductoresService {
       orderBy: { nombre: 'asc' },
       take: 300,
     });
-    return this.resumenDe(this.prisma, usuarios);
+    const [resumenes, perfiles] = await Promise.all([
+      this.resumenDe(this.prisma, usuarios),
+      this.perfilesDe(usuarios.map((u) => u.id)),
+    ]);
+    return resumenes.map((r) => ({ ...r, perfil: perfiles.get(r.usuario.id) ?? null }));
+  }
+
+  /** Solo las cuatro columnas del perfil que Flota puede leer (el permiso de la base también se limita a ellas). */
+  private async perfilesDe(ids: string[]): Promise<Map<string, PerfilConductor>> {
+    if (!ids.length) return new Map();
+    const filas = await this.prisma.idUsuarioPerfil.findMany({
+      where: { usuarioId: { in: ids } },
+      select: {
+        usuarioId: true,
+        nombres: true,
+        apellidos: true,
+        tipoIdentificacion: true,
+        cedula: true,
+      },
+    });
+    return new Map(
+      filas.map((f) => [
+        f.usuarioId,
+        {
+          nombres: f.nombres,
+          apellidos: f.apellidos,
+          tipoIdentificacion: f.tipoIdentificacion,
+          cedula: f.cedula,
+        },
+      ]),
+    );
   }
 
   /** Historia de documentos de una cuenta (incluye los anulados). */

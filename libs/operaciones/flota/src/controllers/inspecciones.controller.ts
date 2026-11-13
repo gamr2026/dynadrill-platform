@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -126,9 +135,13 @@ export class InspeccionesController {
     return this.inspecciones.casosDeOperador(u.id, q.dia);
   }
 
-  @RequirePermission(P.INSPECCIONES_VER)
+  @RequirePermission(P.INSPECCIONES_VER, P.EXPEDIENTE_VER)
   @Get('inspecciones-vehiculo')
-  listar(@Query() q: ListarInspeccionesDto) {
+  listar(@Query() q: ListarInspeccionesDto, @CurrentUser() u: AuthUser) {
+    // Con solo el permiso del expediente (Facturación) se consulta por ticket, no el listado general.
+    if (!q.ticketId && !u.permissions.includes(P.INSPECCIONES_VER)) {
+      throw new ForbiddenException('Indique el ticket de las inspecciones que quiere ver');
+    }
     return this.inspecciones.listar({
       ticketId: q.ticketId,
       unidadId: q.unidadId,
@@ -138,10 +151,15 @@ export class InspeccionesController {
     });
   }
 
-  @RequirePermission(P.INSPECCIONES_VER)
+  @RequirePermission(P.INSPECCIONES_VER, P.EXPEDIENTE_VER)
   @Get('inspecciones-vehiculo/:id')
-  obtener(@Param('id', ParseUUIDPipe) id: string) {
-    return this.inspecciones.obtener(id);
+  async obtener(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() u: AuthUser) {
+    const inspeccion = await this.inspecciones.obtener(id);
+    // Con solo el permiso del expediente se ven las inspecciones que pertenecen a un ticket.
+    if (!u.permissions.includes(P.INSPECCIONES_VER) && !inspeccion.caso?.ticketId) {
+      throw new ForbiddenException('No tiene permiso para ver esta inspección');
+    }
+    return inspeccion;
   }
 
   @RequirePermission(P.INSPECCIONES_CREAR)
@@ -195,7 +213,7 @@ export class InspeccionesController {
   @RequirePermission(P.CONDUCTORES_VER)
   @Get('conductores/:usuarioId')
   estado(@Param('usuarioId', ParseUUIDPipe) usuarioId: string) {
-    return this.conductores.estado(usuarioId);
+    return this.conductores.detalle(usuarioId);
   }
 
   @RequirePermission(P.CONDUCTORES_VER)

@@ -40,7 +40,12 @@ run('QHSE: metas del tablero HSE (base de datos real)', () => {
   });
 
   it('una meta nueva reemplaza a la anterior y la historia se conserva', async () => {
-    const primera = await t.http().patch(ruta).set(tecnico()).send({ dias_sin_lti: 30 }).expect(200);
+    const primera = await t
+      .http()
+      .patch(ruta)
+      .set(tecnico())
+      .send({ dias_sin_lti: 30 })
+      .expect(200);
     expect(primera.body['dias_sin_lti']).toBe(30);
     const segunda = await t
       .http()

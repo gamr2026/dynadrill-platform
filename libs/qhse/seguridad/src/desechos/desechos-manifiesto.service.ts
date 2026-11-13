@@ -164,7 +164,15 @@ export class DesechosManifiestoService {
         firmasRegistradas: firmadas,
         firmasCompletas: firmadas === 3,
         // evidencia (contrato 4.14); el firmante en papel (nombre y cédula) se guarda aquí porque Firmas no tiene dónde
-        ...firmaDeUnaLinea('qhse_desecho', id, rol, actor.id, firma.firmadoAt, nombre ?? '', cedula ?? ''),
+        ...firmaDeUnaLinea(
+          'qhse_desecho',
+          id,
+          rol,
+          actor.id,
+          firma.firmadoAt,
+          nombre ?? '',
+          cedula ?? '',
+        ),
       });
     });
     return this.consulta.detalle(id);

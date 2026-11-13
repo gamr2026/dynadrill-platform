@@ -195,6 +195,118 @@ export class ReporteUnidadService {
     };
   }
 
+  /**
+   * Los reportes de unidad que ya existen en un ticket (uno por unidad y día), para listarlos como documentos del expediente del
+   * pedido. Solo lectura. `salida` y `llegada` dicen quién firmó cada lado y cuándo (nulos si ese lado aún no se firma).
+   */
+  async listarParaExpediente(ticketId: string) {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: { id: true },
+    });
+    if (!ticket) throw new NotFoundException('El ticket no existe');
+    const reportes = await this.prisma.reporteUnidad.findMany({
+      where: { ticketId },
+      include: { unidad: UNIDAD_CON_PLACA },
+      orderBy: [{ fecha: 'asc' }, { unidad: { codigo: 'asc' } }],
+    });
+    const nombres = await this.nombresDeFirmantes(reportes);
+    return reportes.map((r) => ({
+      id: r.id,
+      ticketId: r.ticketId,
+      unidadId: r.unidadId,
+      unidadCodigo: r.unidad.codigo,
+      unidadNombre: r.unidad.nombre,
+      placa: r.unidad.vehiculo?.placa ?? null,
+      fecha: r.fecha.toISOString().slice(0, 10),
+      salida: {
+        firmada: !!r.salidaFirmadaAt,
+        firmadaPor: r.salidaFirmadaPor ? (nombres.get(r.salidaFirmadaPor) ?? null) : null,
+        firmadaAt: r.salidaFirmadaAt,
+      },
+      llegada: {
+        firmada: !!r.llegadaFirmadaAt,
+        firmadaPor: r.llegadaFirmadaPor ? (nombres.get(r.llegadaFirmadaPor) ?? null) : null,
+        firmadaAt: r.llegadaFirmadaAt,
+      },
+    }));
+  }
+
+  /**
+   * Un reporte de unidad por su id, con lo que necesita la hoja `reporte-unidad-hoja`: lo mismo que `obtener` (salida, llegada,
+   * hubodómetros, llantas e inspecciones) más el encabezado del ticket y quién firmó cada lado.
+   */
+  async obtenerParaExpediente(ticketId: string, reporteId: string) {
+    const r = await this.prisma.reporteUnidad.findFirst({
+      where: { id: reporteId, ticketId },
+      select: {
+        unidadId: true,
+        fecha: true,
+        salidaFirmadaPor: true,
+        llegadaFirmadaPor: true,
+        ticket: {
+          select: {
+            ticketNumero: true,
+            pedidoCodigo: true,
+            numeroContrato: true,
+            cliente: { select: { nombreComercial: true } },
+            pozo: { select: { nombreCompleto: true } },
+            campo: { select: { nombre: true } },
+            bloque: { select: { nombre: true } },
+            taladro: { select: { nombre: true } },
+          },
+        },
+      },
+    });
+    if (!r) throw new NotFoundException('El reporte de unidad no existe en ese ticket');
+    const fecha = r.fecha.toISOString().slice(0, 10);
+    const [base, nombres] = await Promise.all([
+      this.obtener(ticketId, r.unidadId, fecha),
+      this.nombresDeFirmantes([r]),
+    ]);
+    const t = r.ticket;
+    return {
+      id: reporteId,
+      ...base,
+      encabezado: {
+        ticketNumero: t.ticketNumero,
+        pedidoCodigo: t.pedidoCodigo,
+        numeroContrato: t.numeroContrato,
+        cliente: t.cliente?.nombreComercial ?? null,
+        pozo: t.pozo?.nombreCompleto ?? null,
+        campo: t.campo?.nombre ?? null,
+        bloque: t.bloque?.nombre ?? null,
+        taladro: t.taladro?.nombre ?? null,
+      },
+      salida: {
+        ...base.salida,
+        firmadaPor: r.salidaFirmadaPor ? (nombres.get(r.salidaFirmadaPor) ?? null) : null,
+      },
+      llegada: {
+        ...base.llegada,
+        firmadaPor: r.llegadaFirmadaPor ? (nombres.get(r.llegadaFirmadaPor) ?? null) : null,
+      },
+    };
+  }
+
+  private async nombresDeFirmantes(
+    reportes: Array<{ salidaFirmadaPor: string | null; llegadaFirmadaPor: string | null }>,
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(
+        reportes
+          .flatMap((r) => [r.salidaFirmadaPor, r.llegadaFirmadaPor])
+          .filter((x): x is string => !!x),
+      ),
+    ];
+    if (!ids.length) return new Map();
+    const usuarios = await this.prisma.idUsuario.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, nombre: true },
+    });
+    return new Map(usuarios.map((u) => [u.id, u.nombre]));
+  }
+
   /** Cada extremo del traslado es un texto libre, obligatorio, de hasta 200 caracteres. */
   private exigirExtremo(x: string | undefined, cual: 'origen' | 'destino'): string {
     const texto = typeof x === 'string' ? x.trim() : '';

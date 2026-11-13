@@ -31,6 +31,8 @@ export interface PedidoAbiertoData {
   bloqueId?: string | null;
   pozoId?: string | null;
   taladroId?: string | null;
+  /** Bodega del pedido (solo el id): QHSE la usa para prellenar la entrega de EPI. */
+  bodegaId?: string | null;
   rigless?: boolean;
   numeroContrato?: string | null;
   fechaInicioServicio?: string | null;
@@ -212,6 +214,7 @@ export class TicketsService {
         bloqueId: d.bloqueId ?? null,
         pozoId: d.pozoId ?? null,
         taladroId: d.taladroId ?? null,
+        bodegaId: d.bodegaId ?? null,
         rigless: d.rigless ?? false,
         numeroContrato: d.numeroContrato ?? null,
         as2Numero: d.as2Numero ?? null,
@@ -257,6 +260,7 @@ export class TicketsService {
           campo: n.campo?.nombre ?? null,
           pozo: n.pozo?.nombreCompleto ?? null,
           taladro: d.rigless ? 'RIGLESS' : (n.taladro?.nombre ?? null),
+          bodegaId: n.bodegaId,
           tiposServicio: [...new Set(d.tiposServicio ?? [])],
           servicios: [...new Set(d.tiposServicio ?? [])].map(textoServicio).join(', '),
           fechaInicioServicio: d.fechaInicioServicio ?? null,
@@ -290,7 +294,9 @@ export class TicketsService {
         : {}),
       ...(d.fechaFinServicio !== undefined ? { fechaFinServicio: deDia(d.fechaFinServicio) } : {}),
     };
-    if (Object.keys(fechas).length) await tx.ticket.update({ where: { id: t.id }, data: fechas });
+    const bodega = d.bodegaId !== undefined ? { bodegaId: d.bodegaId } : {};
+    const cambios = { ...fechas, ...bodega };
+    if (Object.keys(cambios).length) await tx.ticket.update({ where: { id: t.id }, data: cambios });
     if (Array.isArray(d.lineas)) await this.precarga.guardarLineas(tx, t.id, d.lineas);
     return true;
   }

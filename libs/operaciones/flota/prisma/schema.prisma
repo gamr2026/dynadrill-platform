@@ -337,20 +337,20 @@ model ItemInspeccionVehiculo {
 
 /// Una unidad de transporte asignada a un ticket de Pumping. Su estado se calcula con las inspecciones y revisiones.
 model InspeccionCaso {
-  id         String    @id @db.Uuid
-  ticketId   String    @map("ticket_id") @db.Uuid
-  ticket     PumTicket @relation(fields: [ticketId], references: [id])
-  unidadId   String    @map("unidad_id") @db.Uuid
-  unidad     Unidad    @relation(fields: [unidadId], references: [id])
-  operadorId String    @map("operador_id") @db.Uuid
-  operador   IdUsuario @relation("casoOperador", fields: [operadorId], references: [id])
+  id           String     @id @db.Uuid
+  ticketId     String     @map("ticket_id") @db.Uuid
+  ticket       PumTicket  @relation(fields: [ticketId], references: [id])
+  unidadId     String     @map("unidad_id") @db.Uuid
+  unidad       Unidad     @relation(fields: [unidadId], references: [id])
+  operadorId   String     @map("operador_id") @db.Uuid
+  operador     IdUsuario  @relation("casoOperador", fields: [operadorId], references: [id])
   /// Supervisor asignado al ticket: el único que aprueba o rechaza las inspecciones del caso (nulo en casos anteriores a la regla).
-  supervisorId String?  @map("supervisor_id") @db.Uuid
+  supervisorId String?    @map("supervisor_id") @db.Uuid
   supervisor   IdUsuario? @relation("casoSupervisor", fields: [supervisorId], references: [id])
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy  String?   @map("created_by") @db.Uuid
-  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  updatedBy  String?   @map("updated_by") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?    @map("created_by") @db.Uuid
+  updatedAt    DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy    String?    @map("updated_by") @db.Uuid
 
   inspecciones InspeccionVehiculo[]
 
@@ -430,15 +430,15 @@ model InspeccionVehiculoRevision {
 
 /// `pumping.ticket`: solo el id (espejo de solo lectura, para la FK del caso de inspección).
 model PumTicket {
-  id           String                @id @db.Uuid
+  id                  String                @id @db.Uuid
   /// Número del ticket (el de la prefactura): solo para mostrarlo en los formatos; Flota nunca lo escribe.
-  ticketNumero Int?                  @unique @map("ticket_numero")
+  ticketNumero        Int?                  @unique @map("ticket_numero")
   /// Paso y fechas del servicio del ticket: Flota solo los lee (para saber si el servicio está activo y si hoy es día de servicio).
-  pasoCodigo          String    @map("paso_codigo")
-  fechaInicioServicio DateTime? @map("fecha_inicio_servicio") @db.Date
-  fechaFinServicio    DateTime? @map("fecha_fin_servicio") @db.Date
-  casos        InspeccionCaso[]
-  viajes       GerenciamientoViaje[]
+  pasoCodigo          String                @map("paso_codigo")
+  fechaInicioServicio DateTime?             @map("fecha_inicio_servicio") @db.Date
+  fechaFinServicio    DateTime?             @map("fecha_fin_servicio") @db.Date
+  casos               InspeccionCaso[]
+  viajes              GerenciamientoViaje[]
 
   @@map("ticket")
   @@schema("pumping")
@@ -530,40 +530,40 @@ model UmbralRiesgoViaje {
 
 /// Gerenciamiento de Viaje firmado por el Conductor. Solo admite que se le marque la decisión, una vez.
 model GerenciamientoViaje {
-  id                       String             @id @db.Uuid
-  numero                   BigInt             @unique @default(autoincrement())
+  id                       String              @id @db.Uuid
+  numero                   BigInt              @unique @default(autoincrement())
   tipo                     TipoGerenciamiento
-  ticketId                 String?            @map("ticket_id") @db.Uuid
-  ticket                   PumTicket?         @relation(fields: [ticketId], references: [id])
-  conductorId              String             @map("conductor_id") @db.Uuid
-  conductor                IdUsuario          @relation("viajeConductor", fields: [conductorId], references: [id])
-  unidadId                 String             @map("unidad_id") @db.Uuid
-  unidad                   Unidad             @relation(fields: [unidadId], references: [id])
+  ticketId                 String?             @map("ticket_id") @db.Uuid
+  ticket                   PumTicket?          @relation(fields: [ticketId], references: [id])
+  conductorId              String              @map("conductor_id") @db.Uuid
+  conductor                IdUsuario           @relation("viajeConductor", fields: [conductorId], references: [id])
+  unidadId                 String              @map("unidad_id") @db.Uuid
+  unidad                   Unidad              @relation(fields: [unidadId], references: [id])
   /// Inspección de salida de la unidad: de ahí salen el origen y el destino cuando el viaje es de un ticket.
-  inspeccionId             String?            @map("inspeccion_id") @db.Uuid
+  inspeccionId             String?             @map("inspeccion_id") @db.Uuid
   inspeccion               InspeccionVehiculo? @relation(fields: [inspeccionId], references: [id])
-  fecha                    DateTime           @db.Date
+  fecha                    DateTime            @db.Date
   motivo                   String
   /// Origen y destino en texto libre. Con ticket quedan nulos y se toman de la inspección de salida (al revés en el retorno).
   origen                   String?
   destino                  String?
-  puntajeTotal             Int                @map("puntaje_total")
+  puntajeTotal             Int                 @map("puntaje_total")
   nivel                    NivelRiesgoViaje
   pasajeros                String?
-  puedeCombinarViajes      Boolean?           @map("puede_combinar_viajes")
-  horaSalida               DateTime?          @map("hora_salida") @db.Time(0)
-  horaLlegada              DateTime?          @map("hora_llegada") @db.Time(0)
-  datosPernocta            String?            @map("datos_pernocta")
-  aprobacionTelefonicaDe   String?            @map("aprobacion_telefonica_de")
-  aprobacionTelefonicaHora DateTime?          @map("aprobacion_telefonica_hora") @db.Time(0)
+  puedeCombinarViajes      Boolean?            @map("puede_combinar_viajes")
+  horaSalida               DateTime?           @map("hora_salida") @db.Time(0)
+  horaLlegada              DateTime?           @map("hora_llegada") @db.Time(0)
+  datosPernocta            String?             @map("datos_pernocta")
+  aprobacionTelefonicaDe   String?             @map("aprobacion_telefonica_de")
+  aprobacionTelefonicaHora DateTime?           @map("aprobacion_telefonica_hora") @db.Time(0)
   decision                 DecisionViaje?
-  decididoPor              String?            @map("decidido_por") @db.Uuid
-  decisor                  IdUsuario?         @relation("viajeDecisor", fields: [decididoPor], references: [id])
-  decididoAt               DateTime?          @map("decidido_at") @db.Timestamptz(6)
-  motivoDecision           String?            @map("motivo_decision")
-  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  createdBy                String             @map("created_by") @db.Uuid
-  registrador              IdUsuario          @relation("viajeRegistrador", fields: [createdBy], references: [id])
+  decididoPor              String?             @map("decidido_por") @db.Uuid
+  decisor                  IdUsuario?          @relation("viajeDecisor", fields: [decididoPor], references: [id])
+  decididoAt               DateTime?           @map("decidido_at") @db.Timestamptz(6)
+  motivoDecision           String?             @map("motivo_decision")
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                String              @map("created_by") @db.Uuid
+  registrador              IdUsuario           @relation("viajeRegistrador", fields: [createdBy], references: [id])
 
   respuestas     GerenciamientoViajeRespuesta[]
   paradas        GerenciamientoViajeParada[]
@@ -667,6 +667,20 @@ model IdPermiso {
   @@schema("identidad")
 }
 
+/// `identidad.usuario_perfil`: SOLO lectura y solo cuatro datos personales (protegidos por la LOPDP), para identificar al conductor en la lista de
+/// conductores. `app_operaciones` tiene `SELECT` sobre exactamente estas columnas; no se exponen fuera de los endpoints de conductores.
+model IdUsuarioPerfil {
+  usuarioId          String    @id @map("usuario_id") @db.Uuid
+  usuario            IdUsuario @relation(fields: [usuarioId], references: [id])
+  cedula             String?
+  tipoIdentificacion String?   @map("tipo_identificacion")
+  apellidos          String?
+  nombres            String?
+
+  @@map("usuario_perfil")
+  @@schema("identidad")
+}
+
 /// `identidad.usuario`: solo lo que otros módulos pueden ver (nunca la clave ni los datos de acceso).
 model IdUsuario {
   id     String  @id @db.Uuid
@@ -675,6 +689,8 @@ model IdUsuario {
   activo Boolean
   rolId  String  @map("rol_id") @db.Uuid
   rol    IdRol   @relation(fields: [rolId], references: [id])
+
+  perfil IdUsuarioPerfil?
 
   unidadesResponsable     Unidad[]                     @relation("unidadResponsable")
   lecturas                UnidadLectura[]              @relation("lecturaRegistrador")

@@ -248,6 +248,7 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
     );
     await q('DELETE FROM flota.inspeccion_vehiculo WHERE unidad_id = ANY($1::uuid[])', [unidades]);
     await q('DELETE FROM flota.inspeccion_caso WHERE ticket_id = $1', [ticketId]);
+    await q('DELETE FROM identidad.usuario_perfil WHERE usuario_id = $1', [CONDUCTOR.id]);
     await q('DELETE FROM flota.conductor_permiso WHERE usuario_id = ANY($1::uuid[])', [
       [CONDUCTOR.id, CONDUCTOR_SIN.id],
     ]);
@@ -297,6 +298,45 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
   });
 
   describe('F2: documentos del conductor', () => {
+    it('la lista y el detalle de conductores traen sus datos personales del perfil, y solo esos', async () => {
+      await admin.query(
+        `INSERT INTO identidad.usuario_perfil (id, usuario_id, cedula, tipo_identificacion, apellidos, nombres, cargo)
+         VALUES ($1, $2, '1712345678', 'cedula', 'Conductor Pérez', 'Carlos Alberto', 'Chofer')`,
+        [uuidv7(), CONDUCTOR.id],
+      );
+      const perfil = {
+        nombres: 'Carlos Alberto',
+        apellidos: 'Conductor Pérez',
+        tipoIdentificacion: 'cedula',
+        cedula: '1712345678',
+      };
+      const lista = (await http().get(`${base}/conductores`).set(operador()).expect(200))
+        .body as Array<{
+        usuario: { id: string };
+        perfil: unknown;
+      }>;
+      expect(lista.find((c) => c.usuario.id === CONDUCTOR.id)?.perfil).toEqual(perfil);
+      const detalle = (
+        await http().get(`${base}/conductores/${CONDUCTOR.id}`).set(operador()).expect(200)
+      ).body;
+      expect(detalle.perfil).toEqual(perfil);
+      expect(JSON.stringify(detalle)).not.toContain('Chofer'); // el cargo no sale
+      // una cuenta sin perfil: nulo
+      const sin = (
+        await http().get(`${base}/conductores/${CONDUCTOR_SIN.id}`).set(operador()).expect(200)
+      ).body;
+      expect(sin.perfil).toBeNull();
+      // sin el permiso de ver conductores no hay datos personales
+      await http()
+        .get(`${base}/conductores`)
+        .set(token('facturacion', 'Fabiola', [P.EXPEDIENTE_VER], uuidv7()))
+        .expect(403);
+      // la base solo deja leer esas columnas del perfil
+      expect(
+        await rechazoDeBase(appDb.query('SELECT cargo FROM identidad.usuario_perfil LIMIT 1')),
+      ).toMatch(/permission denied/);
+    });
+
     it('exige fecha en los documentos que vencen y la prohíbe en los que no', async () => {
       const sinFecha = await permiso(CONDUCTOR.id, 'manejo_defensivo');
       expect([sinFecha.status, sinFecha.body.code]).toEqual([400, 'falta_vigencia']);
@@ -808,6 +848,25 @@ run('Flota F2/F3: conductores e inspección de vehículos (base de datos real)',
           .expect(200)
       ).body as Array<{ id: string }>;
       expect(lista.map((x) => x.id)).not.toContain(deB.id);
+    });
+
+    it('el permiso del expediente (Facturación) lee las inspecciones de un ticket, pero no el listado general ni escribe', async () => {
+      const exp = token('facturacion', 'Fabiola Facturación', [P.EXPEDIENTE_VER], uuidv7());
+      const lista = (
+        await http().get(`${base}/inspecciones-vehiculo?ticketId=${ticketId}`).set(exp).expect(200)
+      ).body as Array<{ id: string; ticketId: string | null }>;
+      expect(lista.length).toBeGreaterThan(0);
+      expect(lista.every((x) => x.ticketId === ticketId)).toBe(true);
+      await http().get(`${base}/inspecciones-vehiculo/${lista[0].id}`).set(exp).expect(200);
+      // sin indicar el ticket no se ve el listado general
+      await http().get(`${base}/inspecciones-vehiculo`).set(exp).expect(403);
+      // solo lectura
+      await http()
+        .post(`${base}/inspecciones-vehiculo/${lista[0].id}/anular`)
+        .set(exp)
+        .send({ motivo: 'No debe poder' })
+        .expect(403);
+      await http().post(`${base}/inspecciones-vehiculo`).set(exp).send({}).expect(403);
     });
   });
 

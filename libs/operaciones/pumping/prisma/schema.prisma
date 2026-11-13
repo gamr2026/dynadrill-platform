@@ -229,6 +229,8 @@ model Ticket {
   /// Representante del cliente en campo (Company Man), según el pedido.
   representanteCampoId String?             @map("representante_campo_id") @db.Uuid
   representanteCampo   CatPersonaContacto? @relation(fields: [representanteCampoId], references: [id])
+  /// Bodega del pedido (FK a `catalogos.bodega`, solo en la base de datos): QHSE la usa para prellenar la entrega de EPI.
+  bodegaId             String?             @map("bodega_id") @db.Uuid
   rigless              Boolean             @default(false)
   numeroContrato       String?             @map("numero_contrato")
   as2Numero            String?             @map("as2_numero")

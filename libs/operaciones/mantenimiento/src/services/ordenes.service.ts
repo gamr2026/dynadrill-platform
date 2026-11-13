@@ -246,6 +246,20 @@ export class OrdenesService {
     return ordenes.map((o) => this.vista(o));
   }
 
+  /**
+   * Las órdenes que nacieron de reportes de unidad DE ESTE ticket (a diferencia de `ordenesDeTicket`, que trae las de todas las
+   * unidades del ticket): alimentan el expediente del pedido (orden general, orden operativa e informe de cada orden).
+   */
+  async ordenesDelServicio(ticketId: string) {
+    const ordenes = await this.prisma.orden.findMany({
+      where: { reporte: { pumpingReporteUnidad: { is: { ticketId } } } },
+      include: INCLUIR_ORDEN,
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    return ordenes.map((o) => this.vista(o));
+  }
+
   async obtener(id: string) {
     const o = await this.prisma.orden.findUnique({ where: { id }, include: INCLUIR_ORDEN });
     if (!o) throw new NotFoundException('La orden no existe');
@@ -318,7 +332,8 @@ export class OrdenesService {
       retorno: vista.retorno
         ? {
             ...vista.retorno,
-            estadoFinalNombre: vista.retorno.estadoFinal === 'disponible' ? 'Disponible' : 'Con restricciones',
+            estadoFinalNombre:
+              vista.retorno.estadoFinal === 'disponible' ? 'Disponible' : 'Con restricciones',
             responsable: o.retornador?.nombre ?? null,
           }
         : null,
