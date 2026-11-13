@@ -272,6 +272,28 @@ run('archivos (Azurite y base de datos reales)', () => {
     await http().get(`/api/archivos/${creados[0]}`).expect(401);
   });
 
+  it('un módulo con permiso alterno deja ver y descargar con cualquiera de los dos, pero no subir', async () => {
+    const id = creados[0];
+    const alterno = bearer(OTRO, ['comercial.expediente.ver']);
+    await http().get(`/api/archivos/${id}`).set(alterno).expect(403);
+    await admin.query(
+      "UPDATE archivos.modulo_archivo SET permiso_ver_alterno = 'comercial.expediente.ver' WHERE codigo = $1",
+      [MODULO],
+    );
+    try {
+      await http().get(`/api/archivos/${id}`).set(alterno).expect(200);
+      await http().get(`/api/archivos/${id}/contenido`).set(alterno).expect(200);
+      await http().get(`/api/archivos/${id}`).set(lector()).expect(200); // el permiso propio sigue valiendo
+      await http().get(`/api/archivos/${id}`).set(sinPermisos()).expect(403);
+      await subir(PDF, 'x.pdf', 'application/pdf', MODULO, alterno).expect(403); // solo lectura
+    } finally {
+      await admin.query(
+        'UPDATE archivos.modulo_archivo SET permiso_ver_alterno = NULL WHERE codigo = $1',
+        [MODULO],
+      );
+    }
+  });
+
   it('rechaza lo que no cumple: módulo inexistente, tipo no admitido, vacío, firma que no corresponde, demasiado grande', async () => {
     await subir(PDF, 'x.pdf', 'application/pdf', 'no_existe').expect(400);
     await subir(Buffer.from('MZ ejecutable'), 'virus.exe', 'application/x-msdownload').expect(415);

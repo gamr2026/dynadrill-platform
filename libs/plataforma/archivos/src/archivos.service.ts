@@ -182,13 +182,13 @@ export class ArchivosService {
 
   async metadatos(id: string, actor: AuthUser): Promise<ArchivoDto> {
     const a = await this.cargar(id);
-    this.exigir(actor, a.modulo.permisoVer);
+    this.exigirVer(actor, a.modulo);
     return aDto(a);
   }
 
   async contenido(id: string, actor: AuthUser): Promise<{ archivo: ArchivoDto; flujo: Readable }> {
     const a = await this.cargar(id);
-    this.exigir(actor, a.modulo.permisoVer);
+    this.exigirVer(actor, a.modulo);
     return { archivo: aDto(a), flujo: await this.almacen.leer(a.blobKey) };
   }
 
@@ -203,7 +203,7 @@ export class ArchivosService {
     actor: AuthUser,
   ): Promise<VerificacionFirma> {
     const a = await this.cargar(id);
-    this.exigir(actor, a.modulo.permisoVer);
+    this.exigirVer(actor, a.modulo);
     if (!this.firmas.disponible()) {
       throw new ServiceUnavailableException('La verificación de firmas no está disponible');
     }
@@ -232,7 +232,7 @@ export class ArchivosService {
     actor: AuthUser,
   ): Promise<VerificacionFirmaElectronica> {
     const a = await this.cargar(id);
-    this.exigir(actor, a.modulo.permisoVer);
+    this.exigirVer(actor, a.modulo);
     if (a.mimeType !== 'application/pdf') {
       throw new BadRequestException('La firma electrónica solo se valida en archivos PDF');
     }
@@ -268,6 +268,17 @@ export class ArchivosService {
     });
     if (!a) throw new NotFoundException('El archivo no existe');
     return a;
+  }
+
+  /** Ver o descargar: basta el permiso de ver del módulo o, si lo tiene, su permiso alterno. */
+  private exigirVer(
+    actor: AuthUser,
+    modulo: { permisoVer: string; permisoVerAlterno: string | null },
+  ) {
+    const permisos = [modulo.permisoVer, modulo.permisoVerAlterno].filter((p): p is string => !!p);
+    if (!permisos.some((p) => actor.permissions.includes(p))) {
+      throw new ForbiddenException('No tiene permiso para esta operación con archivos');
+    }
   }
 
   private exigir(actor: AuthUser, permiso: string) {

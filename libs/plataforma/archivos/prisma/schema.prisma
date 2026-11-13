@@ -19,18 +19,20 @@ datasource db {
 
 /// Qué admite cada módulo que guarda archivos: permisos para subir y ver, tipos de contenido y tamaño máximo.
 model ModuloArchivo {
-  id           String   @id @db.Uuid
+  id                String   @id @db.Uuid
   /// Clave que envía el módulo al subir (p. ej. `pedido_documento`).
-  codigo       String   @unique
-  nombre       String
+  codigo            String   @unique
+  nombre            String
   /// Permiso (código de `identidad.permiso`) que exige SUBIR un archivo de este módulo.
-  permisoSubir String   @map("permiso_subir")
+  permisoSubir      String   @map("permiso_subir")
   /// Permiso que exige VER o DESCARGAR un archivo de este módulo.
-  permisoVer   String   @map("permiso_ver")
+  permisoVer        String   @map("permiso_ver")
+  /// Segundo permiso que también deja VER o DESCARGAR (con cualquiera de los dos basta). Nulo si el módulo solo admite `permisoVer`.
+  permisoVerAlterno String?  @map("permiso_ver_alterno")
   /// Tipos de contenido admitidos (MIME).
-  tiposMime    String[] @map("tipos_mime")
-  tamanoMaxMb  Int      @default(25) @map("tamano_max_mb")
-  activo       Boolean  @default(true)
+  tiposMime         String[] @map("tipos_mime")
+  tamanoMaxMb       Int      @default(25) @map("tamano_max_mb")
+  activo            Boolean  @default(true)
 
   archivos Archivo[]
 

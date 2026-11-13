@@ -1,6 +1,6 @@
 import { ModuleRoles } from './module-roles';
 import { MENU_PERMISSION_CATALOG } from './menu-permissions';
-import { ADMIN_ROLE_CODES, RoleCode } from './role-code';
+import { ADMIN_ROLE_CODES, RoleCode, withAdmins } from './role-code';
 
 /**
  * Catálogo de permisos del sistema (RBAC). Cada permiso es un código `<modulo>.<recurso>.<accion>`.
@@ -236,6 +236,11 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
     'documentosOperativosPush',
     'comercial.documentos_operativos.enviar',
     'Enviar un documento operativo (Reporte Job o de Herramientas) al pedido',
+  ),
+  nuevo(
+    'comercial.expediente.ver',
+    'Ver en Facturación los documentos del pedido que nacen en otros módulos',
+    withAdmins(RoleCode.FACTURACION),
   ),
   def(
     'facturacion',
@@ -827,6 +832,7 @@ export const Permission = {
   FACTURACION_GESTIONAR: 'comercial.facturacion.gestionar',
   LISTAS_PRECIOS_VER: 'comercial.listas_precios.ver',
   DOCUMENTOS_OPERATIVOS_VER: 'comercial.documentos_operativos.ver',
+  EXPEDIENTE_VER: 'comercial.expediente.ver',
   DOCUMENTOS_OPERATIVOS_ENVIAR: 'comercial.documentos_operativos.enviar',
   DOCUMENTOS_OPERATIVOS_ELIMINAR: 'comercial.documentos_operativos.eliminar',
   DOCUMENTOS_OPERATIVOS_CORREGIR: 'comercial.documentos_operativos.corregir',

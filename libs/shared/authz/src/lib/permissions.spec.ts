@@ -180,6 +180,17 @@ describe('permisos dedicados (exonerar, responsable, disponibilidad, revisar doc
   });
 });
 
+describe('permiso del expediente del pedido', () => {
+  it('comercial.expediente.ver es de lectura y lo reciben Facturación y los administradores', () => {
+    const p = PERMISSION_CATALOG.find((x) => x.code === Permission.EXPEDIENTE_VER);
+    expect(p?.code).toBe('comercial.expediente.ver');
+    expect(p?.accion).toBe('ver');
+    expect([...(p?.defaultRoles ?? [])].sort()).toEqual(
+      [RoleCode.FACTURACION, RoleCode.SUPERADMIN, RoleCode.JEFE_BASE].sort(),
+    );
+  });
+});
+
 describe('permisos de menú', () => {
   const menu = PERMISSION_CATALOG.filter((p) => p.modulo === 'menu');
   const verDe = (rol: RoleCode) =>
@@ -209,7 +220,13 @@ describe('permisos de menú', () => {
   it('los destinos que hoy salen de un permiso funcional heredan sus roles por defecto', () => {
     const igual = (menuCode: string, funcional: string) =>
       expect([...defaults(menuCode)].sort()).toEqual([...defaults(funcional)].sort());
-    igual('menu.flota_unidades.ver', Permission.UNIDADES_VER);
+    // Unidades: igual que el funcional, salvo el Bodeguero, que lo conserva pero no lo ve en el menú.
+    expect([...defaults('menu.flota_unidades.ver')].sort()).toEqual(
+      defaults(Permission.UNIDADES_VER)
+        .filter((r) => r !== RoleCode.BODEGUERO)
+        .sort(),
+    );
+    expect(defaults(Permission.UNIDADES_VER)).toContain(RoleCode.BODEGUERO);
     igual('menu.flota_inspecciones.ver', Permission.INSPECCIONES_VER);
     igual('menu.flota_conductores.ver', Permission.CONDUCTORES_VER);
     igual('menu.configuracion_usuarios.ver', Permission.USUARIOS_VER);
@@ -271,9 +288,8 @@ describe('permisos de menú', () => {
     ]);
   });
 
-  it('matriz de menú por defecto: Bodeguero ve Inventario y la lectura de Flota', () => {
+  it('matriz de menú por defecto: Bodeguero ve Inventario y no ve Unidades', () => {
     expect(verDe(RoleCode.BODEGUERO)).toEqual([
-      'flota_unidades',
       'inventario_articulos',
       'inventario_mis_tareas',
       'inventario_vehiculos',

@@ -23,12 +23,11 @@ const SA = RoleCode.SUPERADMIN;
 const JB = RoleCode.JEFE_BASE;
 const HSE = [RoleCode.TECNICO_HSE, RoleCode.GERENTE_HSE] as const;
 
-/** Destinos que hoy ya salían de un permiso funcional: mismos roles por defecto que ese permiso. */
-const FLOTA_UNIDADES: readonly RoleCode[] = [
-  ...ModuleRoles.maintenanceReadOps,
-  RoleCode.BODEGUERO,
-  RoleCode.CONDUCTOR,
-];
+/**
+ * Destinos que hoy ya salían de un permiso funcional: mismos roles por defecto que ese permiso. Unidades es la excepción: el
+ * Bodeguero conserva `flota.unidades.ver` (lectura) pero no ve la entrada en el menú.
+ */
+const FLOTA_UNIDADES: readonly RoleCode[] = [...ModuleRoles.maintenanceReadOps, RoleCode.CONDUCTOR];
 /** `flota.inspecciones.ver` y `flota.conductores.ver` comparten roles por defecto. */
 const FLOTA_INSPECCIONES: readonly RoleCode[] = [
   ...ModuleRoles.maintenanceReadOps,
